@@ -3,6 +3,7 @@
 if (( $1 == 'clean' ))
 then
   rm -rf build/
+  rm -rf shaders/*.spv
   echo "Cleaned build directory"
   exit 0
 fi
