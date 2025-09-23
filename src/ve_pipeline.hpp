@@ -6,7 +6,28 @@
 #include <vector>
 
 namespace ve {
-    struct PipelineConfigInfo {};
+    struct PipelineConfigInfo {
+        vk::Viewport viewport;
+        vk::Rect2D scissor;
+        vk::PipelineInputAssemblyStateCreateInfo inputAssemblyInfo;
+        vk::PipelineRasterizationStateCreateInfo rasterizationInfo;
+        vk::PipelineMultisampleStateCreateInfo multisampleInfo;
+        vk::PipelineColorBlendAttachmentState colorBlendAttachment;
+        vk::PipelineColorBlendStateCreateInfo colorBlendInfo;
+        vk::PipelineDepthStencilStateCreateInfo depthStencilInfo;
+        vk::PipelineDynamicStateCreateInfo dynamicStateInfo;
+        vk::PipelineLayout pipelineLayout = nullptr;
+        vk::RenderPass renderPass = nullptr;
+        uint32_t subpass = 0;
+
+        //PipelineConfigInfo() = default;
+        //PipelineConfigInfo(const PipelineConfigInfo&) = delete;
+        //PipelineConfigInfo& operator=(const PipelineConfigInfo&) = delete;
+
+        //std::vector<vk::VertexInputBindingDescription> bindingDescriptions{};
+        //std::vector<vk::VertexInputAttributeDescription> attributeDescriptions{};
+        //std::vector<vk::DynamicState> dynamicStateEnables{};
+    };
 
     class VePipeline {
     public:

@@ -19,7 +19,78 @@ namespace ve {
 
     PipelineConfigInfo VePipeline::defaultPipelineConfigInfo(uint32_t width, uint32_t height) {
         PipelineConfigInfo config_info{};
-        // Set default values for the config_info as needed
+        config_info.inputAssemblyInfo = {
+            .sType = vk::StructureType::ePipelineInputAssemblyStateCreateInfo,
+            .topology = vk::PrimitiveTopology::eTriangleList,
+            .primitiveRestartEnable = VK_FALSE
+        };
+        config_info.viewport = vk::Viewport{
+            .x = 0.0f,
+            .y = 0.0f,
+            .width = static_cast<float>(width),
+            .height = static_cast<float>(height),
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f
+        };
+        config_info.scissor = vk::Rect2D{
+            .offset = vk::Offset2D{0, 0},
+            .extent = vk::Extent2D{width, height}
+        };
+        config_info.rasterizationInfo = {
+            .sType = vk::StructureType::ePipelineRasterizationStateCreateInfo,
+            .depthClampEnable = VK_FALSE,
+            .rasterizerDiscardEnable = VK_FALSE,
+            .polygonMode = vk::PolygonMode::eFill,
+            .cullMode = vk::CullModeFlagBits::eNone,
+            .frontFace = vk::FrontFace::eClockwise,
+            .depthBiasEnable = VK_FALSE,
+            .lineWidth = 1.0f,
+            .depthBiasConstantFactor = 0.0f,
+            .depthBiasClamp = 0.0f,
+            .depthBiasSlopeFactor = 0.0f
+        };
+        config_info.multisampleInfo = {
+            .sType = vk::StructureType::ePipelineMultisampleStateCreateInfo,
+            .sampleShadingEnable = VK_FALSE,
+            .rasterizationSamples = vk::SampleCountFlagBits::e1,
+            .minSampleShading = 1.0f,
+            .pSampleMask = nullptr,
+            .alphaToCoverageEnable = VK_FALSE,
+            .alphaToOneEnable = VK_FALSE
+        };
+        config_info.colorBlendAttachment = {
+            .blendEnable = VK_FALSE,
+            .srcColorBlendFactor = vk::BlendFactor::eOne,
+            .dstColorBlendFactor = vk::BlendFactor::eZero,
+            .colorBlendOp = vk::BlendOp::eAdd,
+            .srcAlphaBlendFactor = vk::BlendFactor::eOne,
+            .dstAlphaBlendFactor = vk::BlendFactor::eZero,
+            .alphaBlendOp = vk::BlendOp::eAdd,
+            .colorWriteMask = vk::ColorComponentFlagBits::eR | 
+                              vk::ColorComponentFlagBits::eG | 
+                              vk::ColorComponentFlagBits::eB | 
+                              vk::ColorComponentFlagBits::eA
+        };
+        config_info.colorBlendInfo = {
+            .sType = vk::StructureType::ePipelineColorBlendStateCreateInfo,
+            .logicOpEnable = VK_FALSE,
+            .logicOp = vk::LogicOp::eCopy,
+            .attachmentCount = 1,
+            .pAttachments = &config_info.colorBlendAttachment
+        };
+        config_info.depthStencilInfo = {
+            .sType = vk::StructureType::ePipelineDepthStencilStateCreateInfo,
+            .depthTestEnable = VK_TRUE,
+            .depthWriteEnable = VK_TRUE,
+            .depthCompareOp = vk::CompareOp::eLess,
+            .depthBoundsTestEnable = VK_FALSE,
+            .minDepthBounds = 0.0f,
+            .maxDepthBounds = 1.0f,
+            .stencilTestEnable = VK_FALSE,
+            .front = {},
+            .back = {}
+        };
+    
         return config_info;
     }
 
@@ -43,11 +114,67 @@ namespace ve {
             const std::string& frag_file_path, 
             const PipelineConfigInfo& config_info) {
 
+        //assert(config_info.pipelineLayout != nullptr && "Cannot create graphics pipeline: no pipelineLayout provided in config_info");
+        //assert(config_info.renderPass != nullptr && "Cannot create graphics pipeline: no renderPass provided in config_info");
         auto vert_shader_code = readFile(vert_file_path);
         auto frag_shader_code = readFile(frag_file_path);
 
-        std::cout << "Vertex shader code size: " << vert_shader_code.size() << " bytes" << std::endl;
-        std::cout << "Fragment shader code size: " << frag_shader_code.size() << " bytes" << std::endl;
+        createShaderModule(vert_shader_code, &vert_shader_module);
+        createShaderModule(frag_shader_code, &frag_shader_module);
+
+        vk::PipelineShaderStageCreateInfo shader_stages[2] = {
+            {
+                .sType = vk::StructureType::ePipelineShaderStageCreateInfo,
+                .stage = vk::ShaderStageFlagBits::eVertex,
+                .module = *vert_shader_module,
+                .pName = "main",
+                .pSpecializationInfo = nullptr
+            },
+            {
+                .sType = vk::StructureType::ePipelineShaderStageCreateInfo,
+                .stage = vk::ShaderStageFlagBits::eFragment,
+                .module = *frag_shader_module,
+                .pName = "main",
+                .pSpecializationInfo = nullptr
+            }
+        };
+        vk::PipelineVertexInputStateCreateInfo vertex_input_info{
+            .sType = vk::StructureType::ePipelineVertexInputStateCreateInfo,
+            .vertexBindingDescriptionCount = 0, // for now, vertex input is hardcoded in the vertex shader
+            .pVertexBindingDescriptions = nullptr,
+            .vertexAttributeDescriptionCount = 0,
+            .pVertexAttributeDescriptions = nullptr
+        };
+        vk::PipelineViewportStateCreateInfo viewport_info = {
+            .sType = vk::StructureType::ePipelineViewportStateCreateInfo,
+            .viewportCount = 1,
+            .pViewports = &config_info.viewport,
+            .scissorCount = 1,
+            .pScissors = &config_info.scissor
+        };
+        vk::GraphicsPipelineCreateInfo pipeline_info{
+            .sType = vk::StructureType::eGraphicsPipelineCreateInfo,
+            .stageCount = 2,
+            .pStages = shader_stages,
+            .pVertexInputState = &vertex_input_info,
+            .pInputAssemblyState = &config_info.inputAssemblyInfo,
+            .pViewportState = &viewport_info,
+            .pRasterizationState = &config_info.rasterizationInfo,
+            .pMultisampleState = &config_info.multisampleInfo,
+            .pDepthStencilState = &config_info.depthStencilInfo,
+            .pColorBlendState = &config_info.colorBlendInfo,
+            .pDynamicState = nullptr, 
+            .layout = config_info.pipelineLayout,
+            .renderPass = config_info.renderPass,
+            .subpass = config_info.subpass,
+            .basePipelineHandle = VK_NULL_HANDLE,
+            .basePipelineIndex = -1
+        };
+
+        //graphics_pipeline = vk::raii::Pipeline{ve_device.getDevice(), nullptr, pipeline_info};
+    
+        //std::cout << "Vertex shader code size: " << vert_shader_code.size() << " bytes" << std::endl;
+        //std::cout << "Fragment shader code size: " << frag_shader_code.size() << " bytes" << std::endl;
     }
 
     void VePipeline::createShaderModule(const std::vector<char>& code, vk::raii::ShaderModule* shader_module) {
