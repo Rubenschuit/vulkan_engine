@@ -48,27 +48,35 @@ namespace ve {
   private:
     void createInstance();
     void setupDebugMessenger();
-    void createSurface();
     void pickPhysicalDevice();
     void createLogicalDevice();
     void createCommandPool();
+    void createSurface();
 
-    bool isDeviceSuitable(vk::PhysicalDevice device);
+    //bool isDeviceSuitable(vk::PhysicalDevice device);
     std::vector<const char *> getRequiredExtensions();
     bool checkValidationLayerSupport();
-    QueueFamilyIndices findQueueFamilies(vk::PhysicalDevice device);
+    uint32_t findQueueFamilies(vk::PhysicalDevice device);
     SwapChainSupportDetails querySwapChainSupport(vk::PhysicalDevice device);
     bool checkDeviceExtensionSupport(vk::PhysicalDevice device);
     void hasGlfwRequiredInstanceExtensions();
     void populateDebugMessengerCreateInfo(vk::DebugUtilsMessengerCreateInfoEXT &createInfo);
 
     VeWindow &window;
+    vk::raii::Device device_{nullptr};
     vk::raii::Context context;
     vk::raii::Instance instance{nullptr};
     vk::raii::DebugUtilsMessengerEXT debugMessenger{nullptr};
-    vk::raii::Device device_{nullptr};
-    vk::raii::SurfaceKHR surface{nullptr};
     vk::raii::PhysicalDevice physicalDevice{nullptr};
+    std::vector<const char*> requiredDeviceExtension = {
+        vk::KHRSwapchainExtensionName,
+        vk::KHRSpirv14ExtensionName,
+        vk::KHRSynchronization2ExtensionName,
+        vk::KHRCreateRenderpass2ExtensionName
+    };
+
+    //todo
+    vk::raii::SurfaceKHR surface{nullptr};
     vk::raii::CommandPool commandPool{nullptr};
     vk::raii::Queue graphicsQueue{nullptr};
     vk::raii::Queue presentQueue{nullptr};
