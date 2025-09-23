@@ -1,6 +1,8 @@
 #pragma once
 
+#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include <vulkan/vulkan_core.h>
 #include <string>
 
 namespace ve {  
@@ -13,7 +15,7 @@ namespace ve {
         VeWindow(const VeWindow&) = delete;
         VeWindow& operator=(const VeWindow&) = delete;
 
-        //void createWindowSurface(VkInstance instance, VkSurfaceKHR* surface);
+        void createWindowSurface(VkInstance instance, VkSurfaceKHR* surface);
 
         GLFWwindow* getGLFWwindow() const { return window; }
         int getWidth() const { return width; }

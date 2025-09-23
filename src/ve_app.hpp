@@ -15,6 +15,9 @@ namespace ve {
 
     private:
         VeWindow window{WIDTH, HEIGHT, "Vulkan Engine!"};
-        VePipeline pipeline{"../shaders/simple_shader.vert.spv", "../shaders/simple_shader.frag.spv"};
+
+        // navigate from build directory to shaders directory
+        //VePipeline pipeline{"../shaders/simple_shader.vert.spv", "../shaders/simple_shader.frag.spv"};
     };
 }
+

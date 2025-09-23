@@ -4,6 +4,8 @@ message(STATUS "Local .env.cmake: ${LOCAL_ENV}")
 cmake_minimum_required(VERSION 3.11.0)
 
 set(NAME VEngine)
+set(CMAKE_CXX_STANDARD 20)
+add_compile_definitions(VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1)
 
 message(STATUS "using ${CMAKE_GENERATOR}")
 if (CMAKE_GENERATOR STREQUAL "MinGW Makefiles")
@@ -17,6 +19,8 @@ endif()
 
 project(${NAME} VERSION 0.1)
 
+
+
 # 1. Set VULKAN_SDK_PATH in .env.cmake to target specific vulkan version
 if (DEFINED VULKAN_SDK_PATH)
   set(Vulkan_INCLUDE_DIRS "${VULKAN_SDK_PATH}/Include") # 1.1 Make sure this include path is correct
@@ -25,6 +29,7 @@ if (DEFINED VULKAN_SDK_PATH)
 else()
   find_package(Vulkan REQUIRED) # throws error if could not find Vulkan
   message(STATUS "Found Vulkan: $ENV{VULKAN_SDK}")
+  
 endif()
 if (NOT Vulkan_FOUND)
 	message(FATAL_ERROR "Could not find Vulkan library!")
