@@ -36,15 +36,7 @@ namespace ve {
   }
 
   VeDevice::~VeDevice() {
-    // Cleanup resources
-    //vkDestroyCommandPool(device, commandPool, nullptr);
-    //vkDestroyDevice(device, nullptr);
-    //vkDestroySurfaceKHR(instance, surface, nullptr);
-    //if (enableValidationLayers) {
-    //  DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
-    //}
-    //vkDestroyInstance(instance, nullptr);
-
+    // commandPool, device, surface, debugMessenger and instance are RAII objects and will be cleaned up automatically
   }
 
   void VeDevice::createInstance() {
@@ -72,8 +64,19 @@ namespace ve {
         throw std::runtime_error("One or more required layers are not supported!");
     }
 
+    std::vector<vk::ExtensionProperties> availableExtensions = context.enumerateInstanceExtensionProperties();
+    std::cout << availableExtensions.size() << " available extensions:" << std::endl;
+    for (const auto& extension : availableExtensions) {
+        std::cout << "\t" << extension.extensionName << std::endl;
+    }
+
     // Get the required instance extensions
     auto extensions = getRequiredExtensions();
+
+    std::cout << extensions.size() << " required extensions:" << std::endl;
+    for (const auto& extension : extensions) {
+        std::cout << "\t" << extension << std::endl;
+    }
 
     // Check if the required extensions are supported by the Vulkan implementation.
     auto extensionProperties = context.enumerateInstanceExtensionProperties();
@@ -88,6 +91,7 @@ namespace ve {
     }
 
     vk::InstanceCreateInfo createInfo{
+        .flags = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR,
         .pApplicationInfo = &appInfo,
         .enabledLayerCount = static_cast<uint32_t>(required_layers.size()),
         .ppEnabledLayerNames = required_layers.data(),
@@ -117,15 +121,16 @@ namespace ve {
   }
 
   void VeDevice::createSurface() {
-        VkSurfaceKHR _surface;
+        VkSurfaceKHR _surface; // glfw works with c api handles
         if (glfwCreateWindowSurface(*instance, window.getGLFWwindow(), nullptr, &_surface) != VK_SUCCESS) {
             throw std::runtime_error("failed to create window surface!");
         }
-        surface = vk::raii::SurfaceKHR(instance, _surface);
+        surface = vk::raii::SurfaceKHR(instance, _surface); // promote to RAII
     }
 
   void VeDevice::pickPhysicalDevice() {
     auto devices = instance.enumeratePhysicalDevices();
+    std::cout << "Found " << devices.size() << " physical device(s)" << std::endl;
     const auto devIter = std::ranges::find_if(devices,
       [&](auto const & device) {
             auto queueFamilies = device.getQueueFamilyProperties();
@@ -143,7 +148,6 @@ namespace ve {
                 found = found &&  extensionIter != extensions.end();
             }
             isSuitable = isSuitable && found;
-            printf("\n");
             if (isSuitable) {
                 physicalDevice = device;
             }
@@ -151,21 +155,19 @@ namespace ve {
     if (devIter == devices.end()) {
         throw std::runtime_error("failed to find a suitable GPU!");
     }
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(*physicalDevice, &properties);
+    std::cout << "Using device: " << properties.deviceName << std::endl;
   }
 
   void VeDevice::createLogicalDevice() {
-        // find the index of the first queue family that supports graphics
-        std::vector<vk::QueueFamilyProperties> queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
-
-        // get the first index into queueFamilyProperties which supports graphics
-        auto graphicsQueueFamilyProperty = std::ranges::find_if( queueFamilyProperties, []( auto const & qfp )
-                        { return (qfp.queueFlags & vk::QueueFlagBits::eGraphics) != static_cast<vk::QueueFlags>(0); } );
-        assert(graphicsQueueFamilyProperty != queueFamilyProperties.end() && "No graphics queue family found!");
-
-        auto graphicsIndex = static_cast<uint32_t>( std::distance( queueFamilyProperties.begin(), graphicsQueueFamilyProperty ) );
-
+       
+        uint32_t queue_index = findQueueFamilies();
+        
         // query for Vulkan 1.3 features
-        vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {
+        vk::StructureChain<vk::PhysicalDeviceFeatures2, 
+                           vk::PhysicalDeviceVulkan13Features, 
+                           vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {
             {},                               // vk::PhysicalDeviceFeatures2
             {.dynamicRendering = true },      // vk::PhysicalDeviceVulkan13Features
             {.extendedDynamicState = true }   // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
@@ -173,7 +175,7 @@ namespace ve {
 
         // create a Device
         float                     queuePriority = 0.0f;
-        vk::DeviceQueueCreateInfo deviceQueueCreateInfo{ .queueFamilyIndex = graphicsIndex, .queueCount = 1, .pQueuePriorities = &queuePriority };
+        vk::DeviceQueueCreateInfo deviceQueueCreateInfo{ .queueFamilyIndex = queue_index, .queueCount = 1, .pQueuePriorities = &queuePriority };
         vk::DeviceCreateInfo      deviceCreateInfo{ .pNext = &featureChain.get<vk::PhysicalDeviceFeatures2>(),
                                                     .queueCreateInfoCount = 1,
                                                     .pQueueCreateInfos = &deviceQueueCreateInfo,
@@ -181,20 +183,28 @@ namespace ve {
                                                     .ppEnabledExtensionNames = requiredDeviceExtension.data() };
 
         device_ = vk::raii::Device(physicalDevice, deviceCreateInfo);
-        graphicsQueue = vk::raii::Queue(device_, graphicsIndex, 0);
+        queue = vk::raii::Queue(device_, queue_index, 0);
   }
   
-  uint32_t VeDevice::findQueueFamilies(vk::PhysicalDevice device) {
-    // find the index of the first queue family that supports graphics
-    std::vector<vk::QueueFamilyProperties> queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
-
-    // get the first index into queueFamilyProperties which supports graphics
-    auto graphicsQueueFamilyProperty =
-      std::find_if( queueFamilyProperties.begin(),
-                    queueFamilyProperties.end(),
-                    []( vk::QueueFamilyProperties const & qfp ) { return qfp.queueFlags & vk::QueueFlagBits::eGraphics; } );
-
-    return static_cast<uint32_t>( std::distance( queueFamilyProperties.begin(), graphicsQueueFamilyProperty ) );
+  uint32_t VeDevice::findQueueFamilies() {
+    auto queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
+    // get the first index into queueFamilyProperties which supports both graphics and present
+    uint32_t queue_index = ~0;
+    for (uint32_t qfpIndex = 0; qfpIndex < queueFamilyProperties.size(); qfpIndex++)
+    {
+      if ((queueFamilyProperties[qfpIndex].queueFlags & vk::QueueFlagBits::eGraphics) &&
+          physicalDevice.getSurfaceSupportKHR(qfpIndex, *surface))
+      {
+        // found a queue family that supports both graphics and present
+        queue_index = qfpIndex;
+        break;
+      }
+    }
+    if (queue_index == ~0)
+    {
+      throw std::runtime_error("Could not find a queue for graphics and present -> terminating");
+    }
+    return queue_index;
   }
 
 
@@ -207,6 +217,10 @@ namespace ve {
     if (enableValidationLayers) {
         extensions.push_back(vk::EXTDebugUtilsExtensionName );
     }
+
+    // required for portability on macOS
+    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME); // required for VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
 
     return extensions;
   }

@@ -3,6 +3,7 @@
 #include "ve_window.hpp"
 #define VULKAN_HPP_ENABLE_RAII
 #include <vulkan/vulkan_raii.hpp>
+#include <vulkan/vulkan_beta.h> // required for
 
 // std lib headers
 #include <string>
@@ -57,16 +58,16 @@ namespace ve {
     //bool isDeviceSuitable(vk::PhysicalDevice device);
     std::vector<const char *> getRequiredExtensions();
     bool checkValidationLayerSupport();
-    uint32_t findQueueFamilies(vk::PhysicalDevice device);
+    uint32_t findQueueFamilies();
     SwapChainSupportDetails querySwapChainSupport(vk::PhysicalDevice device);
     bool checkDeviceExtensionSupport(vk::PhysicalDevice device);
     void hasGlfwRequiredInstanceExtensions();
     void populateDebugMessengerCreateInfo(vk::DebugUtilsMessengerCreateInfoEXT &createInfo);
 
     VeWindow &window;
+    vk::raii::Instance instance{nullptr};
     vk::raii::Device device_{nullptr};
     vk::raii::Context context;
-    vk::raii::Instance instance{nullptr};
     vk::raii::DebugUtilsMessengerEXT debugMessenger{nullptr};
     vk::raii::SurfaceKHR surface{nullptr};
     vk::raii::PhysicalDevice physicalDevice{nullptr};
@@ -74,14 +75,12 @@ namespace ve {
         vk::KHRSwapchainExtensionName,
         vk::KHRSpirv14ExtensionName,
         vk::KHRSynchronization2ExtensionName,
-        vk::KHRCreateRenderpass2ExtensionName
+        vk::KHRCreateRenderpass2ExtensionName,
+        VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME, // required for portability on macOS
     };
-
-    //todo
     
     vk::raii::CommandPool commandPool{nullptr};
-    vk::raii::Queue graphicsQueue{nullptr};
-    vk::raii::Queue presentQueue{nullptr};
+    vk::raii::Queue queue{nullptr};
 
     const std::vector<const char *> validationLayers = {
         "VK_LAYER_KHRONOS_validation"

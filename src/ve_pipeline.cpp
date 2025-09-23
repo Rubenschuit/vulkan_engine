@@ -17,6 +17,12 @@ namespace ve {
         // Cleanup code for the pipeline would go here
     }
 
+    PipelineConfigInfo VePipeline::defaultPipelineConfigInfo(uint32_t width, uint32_t height) {
+        PipelineConfigInfo config_info{};
+        // Set default values for the config_info as needed
+        return config_info;
+    }
+
     std::vector<char> VePipeline::readFile(const std::string& file_path) {
         std::ifstream file(file_path, std::ios::ate | std::ios::binary);
         if (!file.is_open()) {
@@ -48,9 +54,9 @@ namespace ve {
         vk::ShaderModuleCreateInfo create_info{
             .sType = vk::StructureType::eShaderModuleCreateInfo,
             .codeSize = code.size(),
-            .pCode = reinterpret_cast<const uint32_t*>(code.data()) // leverage that vector aligns data to 4 bytes
+            .pCode = reinterpret_cast<const uint32_t*>(code.data()) // leverage that vector already aligns data to worst-case alignment
         };
-
+        
         try {
             *shader_module = vk::raii::ShaderModule(ve_device.getDevice(), create_info);
         } catch (const std::exception& e) {
