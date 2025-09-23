@@ -48,10 +48,11 @@ namespace ve {
   private:
     void createInstance();
     void setupDebugMessenger();
+    void createSurface();
     void pickPhysicalDevice();
     void createLogicalDevice();
     void createCommandPool();
-    void createSurface();
+    
 
     //bool isDeviceSuitable(vk::PhysicalDevice device);
     std::vector<const char *> getRequiredExtensions();
@@ -67,6 +68,7 @@ namespace ve {
     vk::raii::Context context;
     vk::raii::Instance instance{nullptr};
     vk::raii::DebugUtilsMessengerEXT debugMessenger{nullptr};
+    vk::raii::SurfaceKHR surface{nullptr};
     vk::raii::PhysicalDevice physicalDevice{nullptr};
     std::vector<const char*> requiredDeviceExtension = {
         vk::KHRSwapchainExtensionName,
@@ -76,7 +78,7 @@ namespace ve {
     };
 
     //todo
-    vk::raii::SurfaceKHR surface{nullptr};
+    
     vk::raii::CommandPool commandPool{nullptr};
     vk::raii::Queue graphicsQueue{nullptr};
     vk::raii::Queue presentQueue{nullptr};

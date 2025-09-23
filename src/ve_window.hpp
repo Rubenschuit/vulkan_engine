@@ -2,6 +2,8 @@
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#define VULKAN_HPP_ENABLE_RAII
+#include <vulkan/vulkan_raii.hpp>
 #include <vulkan/vulkan_core.h>
 #include <string>
 
@@ -14,8 +16,6 @@ namespace ve {
         // Prevent copying, ensuring unique ownership of GLFWwindow
         VeWindow(const VeWindow&) = delete;
         VeWindow& operator=(const VeWindow&) = delete;
-
-        void createWindowSurface(VkInstance instance, VkSurfaceKHR* surface);
 
         GLFWwindow* getGLFWwindow() const { return window; }
         int getWidth() const { return width; }

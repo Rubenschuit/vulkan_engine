@@ -29,9 +29,9 @@ namespace ve {
   VeDevice::VeDevice(VeWindow &window) : window(window) {
     createInstance();
     setupDebugMessenger();
+    createSurface();
     pickPhysicalDevice();
     createLogicalDevice();
-    //createSurface(window);
     //createCommandPool();
   }
 
@@ -115,6 +115,14 @@ namespace ve {
     };
     debugMessenger = instance.createDebugUtilsMessengerEXT(debugUtilsMessengerCreateInfoEXT);
   }
+
+  void VeDevice::createSurface() {
+        VkSurfaceKHR _surface;
+        if (glfwCreateWindowSurface(*instance, window.getGLFWwindow(), nullptr, &_surface) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create window surface!");
+        }
+        surface = vk::raii::SurfaceKHR(instance, _surface);
+    }
 
   void VeDevice::pickPhysicalDevice() {
     auto devices = instance.enumeratePhysicalDevices();
