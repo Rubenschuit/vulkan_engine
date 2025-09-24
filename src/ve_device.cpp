@@ -22,7 +22,7 @@ namespace ve {
       const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData, 
       void*) {
     std::cerr << "validation layer: type " << to_string(type) 
-              << " msg: " << pCallbackData->pMessage << std::endl;
+              << " msg: " << pCallbackData->pMessage << std::endl << std::endl;
     return vk::False;
   }
 
@@ -32,7 +32,7 @@ namespace ve {
     createSurface();
     pickPhysicalDevice();
     createLogicalDevice();
-    //createCommandPool();
+    createCommandPool();
   }
 
   VeDevice::~VeDevice() {
@@ -120,6 +120,17 @@ namespace ve {
     debugMessenger = instance.createDebugUtilsMessengerEXT(debugUtilsMessengerCreateInfoEXT);
   }
 
+  void VeDevice::createCommandPool() {
+    uint32_t queue_index = findQueueFamilies();
+    vk::CommandPoolCreateInfo poolInfo{
+        .sType = vk::StructureType::eCommandPoolCreateInfo,
+        .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer | vk::CommandPoolCreateFlagBits::eTransient,
+        .queueFamilyIndex = queue_index
+    };
+
+    commandPool = vk::raii::CommandPool(device_, poolInfo);
+  }
+
   void VeDevice::createSurface() {
         VkSurfaceKHR _surface; // glfw works with c api handles
         if (glfwCreateWindowSurface(*instance, window.getGLFWwindow(), nullptr, &_surface) != VK_SUCCESS) {
@@ -143,7 +154,7 @@ namespace ve {
             isSuitable = isSuitable && ( qfpIter != queueFamilies.end() );
             auto extensions = device.enumerateDeviceExtensionProperties( );
             bool found = true;
-            for (auto const & extension : deviceExtensions) {
+            for (auto const & extension : requiredDeviceExtension) {
                 auto extensionIter = std::ranges::find_if(extensions, [extension](auto const & ext) {return strcmp(ext.extensionName, extension) == 0;});
                 found = found &&  extensionIter != extensions.end();
             }
@@ -169,7 +180,7 @@ namespace ve {
                            vk::PhysicalDeviceVulkan13Features, 
                            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {
             {},                               // vk::PhysicalDeviceFeatures2
-            {.dynamicRendering = true },      // vk::PhysicalDeviceVulkan13Features
+            {.dynamicRendering = true, .synchronization2 = true},      // vk::PhysicalDeviceVulkan13Features
             {.extendedDynamicState = true }   // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
         };
 
@@ -225,4 +236,53 @@ namespace ve {
     return extensions;
   }
 
+  SwapChainSupportDetails VeDevice::querySwapChainSupport(vk::PhysicalDevice device) {
+    SwapChainSupportDetails details;
+    details.capabilities = device.getSurfaceCapabilitiesKHR(*surface);
+    details.formats = device.getSurfaceFormatsKHR(*surface);
+    details.presentModes = device.getSurfacePresentModesKHR(*surface);
+    return details;
+  }
+
+  uint32_t VeDevice::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
+    vk::PhysicalDeviceMemoryProperties memProperties = physicalDevice.getMemoryProperties();
+    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+      if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+        return i;
+      }
+    }
+    throw std::runtime_error("failed to find suitable memory type!");
+  }
+
+  vk::Format VeDevice::findSupportedFormat(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features) {
+    for (vk::Format format : candidates) {
+      vk::FormatProperties props = physicalDevice.getFormatProperties(format);
+      if (tiling == vk::ImageTiling::eLinear && (props.linearTilingFeatures & features) == features) {
+        return format;
+      } else if (tiling == vk::ImageTiling::eOptimal && (props.optimalTilingFeatures & features) == features) {
+        return format;
+      }
+    }
+    throw std::runtime_error("failed to find supported format!");
+  }
+
+  void VeDevice::createImageWithInfo(
+      const vk::ImageCreateInfo& imageInfo, 
+      vk::MemoryPropertyFlags properties, 
+      vk::raii::Image* image, 
+      vk::raii::DeviceMemory* imageMemory) {
+    
+    *image = vk::raii::Image(device_, imageInfo);
+
+    vk::MemoryRequirements memRequirements = (*image).getMemoryRequirements();
+
+    vk::MemoryAllocateInfo allocInfo{
+        .allocationSize = memRequirements.size,
+        .memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties)
+    };
+
+    *imageMemory = vk::raii::DeviceMemory(device_, allocInfo);
+
+    (*image).bindMemory(**imageMemory, 0);
+  }
 }

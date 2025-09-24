@@ -13,12 +13,16 @@ namespace ve {
         createGraphicsPipeline(vert_file_path, frag_file_path, config_info);
     }
 
-    VePipeline::~VePipeline() {
-        // Cleanup code for the pipeline would go here
-    }
+    VePipeline::~VePipeline() {}
 
     PipelineConfigInfo VePipeline::defaultPipelineConfigInfo(uint32_t width, uint32_t height) {
         PipelineConfigInfo config_info{};
+        config_info.dynamicStateEnables = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
+        config_info.dynamicStateInfo = vk::PipelineDynamicStateCreateInfo{
+            .dynamicStateCount = static_cast<uint32_t>(config_info.dynamicStateEnables.size()),
+            .pDynamicStates = config_info.dynamicStateEnables.data()
+        };
+        
         config_info.inputAssemblyInfo = {
             .sType = vk::StructureType::ePipelineInputAssemblyStateCreateInfo,
             .topology = vk::PrimitiveTopology::eTriangleList,
@@ -114,7 +118,7 @@ namespace ve {
             const std::string& frag_file_path, 
             const PipelineConfigInfo& config_info) {
 
-        //assert(config_info.pipelineLayout != nullptr && "Cannot create graphics pipeline: no pipelineLayout provided in config_info");
+        
         //assert(config_info.renderPass != nullptr && "Cannot create graphics pipeline: no renderPass provided in config_info");
         auto vert_shader_code = readFile(vert_file_path);
         auto frag_shader_code = readFile(frag_file_path);
@@ -152,8 +156,15 @@ namespace ve {
             .scissorCount = 1,
             .pScissors = &config_info.scissor
         };
+
+        vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo{ 
+            .colorAttachmentCount = 1, 
+            .pColorAttachmentFormats = &config_info.colorFormat,
+            .depthAttachmentFormat = config_info.depthFormat
+        };
         vk::GraphicsPipelineCreateInfo pipeline_info{
             .sType = vk::StructureType::eGraphicsPipelineCreateInfo,
+            .pNext = &pipelineRenderingCreateInfo,
             .stageCount = 2,
             .pStages = shader_stages,
             .pVertexInputState = &vertex_input_info,
@@ -163,18 +174,21 @@ namespace ve {
             .pMultisampleState = &config_info.multisampleInfo,
             .pDepthStencilState = &config_info.depthStencilInfo,
             .pColorBlendState = &config_info.colorBlendInfo,
-            .pDynamicState = nullptr, 
+            .pDynamicState = &config_info.dynamicStateInfo,
             .layout = config_info.pipelineLayout,
-            .renderPass = config_info.renderPass,
+            .renderPass = nullptr, //config_info.renderPass,
             .subpass = config_info.subpass,
             .basePipelineHandle = VK_NULL_HANDLE,
             .basePipelineIndex = -1
         };
+        assert(config_info.pipelineLayout != nullptr && "Cannot create graphics pipeline: no pipelineLayout provided in config_info");
 
-        //graphics_pipeline = vk::raii::Pipeline{ve_device.getDevice(), nullptr, pipeline_info};
+        std::cout << "Vertex shader code size: " << vert_shader_code.size() << " bytes" << std::endl;
+        std::cout << "Fragment shader code size: " << frag_shader_code.size() << " bytes" << std::endl;
+        
+        graphics_pipeline = vk::raii::Pipeline{ve_device.getDevice(), nullptr, pipeline_info};
     
-        //std::cout << "Vertex shader code size: " << vert_shader_code.size() << " bytes" << std::endl;
-        //std::cout << "Fragment shader code size: " << frag_shader_code.size() << " bytes" << std::endl;
+        
     }
 
     void VePipeline::createShaderModule(const std::vector<char>& code, vk::raii::ShaderModule* shader_module) {

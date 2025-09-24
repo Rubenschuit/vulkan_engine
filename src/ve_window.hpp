@@ -20,6 +20,7 @@ namespace ve {
         GLFWwindow* getGLFWwindow() const { return window; }
         int getWidth() const { return width; }
         int getHeight() const { return height; }
+        vk::Extent2D getExtent() const { return {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}; }
 
     private:
         void initWindow(int width, int height, const std::string name);

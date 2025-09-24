@@ -7,6 +7,9 @@
 
 namespace ve {
     struct PipelineConfigInfo {
+        std::vector<vk::DynamicState> dynamicStateEnables;
+        vk::PipelineDynamicStateCreateInfo dynamicStateInfo{};
+
         vk::Viewport viewport;
         vk::Rect2D scissor;
         vk::PipelineInputAssemblyStateCreateInfo inputAssemblyInfo;
@@ -15,10 +18,11 @@ namespace ve {
         vk::PipelineColorBlendAttachmentState colorBlendAttachment;
         vk::PipelineColorBlendStateCreateInfo colorBlendInfo;
         vk::PipelineDepthStencilStateCreateInfo depthStencilInfo;
-        vk::PipelineDynamicStateCreateInfo dynamicStateInfo;
         vk::PipelineLayout pipelineLayout = nullptr;
         vk::RenderPass renderPass = nullptr;
         uint32_t subpass = 0;
+        vk::Format colorFormat = vk::Format::eUndefined;
+        vk::Format depthFormat = vk::Format::eUndefined;
 
         //PipelineConfigInfo() = default;
         //PipelineConfigInfo(const PipelineConfigInfo&) = delete;
@@ -43,6 +47,7 @@ namespace ve {
         VePipeline(const VePipeline&) = delete;
         void operator=(const VePipeline&) = delete;
 
+        vk::Pipeline getPipeline() { return *graphics_pipeline; }
         static PipelineConfigInfo defaultPipelineConfigInfo(uint32_t width, uint32_t height);
 
     private:
