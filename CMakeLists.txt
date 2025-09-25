@@ -71,6 +71,10 @@ file(GLOB_RECURSE SOURCES ${PROJECT_SOURCE_DIR}/src/*.cpp)
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 
+# Precompiled header (PCH) to speed up builds. This creates a compiled
+# version of heavy headers (Vulkan-Hpp) reused by all translation units.
+target_precompile_headers(${PROJECT_NAME} PRIVATE src/pch.hpp)
+
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 
 set_property(TARGET ${PROJECT_NAME} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/build")
@@ -128,22 +132,27 @@ find_program(GLSL_VALIDATOR glslangValidator HINTS
 )
 
 # get all .vert and .frag files in shaders directory
-file(GLOB_RECURSE GLSL_SOURCE_FILES
+file(GLOB_RECURSE GLSL_SOURCE_FILES CONFIGURE_DEPENDS
   "${PROJECT_SOURCE_DIR}/shaders/*.frag"
   "${PROJECT_SOURCE_DIR}/shaders/*.vert"
 )
 
+set(SPIRV_BINARY_FILES "")
 foreach(GLSL ${GLSL_SOURCE_FILES})
   get_filename_component(FILE_NAME ${GLSL} NAME)
   set(SPIRV "${PROJECT_SOURCE_DIR}/shaders/${FILE_NAME}.spv")
+  # Each shader compiles only when its source changes (DEPENDS). The OUTPUT ensures
+  # Ninja/Make can skip the command if the .spv is newer than the source.
   add_custom_command(
     OUTPUT ${SPIRV}
     COMMAND ${GLSL_VALIDATOR} -V ${GLSL} -o ${SPIRV}
-    DEPENDS ${GLSL})
+    DEPENDS ${GLSL}
+    COMMENT "Compiling shader ${FILE_NAME} -> ${FILE_NAME}.spv"
+    VERBATIM)
   list(APPEND SPIRV_BINARY_FILES ${SPIRV})
-endforeach(GLSL)
+endforeach()
 
-add_custom_target(
-    Shaders
-    DEPENDS ${SPIRV_BINARY_FILES}
-)
+add_custom_target(Shaders DEPENDS ${SPIRV_BINARY_FILES})
+
+# Ensure the main executable builds shaders first when needed.
+add_dependencies(${PROJECT_NAME} Shaders)
