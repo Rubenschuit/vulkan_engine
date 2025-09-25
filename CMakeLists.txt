@@ -21,6 +21,7 @@ project(${NAME} VERSION 0.1)
 
 # Enable strict warnings
 option(VE_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
+option(VE_BUILD_TESTS "Build unit tests" ON)
 if (MSVC)
   target_compile_options(${PROJECT_NAME} PRIVATE /W4 $<$<BOOL:${VE_WARNINGS_AS_ERRORS}>:/WX>)
 else()
@@ -78,13 +79,26 @@ if (NOT TINYOBJ_PATH)
   set(TINYOBJ_PATH external/tinyobjloader)
 endif()
 
-file(GLOB_RECURSE SOURCES ${PROJECT_SOURCE_DIR}/src/*.cpp)
+file(GLOB_RECURSE ALL_SOURCES ${PROJECT_SOURCE_DIR}/src/*.cpp)
 
-add_executable(${PROJECT_NAME} ${SOURCES})
+# Split out main.cpp so we can reuse engine code (for tests) without needing an executable
+set(ENGINE_SOURCES "")
+foreach(src_file ${ALL_SOURCES})
+  if (src_file MATCHES ".*/main.cpp$")
+    set(MAIN_SOURCE ${src_file})
+  else()
+    list(APPEND ENGINE_SOURCES ${src_file})
+  endif()
+endforeach()
+
+add_library(VEngineLib ${ENGINE_SOURCES})
+add_executable(${PROJECT_NAME} ${MAIN_SOURCE})
+target_link_libraries(${PROJECT_NAME} PRIVATE VEngineLib)
 
 # Precompiled header (PCH) to speed up builds. This creates a compiled
 # version of heavy headers (Vulkan-Hpp) reused by all translation units.
-target_precompile_headers(${PROJECT_NAME} PRIVATE src/pch.hpp)
+target_precompile_headers(VEngineLib PRIVATE src/pch.hpp)
+target_precompile_headers(${PROJECT_NAME} REUSE_FROM VEngineLib)
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 
@@ -119,11 +133,14 @@ if (WIN32)
 
 elseif (UNIX)
     message(STATUS "CREATING BUILD FOR UNIX")
-    target_include_directories(${PROJECT_NAME} PUBLIC
+    target_include_directories(VEngineLib PUBLIC
       ${PROJECT_SOURCE_DIR}/src
       ${TINYOBJ_PATH}
+      ${GLFW_INCLUDE_DIRS}
     )
-    target_link_libraries(${PROJECT_NAME} glfw ${Vulkan_LIBRARIES})
+  target_link_libraries(VEngineLib PUBLIC glfw ${Vulkan_LIBRARIES})
+  target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/src)
+  target_link_libraries(${PROJECT_NAME} PRIVATE VEngineLib)
 endif()
 
 
@@ -166,4 +183,31 @@ endforeach()
 add_custom_target(Shaders DEPENDS ${SPIRV_BINARY_FILES})
 
 # Ensure the main executable builds shaders first when needed.
+add_dependencies(VEngineLib Shaders)
 add_dependencies(${PROJECT_NAME} Shaders)
+
+##################### Tests ################################
+if (VE_BUILD_TESTS)
+  include(FetchContent)
+  FetchContent_Declare(
+    Catch2
+    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+    GIT_TAG v3.5.2
+  )
+  FetchContent_MakeAvailable(Catch2)
+
+  file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/*.cpp)
+  if (TEST_SOURCES)
+  add_executable(EngineTests ${TEST_SOURCES})
+  target_link_libraries(EngineTests PRIVATE Catch2::Catch2WithMain VEngineLib)
+  target_precompile_headers(EngineTests REUSE_FROM VEngineLib)
+  target_include_directories(EngineTests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    if (NOT MSVC)
+      target_compile_options(EngineTests PRIVATE -Wall -Wextra -Wconversion -Wpedantic)
+    else()
+      target_compile_options(EngineTests PRIVATE /W4)
+    endif()
+    add_test(NAME EngineTests COMMAND EngineTests)
+    enable_testing()
+  endif()
+endif()

@@ -1,6 +1,8 @@
 # pragma once
 
-#include "ve_device.hpp"
+#include <vulkan/vulkan_raii.hpp>
+
+namespace ve { class VeDevice; }
 
 #include <string>
 #include <vector>

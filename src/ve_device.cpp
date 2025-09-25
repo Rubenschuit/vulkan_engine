@@ -17,10 +17,10 @@ namespace ve {
 
   //local function
   static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
-      vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
-      vk::DebugUtilsMessageTypeFlagsEXT type,
-      const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData,
-      void*) {
+    vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
+    vk::DebugUtilsMessageTypeFlagsEXT type,
+    const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData,
+    void*) {
     // Basic ANSI color mapping (can be disabled by exporting NO_COLOR or if terminal does not support it)
     const bool enableColor = (std::getenv("NO_COLOR") == nullptr);
     const char* reset   = enableColor ? "\033[0m"  : "";
@@ -72,17 +72,17 @@ namespace ve {
     // Get the required layers
     std::vector<char const*> required_layers;
     if (enableValidationLayers) {
-        required_layers.assign(validationLayers.begin(), validationLayers.end());
+      required_layers.assign(validationLayers.begin(), validationLayers.end());
     }
 
     // Check if the required layers are supported by the Vulkan implementation.
     auto layerProperties = context.enumerateInstanceLayerProperties();
     if (std::ranges::any_of(required_layers, [&layerProperties](auto const& requiredLayer) {
-        return std::ranges::none_of(layerProperties,
-                                   [requiredLayer](auto const& layerProperty)
-                                   { return strcmp(layerProperty.layerName, requiredLayer) == 0; });})
-        ) {
-        throw std::runtime_error("One or more required layers are not supported!");
+      return std::ranges::none_of(layerProperties,
+                                  [requiredLayer](auto const& layerProperty)
+                                  { return strcmp(layerProperty.layerName, requiredLayer) == 0; });})
+      ) {
+      throw std::runtime_error("One or more required layers are not supported!");
     }
 
     std::vector<vk::ExtensionProperties> availableExtensions = context.enumerateInstanceExtensionProperties();

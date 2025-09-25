@@ -1,4 +1,5 @@
 #include "ve_pipeline.hpp"
+#include "ve_device.hpp"
 
 #include <fstream>
 #include <stdexcept>
