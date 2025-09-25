@@ -23,14 +23,7 @@ namespace ve {
         old_swap_chain = nullptr;
     }
 
-    VeSwapChain::~VeSwapChain() {
-        // Cleanup non-RAII objects
-        for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            vkDestroySemaphore(*device.getDevice(), image_available_semaphores[i], nullptr);
-            vkDestroySemaphore(*device.getDevice(), render_finished_semaphores[i], nullptr);
-            vkDestroyFence(*device.getDevice(), in_flight_fences[i], nullptr);
-        }
-    }
+    VeSwapChain::~VeSwapChain() {}
 
     void VeSwapChain::init() {
         createSwapChain();
@@ -39,67 +32,47 @@ namespace ve {
     }
 
     // Todo: 
-    vk::Result VeSwapChain::acquireNextImage(uint32_t* image_ndex) {
+    vk::Result VeSwapChain::acquireNextImage(uint32_t* image_index) {
 
-        vkWaitForFences(*device.getDevice(), 1, 
-                        reinterpret_cast<const VkFence *>(&in_flight_fences[current_frame]), 
-                        VK_TRUE, 
-                        std::numeric_limits<uint64_t>::max());
+        // Wait for the fence for the current frame to ensure that the previous frame has finished
+        while ( vk::Result::eTimeout == 
+                device.getDevice().waitForFences( *in_flight_fences[current_frame], vk::True, UINT64_MAX ) );
 
-        auto [result, image_index] = swap_chain.acquireNextImage(
-            std::numeric_limits<uint64_t>::max(), 
-            image_available_semaphores[current_frame], 
+        // Acquire the next image from the swap chain allowing the semaphore to signal once the image is available
+        auto [result, _image_index] = swap_chain.acquireNextImage(
+            UINT64_MAX, 
+            present_complete_semaphores[semaphore_index], 
             nullptr);
-
-        //device.getDevice().resetFences(1, &in_flight_fences[current_frame]);
+        *image_index = _image_index;
+        // Reset the fence for the current frame
+        device.getDevice().resetFences( *in_flight_fences[current_frame] );
         return result;
     }
 
-    // This function first waits on the fence for the current frame to ensure that the previous frame has finished.
-    // It then checks if the image to be rendered to is already in use by another frame, and if so, waits on the corresponding fence.
-    // After that, it sets up the semaphores and submits the command buffer to the graphics queue.
-    // Finally, it presents the image and advances to the next frame.
-    vk::Result VeSwapChain::submitCommandBuffers(const vk::CommandBuffer* buffers, uint32_t* imageIndex) {
-        if (images_in_flight[*imageIndex] != VK_NULL_HANDLE) {
-            vkWaitForFences(*device.getDevice(), 1, 
-                            reinterpret_cast<const VkFence *>(&images_in_flight[*imageIndex]), 
-                            VK_TRUE, 
-                            std::numeric_limits<uint64_t>::max());
-        }
-        images_in_flight[*imageIndex] = in_flight_fences[current_frame];
+    vk::Result VeSwapChain::submitCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t* image_index) {
+        vk::PipelineStageFlags wait_dest_stage_mask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
+        const vk::SubmitInfo submit_info{ 
+            .waitSemaphoreCount = 1, 
+            .pWaitSemaphores = &*present_complete_semaphores[semaphore_index],
+            .pWaitDstStageMask = &wait_dest_stage_mask, 
+            .commandBufferCount = 1, 
+            .pCommandBuffers = &commandBuffer,
+            .signalSemaphoreCount = 1, 
+            .pSignalSemaphores = &*render_finished_semaphores[*image_index] };
 
-        vk::Semaphore wait_semaphores[] = {image_available_semaphores[current_frame]};
-        vk::PipelineStageFlags wait_stages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
-        vk::Semaphore signal_semaphores[] = {render_finished_semaphores[current_frame]};
+        device.getQueue().submit(submit_info, *in_flight_fences[current_frame]);
 
-        vk::SubmitInfo submitInfo{
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores = wait_semaphores,
-            .pWaitDstStageMask = wait_stages,
-            .commandBufferCount = 1,
-            .pCommandBuffers = buffers,
-            .signalSemaphoreCount = 1,
-            .pSignalSemaphores = signal_semaphores
-        };
+        const vk::PresentInfoKHR present_info{ 
+            .waitSemaphoreCount = 1, 
+            .pWaitSemaphores = &*render_finished_semaphores[*image_index],
+            .swapchainCount = 1, 
+            .pSwapchains = &*swap_chain, 
+            .pImageIndices = image_index };
 
-        vkResetFences(*device.getDevice(), 1, &in_flight_fences[current_frame]); 
+        auto result = device.getQueue().presentKHR(present_info);
 
-        device.getQueue().submit(submitInfo, in_flight_fences[current_frame]);
-
-        vk::SwapchainKHR swapChains[] = { *swap_chain };
-
-        vk::PresentInfoKHR presentInfo{
-            .sType = vk::StructureType::ePresentInfoKHR,
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores = signal_semaphores,
-            .swapchainCount = 1,
-            .pSwapchains = swapChains,
-            .pImageIndices = imageIndex
-        };
-
-        auto result = device.getQueue().presentKHR(presentInfo);
-
-        current_frame = (current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+    current_frame = (current_frame + 1) % ve::MAX_FRAMES_IN_FLIGHT;
+        semaphore_index = (semaphore_index + 1) % present_complete_semaphores.size();
 
         return result;
     }
@@ -161,26 +134,21 @@ namespace ve {
     }
 
     void VeSwapChain::createSyncObjects() {
-        image_available_semaphores.resize(MAX_FRAMES_IN_FLIGHT);
-        render_finished_semaphores.resize(MAX_FRAMES_IN_FLIGHT);
-        in_flight_fences.resize(MAX_FRAMES_IN_FLIGHT);
-        images_in_flight.resize(swap_chain_images.size(), VK_NULL_HANDLE);
+        present_complete_semaphores.clear();
+        render_finished_semaphores.clear();
+        in_flight_fences.clear();
 
-        vk::SemaphoreCreateInfo semaphore_info{
-            .sType = vk::StructureType::eSemaphoreCreateInfo
-        };
+        vk::SemaphoreCreateInfo present_info {};
+        vk::SemaphoreCreateInfo render_info {};
+        vk::FenceCreateInfo fence_info { .flags = vk::FenceCreateFlagBits::eSignaled };
 
-        vk::FenceCreateInfo fence_info{
-            .sType = vk::StructureType::eFenceCreateInfo,
-            .flags = vk::FenceCreateFlagBits::eSignaled
-        };
+        for (size_t i = 0; i < swap_chain_images.size(); i++) {
+            present_complete_semaphores.emplace_back(device.getDevice(), present_info);
+            render_finished_semaphores.emplace_back(device.getDevice(), render_info);
+        }
 
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            if (vkCreateSemaphore(*device.getDevice(), reinterpret_cast<const VkSemaphoreCreateInfo*>(&semaphore_info), nullptr, &image_available_semaphores[i]) != VK_SUCCESS ||
-                vkCreateSemaphore(*device.getDevice(), reinterpret_cast<const VkSemaphoreCreateInfo*>(&semaphore_info), nullptr, &render_finished_semaphores[i]) != VK_SUCCESS ||
-                vkCreateFence(*device.getDevice(), reinterpret_cast<const VkFenceCreateInfo*>(&fence_info), nullptr, &in_flight_fences[i]) != VK_SUCCESS) {
-                throw std::runtime_error("failed to create synchronization objects for a frame!");
-            }
+        for (size_t i = 0; i < ve::MAX_FRAMES_IN_FLIGHT; i++) {
+            in_flight_fences.emplace_back(device.getDevice(), fence_info);
         }
     }
 

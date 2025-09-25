@@ -58,7 +58,7 @@ namespace ve {
         vk::MemoryPropertyFlags properties, 
         vk::raii::Buffer* buffer, 
         vk::raii::DeviceMemory* bufferMemory);
-        
+
     vk::raii::CommandBuffer beginSingleTimeCommands();
     void endSingleTimeCommands(vk::raii::CommandBuffer* commandBuffer);
     void copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size);

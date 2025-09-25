@@ -48,17 +48,18 @@ namespace ve {
             .sType = vk::StructureType::eCommandBufferAllocateInfo,
             .commandPool = *device.getCommandPool(),
             .level = vk::CommandBufferLevel::ePrimary,
-            .commandBufferCount = 1
+            .commandBufferCount = ve::MAX_FRAMES_IN_FLIGHT
         };
-        command_buffer = std::move(vk::raii::CommandBuffers(device.getDevice(), alloc_info).front());
+        command_buffers = vk::raii::CommandBuffers(device.getDevice(), alloc_info);
     }
 
     void VeApp::recordCommandBuffer(uint32_t imageIndex) {
         auto extent = swap_chain.getSwapChainExtent();
         auto height = extent.height;
         auto width = extent.width;
+        uint32_t current_frame = swap_chain.getCurrentFrame();
         
-        command_buffer.begin( {} );
+        command_buffers[current_frame].begin( {} );
         // Before starting rendering, transition the swapchain image to COLOR_ATTACHMENT_OPTIMAL
         transition_image_layout(
             imageIndex,
@@ -84,12 +85,12 @@ namespace ve {
             .pColorAttachments = &attachmentInfo
         };
 
-        command_buffer.beginRendering(renderingInfo);
-        command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
-        command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f));
-        command_buffer.setScissor( 0, vk::Rect2D( vk::Offset2D( 0, 0 ), extent ) );
-        command_buffer.draw(3, 1, 0, 0);
-        command_buffer.endRendering();
+        command_buffers[current_frame].beginRendering(renderingInfo);
+        command_buffers[current_frame].bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
+        command_buffers[current_frame].setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f));
+        command_buffers[current_frame].setScissor( 0, vk::Rect2D( vk::Offset2D( 0, 0 ), extent ) );
+        command_buffers[current_frame].draw(3, 1, 0, 0);
+        command_buffers[current_frame].endRendering();
         // After rendering, transition to presentation
         transition_image_layout(
             imageIndex,
@@ -100,11 +101,11 @@ namespace ve {
             vk::PipelineStageFlagBits2::eColorAttachmentOutput,      
             vk::PipelineStageFlagBits2::eBottomOfPipe                  
         );
-        command_buffer.end();
+        command_buffers[current_frame].end();
     }
 
     void VeApp::transition_image_layout(
-        uint32_t currentFrame,
+        uint32_t image_index,
         vk::ImageLayout old_layout,
         vk::ImageLayout new_layout,
         vk::AccessFlags2 src_access_mask,
@@ -121,7 +122,7 @@ namespace ve {
             .newLayout = new_layout,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = swap_chain.getSwapChainImages()[currentFrame],
+            .image = swap_chain.getSwapChainImages()[image_index],
             .subresourceRange = {
                 .aspectMask = vk::ImageAspectFlagBits::eColor,
                 .baseMipLevel = 0,
@@ -135,21 +136,21 @@ namespace ve {
             .imageMemoryBarrierCount = 1,
             .pImageMemoryBarriers = &barrier
         };
-        command_buffer.pipelineBarrier2(dependency_info);
+        uint32_t current_frame = swap_chain.getCurrentFrame();
+        command_buffers[current_frame].pipelineBarrier2(dependency_info);
     }
         
     void VeApp::drawFrame() {
         uint32_t image_index;
         auto result = swap_chain.acquireNextImage(&image_index);
-        if (result == vk::Result::eErrorOutOfDateKHR) {
-            return;
-        }
-        else if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) {
+        if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) {
             throw std::runtime_error("failed to acquire swap chain image!");
         }
-        //command_buffer.reset();
+        // reset command buffer, record it and submit it
+        uint32_t current_frame = swap_chain.getCurrentFrame();
+        command_buffers[current_frame].reset();
         recordCommandBuffer(image_index);
-        result = swap_chain.submitCommandBuffers(&*command_buffer, &image_index);
+        result = swap_chain.submitCommandBuffer(*command_buffers[current_frame], &image_index);
         switch ( result )
         {
             case vk::Result::eSuccess: break;

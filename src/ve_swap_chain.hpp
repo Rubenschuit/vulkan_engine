@@ -3,6 +3,7 @@
 #include "ve_device.hpp"
 #define VULKAN_HPP_ENABLE_RAII
 #include <vulkan/vulkan_raii.hpp>
+#include <ve_config.hpp>
 
 #include <vector>
 #include <string>
@@ -11,7 +12,6 @@
 namespace ve {
     class VeSwapChain {
     public:
-        static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
         VeSwapChain(VeDevice& device, vk::Extent2D window_extent);
         VeSwapChain(VeDevice& device, vk::Extent2D window_extent, std::shared_ptr<VeSwapChain> old_swap_chain);
@@ -21,6 +21,7 @@ namespace ve {
         VeSwapChain(const VeSwapChain&) = delete;
         VeSwapChain& operator=(const VeSwapChain&) = delete;
 
+        uint32_t getCurrentFrame() const { return current_frame; }
         vk::raii::ImageView *getImageView(int index) { return &swap_chain_image_views[index]; };
         size_t getImageCount() { return swap_chain_images.size(); }
         vk::Format getSwapChainImageFormat() { return swap_chain_image_format; }
@@ -33,7 +34,7 @@ namespace ve {
                                            static_cast<float>(swap_chain_extent.height);  }
 
         vk::Result acquireNextImage(uint32_t* imageIndex);
-        vk::Result submitCommandBuffers(const vk::CommandBuffer* buffers, uint32_t* imageIndex);
+        vk::Result submitCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t* imageIndex);
         bool compareSwapFormats(const VeSwapChain& other) const;
 
     private:
@@ -62,11 +63,10 @@ namespace ve {
         vk::raii::SwapchainKHR swap_chain{nullptr};
         std::shared_ptr<VeSwapChain> old_swap_chain;
 
-        //non raii for now
-        std::vector<VkSemaphore> image_available_semaphores;
-        std::vector<VkSemaphore> render_finished_semaphores;
-        std::vector<VkFence> in_flight_fences;
-        std::vector<VkFence> images_in_flight;
-        size_t current_frame = 0;
+        std::vector<vk::raii::Semaphore> present_complete_semaphores;
+        std::vector<vk::raii::Semaphore> render_finished_semaphores;
+        std::vector<vk::raii::Fence> in_flight_fences;
+        uint32_t current_frame = 0;
+        uint32_t semaphore_index = 0;
     };
 }

@@ -3,6 +3,7 @@
 #include <ve_device.hpp>
 #include <ve_pipeline.hpp>
 #include <ve_swap_chain.hpp>
+#include <ve_config.hpp>
 
 #include <memory>
 #include <vector>
@@ -27,15 +28,15 @@ namespace ve {
         void createPipeline();
         void createPipelineLayout();
         void createCommandBuffers();
-        void recordCommandBuffer(uint32_t imageIndex);
+        void recordCommandBuffer(uint32_t image_index);
         void transition_image_layout(
-            uint32_t imageIndex,
-            vk::ImageLayout oldLayout,
-            vk::ImageLayout newLayout,
-            vk::AccessFlags2 srcAccessMask,
-            vk::AccessFlags2 dstAccessMask,
-            vk::PipelineStageFlags2 srcStage,
-            vk::PipelineStageFlags2 dstStage);
+            uint32_t image_index,
+            vk::ImageLayout old_layout,
+            vk::ImageLayout new_layout,
+            vk::AccessFlags2 src_access_mask,
+            vk::AccessFlags2 dst_access_mask,
+            vk::PipelineStageFlags2 src_stage,
+            vk::PipelineStageFlags2 dst_stage);
         void drawFrame();
 
         VeWindow window{WIDTH, HEIGHT, "Vulkan Engine!"};
@@ -43,7 +44,7 @@ namespace ve {
         VeSwapChain swap_chain{device, window.getExtent()};
         vk::raii::PipelineLayout pipeline_layout{nullptr};
         std::unique_ptr<VePipeline> pipeline;
-        vk::raii::CommandBuffer command_buffer{nullptr};
+        std::vector<vk::raii::CommandBuffer> command_buffers;
     };
 }
 
