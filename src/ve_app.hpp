@@ -19,12 +19,18 @@ namespace ve {
         VeApp(const VeApp&) = delete;
         VeApp& operator=(const VeApp&) = delete;
 
+        
+
         static constexpr int WIDTH = 800;
         static constexpr int HEIGHT = 600;
+
+        bool framebuffer_resized = false;
 
         void run();
 
     private:
+        void mainLoop();
+        void cleanup();
         void createPipeline();
         void createPipelineLayout();
         void createCommandBuffers();
@@ -38,10 +44,11 @@ namespace ve {
             vk::PipelineStageFlags2 src_stage,
             vk::PipelineStageFlags2 dst_stage);
         void drawFrame();
+        void recreateSwapChain();
 
         VeWindow window{WIDTH, HEIGHT, "Vulkan Engine!"};
         VeDevice device{window};
-        VeSwapChain swap_chain{device, window.getExtent()};
+        std::unique_ptr<VeSwapChain> swap_chain = std::make_unique<VeSwapChain>(device, window.getExtent());
         vk::raii::PipelineLayout pipeline_layout{nullptr};
         std::unique_ptr<VePipeline> pipeline;
         std::vector<vk::raii::CommandBuffer> command_buffers;

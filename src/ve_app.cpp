@@ -11,12 +11,20 @@ namespace ve {
     }
 
     void VeApp::run() {
+        mainLoop();
+        cleanup();
+    }
+
+    void VeApp::mainLoop() {
         while (!glfwWindowShouldClose(window.getGLFWwindow())) {
             glfwPollEvents();
             drawFrame();
         }
-
         device.getDevice().waitIdle();
+    }
+
+    void VeApp::cleanup() {
+        // nothing yet
     }
 
     void VeApp::createPipelineLayout() {
@@ -33,7 +41,7 @@ namespace ve {
     void VeApp::createPipeline() {
         auto pipeline_config = VePipeline::defaultPipelineConfigInfo();
         // set formats for dynamic rendering
-        pipeline_config.color_format = swap_chain.getSwapChainImageFormat();
+        pipeline_config.color_format = swap_chain->getSwapChainImageFormat();
         pipeline_config.pipeline_layout = pipeline_layout;
         pipeline = std::make_unique<VePipeline>(
             device, 
@@ -54,10 +62,10 @@ namespace ve {
     }
 
     void VeApp::recordCommandBuffer(uint32_t imageIndex) {
-        auto extent = swap_chain.getSwapChainExtent();
+        auto extent = swap_chain->getSwapChainExtent();
         auto height = extent.height;
         auto width = extent.width;
-        uint32_t current_frame = swap_chain.getCurrentFrame();
+        uint32_t current_frame = swap_chain->getCurrentFrame();
         
         command_buffers[current_frame].begin( {} );
         // Before starting rendering, transition the swapchain image to COLOR_ATTACHMENT_OPTIMAL
@@ -72,7 +80,7 @@ namespace ve {
         );
         vk::ClearValue clearColor = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
         vk::RenderingAttachmentInfo attachmentInfo = {
-            .imageView = swap_chain.getSwapChainImageViews()[imageIndex],
+            .imageView = swap_chain->getSwapChainImageViews()[imageIndex],
             .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
             .loadOp = vk::AttachmentLoadOp::eClear,
             .storeOp = vk::AttachmentStoreOp::eStore,
@@ -122,7 +130,7 @@ namespace ve {
             .newLayout = new_layout,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = swap_chain.getSwapChainImages()[image_index],
+            .image = swap_chain->getSwapChainImages()[image_index],
             .subresourceRange = {
                 .aspectMask = vk::ImageAspectFlagBits::eColor,
                 .baseMipLevel = 0,
@@ -136,28 +144,71 @@ namespace ve {
             .imageMemoryBarrierCount = 1,
             .pImageMemoryBarriers = &barrier
         };
-        uint32_t current_frame = swap_chain.getCurrentFrame();
+        uint32_t current_frame = swap_chain->getCurrentFrame();
         command_buffers[current_frame].pipelineBarrier2(dependency_info);
+    }
+
+    void VeApp::recreateSwapChain() {
+        // Handle minimized window
+        int width = 0, height = 0;
+        glfwGetFramebufferSize(window.getGLFWwindow(), &width, &height);
+        while (width == 0 || height == 0) {
+            glfwGetFramebufferSize(window.getGLFWwindow(), &width, &height);
+            glfwWaitEvents();
+        }
+
+        device.getDevice().waitIdle();
+
+        // Create a new swap chain
+        if (swap_chain == nullptr) {
+            swap_chain = std::make_unique<VeSwapChain>(device, window.getExtent());
+        } 
+        else {
+            // Transfer ownership of the existing swap chain to a shared_ptr so the new one
+            // can safely reference it during recreation.
+            std::shared_ptr<VeSwapChain> old_swap_chain{ std::move(swap_chain) };
+            swap_chain = std::make_unique<VeSwapChain>(device, window.getExtent(), old_swap_chain);
+            if (!old_swap_chain->compareSwapFormats(*swap_chain)) {
+                throw std::runtime_error("Swap chain image (or depth) format has changed!");
+            }
+        }
     }
         
     void VeApp::drawFrame() {
+        // Wait until the previous frame is finished
+        swap_chain->waitForFences();
+
+        // Acquire an image from the swap chain
         uint32_t image_index;
-        auto result = swap_chain.acquireNextImage(&image_index);
+        auto result = swap_chain->acquireNextImage(&image_index);
+        if (result == vk::Result::eErrorOutOfDateKHR) {
+            recreateSwapChain();
+            return;
+        }
         if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) {
             throw std::runtime_error("failed to acquire swap chain image!");
         }
-        // reset command buffer, record it and submit it
-        uint32_t current_frame = swap_chain.getCurrentFrame();
+
+        // Reset the fence for the current frame
+        swap_chain->resetFences();
+
+        // Record command buffer using the acquired image
+        uint32_t current_frame = swap_chain->getCurrentFrame();
         command_buffers[current_frame].reset();
         recordCommandBuffer(image_index);
-        result = swap_chain.submitCommandBuffer(*command_buffers[current_frame], &image_index);
-        switch ( result )
-        {
-            case vk::Result::eSuccess: break;
-            case vk::Result::eSuboptimalKHR: std::cout << "vk::Queue::presentKHR returned vk::Result::eSuboptimalKHR !\n"; break;
-            default: break;  // an unexpected result is returned!
+
+        // Submit the command buffer
+        result = swap_chain->submitAndPresent(*command_buffers[current_frame], &image_index);
+        if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR || window.framebuffer_resized) {
+            window.framebuffer_resized = false;
+            recreateSwapChain();
+        } else if (result != vk::Result::eSuccess) {
+            throw std::runtime_error("failed to present swap chain image!");
         }
+        // Advance to the next frame
+        swap_chain->advanceFrame();
     }
+
 
 }
         

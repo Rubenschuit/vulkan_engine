@@ -23,7 +23,10 @@ namespace ve {
         old_swap_chain = nullptr;
     }
 
-    VeSwapChain::~VeSwapChain() {}
+    VeSwapChain::~VeSwapChain() {
+        swap_chain_image_views.clear();
+        swap_chain = nullptr;
+    }
 
     void VeSwapChain::init() {
         createSwapChain();
@@ -34,9 +37,7 @@ namespace ve {
     // Todo: 
     vk::Result VeSwapChain::acquireNextImage(uint32_t* image_index) {
 
-        // Wait for the fence for the current frame to ensure that the previous frame has finished
-        while ( vk::Result::eTimeout == 
-                device.getDevice().waitForFences( *in_flight_fences[current_frame], vk::True, UINT64_MAX ) );
+        
 
         // Acquire the next image from the swap chain allowing the semaphore to signal once the image is available
         auto [result, _image_index] = swap_chain.acquireNextImage(
@@ -44,12 +45,11 @@ namespace ve {
             present_complete_semaphores[semaphore_index], 
             nullptr);
         *image_index = _image_index;
-        // Reset the fence for the current frame
-        device.getDevice().resetFences( *in_flight_fences[current_frame] );
+        
         return result;
     }
 
-    vk::Result VeSwapChain::submitCommandBuffer(vk::CommandBuffer commandBuffer, uint32_t* image_index) {
+    vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer commandBuffer, uint32_t* image_index) {
         vk::PipelineStageFlags wait_dest_stage_mask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
         const vk::SubmitInfo submit_info{ 
             .waitSemaphoreCount = 1, 
@@ -60,6 +60,7 @@ namespace ve {
             .signalSemaphoreCount = 1, 
             .pSignalSemaphores = &*render_finished_semaphores[*image_index] };
 
+        // Submit the command buffer to the graphics queue and signal the fence when it is done
         device.getQueue().submit(submit_info, *in_flight_fences[current_frame]);
 
         const vk::PresentInfoKHR present_info{ 
@@ -69,12 +70,8 @@ namespace ve {
             .pSwapchains = &*swap_chain, 
             .pImageIndices = image_index };
 
-        auto result = device.getQueue().presentKHR(present_info);
-
-    current_frame = (current_frame + 1) % ve::MAX_FRAMES_IN_FLIGHT;
-        semaphore_index = (semaphore_index + 1) % present_complete_semaphores.size();
-
-        return result;
+        // Present the image to the screen
+        return device.getQueue().presentKHR(present_info);
     }
 
     void VeSwapChain::createSwapChain() {
@@ -104,7 +101,7 @@ namespace ve {
             .compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque,
             .presentMode = present_mode,
             .clipped = VK_TRUE,
-            .oldSwapchain = VK_NULL_HANDLE, // no swap chain swapping yet
+            .oldSwapchain = VK_NULL_HANDLE, // may be overwritten below if recreating
             
             // graphics and presentation are in the same queue family, so we can use exclusive mode
             .imageSharingMode = vk::SharingMode::eExclusive, // best performance
@@ -112,27 +109,32 @@ namespace ve {
             .pQueueFamilyIndices = nullptr // optional
         };
 
+        // If we are recreating (old_swap_chain retained), provide its handle so the driver
+        // can safely migrate resources and release the old one.
+        if (old_swap_chain != nullptr) {
+            // Dereference twice: first to get vk::raii::SwapchainKHR&, second to obtain raw handle
+            create_info.oldSwapchain = **old_swap_chain->getSwapChain();
+        }
+
         swap_chain = vk::raii::SwapchainKHR(device.getDevice(), create_info);
         swap_chain_images = swap_chain.getImages();
     }
 
     void VeSwapChain::createImageViews() {
-
-        //swap_chain_image_views.resize(swap_chain_images.size());
-
         assert(swap_chain_image_views.empty());
         vk::ImageViewCreateInfo imageViewCreateInfo{ 
             .viewType = vk::ImageViewType::e2D, 
             .format = surface_format.format,
             .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 } 
         };
-        for ( auto image : swap_chain_images )
-        {
+        for ( auto image : swap_chain_images ) {
             imageViewCreateInfo.image = image;
-            swap_chain_image_views.emplace_back( device.getDevice(), imageViewCreateInfo );
+            // call the constructor of vk::raii::ImageView and add it to the vector
+            swap_chain_image_views.emplace_back(device.getDevice(), imageViewCreateInfo);
         }
     }
 
+    // Create 2 semaphores and 1 fence per frame in flight
     void VeSwapChain::createSyncObjects() {
         present_complete_semaphores.clear();
         render_finished_semaphores.clear();
@@ -195,6 +197,20 @@ namespace ve {
             return actual_extent;
         }
     }
-    
+
+    void VeSwapChain::waitForFences() {
+        while ( vk::Result::eTimeout == 
+                device.getDevice().waitForFences( *in_flight_fences[current_frame], vk::True, UINT64_MAX ) );
+        return;
+    }
+
+    void VeSwapChain::resetFences() {
+        device.getDevice().resetFences(*in_flight_fences[current_frame]);
+    }
+
+    void VeSwapChain::advanceFrame() {
+        current_frame = (current_frame + 1) % ve::MAX_FRAMES_IN_FLIGHT;
+        semaphore_index = (semaphore_index + 1) % swap_chain_images.size();
+    }
 }
 
