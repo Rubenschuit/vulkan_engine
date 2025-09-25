@@ -15,32 +15,21 @@ namespace ve {
 
     VePipeline::~VePipeline() {}
 
-    PipelineConfigInfo VePipeline::defaultPipelineConfigInfo(uint32_t width, uint32_t height) {
+    PipelineConfigInfo VePipeline::defaultPipelineConfigInfo() {
         PipelineConfigInfo config_info{};
-        config_info.dynamicStateEnables = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
-        config_info.dynamicStateInfo = vk::PipelineDynamicStateCreateInfo{
-            .dynamicStateCount = static_cast<uint32_t>(config_info.dynamicStateEnables.size()),
-            .pDynamicStates = config_info.dynamicStateEnables.data()
+        config_info.dynamic_state_enables = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
+        config_info.dynamic_state_info = vk::PipelineDynamicStateCreateInfo{
+            .dynamicStateCount = static_cast<uint32_t>(config_info.dynamic_state_enables.size()),
+            .pDynamicStates = config_info.dynamic_state_enables.data()
         };
-        
-        config_info.inputAssemblyInfo = {
+        config_info.viewport_info = { .viewportCount = 1, .scissorCount = 1 };
+
+        config_info.input_assembly_info = {
             .sType = vk::StructureType::ePipelineInputAssemblyStateCreateInfo,
             .topology = vk::PrimitiveTopology::eTriangleList,
             .primitiveRestartEnable = VK_FALSE
         };
-        config_info.viewport = vk::Viewport{
-            .x = 0.0f,
-            .y = 0.0f,
-            .width = static_cast<float>(width),
-            .height = static_cast<float>(height),
-            .minDepth = 0.0f,
-            .maxDepth = 1.0f
-        };
-        config_info.scissor = vk::Rect2D{
-            .offset = vk::Offset2D{0, 0},
-            .extent = vk::Extent2D{width, height}
-        };
-        config_info.rasterizationInfo = {
+        config_info.rasterization_info = {
             .sType = vk::StructureType::ePipelineRasterizationStateCreateInfo,
             .depthClampEnable = VK_FALSE,
             .rasterizerDiscardEnable = VK_FALSE,
@@ -53,7 +42,7 @@ namespace ve {
             .depthBiasClamp = 0.0f,
             .depthBiasSlopeFactor = 0.0f
         };
-        config_info.multisampleInfo = {
+        config_info.multisample_info = {
             .sType = vk::StructureType::ePipelineMultisampleStateCreateInfo,
             .sampleShadingEnable = VK_FALSE,
             .rasterizationSamples = vk::SampleCountFlagBits::e1,
@@ -62,7 +51,7 @@ namespace ve {
             .alphaToCoverageEnable = VK_FALSE,
             .alphaToOneEnable = VK_FALSE
         };
-        config_info.colorBlendAttachment = {
+        config_info.color_blend_attachment = {
             .blendEnable = VK_FALSE,
             .srcColorBlendFactor = vk::BlendFactor::eOne,
             .dstColorBlendFactor = vk::BlendFactor::eZero,
@@ -75,12 +64,12 @@ namespace ve {
                               vk::ColorComponentFlagBits::eB | 
                               vk::ColorComponentFlagBits::eA
         };
-        config_info.colorBlendInfo = {
+        config_info.color_blend_info = {
             .sType = vk::StructureType::ePipelineColorBlendStateCreateInfo,
             .logicOpEnable = VK_FALSE,
             .logicOp = vk::LogicOp::eCopy,
             .attachmentCount = 1,
-            .pAttachments = &config_info.colorBlendAttachment
+            .pAttachments = &config_info.color_blend_attachment
         };    
         return config_info;
     }
@@ -95,7 +84,7 @@ namespace ve {
         std::vector<char> buffer(file_size);
 
         file.seekg(0);
-        file.read(buffer.data(), file_size);
+        file.read(buffer.data(), static_cast<std::streamsize>(file_size));
         file.close();
         return buffer;
     }
@@ -136,17 +125,10 @@ namespace ve {
             .vertexAttributeDescriptionCount = 0,
             .pVertexAttributeDescriptions = nullptr
         };
-        vk::PipelineViewportStateCreateInfo viewport_info = {
-            .sType = vk::StructureType::ePipelineViewportStateCreateInfo,
-            .viewportCount = 1,
-            .pViewports = &config_info.viewport,
-            .scissorCount = 1,
-            .pScissors = &config_info.scissor
-        };
 
         vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo{ 
             .colorAttachmentCount = 1, 
-            .pColorAttachmentFormats = &config_info.colorFormat,
+            .pColorAttachmentFormats = &config_info.color_format,
         };
         vk::GraphicsPipelineCreateInfo pipeline_info{
             .sType = vk::StructureType::eGraphicsPipelineCreateInfo,
@@ -154,19 +136,19 @@ namespace ve {
             .stageCount = 2,
             .pStages = shader_stages,
             .pVertexInputState = &vertex_input_info,
-            .pInputAssemblyState = &config_info.inputAssemblyInfo,
-            .pViewportState = &viewport_info,
-            .pRasterizationState = &config_info.rasterizationInfo,
-            .pMultisampleState = &config_info.multisampleInfo,
-            .pColorBlendState = &config_info.colorBlendInfo,
-            .pDynamicState = &config_info.dynamicStateInfo,
-            .layout = config_info.pipelineLayout,
+            .pInputAssemblyState = &config_info.input_assembly_info,
+            .pViewportState = &config_info.viewport_info,
+            .pRasterizationState = &config_info.rasterization_info,
+            .pMultisampleState = &config_info.multisample_info,
+            .pColorBlendState = &config_info.color_blend_info,
+            .pDynamicState = &config_info.dynamic_state_info,
+            .layout = config_info.pipeline_layout,
             .renderPass = nullptr,
             .subpass = config_info.subpass,
             .basePipelineHandle = VK_NULL_HANDLE,
             .basePipelineIndex = -1
         };
-        assert(config_info.pipelineLayout != nullptr && "Cannot create graphics pipeline: no pipelineLayout provided in config_info");
+        assert(config_info.pipeline_layout != nullptr && "Cannot create graphics pipeline: no pipelineLayout provided in config_info");
 
         std::cout << "Vertex shader code size: " << vert_shader_code.size() << " bytes" << std::endl;
         std::cout << "Fragment shader code size: " << frag_shader_code.size() << " bytes" << std::endl;

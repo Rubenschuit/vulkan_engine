@@ -29,7 +29,7 @@ namespace ve {
         void createPipelineLayout();
         void createCommandBuffers();
         void recordCommandBuffer(uint32_t image_index);
-        void transition_image_layout(
+        void transitionImageLayout(
             uint32_t image_index,
             vk::ImageLayout old_layout,
             vk::ImageLayout new_layout,

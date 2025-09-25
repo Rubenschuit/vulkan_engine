@@ -7,30 +7,19 @@
 
 namespace ve {
     struct PipelineConfigInfo {
-        std::vector<vk::DynamicState> dynamicStateEnables;
-        vk::PipelineDynamicStateCreateInfo dynamicStateInfo{};
-
-        vk::Viewport viewport;
-        vk::Rect2D scissor;
-        vk::PipelineInputAssemblyStateCreateInfo inputAssemblyInfo;
-        vk::PipelineRasterizationStateCreateInfo rasterizationInfo;
-        vk::PipelineMultisampleStateCreateInfo multisampleInfo;
-        vk::PipelineColorBlendAttachmentState colorBlendAttachment;
-        vk::PipelineColorBlendStateCreateInfo colorBlendInfo;
-        vk::PipelineDepthStencilStateCreateInfo depthStencilInfo;
-        vk::PipelineLayout pipelineLayout = nullptr;
-        vk::RenderPass renderPass = nullptr;
+        std::vector<vk::DynamicState> dynamic_state_enables{};
+        vk::PipelineDynamicStateCreateInfo dynamic_state_info{};
+        vk::PipelineInputAssemblyStateCreateInfo input_assembly_info{} ;
+        vk::PipelineRasterizationStateCreateInfo rasterization_info{};
+        vk::PipelineMultisampleStateCreateInfo multisample_info{};
+        vk::PipelineViewportStateCreateInfo viewport_info{};
+        vk::PipelineColorBlendAttachmentState color_blend_attachment{} ;
+        vk::PipelineColorBlendStateCreateInfo color_blend_info{};
+        vk::PipelineLayout pipeline_layout = nullptr;
+        vk::RenderPass render_pass = nullptr;
         uint32_t subpass = 0;
-        vk::Format colorFormat = vk::Format::eUndefined;
-        vk::Format depthFormat = vk::Format::eUndefined;
-
-        //PipelineConfigInfo() = default;
-        //PipelineConfigInfo(const PipelineConfigInfo&) = delete;
-        //PipelineConfigInfo& operator=(const PipelineConfigInfo&) = delete;
-
-        //std::vector<vk::VertexInputBindingDescription> bindingDescriptions{};
-        //std::vector<vk::VertexInputAttributeDescription> attributeDescriptions{};
-        //std::vector<vk::DynamicState> dynamicStateEnables{};
+        vk::Format color_format = vk::Format::eUndefined;
+        //vk::Format depth_format = vk::Format::eUndefined;
     };
 
     class VePipeline {
@@ -48,7 +37,7 @@ namespace ve {
         void operator=(const VePipeline&) = delete;
 
         vk::Pipeline getPipeline() { return *graphics_pipeline; }
-        static PipelineConfigInfo defaultPipelineConfigInfo(uint32_t width, uint32_t height);
+        static PipelineConfigInfo defaultPipelineConfigInfo();
 
     private:
         static std::vector<char> readFile(const std::string& file_path);

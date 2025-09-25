@@ -19,6 +19,17 @@ endif()
 
 project(${NAME} VERSION 0.1)
 
+# Enable strict warnings
+option(VE_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
+if (MSVC)
+  target_compile_options(${PROJECT_NAME} PRIVATE /W4 $<$<BOOL:${VE_WARNINGS_AS_ERRORS}>:/WX>)
+else()
+  add_compile_options(-Wall -Wextra -Wconversion -Wpedantic)
+  if (VE_WARNINGS_AS_ERRORS)
+    add_compile_options(-Werror)
+  endif()
+endif()
+
 
 
 # 1. Set VULKAN_SDK_PATH in .env.cmake to target specific vulkan version

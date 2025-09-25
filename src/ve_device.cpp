@@ -17,13 +17,34 @@ namespace ve {
 
   //local function
   static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
-      vk::DebugUtilsMessageSeverityFlagBitsEXT severity, 
-      vk::DebugUtilsMessageTypeFlagsEXT type, 
-      const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData, 
+      vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
+      vk::DebugUtilsMessageTypeFlagsEXT type,
+      const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData,
       void*) {
-    std::cerr << "validation layer: type " << to_string(type) 
-              << " msg: " << pCallbackData->pMessage << std::endl << std::endl;
-    return vk::False;
+    // Basic ANSI color mapping (can be disabled by exporting NO_COLOR or if terminal does not support it)
+    const bool enableColor = (std::getenv("NO_COLOR") == nullptr);
+    const char* reset   = enableColor ? "\033[0m"  : "";
+    const char* red     = enableColor ? "\033[31m" : "";
+    const char* yellow  = enableColor ? "\033[33m" : "";
+    const char* blue    = enableColor ? "\033[34m" : "";
+    const char* magenta = enableColor ? "\033[35m" : "";
+    const char* gray    = enableColor ? "\033[90m" : "";
+
+    const char* sevColor = gray;
+    const char* sevLabel = "VERBOSE";
+    if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eError)   { sevColor = red;    sevLabel = "ERROR"; }
+    else if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning){ sevColor = yellow; sevLabel = "WARNING"; }
+    else if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo)   { sevColor = blue;   sevLabel = "INFO"; }
+    else if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose){ sevColor = gray;   sevLabel = "VERBOSE"; }
+
+    // Type coloring (optional subtle variation)
+    const char* typeColor = magenta;
+    std::string typeStr = to_string(type);
+
+    std::cerr << sevColor << "[VULKAN]" << '[' << sevLabel << "] "
+              << typeColor << '[' << typeStr << "] "
+              << reset << pCallbackData->pMessage << '\n';
+    return vk::False; // don't abort
   }
 
   VeDevice::VeDevice(VeWindow &window) : window(window) {
@@ -200,18 +221,18 @@ namespace ve {
   uint32_t VeDevice::findQueueFamilies() {
     auto queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
     // get the first index into queueFamilyProperties which supports both graphics and present
-    uint32_t queue_index = ~0;
-    for (uint32_t qfpIndex = 0; qfpIndex < queueFamilyProperties.size(); qfpIndex++)
+    uint32_t queue_index = UINT32_MAX;
+    for (uint32_t qfp_index = 0; qfp_index < queueFamilyProperties.size(); qfp_index++)
     {
-      if ((queueFamilyProperties[qfpIndex].queueFlags & vk::QueueFlagBits::eGraphics) &&
-          physicalDevice.getSurfaceSupportKHR(qfpIndex, *surface))
+      if ((queueFamilyProperties[qfp_index].queueFlags & vk::QueueFlagBits::eGraphics) &&
+          physicalDevice.getSurfaceSupportKHR(qfp_index, *surface))
       {
         // found a queue family that supports both graphics and present
-        queue_index = qfpIndex;
+        queue_index = qfp_index;
         break;
       }
     }
-    if (queue_index == ~0)
+    if (queue_index == UINT32_MAX)
     {
       throw std::runtime_error("Could not find a queue for graphics and present -> terminating");
     }

@@ -22,7 +22,7 @@ namespace ve {
         VeSwapChain& operator=(const VeSwapChain&) = delete;
 
         uint32_t getCurrentFrame() const { return current_frame; }
-        vk::raii::ImageView *getImageView(int index) { return &swap_chain_image_views[index]; };
+        vk::raii::ImageView *getImageView(size_t index) { return &swap_chain_image_views[index]; };
         size_t getImageCount() { return swap_chain_images.size(); }
         vk::Format getSwapChainImageFormat() { return swap_chain_image_format; }
         const std::vector<vk::Image>& getSwapChainImages() { return swap_chain_images; }

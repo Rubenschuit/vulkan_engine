@@ -31,10 +31,10 @@ namespace ve {
     }
 
     void VeApp::createPipeline() {
-        auto pipeline_config = VePipeline::defaultPipelineConfigInfo(swap_chain.width(), swap_chain.height());
+        auto pipeline_config = VePipeline::defaultPipelineConfigInfo();
         // set formats for dynamic rendering
-        pipeline_config.colorFormat = swap_chain.getSwapChainImageFormat();
-        pipeline_config.pipelineLayout = pipeline_layout;
+        pipeline_config.color_format = swap_chain.getSwapChainImageFormat();
+        pipeline_config.pipeline_layout = pipeline_layout;
         pipeline = std::make_unique<VePipeline>(
             device, 
             "../shaders/simple_shader.vert.spv", 
@@ -61,7 +61,7 @@ namespace ve {
         
         command_buffers[current_frame].begin( {} );
         // Before starting rendering, transition the swapchain image to COLOR_ATTACHMENT_OPTIMAL
-        transition_image_layout(
+        transitionImageLayout(
             imageIndex,
             vk::ImageLayout::eUndefined,
             vk::ImageLayout::eColorAttachmentOptimal,
@@ -92,7 +92,7 @@ namespace ve {
         command_buffers[current_frame].draw(3, 1, 0, 0);
         command_buffers[current_frame].endRendering();
         // After rendering, transition to presentation
-        transition_image_layout(
+        transitionImageLayout(
             imageIndex,
             vk::ImageLayout::eColorAttachmentOptimal,
             vk::ImageLayout::ePresentSrcKHR,
@@ -104,7 +104,7 @@ namespace ve {
         command_buffers[current_frame].end();
     }
 
-    void VeApp::transition_image_layout(
+    void VeApp::transitionImageLayout(
         uint32_t image_index,
         vk::ImageLayout old_layout,
         vk::ImageLayout new_layout,
