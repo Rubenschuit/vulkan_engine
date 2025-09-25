@@ -34,8 +34,6 @@ namespace ve {
         auto pipeline_config = VePipeline::defaultPipelineConfigInfo(swap_chain.width(), swap_chain.height());
         // set formats for dynamic rendering
         pipeline_config.colorFormat = swap_chain.getSwapChainImageFormat();
-        pipeline_config.depthFormat = swap_chain.getSwapChainDepthFormat();
-        //pipeline_config.renderPass = *swap_chain.getRenderPass();
         pipeline_config.pipelineLayout = pipeline_layout;
         pipeline = std::make_unique<VePipeline>(
             device, 
@@ -92,7 +90,7 @@ namespace ve {
         command_buffer.setScissor( 0, vk::Rect2D( vk::Offset2D( 0, 0 ), extent ) );
         command_buffer.draw(3, 1, 0, 0);
         command_buffer.endRendering();
-        // After rendering, transition the swapchain image to PRESENT_SRC
+        // After rendering, transition to presentation
         transition_image_layout(
             imageIndex,
             vk::ImageLayout::eColorAttachmentOptimal,

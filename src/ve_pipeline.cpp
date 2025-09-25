@@ -81,20 +81,7 @@ namespace ve {
             .logicOp = vk::LogicOp::eCopy,
             .attachmentCount = 1,
             .pAttachments = &config_info.colorBlendAttachment
-        };
-        config_info.depthStencilInfo = {
-            .sType = vk::StructureType::ePipelineDepthStencilStateCreateInfo,
-            .depthTestEnable = VK_TRUE,
-            .depthWriteEnable = VK_TRUE,
-            .depthCompareOp = vk::CompareOp::eLess,
-            .depthBoundsTestEnable = VK_FALSE,
-            .minDepthBounds = 0.0f,
-            .maxDepthBounds = 1.0f,
-            .stencilTestEnable = VK_FALSE,
-            .front = {},
-            .back = {}
-        };
-    
+        };    
         return config_info;
     }
 
@@ -160,7 +147,6 @@ namespace ve {
         vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo{ 
             .colorAttachmentCount = 1, 
             .pColorAttachmentFormats = &config_info.colorFormat,
-            .depthAttachmentFormat = config_info.depthFormat
         };
         vk::GraphicsPipelineCreateInfo pipeline_info{
             .sType = vk::StructureType::eGraphicsPipelineCreateInfo,
@@ -172,11 +158,10 @@ namespace ve {
             .pViewportState = &viewport_info,
             .pRasterizationState = &config_info.rasterizationInfo,
             .pMultisampleState = &config_info.multisampleInfo,
-            .pDepthStencilState = &config_info.depthStencilInfo,
             .pColorBlendState = &config_info.colorBlendInfo,
             .pDynamicState = &config_info.dynamicStateInfo,
             .layout = config_info.pipelineLayout,
-            .renderPass = nullptr, //config_info.renderPass,
+            .renderPass = nullptr,
             .subpass = config_info.subpass,
             .basePipelineHandle = VK_NULL_HANDLE,
             .basePipelineIndex = -1

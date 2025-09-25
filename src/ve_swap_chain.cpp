@@ -35,9 +35,6 @@ namespace ve {
     void VeSwapChain::init() {
         createSwapChain();
         createImageViews();
-        //createRenderPass();
-        //createDepthResources();
-        //createFramebuffers();
         createSyncObjects();
     }
 
@@ -53,6 +50,8 @@ namespace ve {
             std::numeric_limits<uint64_t>::max(), 
             image_available_semaphores[current_frame], 
             nullptr);
+
+        //device.getDevice().resetFences(1, &in_flight_fences[current_frame]);
         return result;
     }
 
@@ -106,11 +105,11 @@ namespace ve {
     }
 
     void VeSwapChain::createSwapChain() {
-    swap_chain_support = device.getSwapChainSupport();
-    surface_format = chooseSwapSurfaceFormat(swap_chain_support.formats);
-    present_mode = chooseSwapPresentMode(swap_chain_support.presentModes);
-    swap_chain_extent = chooseSwapExtent(swap_chain_support.capabilities);
-    swap_chain_image_format = surface_format.format;
+        swap_chain_support = device.getSwapChainSupport();
+        surface_format = chooseSwapSurfaceFormat(swap_chain_support.formats);
+        present_mode = chooseSwapPresentMode(swap_chain_support.presentModes);
+        swap_chain_extent = chooseSwapExtent(swap_chain_support.capabilities);
+        swap_chain_image_format = surface_format.format;
 
         // try to use one more than the minimum number of images to improve gpu utilization
         // note that there is no guarantee that we can get that many images, so we need to check against the maximum as well
@@ -158,144 +157,6 @@ namespace ve {
         {
             imageViewCreateInfo.image = image;
             swap_chain_image_views.emplace_back( device.getDevice(), imageViewCreateInfo );
-        }
-    }
-
-    void VeSwapChain::createRenderPass() {
-        vk::AttachmentDescription color_attachment{
-            .format = surface_format.format, // or swap_chain_image_format
-            .samples = vk::SampleCountFlagBits::e1,
-            .loadOp = vk::AttachmentLoadOp::eClear,
-            .storeOp = vk::AttachmentStoreOp::eStore,
-            .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
-            .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
-            .initialLayout = vk::ImageLayout::eUndefined,
-            .finalLayout = vk::ImageLayout::ePresentSrcKHR
-        };
-
-        vk::AttachmentReference color_attachment_ref{
-            .attachment = 0,
-            .layout = vk::ImageLayout::eColorAttachmentOptimal
-        };
-
-        vk::AttachmentDescription depth_attachment{
-            .format = swap_chain_depth_format,
-            .samples = vk::SampleCountFlagBits::e1,
-            .loadOp = vk::AttachmentLoadOp::eClear,
-            .storeOp = vk::AttachmentStoreOp::eDontCare,
-            .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
-            .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
-            .initialLayout = vk::ImageLayout::eUndefined,
-            .finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal
-        };
-
-        vk::AttachmentReference depth_attachment_ref{
-            .attachment = 1,
-            .layout = vk::ImageLayout::eDepthStencilAttachmentOptimal
-        };
-
-        vk::SubpassDescription subpass{
-            .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
-            .colorAttachmentCount = 1,
-            .pColorAttachments = &color_attachment_ref,
-            .pDepthStencilAttachment = &depth_attachment_ref
-        };
-
-        std::array<vk::SubpassDependency, 2> dependencies;
-
-        dependencies[0] = {
-            .srcSubpass = VK_SUBPASS_EXTERNAL,
-            .dstSubpass = 0,
-            .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests,
-            .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests,
-            .srcAccessMask = {},
-            .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite,
-            .dependencyFlags = {}
-        };  
-        dependencies[1] = {
-            .srcSubpass = 0,
-            .dstSubpass = VK_SUBPASS_EXTERNAL,
-            .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests,
-            .dstStageMask = vk::PipelineStageFlagBits::eBottomOfPipe,
-            .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite,
-            .dstAccessMask = {},
-            .dependencyFlags = {}
-        };
-        std::array<vk::AttachmentDescription, 2> attachments = {color_attachment, depth_attachment};
-        vk::RenderPassCreateInfo render_pass_info{
-            .sType = vk::StructureType::eRenderPassCreateInfo,
-            .attachmentCount = static_cast<uint32_t>(attachments.size()),
-            .pAttachments = attachments.data(),
-            .subpassCount = 1,
-            .pSubpasses = &subpass,
-            .dependencyCount = static_cast<uint32_t>(dependencies.size()),
-            .pDependencies = dependencies.data()
-        };
-        render_pass = vk::raii::RenderPass(device.getDevice(), render_pass_info);
-    }
-    void VeSwapChain::createFramebuffers() {
-        for (size_t i = 0; i < swap_chain_image_views.size(); i++) {
-            std::array<vk::ImageView, 2> attachments = {
-                *swap_chain_image_views[i],
-                *depth_image_views[i]
-            };
-
-            vk::FramebufferCreateInfo framebuffer_info{
-                .sType = vk::StructureType::eFramebufferCreateInfo,
-                .renderPass = *render_pass,
-                .attachmentCount = static_cast<uint32_t>(attachments.size()),
-                .pAttachments = attachments.data(),
-                .width = swap_chain_extent.width,
-                .height = swap_chain_extent.height,
-                .layers = 1
-            };
-
-            swap_chain_framebuffers[i] = vk::raii::Framebuffer(device.getDevice(), framebuffer_info);
-        }
-    }
-
-    void VeSwapChain::createDepthResources() {
-        swap_chain_depth_format = findDepthFormat();
-
-        for (size_t i = 0; i < swap_chain_images.size(); i++) {
-            vk::ImageCreateInfo image_info{
-                .sType = vk::StructureType::eImageCreateInfo,
-                .imageType = vk::ImageType::e2D,
-                .format = swap_chain_depth_format,
-                .extent = {
-                    .width = swap_chain_extent.width,
-                    .height = swap_chain_extent.height,
-                    .depth = 1
-                },
-                .mipLevels = 1,
-                .arrayLayers = 1,
-                .samples = vk::SampleCountFlagBits::e1,
-                .tiling = vk::ImageTiling::eOptimal,
-                .usage = vk::ImageUsageFlagBits::eDepthStencilAttachment,
-                .sharingMode = vk::SharingMode::eExclusive,
-                .initialLayout = vk::ImageLayout::eUndefined
-            };
-
-            device.createImageWithInfo(image_info, 
-                                       vk::MemoryPropertyFlagBits::eDeviceLocal, 
-                                       &depth_images[i], 
-                                       &depth_image_memorys[i]);
-            
-            vk::ImageViewCreateInfo view_info{
-                .sType = vk::StructureType::eImageViewCreateInfo,
-                .image = *depth_images[i],
-                .viewType = vk::ImageViewType::e2D,
-                .format = swap_chain_depth_format,
-                .subresourceRange = {
-                    .aspectMask = vk::ImageAspectFlagBits::eDepth,
-                    .baseMipLevel = 0,
-                    .levelCount = 1,
-                    .baseArrayLayer = 0,
-                    .layerCount = 1
-                }
-            };
-
-            depth_image_views[i] = vk::raii::ImageView(device.getDevice(), view_info);
         }
     }
 
@@ -366,15 +227,6 @@ namespace ve {
             return actual_extent;
         }
     }
-
-    vk::Format VeSwapChain::findDepthFormat() {
-        return device.findSupportedFormat(
-            {vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint},
-            vk::ImageTiling::eOptimal,
-            vk::FormatFeatureFlagBits::eDepthStencilAttachment
-        );
-    }
-
     
 }
 
