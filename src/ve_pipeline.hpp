@@ -51,8 +51,6 @@ namespace ve {
 
 		VeDevice& ve_device; // will outlive the pipeline class
 		vk::raii::Pipeline graphics_pipeline{nullptr};
-		vk::raii::ShaderModule vert_shader_module{nullptr};
-		vk::raii::ShaderModule frag_shader_module{nullptr};
-
+		vk::raii::ShaderModule shader_module{nullptr};
 	};
 }

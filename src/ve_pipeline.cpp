@@ -1,5 +1,6 @@
 #include "ve_pipeline.hpp"
 #include "ve_device.hpp"
+#include "ve_model.hpp"
 
 #include <fstream>
 #include <stdexcept>
@@ -92,34 +93,35 @@ namespace ve {
 	void VePipeline::createGraphicsPipeline(
 		const std::string& shader_file_path,
 		const PipelineConfigInfo& config_info) {
-		//assert(config_info.renderPass != nullptr && "Cannot create graphics pipeline: no renderPass provided in config_info");
+
 		auto shader_code = readFile(shader_file_path);
 		// Use the same combined SPIR-V for both stages; entry points differ per stage
-		createShaderModule(shader_code, &vert_shader_module);
-		createShaderModule(shader_code, &frag_shader_module);
+		createShaderModule(shader_code, &shader_module);
 
 		vk::PipelineShaderStageCreateInfo shader_stages[2] = {
 			{
 				.sType = vk::StructureType::ePipelineShaderStageCreateInfo,
 				.stage = vk::ShaderStageFlagBits::eVertex,
-				.module = *vert_shader_module,
+				.module = *shader_module,
 				.pName = "vertMain",
 				.pSpecializationInfo = nullptr
 			},
 			{
 				.sType = vk::StructureType::ePipelineShaderStageCreateInfo,
 				.stage = vk::ShaderStageFlagBits::eFragment,
-				.module = *frag_shader_module,
+				.module = *shader_module,
 				.pName = "fragMain",
 				.pSpecializationInfo = nullptr
 			}
 		};
+		auto binding_descriptions = VeModel::Vertex::getBindingDescriptions();
+		auto attribute_descriptions = VeModel::Vertex::getAttributeDescriptions();
 		vk::PipelineVertexInputStateCreateInfo vertex_input_info{
 			.sType = vk::StructureType::ePipelineVertexInputStateCreateInfo,
-			.vertexBindingDescriptionCount = 0, // for now, vertex input is hardcoded in the vertex shader
-			.pVertexBindingDescriptions = nullptr,
-			.vertexAttributeDescriptionCount = 0,
-			.pVertexAttributeDescriptions = nullptr
+			.vertexBindingDescriptionCount = static_cast<uint32_t>(binding_descriptions.size()),
+			.pVertexBindingDescriptions = binding_descriptions.data(),
+			.vertexAttributeDescriptionCount = static_cast<uint32_t>(attribute_descriptions.size()),
+			.pVertexAttributeDescriptions = attribute_descriptions.data()
 		};
 
 		vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo{
@@ -151,7 +153,7 @@ namespace ve {
 		graphics_pipeline = vk::raii::Pipeline{ve_device.getDevice(), nullptr, pipeline_info};
 	}
 
-	void VePipeline::createShaderModule(const std::vector<char>& code, vk::raii::ShaderModule* shader_module) {
+	void VePipeline::createShaderModule(const std::vector<char>& code, vk::raii::ShaderModule* _shader_module) {
 		vk::ShaderModuleCreateInfo create_info{
 			.sType = vk::StructureType::eShaderModuleCreateInfo,
 			.codeSize = code.size(),
@@ -159,7 +161,7 @@ namespace ve {
 		};
 
 		try {
-			*shader_module = vk::raii::ShaderModule(ve_device.getDevice(), create_info);
+			*_shader_module = vk::raii::ShaderModule(ve_device.getDevice(), create_info);
 		} catch (const std::exception& e) {
 			throw std::runtime_error("failed to create shader module: " + std::string(e.what()));
 		}

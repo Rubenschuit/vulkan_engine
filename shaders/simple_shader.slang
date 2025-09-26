@@ -1,32 +1,27 @@
-// Consolidated Slang shader with two entry points used by the engine
-// VSMain -> vertex stage, PSMain -> fragment stage
 
-struct VSOut {
-    float4 position : SV_Position;
-    [[vk::location(0)]] float3 color;
+struct VertexInput {
+	float2 in_pos : POSITION;
+	float3 in_color : COLOR;
 };
 
-VSOut vertMain(uint VertexIndex : SV_VertexID)
-{
-    float2 positions[3] = {
-        float2(0.0, -0.5),
-        float2(0.5, 0.5),
-        float2(-0.5, 0.5)
-    };
-    float3 colors[3] = {
-        float3(1,0,0),
-        float3(0,1,0),
-        float3(0,0,1)
-    };
+struct VertexOutput {
+    float3 color;
+	float2 pos;
+    float4 sv_position : SV_Position;
+};
 
-    VSOut o;
-    o.position = float4(positions[VertexIndex], 0.0, 1.0);
-    o.color = colors[VertexIndex];
-    return o;
+[shader("vertex")]
+VertexOutput vertMain(VertexInput input) {
+    VertexOutput output;
+    float2 p = input.in_pos;
+    output.sv_position = float4(p, 0.0, 1.0);
+    output.pos = p;
+    output.color = input.in_color;
+    return output;
 }
 
-float4 fragMain(VSOut i) : SV_Target0
+[shader("fragment")]
+float4 fragMain(VertexOutput inVert) : SV_Target
 {
-    // If you later feed varying color, this will render a gradient triangle.
-    return float4(i.color, 1.0);
+    return float4(inVert.color, 1.0);
 }

@@ -71,23 +71,23 @@ namespace ve {
 
 		// Get the required layers
 		std::vector<char const*> required_layers;
-		if (enableValidationLayers) {
-			required_layers.assign(validationLayers.begin(), validationLayers.end());
+		if (enable_validation_layers) {
+			required_layers.assign(validation_layers.begin(), validation_layers.end());
 		}
 
 		// Check if the required layers are supported by the Vulkan implementation.
-		auto layerProperties = context.enumerateInstanceLayerProperties();
-		if (std::ranges::any_of(required_layers, [&layerProperties](auto const& requiredLayer) {
-			return std::ranges::none_of(layerProperties,
-									  [requiredLayer](auto const& layerProperty)
-									  { return strcmp(layerProperty.layerName, requiredLayer) == 0; });})
+		auto layer_properties = context.enumerateInstanceLayerProperties();
+		if (std::ranges::any_of(required_layers, [&layer_properties](auto const& required_layer) {
+			return std::ranges::none_of(layer_properties,
+									  [required_layer](auto const& layer_property)
+									  { return strcmp(layer_property.layerName, required_layer) == 0; });})
 		  ) {
 			throw std::runtime_error("One or more required layers are not supported!");
 		}
 
-		std::vector<vk::ExtensionProperties> availableExtensions = context.enumerateInstanceExtensionProperties();
-		std::cout << availableExtensions.size() << " available extensions:" << std::endl;
-		for (const auto& extension : availableExtensions) {
+		std::vector<vk::ExtensionProperties> available_extensions = context.enumerateInstanceExtensionProperties();
+		std::cout << available_extensions.size() << " available extensions:" << std::endl;
+		for (const auto& extension : available_extensions) {
 			std::cout << "\t" << extension.extensionName << std::endl;
 		}
 
@@ -100,12 +100,12 @@ namespace ve {
 		}
 
 		// Check if the required extensions are supported by the Vulkan implementation.
-		auto extensionProperties = context.enumerateInstanceExtensionProperties();
+		auto extension_properties = context.enumerateInstanceExtensionProperties();
 		for (uint32_t i = 0; i < extensions.size(); ++i)
 		{
-			if (std::ranges::none_of(extensionProperties,
-								  [extension = extensions[i]](auto const& extensionProperty)
-								  { return strcmp(extensionProperty.extensionName, extension) == 0; }))
+			if (std::ranges::none_of(extension_properties,
+								  [extension = extensions[i]](auto const& extension_property)
+								  { return strcmp(extension_property.extensionName, extension) == 0; }))
 			{
 				throw std::runtime_error("Required extension not supported: " + std::string(extensions[i]));
 			}
@@ -123,7 +123,7 @@ namespace ve {
 	}
 
 	void VeDevice::setupDebugMessenger() {
-		if (!enableValidationLayers) return;
+		if (!enable_validation_layers) return;
 		vk::DebugUtilsMessageSeverityFlagsEXT severityFlags(
 			vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
 			vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
@@ -138,7 +138,7 @@ namespace ve {
 			.pfnUserCallback = &debugCallback,
 			.pUserData = nullptr // could be used to for example pass a pointer of the application class
 		};
-		debugMessenger = instance.createDebugUtilsMessengerEXT(debugUtilsMessengerCreateInfoEXT);
+		debug_messenger = instance.createDebugUtilsMessengerEXT(debugUtilsMessengerCreateInfoEXT);
 	}
 
 	void VeDevice::createCommandPool() {
@@ -149,7 +149,7 @@ namespace ve {
 			.queueFamilyIndex = queue_index
 		};
 
-		commandPool = vk::raii::CommandPool(device_, poolInfo);
+		command_pool = vk::raii::CommandPool(device, poolInfo);
 	}
 
 	void VeDevice::createSurface() {
@@ -181,14 +181,14 @@ namespace ve {
 				}
 				isSuitable = isSuitable && found;
 				if (isSuitable) {
-					physicalDevice = ve_device;
+					physical_device = ve_device;
 				}
 				return isSuitable;} );
 		if (devIter == devices.end()) {
 			throw std::runtime_error("failed to find a suitable GPU!");
 		}
 		VkPhysicalDeviceProperties properties;
-		vkGetPhysicalDeviceProperties(*physicalDevice, &properties);
+		vkGetPhysicalDeviceProperties(*physical_device, &properties);
 		std::cout << "Using ve_device: " << properties.deviceName << std::endl;
 	}
 
@@ -219,18 +219,18 @@ namespace ve {
 													 .enabledExtensionCount = static_cast<uint32_t>(requiredDeviceExtension.size()),
 													 .ppEnabledExtensionNames = requiredDeviceExtension.data() };
 
-		device_ = vk::raii::Device(physicalDevice, deviceCreateInfo);
-		queue = vk::raii::Queue(device_, queue_index, 0);
+		device = vk::raii::Device(physical_device, deviceCreateInfo);
+		queue = vk::raii::Queue(device, queue_index, 0);
 	}
 
 	uint32_t VeDevice::findQueueFamilies() {
-		auto queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
+		auto queueFamilyProperties = physical_device.getQueueFamilyProperties();
 		// get the first index into queueFamilyProperties which supports both graphics and present
 		uint32_t queue_index = UINT32_MAX;
 		for (uint32_t qfp_index = 0; qfp_index < queueFamilyProperties.size(); qfp_index++)
 		{
 			if ((queueFamilyProperties[qfp_index].queueFlags & vk::QueueFlagBits::eGraphics) &&
-				physicalDevice.getSurfaceSupportKHR(qfp_index, *surface))
+				physical_device.getSurfaceSupportKHR(qfp_index, *surface))
 			{
 				// found a queue family that supports both graphics and present
 				queue_index = qfp_index;
@@ -250,7 +250,7 @@ namespace ve {
 
 		// glfw extensions are always required
 		std::vector extensions(glfw_extensions, glfw_extensions + glfw_extensionCount);
-		if (enableValidationLayers) {
+		if (enable_validation_layers) {
 			extensions.push_back(vk::EXTDebugUtilsExtensionName );
 		}
 
@@ -269,10 +269,12 @@ namespace ve {
 		return details;
 	}
 
-	uint32_t VeDevice::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
-		vk::PhysicalDeviceMemoryProperties memProperties = physicalDevice.getMemoryProperties();
-		for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-			if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+	uint32_t VeDevice::findMemoryType(uint32_t type_filter, vk::MemoryPropertyFlags properties) {
+		vk::PhysicalDeviceMemoryProperties mem_properties = physical_device.getMemoryProperties();
+		for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++) {
+			// check if i'th bit of type_filter is set, this is equivalent to the i'th memory type being
+			// suitable. We also require this memory type to support all the properties.
+			if ((type_filter & (1 << i)) && (mem_properties.memoryTypes[i].propertyFlags & properties) == properties) {
 				return i;
 			}
 		}
@@ -281,7 +283,7 @@ namespace ve {
 
 	vk::Format VeDevice::findSupportedFormat(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features) {
 		for (vk::Format format : candidates) {
-			vk::FormatProperties props = physicalDevice.getFormatProperties(format);
+			vk::FormatProperties props = physical_device.getFormatProperties(format);
 			if (tiling == vk::ImageTiling::eLinear && (props.linearTilingFeatures & features) == features) {
 				return format;
 			} else if (tiling == vk::ImageTiling::eOptimal && (props.optimalTilingFeatures & features) == features) {
@@ -292,11 +294,11 @@ namespace ve {
 	}
 
 	void VeDevice::createImageWithInfo(
-		const vk::ImageCreateInfo& imageInfo,
+		const vk::ImageCreateInfo& image_info,
 		vk::MemoryPropertyFlags properties,
 		vk::raii::Image* image,
-		vk::raii::DeviceMemory* imageMemory) {
-		*image = vk::raii::Image(device_, imageInfo);
+		vk::raii::DeviceMemory* image_memory) {
+		*image = vk::raii::Image(device, image_info);
 
 		vk::MemoryRequirements memRequirements = (*image).getMemoryRequirements();
 
@@ -305,8 +307,36 @@ namespace ve {
 			.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties)
 		};
 
-		*imageMemory = vk::raii::DeviceMemory(device_, allocInfo);
+		*image_memory = vk::raii::DeviceMemory(device, allocInfo);
 
-		(*image).bindMemory(**imageMemory, 0);
+		(*image).bindMemory(**image_memory, 0);
+	}
+
+	// sharing mode is always exclusive
+	void VeDevice::createBuffer(
+			vk::DeviceSize size,
+			vk::BufferUsageFlags usage,
+			vk::MemoryPropertyFlags req_properties,
+			vk::raii::Buffer& buffer,
+			vk::raii::DeviceMemory& buffer_memory) {
+
+		// Create buffer
+		vk::BufferCreateInfo buffer_create_info {
+			.sType = vk::StructureType::eBufferCreateInfo,
+			.size = size,
+			.usage = usage,
+			.sharingMode = vk::SharingMode::eExclusive
+		};
+		buffer = vk::raii::Buffer(device, buffer_create_info);
+
+		// Allocate and bind memory to buffer
+		vk::MemoryRequirements mem_requirements = buffer.getMemoryRequirements();
+		vk::MemoryAllocateInfo alloc_info {
+			.sType = vk::StructureType::eMemoryAllocateInfo,
+			.allocationSize = mem_requirements.size,
+			.memoryTypeIndex = findMemoryType(mem_requirements.memoryTypeBits, req_properties)
+		};
+		buffer_memory = vk::raii::DeviceMemory(device, alloc_info);
+		buffer.bindMemory(*buffer_memory, 0); // offset 0
 	}
 }

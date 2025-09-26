@@ -4,6 +4,7 @@
 #include <ve_pipeline.hpp>
 #include <ve_swap_chain.hpp>
 #include <ve_config.hpp>
+#include <ve_model.hpp>
 
 #include <memory>
 #include <vector>
@@ -27,6 +28,7 @@ namespace ve {
 	private:
 		void mainLoop();
 		void cleanup();
+		void loadModels();
 		void createPipeline();
 		void createPipelineLayout();
 		void createCommandBuffers();
@@ -42,12 +44,13 @@ namespace ve {
 		void drawFrame();
 		void recreateSwapChain();
 
-		VeWindow window{WIDTH, HEIGHT, "Vulkan Engine!"};
-		VeDevice ve_device{window};
-		std::unique_ptr<VeSwapChain> swap_chain = std::make_unique<VeSwapChain>(ve_device, window.getExtent());
+		VeWindow ve_window{WIDTH, HEIGHT, "Vulkan Engine!"};
+		VeDevice ve_device{ve_window};
+		std::unique_ptr<VeSwapChain> ve_swap_chain = std::make_unique<VeSwapChain>(ve_device, ve_window.getExtent());
 		vk::raii::PipelineLayout pipeline_layout{nullptr};
-		std::unique_ptr<VePipeline> pipeline;
+		std::unique_ptr<VePipeline> ve_pipeline;
 		std::vector<vk::raii::CommandBuffer> command_buffers;
+		std::unique_ptr<VeModel> ve_model;
 	};
 }
 
