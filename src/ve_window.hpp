@@ -7,31 +7,31 @@
 #include <vulkan/vulkan_core.h>
 #include <string>
 
-namespace ve {  
-    class VeWindow {
-    public:
-        VeWindow(int width, int height, std::string name);
-        ~VeWindow();
+namespace ve {
+	class VeWindow {
+	public:
+		VeWindow(int width, int height, std::string name);
+		~VeWindow();
 
-        // Prevent copying, ensuring unique ownership of GLFWwindow
-        VeWindow(const VeWindow&) = delete;
-        VeWindow& operator=(const VeWindow&) = delete;
+		// Prevent copying, ensuring unique ownership of GLFWwindow
+		VeWindow(const VeWindow&) = delete;
+		VeWindow& operator=(const VeWindow&) = delete;
 
-        static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
+		static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
 
-        GLFWwindow* getGLFWwindow() const { return window; }
-        int getWidth() const { return width; }
-        int getHeight() const { return height; }
-        vk::Extent2D getExtent() const { return {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}; }
+		GLFWwindow* getGLFWwindow() const { return window; }
+		int getWidth() const { return width; }
+		int getHeight() const { return height; }
+		vk::Extent2D getExtent() const { return {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}; }
 
-        bool framebuffer_resized = false;
-        
-    private:
-        void initWindow(int width, int height, const std::string name);
+		bool framebuffer_resized = false;
+		
+	private:
+		void initWindow(int width, int height, const std::string name);
 
-        GLFWwindow* window;
-        std::string window_name;
-        int width;
-        int height;
-    };
+		GLFWwindow* window;
+		std::string window_name;
+		int width;
+		int height;
+	};
 }

@@ -10,48 +10,44 @@
 #include <iostream>
 
 namespace ve {
-    class VeApp {
-    public:
-        VeApp();
-        ~VeApp();
+	class VeApp {
+	public:
+		VeApp();
+		~VeApp();
 
-        //destroy copy and move constructors and assignment operators
-        VeApp(const VeApp&) = delete;
-        VeApp& operator=(const VeApp&) = delete;
+		//destroy copy and move constructors and assignment operators
+		VeApp(const VeApp&) = delete;
+		VeApp& operator=(const VeApp&) = delete;
 
-        
+		static constexpr int WIDTH = 800;
+		static constexpr int HEIGHT = 600;
 
-        static constexpr int WIDTH = 800;
-        static constexpr int HEIGHT = 600;
+		void run();
 
-        bool framebuffer_resized = false;
+	private:
+		void mainLoop();
+		void cleanup();
+		void createPipeline();
+		void createPipelineLayout();
+		void createCommandBuffers();
+		void recordCommandBuffer(uint32_t image_index);
+		void transitionImageLayout(
+			uint32_t image_index,
+			vk::ImageLayout old_layout,
+			vk::ImageLayout new_layout,
+			vk::AccessFlags2 src_access_mask,
+			vk::AccessFlags2 dst_access_mask,
+			vk::PipelineStageFlags2 src_stage,
+			vk::PipelineStageFlags2 dst_stage);
+		void drawFrame();
+		void recreateSwapChain();
 
-        void run();
-
-    private:
-        void mainLoop();
-        void cleanup();
-        void createPipeline();
-        void createPipelineLayout();
-        void createCommandBuffers();
-        void recordCommandBuffer(uint32_t image_index);
-        void transitionImageLayout(
-            uint32_t image_index,
-            vk::ImageLayout old_layout,
-            vk::ImageLayout new_layout,
-            vk::AccessFlags2 src_access_mask,
-            vk::AccessFlags2 dst_access_mask,
-            vk::PipelineStageFlags2 src_stage,
-            vk::PipelineStageFlags2 dst_stage);
-        void drawFrame();
-        void recreateSwapChain();
-
-        VeWindow window{WIDTH, HEIGHT, "Vulkan Engine!"};
-        VeDevice device{window};
-        std::unique_ptr<VeSwapChain> swap_chain = std::make_unique<VeSwapChain>(device, window.getExtent());
-        vk::raii::PipelineLayout pipeline_layout{nullptr};
-        std::unique_ptr<VePipeline> pipeline;
-        std::vector<vk::raii::CommandBuffer> command_buffers;
-    };
+		VeWindow window{WIDTH, HEIGHT, "Vulkan Engine!"};
+		VeDevice ve_device{window};
+		std::unique_ptr<VeSwapChain> swap_chain = std::make_unique<VeSwapChain>(ve_device, window.getExtent());
+		vk::raii::PipelineLayout pipeline_layout{nullptr};
+		std::unique_ptr<VePipeline> pipeline;
+		std::vector<vk::raii::CommandBuffer> command_buffers;
+	};
 }
 

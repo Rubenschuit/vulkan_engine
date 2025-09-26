@@ -29,7 +29,79 @@ option(VE_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(VE_BUILD_TESTS "Build unit tests" ON)
 option(VE_FETCH_GLFW "Fetch GLFW if not found" OFF)
 option(VE_BUILD_SHADERS "Build shaders" ON)
+## Slang is the only supported shader compiler path (simpler, single-file module)
 
+
+# Utility: Create a shader target using Slang
+# Usage:
+#   add_slang_shader_target(<TARGET>
+#     SOURCES <slang files>
+#     [VERT_ENTRY <name>] [FRAG_ENTRY <name>]
+#     [PROFILE <spirv_profile>] [OUT_DIR <dir>])
+# Defaults: VERT_ENTRY=vertMain, FRAG_ENTRY=fragMain, PROFILE=spirv_1_5, OUT_DIR=${PROJECT_SOURCE_DIR}/shaders
+function(add_slang_shader_target TARGET)
+  set(options "")
+  set(oneValueArgs OUT_DIR OUT_FILE VERT_ENTRY FRAG_ENTRY PROFILE)
+  set(multiValueArgs SOURCES)
+  cmake_parse_arguments(SHADER "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+  if (NOT SHADER_SOURCES)
+    message(FATAL_ERROR "add_slang_shader_target: SOURCES not specified")
+  endif()
+
+  if (NOT SLANGC_EXECUTABLE)
+    message(FATAL_ERROR "add_slang_shader_target: SLANGC_EXECUTABLE not found")
+  endif()
+
+  set(_OUT_DIR ${SHADER_OUT_DIR})
+  if (NOT _OUT_DIR)
+    set(_OUT_DIR ${PROJECT_SOURCE_DIR}/shaders)
+  endif()
+
+  set(_VERT_ENTRY ${SHADER_VERT_ENTRY})
+  if (NOT _VERT_ENTRY)
+    set(_VERT_ENTRY vertMain)
+  endif()
+
+  set(_FRAG_ENTRY ${SHADER_FRAG_ENTRY})
+  if (NOT _FRAG_ENTRY)
+    set(_FRAG_ENTRY fragMain)
+  endif()
+
+  set(_PROFILE ${SHADER_PROFILE})
+  if (NOT _PROFILE)
+    set(_PROFILE spirv_1_5)
+  endif()
+
+  # Ensure output directory exists at build time
+  add_custom_command(
+    OUTPUT ${_OUT_DIR}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${_OUT_DIR}
+    COMMENT "Creating shader output directory: ${_OUT_DIR}"
+    VERBATIM
+  )
+
+  set(_SPV_FILES)
+  foreach(SLANG_SRC ${SHADER_SOURCES})
+    get_filename_component(_FN ${SLANG_SRC} NAME_WE)
+    set(_OUT_FILE ${SHADER_OUT_FILE})
+    if (NOT _OUT_FILE)
+      set(_OUT_FILE ${_OUT_DIR}/${_FN}.spv)
+    endif()
+
+    add_custom_command(
+      OUTPUT ${_OUT_FILE}
+      COMMAND ${SLANGC_EXECUTABLE} ${SLANG_SRC} -target spirv -profile ${_PROFILE} -entry ${_VERT_ENTRY} -stage vertex -entry ${_FRAG_ENTRY} -stage fragment -emit-spirv-directly -fvk-use-entrypoint-name -o ${_OUT_FILE}
+      DEPENDS ${SLANG_SRC} ${_OUT_DIR}
+      WORKING_DIRECTORY ${_OUT_DIR}
+      COMMENT "Slang compiling ${_FN}.slang -> ${_FN}.spv (entries: ${_VERT_ENTRY}, ${_FRAG_ENTRY})"
+      VERBATIM
+    )
+    list(APPEND _SPV_FILES ${_OUT_FILE})
+  endforeach()
+
+  add_custom_target(${TARGET} DEPENDS ${_SPV_FILES})
+endfunction()
 
 
 # 1. Set VULKAN_SDK_PATH in .env.cmake to target specific vulkan version
@@ -171,43 +243,22 @@ endif()
 
 ############## Build SHADERS #######################
 
-# Find all vertex and fragment sources within shaders directory
-# taken from VBlancos vulkan tutorial
-# https://github.com/vblanco20-1/vulkan-guide/blob/all-chapters/CMakeLists.txt
+# Generate SPIR-V with either Slang or glslangValidator
 if (VE_BUILD_SHADERS)
-  find_program(GLSL_VALIDATOR glslangValidator HINTS 
-    ${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE} 
-    /usr/bin 
-    /usr/local/bin 
-    ${VULKAN_SDK_PATH}/Bin
-    ${VULKAN_SDK_PATH}/Bin32
-    $ENV{VULKAN_SDK}/Bin/ 
-    $ENV{VULKAN_SDK}/Bin32/
-  )
-  if (NOT GLSL_VALIDATOR)
-    message(FATAL_ERROR "glslangValidator not found; disable VE_BUILD_SHADERS to skip shader compilation")
+  find_program(SLANGC_EXECUTABLE slangc HINTS $ENV{SLANG_HOME}/bin /usr/local/bin /usr/bin)
+  if (NOT SLANGC_EXECUTABLE)
+    message(FATAL_ERROR "slangc not found; install Slang or set VE_BUILD_SHADERS=OFF to skip shader compilation")
   endif()
 
-# get all .vert and .frag files in shaders directory
-  file(GLOB_RECURSE GLSL_SOURCE_FILES CONFIGURE_DEPENDS
-    "${PROJECT_SOURCE_DIR}/shaders/*.frag"
-    "${PROJECT_SOURCE_DIR}/shaders/*.vert"
+  # Build shaders from the single Slang module
+  add_slang_shader_target(Shaders
+    SOURCES "${PROJECT_SOURCE_DIR}/shaders/simple_shader.slang"
+    VERT_ENTRY vertMain
+    FRAG_ENTRY fragMain
+    PROFILE spirv_1_5
+    OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
+    OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/simple_shader.spv"
   )
-
-  set(SPIRV_BINARY_FILES "")
-  foreach(GLSL ${GLSL_SOURCE_FILES})
-    get_filename_component(FILE_NAME ${GLSL} NAME)
-    set(SPIRV "${PROJECT_SOURCE_DIR}/shaders/${FILE_NAME}.spv")
-    add_custom_command(
-      OUTPUT ${SPIRV}
-      COMMAND ${GLSL_VALIDATOR} -V ${GLSL} -o ${SPIRV}
-      DEPENDS ${GLSL}
-      COMMENT "Compiling shader ${FILE_NAME} -> ${FILE_NAME}.spv"
-      VERBATIM)
-    list(APPEND SPIRV_BINARY_FILES ${SPIRV})
-  endforeach()
-
-  add_custom_target(Shaders DEPENDS ${SPIRV_BINARY_FILES})
   add_dependencies(VEngineLib Shaders)
   add_dependencies(${PROJECT_NAME} Shaders)
 endif()
