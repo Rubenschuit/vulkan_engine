@@ -102,7 +102,7 @@ namespace ve {
 			.clipped = VK_TRUE,
 			.oldSwapchain = VK_NULL_HANDLE, // may be overwritten below if recreating
 			// graphics and presentation are in the same queue family, so we can use exclusive mode
-			.imageSharingMode = vk::SharingMode::eExclusive, // best performance
+			.imageSharingMode = vk::SharingMode::eExclusive,
 			.queueFamilyIndexCount = 0, // optional
 			.pQueueFamilyIndices = nullptr // optional
 		};

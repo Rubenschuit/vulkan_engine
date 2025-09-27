@@ -8,6 +8,8 @@
 
 namespace ve {
 	VeApp::VeApp() {
+		// First a window, device and swap chain are initialised
+
 		loadModels();
 		createPipelineLayout();
 		createPipeline();
@@ -58,14 +60,24 @@ namespace ve {
 	void VeApp::loadModels() {
 
 		// initial triangle vertices
-		std::vector<VeModel::Vertex> vertices = {
+		std::vector<VeModel::Vertex> triangle_vertices = {
 			{{0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
 			{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
 			{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
 		};
-		recursionTriangles(vertices[0].pos, vertices[1].pos, vertices[2].pos, 0, 6, vertices);
+		recursionTriangles(triangle_vertices[0].pos, triangle_vertices[1].pos, triangle_vertices[2].pos, 0, 6, triangle_vertices);
 
-		ve_model = std::make_unique<VeModel>(ve_device, vertices);
+		const std::vector<VeModel::Vertex> vertices = {
+			{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+			{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+			{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+			{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+		};
+		const std::vector<uint16_t> indices = {
+			0, 1, 2, 2, 3, 0
+		};
+
+		ve_model = std::make_unique<VeModel>(ve_device, vertices, indices);
 	}
 
 	void VeApp::createPipelineLayout() {
@@ -106,6 +118,8 @@ namespace ve {
 		assert(command_buffers.size() == ve::MAX_FRAMES_IN_FLIGHT && "Failed to allocate command buffers");
 	}
 
+	// Record commands into the command buffer for the given image index.
+	// Uses barriers to transition image layouts before and after rendering.
 	void VeApp::recordCommandBuffer(uint32_t image_index) {
 		auto extent = ve_swap_chain->getSwapChainExtent();
 		auto height = extent.height;
@@ -115,7 +129,7 @@ namespace ve {
 		assert(image_index < ve_swap_chain->getImageCount() && "Image index out of bounds");
 
 		command_buffers[current_frame].begin({});
-		// Before starting rendering, transition the swapchain image to COLOR_ATTACHMENT_OPTIMAL
+		// Setup image layout for rendering
 		transitionImageLayout(
 			image_index,
 			vk::ImageLayout::eUndefined,
@@ -125,7 +139,8 @@ namespace ve {
 			vk::PipelineStageFlagBits2::eTopOfPipe,
 			vk::PipelineStageFlagBits2::eColorAttachmentOutput
 		);
-		vk::ClearValue clearColor = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
+		// Setup dynamic rendering info
+		vk::ClearValue clearColor = vk::ClearColorValue(0.01f, 0.01f, 0.01f, 1.0f);
 		vk::RenderingAttachmentInfo attachmentInfo = {
 			.imageView = ve_swap_chain->getSwapChainImageViews()[image_index],
 			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
@@ -140,13 +155,16 @@ namespace ve {
 			.pColorAttachments = &attachmentInfo
 		};
 
+		// Begin dynamic rendering
 		command_buffers[current_frame].beginRendering(renderingInfo);
 		command_buffers[current_frame].bindPipeline(vk::PipelineBindPoint::eGraphics, ve_pipeline->getPipeline());
 		command_buffers[current_frame].setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f));
 		command_buffers[current_frame].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), extent));
-		ve_model->bind(command_buffers[current_frame]);
-		ve_model->draw(command_buffers[current_frame]);
+		ve_model->bindVertexBuffer(command_buffers[current_frame]);
+		ve_model->bindIndexBuffer(command_buffers[current_frame]);
+		ve_model->drawIndexed(command_buffers[current_frame]);
 		command_buffers[current_frame].endRendering();
+
 		// After rendering, transition to presentation
 		transitionImageLayout(
 			image_index,
@@ -160,6 +178,8 @@ namespace ve {
 		command_buffers[current_frame].end();
 	}
 
+	// Transition the image layout of the given swap chain image using
+	// pipeline barriers to ensure proper synchronization
 	void VeApp::transitionImageLayout(
 				uint32_t image_index,
 				vk::ImageLayout old_layout,
