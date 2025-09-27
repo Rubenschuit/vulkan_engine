@@ -17,21 +17,23 @@ namespace ve {
 		VeWindow(const VeWindow&) = delete;
 		VeWindow& operator=(const VeWindow&) = delete;
 
-		static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
+
 
 		GLFWwindow* getGLFWwindow() const { return window; }
 		int getWidth() const { return width; }
 		int getHeight() const { return height; }
 		vk::Extent2D getExtent() const { return {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}; }
+		bool wasWindowResized() const { return framebuffer_resized; }
+		void resetWindowResizedFlag() { framebuffer_resized = false; }
 
-		bool framebuffer_resized = false;
-		
 	private:
-		void initWindow(int width, int height, const std::string name);
+		void initWindow();
+		static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
 
 		GLFWwindow* window;
 		std::string window_name;
 		int width;
 		int height;
+		bool framebuffer_resized = false;
 	};
 }

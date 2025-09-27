@@ -16,8 +16,9 @@ namespace ve {
 
 	VePipeline::~VePipeline() {}
 
-	PipelineConfigInfo VePipeline::defaultPipelineConfigInfo() {
-		PipelineConfigInfo config_info{};
+	void VePipeline::defaultPipelineConfigInfo(PipelineConfigInfo& config_info) {
+
+		// Tell the pipeline to expect dynamic viewport and scissor states
 		config_info.dynamic_state_enables = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
 		config_info.dynamic_state_info = vk::PipelineDynamicStateCreateInfo{
 			.dynamicStateCount = static_cast<uint32_t>(config_info.dynamic_state_enables.size()),
@@ -72,7 +73,6 @@ namespace ve {
 			.attachmentCount = 1,
 			.pAttachments = &config_info.color_blend_attachment
 		};
-		return config_info;
 	}
 
 	std::vector<char> VePipeline::readFile(const std::string& file_path) {
@@ -140,6 +140,7 @@ namespace ve {
 			.pMultisampleState = &config_info.multisample_info,
 			.pColorBlendState = &config_info.color_blend_info,
 			.pDynamicState = &config_info.dynamic_state_info,
+			.pDepthStencilState = nullptr, // For now, no depth testing
 			.layout = config_info.pipeline_layout,
 			.renderPass = nullptr,
 			.subpass = config_info.subpass,

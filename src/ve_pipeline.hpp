@@ -9,6 +9,10 @@ namespace ve { class VeDevice; }
 
 namespace ve {
 	struct PipelineConfigInfo {
+		PipelineConfigInfo(const PipelineConfigInfo&) = delete;
+		PipelineConfigInfo& operator=(const PipelineConfigInfo&) = delete;
+		PipelineConfigInfo() = default;
+
 		std::vector<vk::DynamicState> dynamic_state_enables{};
 		vk::PipelineDynamicStateCreateInfo dynamic_state_info{};
 		vk::PipelineInputAssemblyStateCreateInfo input_assembly_info{};
@@ -35,10 +39,10 @@ namespace ve {
 
 		// Prevent copying
 		VePipeline(const VePipeline&) = delete;
-		void operator=(const VePipeline&) = delete;
+		VePipeline& operator=(const VePipeline&) = delete;
 
 		vk::Pipeline getPipeline() { return *graphics_pipeline; }
-		static PipelineConfigInfo defaultPipelineConfigInfo();
+		static void defaultPipelineConfigInfo(PipelineConfigInfo& config_info);
 
 	private:
 		static std::vector<char> readFile(const std::string& file_path);

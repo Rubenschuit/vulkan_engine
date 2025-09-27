@@ -37,11 +37,8 @@ namespace ve {
 		VeDevice(VeWindow &window);
 		~VeDevice();
 
-		// Not copyable or movable
 		VeDevice(const VeDevice &) = delete;
-		void operator=(const VeDevice &) = delete;
-		VeDevice(VeDevice &&) = delete;
-		VeDevice &operator=(VeDevice &&) = delete;
+		VeDevice& operator=(const VeDevice &) = delete;
 
 		vk::raii::CommandPool& getCommandPool() { return command_pool; }
 		vk::raii::Device& getDevice() { return device; }
@@ -59,15 +56,15 @@ namespace ve {
 			vk::raii::Buffer& buffer,
 			vk::raii::DeviceMemory& buffer_memory);
 
+		vk::PhysicalDeviceProperties getDeviceProperties() const { return physical_device.getProperties(); }
 		vk::raii::CommandBuffer beginSingleTimeCommands();
 		void endSingleTimeCommands(vk::raii::CommandBuffer* command_buffer);
 		void copyBuffer(vk::Buffer src_buffer, vk::Buffer dst_buffer, vk::DeviceSize size);
 		void copyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height, uint32_t layer_count);
-		void createImageWithInfo(
-		const vk::ImageCreateInfo& image_info,
-		vk::MemoryPropertyFlags properties,
-		vk::raii::Image* image,
-		vk::raii::DeviceMemory* image_memory);
+		void createImageWithInfo(const vk::ImageCreateInfo& image_info,
+								 vk::MemoryPropertyFlags properties,
+								 vk::raii::Image* image,
+								 vk::raii::DeviceMemory* image_memory);
 
 	private:
 		void createInstance();

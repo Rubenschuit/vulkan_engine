@@ -3,8 +3,8 @@
 #include <stdexcept>
 
 namespace ve {
-	VeWindow::VeWindow(int width, int height, std::string name) {
-		initWindow(width, height, name);
+	VeWindow::VeWindow(int width, int height, std::string name) : window_name(name), width(width), height(height)  {
+		initWindow();
 	}
 
 	VeWindow::~VeWindow() {
@@ -12,20 +12,17 @@ namespace ve {
 		glfwTerminate();
 	}
 
-	void VeWindow::framebufferResizeCallback(GLFWwindow* glfw_window, int /*width*/, int /*height*/) {
+	void VeWindow::framebufferResizeCallback(GLFWwindow* glfw_window, int width, int height) {
 		auto ve_window = reinterpret_cast<VeWindow*>(glfwGetWindowUserPointer(glfw_window));
+		ve_window->height = height;
+		ve_window->width = width;
 		ve_window->framebuffer_resized = true;
 	}
 
-	void VeWindow::initWindow(int width, int height, const std::string name) {
-		this->width = width;
-		this->height = height;
-		this->window_name = name;
-
+	void VeWindow::initWindow() {
 		glfwInit();
-
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // No OpenGL context creation
-		//glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+		glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
 		window = glfwCreateWindow(width, height, window_name.c_str(), nullptr, nullptr);
 		glfwSetWindowUserPointer(window, this);

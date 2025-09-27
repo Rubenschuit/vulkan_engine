@@ -16,11 +16,11 @@ namespace ve {
 		: ve_device(device), window_extent(window_extent) {
 		init();
 	}
-	
+
 	VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent, std::shared_ptr<VeSwapChain> old_swap_chain)
 		: ve_device(device), window_extent(window_extent), old_swap_chain(old_swap_chain) {
 		init();
-		// destroy old swap chain once the new one is ready
+		// destroy old swap chain AFTER the new one is ready
 		old_swap_chain = nullptr;
 	}
 

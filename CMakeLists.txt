@@ -1,3 +1,6 @@
+# Option to enable macOS 'leaks' tool (Valgrind alternative)
+option(VE_USE_LEAKS "Enable debug info and add 'leaks' target for macOS memory leak checking" OFF)
+
 include(./.env.cmake OPTIONAL RESULT_VARIABLE LOCAL_ENV)
 message(STATUS "Local .env.cmake: ${LOCAL_ENV}")
 
@@ -14,7 +17,7 @@ add_compile_definitions(VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1)
 
 message(STATUS "using ${CMAKE_GENERATOR}")
 if (CMAKE_GENERATOR STREQUAL "MinGW Makefiles")
-    if (NOT MINGW_PATH) 
+    if (NOT MINGW_PATH)
       message(FATAL_ERROR "MINGW_PATH not set in .env.cmake")
     endif()
     set(USE_MINGW "True")
@@ -29,6 +32,13 @@ option(VE_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(VE_BUILD_TESTS "Build unit tests" ON)
 option(VE_FETCH_GLFW "Fetch GLFW if not found" OFF)
 option(VE_BUILD_SHADERS "Build shaders" ON)
+## Slang is the only supported shader compiler path (simpler, single-file module)
+
+# If VE_USE_LEAKS is enabled, force debug symbols
+if(VE_USE_LEAKS)
+  set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
+  add_compile_options(-g)
+endif()
 ## Slang is the only supported shader compiler path (simpler, single-file module)
 
 
@@ -195,6 +205,16 @@ add_library(VEngineLib STATIC ${ENGINE_SOURCES})
 add_library(VEngine::Lib ALIAS VEngineLib)
 add_executable(${PROJECT_NAME} ${MAIN_SOURCE})
 target_link_libraries(${PROJECT_NAME} PRIVATE VEngine::Lib)
+
+# Add a custom target to run 'leaks' on the executable (macOS only)
+if(VE_USE_LEAKS AND APPLE)
+  add_custom_target(leaks
+    COMMAND leaks --atExit -- ./VEngine
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    DEPENDS ${PROJECT_NAME}
+    COMMENT "Run macOS leaks tool on VEngine executable"
+  )
+endif()
 
 # Precompiled header (PCH) to speed up builds. This creates a compiled
 # version of heavy headers (Vulkan-Hpp) reused by all translation units.

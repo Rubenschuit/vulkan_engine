@@ -4,7 +4,8 @@
 #include <ve_pipeline.hpp>
 
 TEST_CASE("defaultPipelineConfigInfo sets sane Vulkan defaults", "[pipeline][config]") {
-    auto cfg = ve::VePipeline::defaultPipelineConfigInfo();
+    ve::PipelineConfigInfo cfg{};
+	ve::VePipeline::defaultPipelineConfigInfo(cfg);
 
     // Dynamic state: viewport & scissor expected
     REQUIRE(cfg.dynamic_state_enables.size() == 2);

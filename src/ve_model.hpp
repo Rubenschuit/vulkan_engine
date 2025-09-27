@@ -24,7 +24,7 @@ namespace ve {
 		~VeModel();
 
 		VeModel(const VeModel&) = delete;
-		void operator=(const VeModel&) = delete;
+		VeModel& operator=(const VeModel&) = delete;
 
 		void bind(vk::CommandBuffer commandBuffer);
 		void draw(vk::CommandBuffer commandBuffer);

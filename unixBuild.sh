@@ -17,6 +17,8 @@ case "$MODE" in
     echo "Building in Release mode" ;;
   test)
     echo "Building in Debug mode (tests enabled)" ;;
+  leaks)
+    echo "Building in Debug mode (leaks check)" ;;
   *)
     echo "Building in Debug mode" ;;
 esac
@@ -31,5 +33,17 @@ if [[ "$MODE" == 'test' ]]; then
   ctest --output-on-failure || exit 2
 fi
 
-./VEngine
+if [[ "$MODE" == 'leaks' ]]; then
+  if [[ "$(uname)" == "Darwin" ]]; then
+    ./VEngine &
+    PID=$!
+    sleep 1 # Give the app a moment to start
+    leaks $PID
+    kill $PID
+  else
+    echo "'leaks' mode is only supported on macOS."
+  fi
+else
+  ./VEngine
+fi
 cd ..
