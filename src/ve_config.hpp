@@ -30,3 +30,4 @@ inline const std::vector<const char*> VALIDATION_LAYERS = {
 
 // TODO: Windows: test separate transfer queue on Windows with a discrete GPU
 // TODO: Consdider consolidating index and vertex buffer into single buffer and use offsets
+// TODO: Make sure the directories are setup correctly

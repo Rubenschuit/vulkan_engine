@@ -11,6 +11,7 @@ fi
 # Default build type is Debug, unless 'release' is passed as argument
 BUILD_TYPE="Debug"
 MODE="$1"
+EXTRA_CMAKE_ARGS=""
 case "$MODE" in
   release)
     BUILD_TYPE="Release"
@@ -25,15 +26,19 @@ esac
 
 mkdir -p build
 cd build
-cmake -S ../ -B . -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+if [[ "$MODE" == 'test' ]]; then
+  EXTRA_CMAKE_ARGS="-DVE_BUILD_TESTS=ON"
+fi
+
+cmake -S ../ -B . -DCMAKE_BUILD_TYPE=$BUILD_TYPE $EXTRA_CMAKE_ARGS
 make || exit 1
 make Shaders || exit 1
 
 if [[ "$MODE" == 'test' ]]; then
+  # Run all tests via CTest; each test file builds its own executable
   ctest --output-on-failure || exit 2
-fi
-
-if [[ "$MODE" == 'leaks' ]]; then
+  exit 0
+elif [[ "$MODE" == 'leaks' ]]; then
   if [[ "$(uname)" == "Darwin" ]]; then
     ./VEngine &
     PID=$!

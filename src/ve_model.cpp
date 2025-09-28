@@ -15,68 +15,78 @@ namespace ve {
 
 	void VeModel::createVertexBuffers(const std::vector<Vertex>& vertices) {
 		vertex_count = static_cast<uint32_t>(vertices.size());
-		vk::DeviceSize buffer_size = sizeof(vertices[0]) * vertex_count;
 		assert(vertex_count >= 3 && "Vertex count must be at least 3!");
-		assert(buffer_size >= 1 && "Vertex buffer size must be at least 1 byte!");
 
 		// Create a local scope staging buffer, accessible by CPU
-		vk::BufferUsageFlags usage = vk::BufferUsageFlagBits::eTransferSrc;
-		vk::MemoryPropertyFlags req_properties = vk::MemoryPropertyFlagBits::eHostVisible |
-												 vk::MemoryPropertyFlagBits::eHostCoherent;
-		vk::raii::Buffer staging_buffer{nullptr};
-		vk::raii::DeviceMemory staging_buffer_memory{nullptr};
-		ve_device.createBuffer(buffer_size, usage, req_properties, staging_buffer, staging_buffer_memory);
+		ve::VeBuffer staging_buffer(
+			ve_device,
+			sizeof(vertices[0]),
+			vertex_count,
+			vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+		);
 
 		// Copy vertex data to staging buffer
-		void *data = staging_buffer_memory.mapMemory(0, buffer_size);
-		memcpy(data, vertices.data(), buffer_size);
-		staging_buffer_memory.unmapMemory();
+		staging_buffer.map();
+		staging_buffer.writeToBuffer((void*)vertices.data());
+		// unmap is called in the destructor of VeBuffer
 
 		// Create vertex buffer, accessible by GPU only
-		usage = vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst;
-		req_properties = vk::MemoryPropertyFlagBits::eDeviceLocal;
-		ve_device.createBuffer(buffer_size, usage, req_properties, vertex_buffer, vertex_buffer_memory);
+		vertex_buffer = std::make_unique<ve::VeBuffer>(
+			ve_device,
+			sizeof(vertices[0]),
+			vertex_count,
+			vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			1
+		);
 
 		// Copy vertex data from staging buffer to vertex buffer
-		ve_device.copyBuffer(staging_buffer, vertex_buffer, buffer_size);
+		auto buffer_size = sizeof(vertices[0]) * vertex_count;
+		ve_device.copyBuffer(staging_buffer.getBuffer(), vertex_buffer->getBuffer(), buffer_size);
 	}
 
 	void VeModel::createIndexBuffers(const std::vector<uint16_t>& indices) {
 		index_count = static_cast<uint32_t>(indices.size());
-		vk::DeviceSize buffer_size = sizeof(indices[0]) * index_count;
 		assert(index_count >= 3 && "Index count must be at least 3!");
-		assert(buffer_size >= 1 && "Index buffer size must be at least 1 byte!");
 
 		// Create a local scope staging buffer, accessible by CPU
-		vk::BufferUsageFlags usage = vk::BufferUsageFlagBits::eTransferSrc;
-		vk::MemoryPropertyFlags req_properties = vk::MemoryPropertyFlagBits::eHostVisible |
-												 vk::MemoryPropertyFlagBits::eHostCoherent;
-		vk::raii::Buffer staging_buffer{nullptr};
-		vk::raii::DeviceMemory staging_buffer_memory{nullptr};
-		ve_device.createBuffer(buffer_size, usage, req_properties, staging_buffer, staging_buffer_memory);
+		ve::VeBuffer staging_buffer(
+			ve_device,
+			sizeof(indices[0]),
+			index_count,
+			vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+		);
 
 		// Copy index data to staging buffer
-		void *data = staging_buffer_memory.mapMemory(0, buffer_size);
-		memcpy(data, indices.data(), buffer_size);
-		staging_buffer_memory.unmapMemory();
+		staging_buffer.map();
+		staging_buffer.writeToBuffer((void*)indices.data());
+		// unmap is called in the destructor of VeBuffer
 
 		// Create index buffer, accessible by GPU only
-		usage = vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst;
-		req_properties = vk::MemoryPropertyFlagBits::eDeviceLocal;
-		ve_device.createBuffer(buffer_size, usage, req_properties, index_buffer, index_buffer_memory);
+		index_buffer = std::make_unique<ve::VeBuffer>(
+			ve_device,
+			sizeof(indices[0]),
+			index_count,
+			vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			1
+		);
 
 		// Copy index data from staging buffer to index buffer
-		ve_device.copyBuffer(staging_buffer, index_buffer, buffer_size);
+		auto buffer_size = sizeof(indices[0]) * index_count;
+		ve_device.copyBuffer(staging_buffer.getBuffer(), index_buffer->getBuffer(), buffer_size);
 	}
 
 	void VeModel::bindVertexBuffer(vk::CommandBuffer command_buffer) {
-		vk::Buffer buffers[] = { *vertex_buffer };
+		vk::Buffer buffers[] = { vertex_buffer->getBuffer() };
 		vk::DeviceSize offsets[] = { 0 };
 		command_buffer.bindVertexBuffers(0, 1, buffers, offsets);
 	}
 
 	void VeModel::bindIndexBuffer(vk::CommandBuffer command_buffer) {
-		command_buffer.bindIndexBuffer(*index_buffer, 0, vk::IndexType::eUint16);
+		command_buffer.bindIndexBuffer(index_buffer->getBuffer(), 0, vk::IndexType::eUint16);
 	}
 
 	void VeModel::draw(vk::CommandBuffer command_buffer) {
@@ -113,4 +123,5 @@ namespace ve {
 		};
 		return attribute_descriptions;
 	}
-}
+
+} // namespace ve

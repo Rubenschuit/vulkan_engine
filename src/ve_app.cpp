@@ -161,22 +161,22 @@ namespace ve {
 		);
 		// Setup dynamic rendering info
 		vk::ClearValue clearColor = vk::ClearColorValue(0.01f, 0.01f, 0.01f, 1.0f);
-		vk::RenderingAttachmentInfo attachmentInfo = {
+		vk::RenderingAttachmentInfo attachment_info = {
 			.imageView = ve_swap_chain->getSwapChainImageViews()[image_index],
 			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
 			.loadOp = vk::AttachmentLoadOp::eClear,
 			.storeOp = vk::AttachmentStoreOp::eStore,
 			.clearValue = clearColor
 		};
-		vk::RenderingInfo renderingInfo = {
+		vk::RenderingInfo rendering_info = {
 			.renderArea = { .offset = { 0, 0 }, .extent = extent },
 			.layerCount = 1,
 			.colorAttachmentCount = 1,
-			.pColorAttachments = &attachmentInfo
+			.pColorAttachments = &attachment_info
 		};
 
 		// Begin dynamic rendering
-		command_buffers[current_frame].beginRendering(renderingInfo);
+		command_buffers[current_frame].beginRendering(rendering_info);
 		command_buffers[current_frame].bindPipeline(vk::PipelineBindPoint::eGraphics, ve_pipeline->getPipeline());
 		command_buffers[current_frame].setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f));
 		command_buffers[current_frame].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), extent));
@@ -275,22 +275,17 @@ namespace ve {
 		assert(buffer_size <= ve_device.getDeviceProperties().limits.maxUniformBufferRange && "Uniform buffer size exceeds maximum limit");
 
 		uniform_buffers.clear();
-		uniform_buffers_memory.clear();
-		uniform_buffers_mapped.clear();
 
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-			vk::raii::Buffer _buffer({});
-            vk::raii::DeviceMemory _buffer_mem({});
-			ve_device.createBuffer(
+			uniform_buffers.emplace_back(std::make_unique<VeBuffer>(
+				ve_device,
 				buffer_size,
+				1,
 				vk::BufferUsageFlagBits::eUniformBuffer,
 				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-				_buffer,
-				_buffer_mem
-			);
-			uniform_buffers.emplace_back(std::move(_buffer));
-            uniform_buffers_memory.emplace_back(std::move(_buffer_mem));
-            uniform_buffers_mapped.emplace_back( uniform_buffers_memory[i].mapMemory(0, buffer_size));
+				16
+			));
+			uniform_buffers[i]->map();
 		}
 	}
 
@@ -323,8 +318,7 @@ namespace ve {
 		// GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted.
 		ubo.proj[1][1] *= -1;
 
-		assert(uniform_buffers_mapped[current_image] != nullptr && "Uniform buffer memory not mapped");
-		memcpy(uniform_buffers_mapped[current_image], &ubo, sizeof(ubo));
+		uniform_buffers[current_image]->writeToBuffer(&ubo);
 	}
 
 	void VeApp::createDescriptorPool() {
@@ -353,7 +347,7 @@ namespace ve {
 
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 			vk::DescriptorBufferInfo buffer_info{
-				.buffer = *uniform_buffers[i],
+				.buffer = *uniform_buffers[i]->getBuffer(),
 				.offset = 0,
 				.range = sizeof(UniformBufferObject)
 			};
@@ -408,6 +402,25 @@ namespace ve {
 		}
 		// Advance to the next frame
 		ve_swap_chain->advanceFrame();
+
+		// Update FPS counter and window title roughly once per second
+		updateFpsWindowTitle();
+	}
+
+	void VeApp::updateFpsWindowTitle() {
+		using clock = std::chrono::high_resolution_clock;
+		fps_frame_count++;
+		auto now = clock::now();
+		auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - fps_last_time);
+		if (elapsed.count() >= 1000) {
+			// Compute FPS and update title
+			double fps = static_cast<double>(fps_frame_count) * 1000.0 / static_cast<double>(elapsed.count());
+			std::string title = std::string("Vulkan Engine!  ") + std::to_string(static_cast<int>(fps)) + " FPS";
+			glfwSetWindowTitle(ve_window.getGLFWwindow(), title.c_str());
+			// Reset
+			fps_frame_count = 0;
+			fps_last_time = now;
+		}
 	}
 }
 

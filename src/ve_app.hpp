@@ -60,6 +60,7 @@ namespace ve {
 		void updateUniformBuffer(uint32_t current_image);
 		void createDescriptorPool();
 		void createDescriptorSets();
+		void updateFpsWindowTitle();
 
 
 		VeWindow ve_window{WIDTH, HEIGHT, "Vulkan Engine!"};
@@ -72,12 +73,13 @@ namespace ve {
 		std::vector<vk::raii::CommandBuffer> command_buffers;
 		std::unique_ptr<VeModel> ve_model;
 
-		std::vector<vk::raii::Buffer> uniform_buffers{};
-		std::vector<vk::raii::DeviceMemory> uniform_buffers_memory{};
-		std::vector<void*> uniform_buffers_mapped{};
-
+		std::vector<std::unique_ptr<VeBuffer>> uniform_buffers;
 		vk::raii::DescriptorPool descriptor_pool = nullptr;
 		std::vector<vk::raii::DescriptorSet> descriptor_sets;
+
+		// FPS tracking
+		std::chrono::high_resolution_clock::time_point fps_last_time{std::chrono::high_resolution_clock::now()};
+		uint32_t fps_frame_count{0};
 
 	};
 }
