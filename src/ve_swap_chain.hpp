@@ -28,6 +28,7 @@ namespace ve {
 		vk::Format getSwapChainImageFormat() { return swap_chain_image_format; }
 		vk::Extent2D getSwapChainExtent() { return swap_chain_extent; }
 		vk::raii::ImageView* getImageView(size_t index) { return &swap_chain_image_views[index]; };
+		const vk::raii::Image& getDepthImage() const { return depth_image; }
 		const vk::raii::ImageView& getDepthImageView() const { return depth_image_view; }
 		const std::vector<vk::Image>& getSwapChainImages() { return swap_chain_images; }
 		const std::vector<vk::raii::ImageView>& getSwapChainImageViews() { return swap_chain_image_views; }

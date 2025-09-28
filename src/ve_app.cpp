@@ -128,7 +128,7 @@ namespace ve {
 		assert(image_index < ve_swap_chain->getImageCount() && "Image index out of bounds");
 
 		command_buffers[current_frame].begin({});
-		// Setup image layout for rendering
+		// Transition the swap chain image to eColorAttachmentOptimal
 		transitionImageLayout(
 			image_index,
 			vk::ImageLayout::eUndefined,
@@ -138,6 +138,33 @@ namespace ve {
 			vk::PipelineStageFlagBits2::eTopOfPipe,
 			vk::PipelineStageFlagBits2::eColorAttachmentOutput
 		);
+
+		// Transition depth image layout, TODO add function for this
+        vk::ImageMemoryBarrier2 depth_barrier = {
+            .srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe,
+            .srcAccessMask = {},
+            .dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
+            .dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+            .oldLayout = vk::ImageLayout::eUndefined,
+            .newLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = ve_swap_chain->getDepthImage(),
+            .subresourceRange = {
+                .aspectMask = vk::ImageAspectFlagBits::eDepth,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            }
+        };
+        vk::DependencyInfo depth_dependency_info = {
+            .dependencyFlags = {},
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &depth_barrier
+        };
+        command_buffers[current_frame].pipelineBarrier2(depth_dependency_info);
+
 		// Setup dynamic rendering info
 		vk::RenderingAttachmentInfo attachment_info = {
 			.imageView = ve_swap_chain->getSwapChainImageViews()[image_index],
@@ -178,7 +205,7 @@ namespace ve {
 		ve_model->drawIndexed(command_buffers[current_frame]);
 		command_buffers[current_frame].endRendering();
 
-		// After rendering, transition to presentation
+		// After rendering, transition swap chain image to presentation
 		transitionImageLayout(
 			image_index,
 			vk::ImageLayout::eColorAttachmentOptimal,
