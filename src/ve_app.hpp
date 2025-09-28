@@ -10,7 +10,19 @@
 #include <vector>
 #include <iostream>
 
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <chrono>
+
+
 namespace ve {
+
+	struct UniformBufferObject {
+		glm::mat4 model;
+		glm::mat4 view;
+		glm::mat4 proj;
+	};
+
 	class VeApp {
 	public:
 		VeApp();
@@ -30,6 +42,7 @@ namespace ve {
 		void cleanup();
 		void loadModels();
 		void createPipeline();
+		void createDescriptorSetLayout();
 		void createPipelineLayout();
 		void createCommandBuffers();
 		void recordCommandBuffer(uint32_t image_index);
@@ -43,14 +56,29 @@ namespace ve {
 			vk::PipelineStageFlags2 dst_stage);
 		void drawFrame();
 		void recreateSwapChain();
+		void createUniformBuffers();
+		void updateUniformBuffer(uint32_t current_image);
+		void createDescriptorPool();
+		void createDescriptorSets();
+
 
 		VeWindow ve_window{WIDTH, HEIGHT, "Vulkan Engine!"};
 		VeDevice ve_device{ve_window};
 		std::unique_ptr<VeSwapChain> ve_swap_chain = std::make_unique<VeSwapChain>(ve_device, ve_window.getExtent());
+
+		vk::raii::DescriptorSetLayout descriptor_set_layout{nullptr};
 		vk::raii::PipelineLayout pipeline_layout{nullptr};
 		std::unique_ptr<VePipeline> ve_pipeline;
 		std::vector<vk::raii::CommandBuffer> command_buffers;
 		std::unique_ptr<VeModel> ve_model;
+
+		std::vector<vk::raii::Buffer> uniform_buffers{};
+		std::vector<vk::raii::DeviceMemory> uniform_buffers_memory{};
+		std::vector<void*> uniform_buffers_mapped{};
+
+		vk::raii::DescriptorPool descriptor_pool = nullptr;
+		std::vector<vk::raii::DescriptorSet> descriptor_sets;
+
 	};
 }
 

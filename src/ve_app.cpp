@@ -11,9 +11,13 @@ namespace ve {
 		// First a window, device and swap chain are initialised
 
 		loadModels();
+		createDescriptorSetLayout();
 		createPipelineLayout();
 		createPipeline();
 		createCommandBuffers();
+		createUniformBuffers();
+		createDescriptorPool();
+		createDescriptorSets();
 	}
 
 	VeApp::~VeApp() {
@@ -65,7 +69,7 @@ namespace ve {
 			{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
 			{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
 		};
-		recursionTriangles(triangle_vertices[0].pos, triangle_vertices[1].pos, triangle_vertices[2].pos, 0, 6, triangle_vertices);
+		//recursionTriangles(triangle_vertices[0].pos, triangle_vertices[1].pos, triangle_vertices[2].pos, 0, 6, triangle_vertices);
 
 		const std::vector<VeModel::Vertex> vertices = {
 			{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
@@ -80,11 +84,27 @@ namespace ve {
 		ve_model = std::make_unique<VeModel>(ve_device, vertices, indices);
 	}
 
+	void VeApp::createDescriptorSetLayout() {
+		vk::DescriptorSetLayoutBinding binding{
+			.binding = 0,
+			.descriptorType = vk::DescriptorType::eUniformBuffer,
+			.descriptorCount = 1,
+			.stageFlags = vk::ShaderStageFlagBits::eVertex,
+			.pImmutableSamplers = nullptr
+		};
+		vk::DescriptorSetLayoutCreateInfo layout_info{
+			.flags = {},
+			.bindingCount = 1,
+			.pBindings = &binding
+		};
+		descriptor_set_layout = vk::raii::DescriptorSetLayout(ve_device.getDevice(), layout_info);
+	}
+
 	void VeApp::createPipelineLayout() {
 		vk::PipelineLayoutCreateInfo pipeline_layout_info{
 			.sType = vk::StructureType::ePipelineLayoutCreateInfo,
-			.setLayoutCount = 0,
-			.pSetLayouts = nullptr,
+			.setLayoutCount = 1,
+			.pSetLayouts = &*descriptor_set_layout,
 			.pushConstantRangeCount = 0,
 			.pPushConstantRanges = nullptr
 		};
@@ -162,6 +182,13 @@ namespace ve {
 		command_buffers[current_frame].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), extent));
 		ve_model->bindVertexBuffer(command_buffers[current_frame]);
 		ve_model->bindIndexBuffer(command_buffers[current_frame]);
+		command_buffers[current_frame].bindDescriptorSets(
+			vk::PipelineBindPoint::eGraphics,
+			*pipeline_layout,
+			0,
+			*descriptor_sets[current_frame],
+			{}
+		);
 		ve_model->drawIndexed(command_buffers[current_frame]);
 		command_buffers[current_frame].endRendering();
 
@@ -241,6 +268,109 @@ namespace ve {
 		}
 	}
 
+	void VeApp::createUniformBuffers() {
+		vk::DeviceSize buffer_size = sizeof(UniformBufferObject);
+		assert(buffer_size > 0 && "Uniform buffer size is zero");
+		assert(buffer_size % 16 == 0 && "Uniform buffer size must be a multiple of 16 bytes");
+		assert(buffer_size <= ve_device.getDeviceProperties().limits.maxUniformBufferRange && "Uniform buffer size exceeds maximum limit");
+
+		uniform_buffers.clear();
+		uniform_buffers_memory.clear();
+		uniform_buffers_mapped.clear();
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+			vk::raii::Buffer _buffer({});
+            vk::raii::DeviceMemory _buffer_mem({});
+			ve_device.createBuffer(
+				buffer_size,
+				vk::BufferUsageFlagBits::eUniformBuffer,
+				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+				_buffer,
+				_buffer_mem
+			);
+			uniform_buffers.emplace_back(std::move(_buffer));
+            uniform_buffers_memory.emplace_back(std::move(_buffer_mem));
+            uniform_buffers_mapped.emplace_back( uniform_buffers_memory[i].mapMemory(0, buffer_size));
+		}
+	}
+
+	void VeApp::updateUniformBuffer(uint32_t current_image) {
+		// this assertion saved me a lot of debugging time
+		assert(current_image < uniform_buffers.size() && "Current image index out of bounds");
+
+		// Calculate elapsed time since start of the program
+		static auto start_time = std::chrono::high_resolution_clock::now();
+		auto current_time = std::chrono::high_resolution_clock::now();
+    	float time = std::chrono::duration<float, std::chrono::seconds::period>(current_time - start_time).count();
+
+		UniformBufferObject ubo{};
+		// Coordinate system explanation:
+		//  Camera is at (2,2,2), looking at the origin (0,0,0)
+		//
+		//		+Y (up)
+		//		^
+		//		|
+		//		|
+		//		O------> +X (right)
+		//	   /
+		//	  /
+		//	+Z
+
+		// Rotate the model, centered at the origin, over time, around the Z axis
+		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.proj = glm::perspective(glm::radians(45.0f), ve_swap_chain->extentAspectRatio(), 0.1f, 10.0f);
+		// GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted.
+		ubo.proj[1][1] *= -1;
+
+		assert(uniform_buffers_mapped[current_image] != nullptr && "Uniform buffer memory not mapped");
+		memcpy(uniform_buffers_mapped[current_image], &ubo, sizeof(ubo));
+	}
+
+	void VeApp::createDescriptorPool() {
+		vk::DescriptorPoolSize pool_size{
+			.type = vk::DescriptorType::eUniformBuffer,
+			.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)
+		};
+		vk::DescriptorPoolCreateInfo pool_info{
+			.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
+			.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT),
+			.poolSizeCount = 1,
+			.pPoolSizes = &pool_size
+		};
+		descriptor_pool = vk::raii::DescriptorPool(ve_device.getDevice(), pool_info);
+	}
+
+	void VeApp::createDescriptorSets() {
+		std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, *descriptor_set_layout);
+		vk::DescriptorSetAllocateInfo alloc_info{
+			.descriptorPool = *descriptor_pool,
+			.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT),
+			.pSetLayouts = layouts.data()
+		};
+		descriptor_sets.clear();
+		descriptor_sets = vk::raii::DescriptorSets(ve_device.getDevice(), alloc_info);
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+			vk::DescriptorBufferInfo buffer_info{
+				.buffer = *uniform_buffers[i],
+				.offset = 0,
+				.range = sizeof(UniformBufferObject)
+			};
+			vk::WriteDescriptorSet descriptor_write{
+				.dstSet = *descriptor_sets[i],
+				.dstBinding = 0,
+				.dstArrayElement = 0,
+				.descriptorCount = 1,
+				.descriptorType = vk::DescriptorType::eUniformBuffer,
+				.pImageInfo = nullptr,
+				.pBufferInfo = &buffer_info,
+				.pTexelBufferView = nullptr
+			};
+			ve_device.getDevice().updateDescriptorSets(descriptor_write, {});
+		}
+	}
+
 	void VeApp::drawFrame() {
 		// Wait until the previous frame is finished
 		ve_swap_chain->waitForFences();
@@ -256,11 +386,14 @@ namespace ve {
 			throw std::runtime_error("failed to acquire swap chain image!");
 		}
 
+		// Update
+		uint32_t current_frame = ve_swap_chain->getCurrentFrame();
+		updateUniformBuffer(current_frame);
+
 		// Reset the fence for the current frame
 		ve_swap_chain->resetFences();
 
 		// Record command buffer using the acquired image
-		uint32_t current_frame = ve_swap_chain->getCurrentFrame();
 		assert(current_frame < command_buffers.size() && "Current frame index out of bounds");
 		command_buffers[current_frame].reset();
 		recordCommandBuffer(image_index);
