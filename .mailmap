@@ -1,0 +1,12 @@
+# Consolidate contributor identities to a single canonical GitHub no‑reply address
+# Format: Canonical Name <canonical@email> <old@email>
+# You can also map names for the same email: Canonical Name <email> Old Name <email>
+
+# Canonical identity (GitHub no‑reply associated with your account)
+# Change the name if you prefer a different display name
+Ruben Schuitemaker <41633068+Rubenschuit@users.noreply.github.com> Ruben <41633068+Rubenschuit@users.noreply.github.com>
+
+# Map local host-based emails to the canonical identity
+Ruben Schuitemaker <41633068+Rubenschuit@users.noreply.github.com> <rubenschuitemaker@Rubens-MacBook-Pro.local>
+Ruben Schuitemaker <41633068+Rubenschuit@users.noreply.github.com> <rubenschuitemaker@macbookpro.home>
+Ruben Schuitemaker <41633068+Rubenschuit@users.noreply.github.com> <rubenschuitemaker@rubens-mbp-2.home>
