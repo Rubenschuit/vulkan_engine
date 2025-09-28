@@ -179,11 +179,11 @@ namespace ve {
 
 		// Second, it must have a queue family that supports graphics
 		auto queue_families = p_device.getQueueFamilyProperties();
-		const auto qfpIter = std::ranges::find_if(queue_families,
+		const auto qfp_iter = std::ranges::find_if(queue_families,
 			[](vk::QueueFamilyProperties const& qfp) {
 				return (qfp.queueFlags & vk::QueueFlagBits::eGraphics) != static_cast<vk::QueueFlags>(0);
 			});
-		if (qfpIter == queue_families.end()) {
+		if (qfp_iter == queue_families.end()) {
 			return false;
 		}
 
@@ -216,14 +216,14 @@ namespace ve {
 		std::cout << "Found " << devices.size() << " physical device(s)" << std::endl;
 
 		// Find the first suitable device
-		const auto devIter = std::ranges::find_if(devices,
+		const auto dev_iter = std::ranges::find_if(devices,
 			[this](auto const& p_device) {
 				return isDeviceSuitable(p_device);
 			});
-		if (devIter == devices.end()) {
+		if (dev_iter == devices.end()) {
 			throw std::runtime_error("failed to find a suitable GPU!");
 		}
-		physical_device = *devIter;
+		physical_device = *dev_iter;
 
 		// print the name of the selected physical device (optional)
 		VkPhysicalDeviceProperties properties = physical_device.getProperties();
@@ -376,6 +376,76 @@ namespace ve {
 			}
 		}
 		throw std::runtime_error("failed to find supported format!");
+	}
+
+	vk::Format VeDevice::findDepthFormat() {
+		return findSupportedFormat(
+			{ vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint },
+			vk::ImageTiling::eOptimal,
+			vk::FormatFeatureFlagBits::eDepthStencilAttachment
+		);
+	}
+
+	void VeDevice::createImage(
+			uint32_t width,
+			uint32_t height,
+			vk::Format format,
+			vk::ImageTiling tiling,
+			vk::ImageUsageFlags usage,
+			vk::MemoryPropertyFlags properties,
+			vk::raii::Image& image,
+			vk::raii::DeviceMemory& image_memory) {
+
+		assert(width > 0 && height > 0 && "Image width and height must be greater than zero");
+
+		// Create image
+		vk::ImageCreateInfo image_info {
+			.sType = vk::StructureType::eImageCreateInfo,
+			.imageType = vk::ImageType::e2D,
+			.extent = vk::Extent3D{ width, height, 1 },
+			.mipLevels = 1,
+			.arrayLayers = 1,
+			.format = format,
+			.tiling = tiling,
+			.initialLayout = vk::ImageLayout::eUndefined,
+			.usage = usage,
+			.sharingMode = vk::SharingMode::eExclusive, // hardcoded exclusive for now
+			.samples = vk::SampleCountFlagBits::e1,
+			.flags = {}
+		};
+		image = vk::raii::Image(device, image_info);
+
+		// Allocate and bind memory to image
+		vk::MemoryRequirements mem_requirements = image.getMemoryRequirements();
+		vk::MemoryAllocateInfo alloc_info {
+			.sType = vk::StructureType::eMemoryAllocateInfo,
+			.allocationSize = mem_requirements.size,
+			.memoryTypeIndex = findMemoryType(mem_requirements.memoryTypeBits, properties)
+		};
+		image_memory = vk::raii::DeviceMemory(device, alloc_info);
+		image.bindMemory(*image_memory, 0); // offset 0
+	}
+
+	vk::raii::ImageView VeDevice::createImageView(
+			vk::raii::Image& image,
+			vk::Format format,
+			vk::ImageAspectFlags aspect_flags) {
+
+		assert(*image != VK_NULL_HANDLE && "Image must be valid when creating image view");
+		vk::ImageViewCreateInfo view_info {
+			.sType = vk::StructureType::eImageViewCreateInfo,
+			.image = *image,
+			.viewType = vk::ImageViewType::e2D,
+			.format = format,
+			.subresourceRange = vk::ImageSubresourceRange {
+				.aspectMask = aspect_flags,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			}
+		};
+		return vk::raii::ImageView(device, view_info);
 	}
 
 	// sharing mode is hardcoded exclusive for now

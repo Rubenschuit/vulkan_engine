@@ -32,10 +32,10 @@ namespace ve {
 	void VeSwapChain::init() {
 		createSwapChain();
 		createImageViews();
+		createDepthResources();
 		createSyncObjects();
 	}
 
-	// Todo:
 	vk::Result VeSwapChain::acquireNextImage(uint32_t* image_index) {
 		// Signal the semaphore once the image is available
 		auto [result, _image_index] = swap_chain.acquireNextImage(
@@ -131,6 +131,27 @@ namespace ve {
 			swap_chain_image_views.emplace_back(ve_device.getDevice(), imageViewCreateInfo);
 		}
 	}
+
+	void VeSwapChain::createDepthResources() {
+		vk::Format depth_format = ve_device.findDepthFormat();
+
+		ve_device.createImage(
+			swap_chain_extent.width,
+			swap_chain_extent.height,
+			depth_format,
+			vk::ImageTiling::eOptimal,
+			vk::ImageUsageFlagBits::eDepthStencilAttachment,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			depth_image,
+			depth_image_memory);
+
+		depth_image_view = ve_device.createImageView(depth_image, depth_format, vk::ImageAspectFlagBits::eDepth);
+		assert(*depth_image != VK_NULL_HANDLE && "Depth image must be valid after creation");
+		assert(*depth_image_memory != VK_NULL_HANDLE && "Depth image memory must be valid after creation");
+		assert(*depth_image_view != VK_NULL_HANDLE && "Depth image view must be valid after creation");
+	}
+
+
 
 	// Create 2 semaphores and 1 fence per frame in flight
 	void VeSwapChain::createSyncObjects() {

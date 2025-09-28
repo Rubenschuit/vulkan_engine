@@ -18,6 +18,7 @@ namespace ve {
 		vk::PipelineInputAssemblyStateCreateInfo input_assembly_info{};
 		vk::PipelineRasterizationStateCreateInfo rasterization_info{};
 		vk::PipelineMultisampleStateCreateInfo multisample_info{};
+		vk::PipelineDepthStencilStateCreateInfo depth_stencil_info{};
 		vk::PipelineViewportStateCreateInfo viewport_info{};
 		vk::PipelineColorBlendAttachmentState color_blend_attachment{};
 		vk::PipelineColorBlendStateCreateInfo color_blend_info{};

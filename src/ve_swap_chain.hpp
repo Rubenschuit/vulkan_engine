@@ -28,6 +28,7 @@ namespace ve {
 		vk::Format getSwapChainImageFormat() { return swap_chain_image_format; }
 		vk::Extent2D getSwapChainExtent() { return swap_chain_extent; }
 		vk::raii::ImageView* getImageView(size_t index) { return &swap_chain_image_views[index]; };
+		const vk::raii::ImageView& getDepthImageView() const { return depth_image_view; }
 		const std::vector<vk::Image>& getSwapChainImages() { return swap_chain_images; }
 		const std::vector<vk::raii::ImageView>& getSwapChainImageViews() { return swap_chain_image_views; }
 		float extentAspectRatio() { return static_cast<float>(swap_chain_extent.width) /
@@ -49,6 +50,7 @@ namespace ve {
 		void init();
 		void createSwapChain();
 		void createImageViews();
+		void createDepthResources();
 		void createSyncObjects();
 
 		vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& available_formats);
@@ -63,6 +65,11 @@ namespace ve {
 		vk::raii::SwapchainKHR swap_chain{nullptr};
 		std::vector<vk::Image> swap_chain_images;
 		std::vector<vk::raii::ImageView> swap_chain_image_views;
+
+		//depth resources
+		vk::raii::Image depth_image = nullptr;
+		vk::raii::DeviceMemory depth_image_memory = nullptr;
+		vk::raii::ImageView depth_image_view = nullptr;
 
 		// Synchronization primitives
 		std::vector<vk::raii::Semaphore> present_complete_semaphores;

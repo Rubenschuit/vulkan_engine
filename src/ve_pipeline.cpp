@@ -53,6 +53,14 @@ namespace ve {
 			.alphaToCoverageEnable = VK_FALSE,
 			.alphaToOneEnable = VK_FALSE
 		};
+		config_info.depth_stencil_info = {
+			.sType = vk::StructureType::ePipelineDepthStencilStateCreateInfo,
+			.depthTestEnable = VK_TRUE,
+			.depthWriteEnable = VK_TRUE,
+			.depthCompareOp = vk::CompareOp::eLess,
+			.depthBoundsTestEnable = VK_FALSE,
+			.stencilTestEnable = VK_FALSE,
+		};
 		config_info.color_blend_attachment = {
 			.blendEnable = VK_FALSE,
 			.srcColorBlendFactor = vk::BlendFactor::eOne,
@@ -124,9 +132,14 @@ namespace ve {
 			.pVertexAttributeDescriptions = attribute_descriptions.data()
 		};
 
+		vk::Format depth_format = ve_device.findSupportedFormat(
+			{vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint},
+			vk::ImageTiling::eOptimal,
+			vk::FormatFeatureFlagBits::eDepthStencilAttachment);
 		vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo{
 			.colorAttachmentCount = 1,
 			.pColorAttachmentFormats = &config_info.color_format,
+			.depthAttachmentFormat = depth_format
 		};
 		vk::GraphicsPipelineCreateInfo pipeline_info{
 			.sType = vk::StructureType::eGraphicsPipelineCreateInfo,
@@ -140,7 +153,7 @@ namespace ve {
 			.pMultisampleState = &config_info.multisample_info,
 			.pColorBlendState = &config_info.color_blend_info,
 			.pDynamicState = &config_info.dynamic_state_info,
-			.pDepthStencilState = nullptr, // For now, no depth testing
+			.pDepthStencilState = &config_info.depth_stencil_info,
 			.layout = config_info.pipeline_layout,
 			.renderPass = nullptr,
 			.subpass = config_info.subpass,

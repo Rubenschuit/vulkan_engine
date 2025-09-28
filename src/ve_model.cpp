@@ -108,11 +108,11 @@ namespace ve {
 	}
 
 	std::vector<vk::VertexInputAttributeDescription> VeModel::Vertex::getAttributeDescriptions() {
-		std::vector<vk::VertexInputAttributeDescription> attribute_descriptions(2);
+		std::vector<vk::VertexInputAttributeDescription> attribute_descriptions(3);
 		attribute_descriptions[0] = vk::VertexInputAttributeDescription{
 			.location = 0,
 			.binding = 0,
-			.format = vk::Format::eR32G32Sfloat,
+			.format = vk::Format::eR32G32B32Sfloat,
 			.offset = offsetof(Vertex, pos),
 		};
 		attribute_descriptions[1] = vk::VertexInputAttributeDescription{
@@ -120,6 +120,12 @@ namespace ve {
 			.binding = 0,
 			.format = vk::Format::eR32G32B32Sfloat,
 			.offset = offsetof(Vertex, color)
+		};
+		attribute_descriptions[2] = vk::VertexInputAttributeDescription{
+			.location = 2,
+			.binding = 0,
+			.format = vk::Format::eR32G32Sfloat,
+			.offset = offsetof(Vertex, tex_coord)
 		};
 		return attribute_descriptions;
 	}

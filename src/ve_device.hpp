@@ -49,6 +49,18 @@ namespace ve {
 		SwapChainSupportDetails getSwapChainSupport() { return querySwapChainSupport(physical_device); }
 		uint32_t findMemoryType(uint32_t type_filter, vk::MemoryPropertyFlags properties);
 		vk::Format findSupportedFormat(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features);
+		vk::Format findDepthFormat();
+		void createImage(
+			uint32_t width,
+			uint32_t height,
+			vk::Format format,
+			vk::ImageTiling tiling,
+			vk::ImageUsageFlags usage,
+			vk::MemoryPropertyFlags properties,
+			vk::raii::Image& image,
+			vk::raii::DeviceMemory& image_memory);
+
+		vk::raii::ImageView createImageView(vk::raii::Image& image, vk::Format format, vk::ImageAspectFlags aspect_flags);
 
 		void createBuffer(
 			vk::DeviceSize size,

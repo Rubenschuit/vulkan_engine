@@ -13,8 +13,9 @@ namespace ve {
 	class VeModel {
 	public:
 		struct Vertex {
-			glm::vec2 pos;
+			glm::vec3 pos;
 			glm::vec3 color;
+			glm::vec2 tex_coord;
 
 			static std::vector<vk::VertexInputBindingDescription> getBindingDescriptions();
 			static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptions();

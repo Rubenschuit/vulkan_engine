@@ -41,44 +41,23 @@ namespace ve {
 		// nothing yet
 	}
 
-	// Recursive function to generate Sierpinski triangle vertices
-	void recursionTriangles(glm::vec2 A, glm::vec2 B, glm::vec2 C, int depth, int max_depth, std::vector<VeModel::Vertex> &vertices) {
-		if (depth > max_depth)
-			return;
-		glm::vec2 D = (A + B) / 2.0f;
-		glm::vec2 E = (A + C) / 2.0f;
-		glm::vec2 F = (B + C) / 2.0f;
-		glm::vec3 col_D{0.0f, 0.0f, 0.0f};
-		glm::vec3 col_E{0.0f, 0.0f, 0.0f};
-		glm::vec3 col_F{0.0f, 0.0f, 0.0f};
-
-		vertices.emplace_back(D, col_D);
-		vertices.emplace_back(E, col_E);
-		vertices.emplace_back(F, col_F);
-
-		recursionTriangles(A, E, D, depth + 1, max_depth, vertices);
-		recursionTriangles(D, B, F, depth + 1, max_depth, vertices);
-		recursionTriangles(F, E, C, depth + 1, max_depth, vertices);
-	};
-
 	void VeApp::loadModels() {
 
-		// initial triangle vertices
-		std::vector<VeModel::Vertex> triangle_vertices = {
-			{{0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
-			{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-			{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
-		};
-		//recursionTriangles(triangle_vertices[0].pos, triangle_vertices[1].pos, triangle_vertices[2].pos, 0, 6, triangle_vertices);
-
 		const std::vector<VeModel::Vertex> vertices = {
-			{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-			{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-			{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
-			{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+			{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+			{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+			{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+			{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+
+			{{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+			{{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+			{{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+			{{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
 		};
+
 		const std::vector<uint16_t> indices = {
-			0, 1, 2, 2, 3, 0
+			0, 1, 2, 2, 3, 0,
+			4, 5, 6, 6, 7, 4
 		};
 
 		ve_model = std::make_unique<VeModel>(ve_device, vertices, indices);
@@ -160,19 +139,26 @@ namespace ve {
 			vk::PipelineStageFlagBits2::eColorAttachmentOutput
 		);
 		// Setup dynamic rendering info
-		vk::ClearValue clearColor = vk::ClearColorValue(0.01f, 0.01f, 0.01f, 1.0f);
 		vk::RenderingAttachmentInfo attachment_info = {
 			.imageView = ve_swap_chain->getSwapChainImageViews()[image_index],
 			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
 			.loadOp = vk::AttachmentLoadOp::eClear,
 			.storeOp = vk::AttachmentStoreOp::eStore,
-			.clearValue = clearColor
+			.clearValue = vk::ClearColorValue(0.01f, 0.01f, 0.01f, 1.0f)
+		};
+		vk::RenderingAttachmentInfo depth_attachment_info = {
+			.imageView = ve_swap_chain->getDepthImageView(),
+			.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+			.loadOp = vk::AttachmentLoadOp::eClear,
+			.storeOp = vk::AttachmentStoreOp::eDontCare,
+			.clearValue = vk::ClearDepthStencilValue(1.0f, 0)
 		};
 		vk::RenderingInfo rendering_info = {
 			.renderArea = { .offset = { 0, 0 }, .extent = extent },
 			.layerCount = 1,
 			.colorAttachmentCount = 1,
-			.pColorAttachments = &attachment_info
+			.pColorAttachments = &attachment_info,
+			.pDepthAttachment = &depth_attachment_info
 		};
 
 		// Begin dynamic rendering
@@ -283,7 +269,7 @@ namespace ve {
 				1,
 				vk::BufferUsageFlagBits::eUniformBuffer,
 				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-				16
+				ve_device.getDeviceProperties().limits.minUniformBufferOffsetAlignment
 			));
 			uniform_buffers[i]->map();
 		}

@@ -1,7 +1,8 @@
 
 struct VertexInput {
-	float2 in_pos : POSITION;
+	float3 in_pos : POSITION;
 	float3 in_color : COLOR;
+	float2 in_tex_coord : TEXCOORD0;
 };
 
 struct UniformBuffer {
@@ -19,7 +20,7 @@ struct VertexOutput {
 [shader("vertex")]
 VertexOutput vertMain(VertexInput input) {
     VertexOutput output;
-    output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(input.in_pos, 0.0, 1.0))));
+    output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(input.in_pos, 1.0))));
     output.color = input.in_color;
     return output;
 }
