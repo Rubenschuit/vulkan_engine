@@ -31,7 +31,7 @@ namespace ve {
 
 	void VeSwapChain::init() {
 		createSwapChain();
-		createImageViews();
+		createSwapChainImageViews();
 		createDepthResources();
 		createSyncObjects();
 	}
@@ -118,7 +118,7 @@ namespace ve {
 		swap_chain_images = swap_chain.getImages();
 	}
 
-	void VeSwapChain::createImageViews() {
+	void VeSwapChain::createSwapChainImageViews() {
 		assert(swap_chain_image_views.empty());
 		vk::ImageViewCreateInfo imageViewCreateInfo{
 			.viewType = vk::ImageViewType::e2D,
@@ -134,24 +134,30 @@ namespace ve {
 
 	void VeSwapChain::createDepthResources() {
 		vk::Format depth_format = ve_device.findDepthFormat();
-
-		ve_device.createImage(
+		depth_image = std::make_unique<VeImage>(
+			ve_device,
 			swap_chain_extent.width,
 			swap_chain_extent.height,
 			depth_format,
 			vk::ImageTiling::eOptimal,
 			vk::ImageUsageFlagBits::eDepthStencilAttachment,
 			vk::MemoryPropertyFlagBits::eDeviceLocal,
-			depth_image,
-			depth_image_memory);
+			vk::ImageAspectFlagBits::eDepth);
 
-		depth_image_view = ve_device.createImageView(depth_image, depth_format, vk::ImageAspectFlagBits::eDepth);
-		assert(*depth_image != VK_NULL_HANDLE && "Depth image must be valid after creation");
-		assert(*depth_image_memory != VK_NULL_HANDLE && "Depth image memory must be valid after creation");
-		assert(*depth_image_view != VK_NULL_HANDLE && "Depth image view must be valid after creation");
+		// transition the depth image to be optimal for a depth attachment using a single-time command buffer
+		{
+			auto cmd = ve_device.beginSingleTimeCommands();
+			depth_image->transitionImageLayout(
+				cmd,
+				vk::ImageLayout::eUndefined,
+				vk::ImageLayout::eDepthStencilAttachmentOptimal,
+				{},
+				vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+				vk::PipelineStageFlagBits2::eTopOfPipe,
+				vk::PipelineStageFlagBits2::eEarlyFragmentTests);
+			ve_device.endSingleTimeCommands(cmd);
+		}
 	}
-
-
 
 	// Create 2 semaphores and 1 fence per frame in flight
 	void VeSwapChain::createSyncObjects() {
@@ -223,6 +229,7 @@ namespace ve {
 		return;
 	}
 
+	// Reset the fence of the current frame back to unsignaled state
 	void VeSwapChain::resetFences() {
 		ve_device.getDevice().resetFences(*in_flight_fences[current_frame]);
 	}
@@ -230,6 +237,45 @@ namespace ve {
 	void VeSwapChain::advanceFrame() {
 		current_frame = (current_frame + 1) % ve::MAX_FRAMES_IN_FLIGHT;
 		semaphore_index = (semaphore_index + 1) % swap_chain_images.size();
+	}
+
+		// Transition the image layout of the given swap chain image using
+	// pipeline barriers to ensure proper synchronization
+	void VeSwapChain::transitionImageLayout(
+				vk::raii::CommandBuffer& command_buffer,
+				uint32_t image_index,
+				vk::ImageLayout old_layout,
+				vk::ImageLayout new_layout,
+				vk::AccessFlags2 src_access_mask,
+				vk::AccessFlags2 dst_access_mask,
+				vk::PipelineStageFlags2 src_stage_mask,
+				vk::PipelineStageFlags2 dst_stage_mask) {
+
+		assert(image_index < getImageCount() && "Image index out of bounds");
+		vk::ImageMemoryBarrier2 barrier = {
+			.srcStageMask = src_stage_mask,
+			.srcAccessMask = src_access_mask,
+			.dstStageMask = dst_stage_mask,
+			.dstAccessMask = dst_access_mask,
+			.oldLayout = old_layout,
+			.newLayout = new_layout,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = swap_chain_images[image_index],
+			.subresourceRange = {
+				.aspectMask = vk::ImageAspectFlagBits::eColor,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			}
+		};
+		vk::DependencyInfo dependency_info = {
+			.dependencyFlags = {},
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &barrier
+		};
+		command_buffer.pipelineBarrier2(dependency_info);
 	}
 }
 

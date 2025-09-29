@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ve_device.hpp"
+#include "ve_image.hpp"
 #define VULKAN_HPP_ENABLE_RAII
 #include <vulkan/vulkan_raii.hpp>
 #include <ve_config.hpp>
@@ -28,14 +29,23 @@ namespace ve {
 		vk::Format getSwapChainImageFormat() { return swap_chain_image_format; }
 		vk::Extent2D getSwapChainExtent() { return swap_chain_extent; }
 		vk::raii::ImageView* getImageView(size_t index) { return &swap_chain_image_views[index]; };
-		const vk::raii::Image& getDepthImage() const { return depth_image; }
-		const vk::raii::ImageView& getDepthImageView() const { return depth_image_view; }
+		vk::raii::ImageView* getDepthImageView() { return &depth_image->getImageView(); }
+		vk::raii::Image* getDepthImage() { return &depth_image->getImage(); }
 		const std::vector<vk::Image>& getSwapChainImages() { return swap_chain_images; }
 		const std::vector<vk::raii::ImageView>& getSwapChainImageViews() { return swap_chain_image_views; }
 		float extentAspectRatio() { return static_cast<float>(swap_chain_extent.width) /
 								   static_cast<float>(swap_chain_extent.height); }
-
 		vk::Result acquireNextImage(uint32_t* imageIndex);
+		// Transitions the swap chain image at imageIndex from oldLayout to newLayout.
+		void transitionImageLayout(
+			vk::raii::CommandBuffer& command_buffer,
+			uint32_t image_index,
+			vk::ImageLayout old_layout,
+			vk::ImageLayout new_layout,
+			vk::AccessFlags2 src_access_mask,
+			vk::AccessFlags2 dst_access_mask,
+			vk::PipelineStageFlags2 src_stage,
+			vk::PipelineStageFlags2 dst_stage);
 		// Submits the provided command buffer, along with fence, and presents the acquired image.
 		vk::Result submitAndPresent(vk::CommandBuffer commandBuffer, uint32_t* imageIndex);
 		void waitForFences();
@@ -50,7 +60,7 @@ namespace ve {
 	private:
 		void init();
 		void createSwapChain();
-		void createImageViews();
+		void createSwapChainImageViews();
 		void createDepthResources();
 		void createSyncObjects();
 
@@ -68,9 +78,7 @@ namespace ve {
 		std::vector<vk::raii::ImageView> swap_chain_image_views;
 
 		//depth resources
-		vk::raii::Image depth_image = nullptr;
-		vk::raii::DeviceMemory depth_image_memory = nullptr;
-		vk::raii::ImageView depth_image_view = nullptr;
+		std::unique_ptr<VeImage> depth_image;
 
 		// Synchronization primitives
 		std::vector<vk::raii::Semaphore> present_complete_semaphores;

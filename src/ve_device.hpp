@@ -50,17 +50,6 @@ namespace ve {
 		uint32_t findMemoryType(uint32_t type_filter, vk::MemoryPropertyFlags properties);
 		vk::Format findSupportedFormat(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features);
 		vk::Format findDepthFormat();
-		void createImage(
-			uint32_t width,
-			uint32_t height,
-			vk::Format format,
-			vk::ImageTiling tiling,
-			vk::ImageUsageFlags usage,
-			vk::MemoryPropertyFlags properties,
-			vk::raii::Image& image,
-			vk::raii::DeviceMemory& image_memory);
-
-		vk::raii::ImageView createImageView(vk::raii::Image& image, vk::Format format, vk::ImageAspectFlags aspect_flags);
 
 		void createBuffer(
 			vk::DeviceSize size,
@@ -71,6 +60,11 @@ namespace ve {
 		void copyBuffer(vk::raii::Buffer& src_buffer, vk::raii::Buffer& dst_buffer, vk::DeviceSize size);
 
 		vk::PhysicalDeviceProperties getDeviceProperties() const { return physical_device.getProperties(); }
+
+		enum class QueueKind { Graphics, Transfer };
+		// Single-time command buffer helpers (select queue/pool)
+		vk::raii::CommandBuffer beginSingleTimeCommands(QueueKind kind = QueueKind::Graphics);
+		void endSingleTimeCommands(vk::raii::CommandBuffer& cmd, QueueKind kind = QueueKind::Graphics);
 
 	private:
 		void createInstance();
@@ -93,6 +87,7 @@ namespace ve {
 		vk::raii::DebugUtilsMessengerEXT debug_messenger{nullptr};
 		vk::raii::SurfaceKHR surface{nullptr};
 		vk::raii::PhysicalDevice physical_device{nullptr};
+
 		vk::raii::CommandPool command_pool{nullptr};
 		vk::raii::CommandPool command_pool_transfer{nullptr};
 		vk::raii::Queue queue{nullptr};
@@ -100,7 +95,8 @@ namespace ve {
 		uint32_t queue_index = UINT32_MAX; // queue family index for graphics and present
 		uint32_t transfer_queue_index = UINT32_MAX; // queue family index for transfer
 		//vk::raii::Queue present_queue{nullptr};
-		const std::vector<const char *> validation_layers = VALIDATION_LAYERS;
-		std::vector<const char*> required_device_extensions = REQUIRED_DEVICE_EXTENSIONS;
+
+		const std::vector<const char *> validation_layers = ve::VALIDATION_LAYERS;
+		std::vector<const char*> required_device_extensions = ve::REQUIRED_DEVICE_EXTENSIONS;
 	};
 }

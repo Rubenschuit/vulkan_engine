@@ -46,14 +46,6 @@ namespace ve {
 		void createPipelineLayout();
 		void createCommandBuffers();
 		void recordCommandBuffer(uint32_t image_index);
-		void transitionImageLayout(
-			uint32_t image_index,
-			vk::ImageLayout old_layout,
-			vk::ImageLayout new_layout,
-			vk::AccessFlags2 src_access_mask,
-			vk::AccessFlags2 dst_access_mask,
-			vk::PipelineStageFlags2 src_stage,
-			vk::PipelineStageFlags2 dst_stage);
 		void drawFrame();
 		void recreateSwapChain();
 		void createUniformBuffers();

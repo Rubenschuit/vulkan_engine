@@ -386,68 +386,6 @@ namespace ve {
 		);
 	}
 
-	void VeDevice::createImage(
-			uint32_t width,
-			uint32_t height,
-			vk::Format format,
-			vk::ImageTiling tiling,
-			vk::ImageUsageFlags usage,
-			vk::MemoryPropertyFlags properties,
-			vk::raii::Image& image,
-			vk::raii::DeviceMemory& image_memory) {
-
-		assert(width > 0 && height > 0 && "Image width and height must be greater than zero");
-
-		// Create image
-		vk::ImageCreateInfo image_info {
-			.sType = vk::StructureType::eImageCreateInfo,
-			.imageType = vk::ImageType::e2D,
-			.extent = vk::Extent3D{ width, height, 1 },
-			.mipLevels = 1,
-			.arrayLayers = 1,
-			.format = format,
-			.tiling = tiling,
-			.initialLayout = vk::ImageLayout::eUndefined,
-			.usage = usage,
-			.sharingMode = vk::SharingMode::eExclusive, // hardcoded exclusive for now
-			.samples = vk::SampleCountFlagBits::e1,
-			.flags = {}
-		};
-		image = vk::raii::Image(device, image_info);
-
-		// Allocate and bind memory to image
-		vk::MemoryRequirements mem_requirements = image.getMemoryRequirements();
-		vk::MemoryAllocateInfo alloc_info {
-			.sType = vk::StructureType::eMemoryAllocateInfo,
-			.allocationSize = mem_requirements.size,
-			.memoryTypeIndex = findMemoryType(mem_requirements.memoryTypeBits, properties)
-		};
-		image_memory = vk::raii::DeviceMemory(device, alloc_info);
-		image.bindMemory(*image_memory, 0); // offset 0
-	}
-
-	vk::raii::ImageView VeDevice::createImageView(
-			vk::raii::Image& image,
-			vk::Format format,
-			vk::ImageAspectFlags aspect_flags) {
-
-		assert(*image != VK_NULL_HANDLE && "Image must be valid when creating image view");
-		vk::ImageViewCreateInfo view_info {
-			.sType = vk::StructureType::eImageViewCreateInfo,
-			.image = *image,
-			.viewType = vk::ImageViewType::e2D,
-			.format = format,
-			.subresourceRange = vk::ImageSubresourceRange {
-				.aspectMask = aspect_flags,
-				.baseMipLevel = 0,
-				.levelCount = 1,
-				.baseArrayLayer = 0,
-				.layerCount = 1
-			}
-		};
-		return vk::raii::ImageView(device, view_info);
-	}
-
 	// sharing mode is hardcoded exclusive for now
 	void VeDevice::createBuffer(
 			vk::DeviceSize size,
@@ -481,24 +419,36 @@ namespace ve {
 
 	void VeDevice::copyBuffer(vk::raii::Buffer& src_buffer, vk::raii::Buffer& dst_buffer, vk::DeviceSize size) {
 		assert(size > 0 && "Buffer size must be greater than zero");
-		vk::CommandBufferAllocateInfo alloc_info {
+		assert(*src_buffer != VK_NULL_HANDLE && "Source buffer must be valid");
+		assert(*dst_buffer != VK_NULL_HANDLE && "Destination buffer must be valid");
+		vk::raii::CommandBuffer cmd = beginSingleTimeCommands(QueueKind::Transfer);
+		cmd.copyBuffer(*src_buffer, *dst_buffer, vk::BufferCopy{ 0, 0, size });
+		endSingleTimeCommands(cmd, QueueKind::Transfer);
+	}
+
+	// Single-time command buffer helpers (queue-selectable)
+	vk::raii::CommandBuffer VeDevice::beginSingleTimeCommands(QueueKind kind) {
+		vk::CommandPool pool = (kind == QueueKind::Graphics) ? *command_pool : *command_pool_transfer;
+		vk::CommandBufferAllocateInfo alloc_info{
 			.sType = vk::StructureType::eCommandBufferAllocateInfo,
-			.commandPool = *command_pool_transfer,
+			.commandPool = pool,
 			.level = vk::CommandBufferLevel::ePrimary,
 			.commandBufferCount = 1
 		};
-		vk::raii::CommandBuffer command_copy_buffer = std::move(device.allocateCommandBuffers(alloc_info).front());
+		vk::raii::CommandBuffer cmd = std::move(device.allocateCommandBuffers(alloc_info).front());
+		cmd.begin(vk::CommandBufferBeginInfo{ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+		return cmd;
+	}
 
-		// Inform the command buffer we will only use it once
-		command_copy_buffer.begin(vk::CommandBufferBeginInfo{ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
-		command_copy_buffer.copyBuffer(*src_buffer, *dst_buffer, vk::BufferCopy{ 0, 0, size });
-		command_copy_buffer.end();
-
-		vk::SubmitInfo submit_info {
-			.commandBufferCount = 1,
-			.pCommandBuffers = &*command_copy_buffer
-		};
-		transfer_queue.submit(submit_info);
-		transfer_queue.waitIdle();
+	void VeDevice::endSingleTimeCommands(vk::raii::CommandBuffer& cmd, QueueKind kind) {
+		cmd.end();
+		vk::SubmitInfo submit_info{ .commandBufferCount = 1, .pCommandBuffers = &*cmd };
+		if (kind == QueueKind::Graphics) {
+			queue.submit(submit_info);
+			queue.waitIdle();
+		} else {
+			transfer_queue.submit(submit_info);
+			transfer_queue.waitIdle();
+		}
 	}
 }

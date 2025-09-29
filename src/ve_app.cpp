@@ -106,7 +106,6 @@ namespace ve {
 	}
 
 	void VeApp::createCommandBuffers() {
-		// Allocate a single command buffer for now
 		vk::CommandBufferAllocateInfo alloc_info{
 			.sType = vk::StructureType::eCommandBufferAllocateInfo,
 			.commandPool = *ve_device.getCommandPool(),
@@ -115,146 +114,6 @@ namespace ve {
 		};
 		command_buffers = vk::raii::CommandBuffers(ve_device.getDevice(), alloc_info);
 		assert(command_buffers.size() == ve::MAX_FRAMES_IN_FLIGHT && "Failed to allocate command buffers");
-	}
-
-	// Record commands into the command buffer for the given image index.
-	// Uses barriers to transition image layouts before and after rendering.
-	void VeApp::recordCommandBuffer(uint32_t image_index) {
-		auto extent = ve_swap_chain->getSwapChainExtent();
-		auto height = extent.height;
-		auto width = extent.width;
-		uint32_t current_frame = ve_swap_chain->getCurrentFrame();
-		assert(current_frame < command_buffers.size() && "Current frame index out of bounds");
-		assert(image_index < ve_swap_chain->getImageCount() && "Image index out of bounds");
-
-		command_buffers[current_frame].begin({});
-		// Transition the swap chain image to eColorAttachmentOptimal
-		transitionImageLayout(
-			image_index,
-			vk::ImageLayout::eUndefined,
-			vk::ImageLayout::eColorAttachmentOptimal,
-			{},
-			vk::AccessFlagBits2::eColorAttachmentWrite,
-			vk::PipelineStageFlagBits2::eTopOfPipe,
-			vk::PipelineStageFlagBits2::eColorAttachmentOutput
-		);
-
-		// Transition depth image layout, TODO add function for this
-        vk::ImageMemoryBarrier2 depth_barrier = {
-            .srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe,
-            .srcAccessMask = {},
-            .dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
-            .dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-            .oldLayout = vk::ImageLayout::eUndefined,
-            .newLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = ve_swap_chain->getDepthImage(),
-            .subresourceRange = {
-                .aspectMask = vk::ImageAspectFlagBits::eDepth,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1
-            }
-        };
-        vk::DependencyInfo depth_dependency_info = {
-            .dependencyFlags = {},
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &depth_barrier
-        };
-        command_buffers[current_frame].pipelineBarrier2(depth_dependency_info);
-
-		// Setup dynamic rendering info
-		vk::RenderingAttachmentInfo attachment_info = {
-			.imageView = ve_swap_chain->getSwapChainImageViews()[image_index],
-			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-			.loadOp = vk::AttachmentLoadOp::eClear,
-			.storeOp = vk::AttachmentStoreOp::eStore,
-			.clearValue = vk::ClearColorValue(0.01f, 0.01f, 0.01f, 1.0f)
-		};
-		vk::RenderingAttachmentInfo depth_attachment_info = {
-			.imageView = ve_swap_chain->getDepthImageView(),
-			.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-			.loadOp = vk::AttachmentLoadOp::eClear,
-			.storeOp = vk::AttachmentStoreOp::eDontCare,
-			.clearValue = vk::ClearDepthStencilValue(1.0f, 0)
-		};
-		vk::RenderingInfo rendering_info = {
-			.renderArea = { .offset = { 0, 0 }, .extent = extent },
-			.layerCount = 1,
-			.colorAttachmentCount = 1,
-			.pColorAttachments = &attachment_info,
-			.pDepthAttachment = &depth_attachment_info
-		};
-
-		// Begin dynamic rendering
-		command_buffers[current_frame].beginRendering(rendering_info);
-		command_buffers[current_frame].bindPipeline(vk::PipelineBindPoint::eGraphics, ve_pipeline->getPipeline());
-		command_buffers[current_frame].setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f));
-		command_buffers[current_frame].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), extent));
-		ve_model->bindVertexBuffer(command_buffers[current_frame]);
-		ve_model->bindIndexBuffer(command_buffers[current_frame]);
-		command_buffers[current_frame].bindDescriptorSets(
-			vk::PipelineBindPoint::eGraphics,
-			*pipeline_layout,
-			0,
-			*descriptor_sets[current_frame],
-			{}
-		);
-		ve_model->drawIndexed(command_buffers[current_frame]);
-		command_buffers[current_frame].endRendering();
-
-		// After rendering, transition swap chain image to presentation
-		transitionImageLayout(
-			image_index,
-			vk::ImageLayout::eColorAttachmentOptimal,
-			vk::ImageLayout::ePresentSrcKHR,
-			vk::AccessFlagBits2::eColorAttachmentWrite,
-			{},
-			vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-			vk::PipelineStageFlagBits2::eBottomOfPipe
-		);
-		command_buffers[current_frame].end();
-	}
-
-	// Transition the image layout of the given swap chain image using
-	// pipeline barriers to ensure proper synchronization
-	void VeApp::transitionImageLayout(
-				uint32_t image_index,
-				vk::ImageLayout old_layout,
-				vk::ImageLayout new_layout,
-				vk::AccessFlags2 src_access_mask,
-				vk::AccessFlags2 dst_access_mask,
-				vk::PipelineStageFlags2 src_stage_mask,
-				vk::PipelineStageFlags2 dst_stage_mask) {
-
-		assert(image_index < ve_swap_chain->getImageCount() && "Image index out of bounds");
-		vk::ImageMemoryBarrier2 barrier = {
-			.srcStageMask = src_stage_mask,
-			.srcAccessMask = src_access_mask,
-			.dstStageMask = dst_stage_mask,
-			.dstAccessMask = dst_access_mask,
-			.oldLayout = old_layout,
-			.newLayout = new_layout,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = ve_swap_chain->getSwapChainImages()[image_index],
-			.subresourceRange = {
-				.aspectMask = vk::ImageAspectFlagBits::eColor,
-				.baseMipLevel = 0,
-				.levelCount = 1,
-				.baseArrayLayer = 0,
-				.layerCount = 1
-			}
-		};
-		vk::DependencyInfo dependency_info = {
-			.dependencyFlags = {},
-			.imageMemoryBarrierCount = 1,
-			.pImageMemoryBarriers = &barrier
-		};
-		uint32_t current_frame = ve_swap_chain->getCurrentFrame();
-		command_buffers[current_frame].pipelineBarrier2(dependency_info);
 	}
 
 	void VeApp::recreateSwapChain() {
@@ -418,6 +277,83 @@ namespace ve {
 
 		// Update FPS counter and window title roughly once per second
 		updateFpsWindowTitle();
+	}
+
+	// Record commands into the command buffer for the given image index.
+	// Uses barriers to transition image layouts before and after rendering.
+	void VeApp::recordCommandBuffer(uint32_t image_index) {
+		auto extent = ve_swap_chain->getSwapChainExtent();
+		auto height = extent.height;
+		auto width = extent.width;
+		uint32_t current_frame = ve_swap_chain->getCurrentFrame();
+		assert(current_frame < command_buffers.size() && "Current frame index out of bounds");
+		assert(image_index < ve_swap_chain->getImageCount() && "Image index out of bounds");
+
+		command_buffers[current_frame].begin({});
+		// Transition the swap chain image to eColorAttachmentOptimal
+		ve_swap_chain->transitionImageLayout(
+			command_buffers[current_frame],
+			image_index,
+			vk::ImageLayout::eUndefined,
+			vk::ImageLayout::eColorAttachmentOptimal,
+			{},
+			vk::AccessFlagBits2::eColorAttachmentWrite,
+			vk::PipelineStageFlagBits2::eTopOfPipe,
+			vk::PipelineStageFlagBits2::eColorAttachmentOutput
+		);
+
+		// Setup dynamic rendering info
+		vk::RenderingAttachmentInfo attachment_info = {
+			.imageView = ve_swap_chain->getSwapChainImageViews()[image_index],
+			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+			.loadOp = vk::AttachmentLoadOp::eClear,
+			.storeOp = vk::AttachmentStoreOp::eStore,
+			.clearValue = vk::ClearColorValue(0.01f, 0.01f, 0.01f, 1.0f)
+		};
+		vk::RenderingAttachmentInfo depth_attachment_info = {
+			.imageView = *ve_swap_chain->getDepthImageView(),
+			.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+			.loadOp = vk::AttachmentLoadOp::eClear,
+			.storeOp = vk::AttachmentStoreOp::eDontCare,
+			.clearValue = vk::ClearDepthStencilValue(1.0f, 0)
+		};
+		vk::RenderingInfo rendering_info = {
+			.renderArea = { .offset = { 0, 0 }, .extent = extent },
+			.layerCount = 1,
+			.colorAttachmentCount = 1,
+			.pColorAttachments = &attachment_info,
+			.pDepthAttachment = &depth_attachment_info
+		};
+
+		// Begin dynamic rendering
+		command_buffers[current_frame].beginRendering(rendering_info);
+		command_buffers[current_frame].bindPipeline(vk::PipelineBindPoint::eGraphics, ve_pipeline->getPipeline());
+		command_buffers[current_frame].setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f));
+		command_buffers[current_frame].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), extent));
+		ve_model->bindVertexBuffer(command_buffers[current_frame]);
+		ve_model->bindIndexBuffer(command_buffers[current_frame]);
+		command_buffers[current_frame].bindDescriptorSets(
+			vk::PipelineBindPoint::eGraphics,
+			*pipeline_layout,
+			0,
+			*descriptor_sets[current_frame],
+			{}
+		);
+		ve_model->drawIndexed(command_buffers[current_frame]);
+		command_buffers[current_frame].endRendering();
+
+		// After rendering, transition swap chain image to presentation
+		ve_swap_chain->transitionImageLayout(
+			command_buffers[current_frame],
+			image_index,
+			vk::ImageLayout::eColorAttachmentOptimal,
+			vk::ImageLayout::ePresentSrcKHR,
+			vk::AccessFlagBits2::eColorAttachmentWrite,
+			{},
+			vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+			vk::PipelineStageFlagBits2::eBottomOfPipe
+		);
+		command_buffers[current_frame].end();
 	}
 
 	void VeApp::updateFpsWindowTitle() {
