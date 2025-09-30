@@ -2,7 +2,7 @@
 #include <ve_window.hpp>
 #include <ve_device.hpp>
 #include <ve_pipeline.hpp>
-#include <ve_swap_chain.hpp>
+#include <ve_renderer.hpp>
 #include <ve_config.hpp>
 #include <ve_model.hpp>
 
@@ -39,17 +39,15 @@ namespace ve {
 
 	private:
 		void mainLoop();
-		void cleanup();
 		void loadModels();
 		void createPipeline();
 		void createDescriptorSetLayout();
 		void createPipelineLayout();
-		void createCommandBuffers();
-		void recordCommandBuffer(uint32_t image_index);
-		void drawFrame();
-		void recreateSwapChain();
+
+		void drawFrame(vk::raii::CommandBuffer& command_buffer, uint32_t current_frame);
+
 		void createUniformBuffers();
-		void updateUniformBuffer(uint32_t current_image);
+		void updateUniformBuffer(uint32_t current_frame);
 		void createDescriptorPool();
 		void createDescriptorSets();
 		void updateFpsWindowTitle();
@@ -57,12 +55,12 @@ namespace ve {
 
 		VeWindow ve_window{WIDTH, HEIGHT, "Vulkan Engine!"};
 		VeDevice ve_device{ve_window};
-		std::unique_ptr<VeSwapChain> ve_swap_chain = std::make_unique<VeSwapChain>(ve_device, ve_window.getExtent());
+		VeRenderer ve_renderer{ve_device, ve_window};
 
 		vk::raii::DescriptorSetLayout descriptor_set_layout{nullptr};
 		vk::raii::PipelineLayout pipeline_layout{nullptr};
 		std::unique_ptr<VePipeline> ve_pipeline;
-		std::vector<vk::raii::CommandBuffer> command_buffers;
+
 		std::unique_ptr<VeModel> ve_model;
 
 		std::vector<std::unique_ptr<VeBuffer>> uniform_buffers;

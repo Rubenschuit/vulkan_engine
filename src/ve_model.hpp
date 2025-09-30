@@ -28,10 +28,10 @@ namespace ve {
 		VeModel(const VeModel&) = delete;
 		VeModel& operator=(const VeModel&) = delete;
 
-		void bindVertexBuffer(vk::CommandBuffer commandBuffer);
-		void bindIndexBuffer(vk::CommandBuffer commandBuffer);
-		void draw(vk::CommandBuffer commandBuffer);
-		void drawIndexed(vk::CommandBuffer commandBuffer);
+		void bindVertexBuffer(vk::raii::CommandBuffer& commandBuffer);
+		void bindIndexBuffer(vk::raii::CommandBuffer& commandBuffer);
+		void draw(vk::raii::CommandBuffer& commandBuffer);
+		void drawIndexed(vk::raii::CommandBuffer& commandBuffer);
 
 	private:
 		void createVertexBuffers(const std::vector<Vertex>& vertices);

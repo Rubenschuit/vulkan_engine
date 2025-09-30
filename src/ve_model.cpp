@@ -79,21 +79,21 @@ namespace ve {
 		ve_device.copyBuffer(staging_buffer.getBuffer(), index_buffer->getBuffer(), buffer_size);
 	}
 
-	void VeModel::bindVertexBuffer(vk::CommandBuffer command_buffer) {
+	void VeModel::bindVertexBuffer(vk::raii::CommandBuffer& command_buffer) {
 		vk::Buffer buffers[] = { vertex_buffer->getBuffer() };
 		vk::DeviceSize offsets[] = { 0 };
-		command_buffer.bindVertexBuffers(0, 1, buffers, offsets);
+		command_buffer.bindVertexBuffers(0, buffers, offsets);
 	}
 
-	void VeModel::bindIndexBuffer(vk::CommandBuffer command_buffer) {
+	void VeModel::bindIndexBuffer(vk::raii::CommandBuffer& command_buffer) {
 		command_buffer.bindIndexBuffer(index_buffer->getBuffer(), 0, vk::IndexType::eUint16);
 	}
 
-	void VeModel::draw(vk::CommandBuffer command_buffer) {
+	void VeModel::draw(vk::raii::CommandBuffer& command_buffer) {
 		command_buffer.draw(vertex_count, 1, 0, 0);
 	}
 
-	void VeModel::drawIndexed(vk::CommandBuffer command_buffer) {
+	void VeModel::drawIndexed(vk::raii::CommandBuffer& command_buffer) {
 		command_buffer.drawIndexed(index_count, 1, 0, 0, 0);
 	}
 

@@ -14,7 +14,6 @@ namespace ve {
 		createDescriptorSetLayout();
 		createPipelineLayout();
 		createPipeline();
-		createCommandBuffers();
 		createUniformBuffers();
 		createDescriptorPool();
 		createDescriptorSets();
@@ -26,19 +25,27 @@ namespace ve {
 	void VeApp::run() {
 		//std::cout << "max push constants size: " << ve_device.getDeviceProperties().limits.maxPushConstantsSize << " bytes\n";
 		mainLoop();
-		cleanup();
 	}
 
 	void VeApp::mainLoop() {
 		while (!glfwWindowShouldClose(ve_window.getGLFWwindow())) {
 			glfwPollEvents();
-			drawFrame();
-		}
-		ve_device.getDevice().waitIdle();
-	}
+			auto [result, command_buffer] = ve_renderer.beginFrame();
+			if (result) {
+				// update
+				auto current_frame = ve_renderer.getCurrentFrame();
+				updateUniformBuffer(current_frame);
+				updateFpsWindowTitle();
 
-	void VeApp::cleanup() {
-		// nothing yet
+				//rendering
+				ve_renderer.beginRender(command_buffer);
+				drawFrame(command_buffer, current_frame);
+				ve_renderer.endRender(command_buffer);
+				ve_renderer.endFrame(command_buffer);
+			}
+		}
+		// Ensure device is idle before destroying resources
+		ve_device.getDevice().waitIdle();
 	}
 
 	void VeApp::loadModels() {
@@ -94,7 +101,7 @@ namespace ve {
 		PipelineConfigInfo pipeline_config{};
 		VePipeline::defaultPipelineConfigInfo(pipeline_config);
 		// set formats for dynamic rendering
-		pipeline_config.color_format = ve_swap_chain->getSwapChainImageFormat();
+		pipeline_config.color_format = ve_renderer.getSwapChainImageFormat();
 		assert(pipeline_layout != nullptr && "Pipeline layout is null");
 		pipeline_config.pipeline_layout = pipeline_layout;
 		ve_pipeline = std::make_unique<VePipeline>(
@@ -103,41 +110,6 @@ namespace ve {
 			pipeline_config);
 		assert(ve_pipeline != nullptr && "Failed to create pipeline");
 
-	}
-
-	void VeApp::createCommandBuffers() {
-		vk::CommandBufferAllocateInfo alloc_info{
-			.sType = vk::StructureType::eCommandBufferAllocateInfo,
-			.commandPool = *ve_device.getCommandPool(),
-			.level = vk::CommandBufferLevel::ePrimary,
-			.commandBufferCount = ve::MAX_FRAMES_IN_FLIGHT
-		};
-		command_buffers = vk::raii::CommandBuffers(ve_device.getDevice(), alloc_info);
-		assert(command_buffers.size() == ve::MAX_FRAMES_IN_FLIGHT && "Failed to allocate command buffers");
-	}
-
-	void VeApp::recreateSwapChain() {
-		// Handle minimized window
-		auto extent = ve_window.getExtent();
-		while (extent.width == 0 || extent.height == 0) {
-			extent = ve_window.getExtent();
-			glfwWaitEvents();
-		}
-
-		// Create a new swap chain when device is idle
-		ve_device.getDevice().waitIdle();
-		extent = ve_window.getExtent();
-		if (ve_swap_chain == nullptr) {
-			ve_swap_chain = std::make_unique<VeSwapChain>(ve_device, extent);
-		} else {
-			// Transfer ownership of the existing swap chain to a shared_ptr so the new one
-			// can safely reference it during recreation.
-			std::shared_ptr<VeSwapChain> old_swap_chain{ std::move(ve_swap_chain) };
-			ve_swap_chain = std::make_unique<VeSwapChain>(ve_device, extent, old_swap_chain);
-			if (!old_swap_chain->compareSwapFormats(*ve_swap_chain)) {
-				throw std::runtime_error("Swap chain image (or depth) format has changed!");
-			}
-		}
 	}
 
 	void VeApp::createUniformBuffers() {
@@ -161,9 +133,9 @@ namespace ve {
 		}
 	}
 
-	void VeApp::updateUniformBuffer(uint32_t current_image) {
+	void VeApp::updateUniformBuffer(uint32_t current_frame) {
 		// this assertion saved me a lot of debugging time
-		assert(current_image < uniform_buffers.size() && "Current image index out of bounds");
+		assert(current_frame < uniform_buffers.size() && "Current image index out of bounds");
 
 		// Calculate elapsed time since start of the program
 		static auto start_time = std::chrono::high_resolution_clock::now();
@@ -186,11 +158,11 @@ namespace ve {
 		// Rotate the model, centered at the origin, over time, around the Z axis
 		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 		ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.proj = glm::perspective(glm::radians(45.0f), ve_swap_chain->extentAspectRatio(), 0.1f, 10.0f);
+		ubo.proj = glm::perspective(glm::radians(45.0f), ve_renderer.getExtentAspectRatio(), 0.1f, 10.0f);
 		// GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted.
 		ubo.proj[1][1] *= -1;
 
-		uniform_buffers[current_image]->writeToBuffer(&ubo);
+		uniform_buffers[current_frame]->writeToBuffer(&ubo);
 	}
 
 	void VeApp::createDescriptorPool() {
@@ -237,123 +209,18 @@ namespace ve {
 		}
 	}
 
-	void VeApp::drawFrame() {
-		// Wait until the previous frame is finished
-		ve_swap_chain->waitForFences();
-
-		// Acquire an image from the swap chain
-		uint32_t image_index;
-		auto result = ve_swap_chain->acquireNextImage(&image_index);
-		if (result == vk::Result::eErrorOutOfDateKHR) {
-			recreateSwapChain();
-			return;
-		}
-		if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) {
-			throw std::runtime_error("failed to acquire swap chain image!");
-		}
-
-		// Update
-		uint32_t current_frame = ve_swap_chain->getCurrentFrame();
-		updateUniformBuffer(current_frame);
-
-		// Reset the fence for the current frame
-		ve_swap_chain->resetFences();
-
-		// Record command buffer using the acquired image
-		assert(current_frame < command_buffers.size() && "Current frame index out of bounds");
-		command_buffers[current_frame].reset();
-		recordCommandBuffer(image_index);
-
-		// Submit the command buffer, present the image
-		result = ve_swap_chain->submitAndPresent(*command_buffers[current_frame], &image_index);
-		if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR || ve_window.wasWindowResized()) {
-			ve_window.resetWindowResizedFlag();
-			recreateSwapChain();
-		} else if (result != vk::Result::eSuccess) {
-			throw std::runtime_error("failed to present swap chain image!");
-		}
-		// Advance to the next frame
-		ve_swap_chain->advanceFrame();
-
-		// Update FPS counter and window title roughly once per second
-		updateFpsWindowTitle();
-	}
-
-	// Record commands into the command buffer for the given image index.
-	// Uses barriers to transition image layouts before and after rendering.
-	void VeApp::recordCommandBuffer(uint32_t image_index) {
-		auto extent = ve_swap_chain->getSwapChainExtent();
-		auto height = extent.height;
-		auto width = extent.width;
-		uint32_t current_frame = ve_swap_chain->getCurrentFrame();
-		assert(current_frame < command_buffers.size() && "Current frame index out of bounds");
-		assert(image_index < ve_swap_chain->getImageCount() && "Image index out of bounds");
-
-		command_buffers[current_frame].begin({});
-		// Transition the swap chain image to eColorAttachmentOptimal
-		ve_swap_chain->transitionImageLayout(
-			command_buffers[current_frame],
-			image_index,
-			vk::ImageLayout::eUndefined,
-			vk::ImageLayout::eColorAttachmentOptimal,
-			{},
-			vk::AccessFlagBits2::eColorAttachmentWrite,
-			vk::PipelineStageFlagBits2::eTopOfPipe,
-			vk::PipelineStageFlagBits2::eColorAttachmentOutput
-		);
-
-		// Setup dynamic rendering info
-		vk::RenderingAttachmentInfo attachment_info = {
-			.imageView = ve_swap_chain->getSwapChainImageViews()[image_index],
-			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-			.loadOp = vk::AttachmentLoadOp::eClear,
-			.storeOp = vk::AttachmentStoreOp::eStore,
-			.clearValue = vk::ClearColorValue(0.01f, 0.01f, 0.01f, 1.0f)
-		};
-		vk::RenderingAttachmentInfo depth_attachment_info = {
-			.imageView = *ve_swap_chain->getDepthImageView(),
-			.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-			.loadOp = vk::AttachmentLoadOp::eClear,
-			.storeOp = vk::AttachmentStoreOp::eDontCare,
-			.clearValue = vk::ClearDepthStencilValue(1.0f, 0)
-		};
-		vk::RenderingInfo rendering_info = {
-			.renderArea = { .offset = { 0, 0 }, .extent = extent },
-			.layerCount = 1,
-			.colorAttachmentCount = 1,
-			.pColorAttachments = &attachment_info,
-			.pDepthAttachment = &depth_attachment_info
-		};
-
-		// Begin dynamic rendering
-		command_buffers[current_frame].beginRendering(rendering_info);
-		command_buffers[current_frame].bindPipeline(vk::PipelineBindPoint::eGraphics, ve_pipeline->getPipeline());
-		command_buffers[current_frame].setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f));
-		command_buffers[current_frame].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), extent));
-		ve_model->bindVertexBuffer(command_buffers[current_frame]);
-		ve_model->bindIndexBuffer(command_buffers[current_frame]);
-		command_buffers[current_frame].bindDescriptorSets(
+	void VeApp::drawFrame(vk::raii::CommandBuffer& command_buffer, uint32_t current_frame) {
+		command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, ve_pipeline->getPipeline());
+		ve_model->bindVertexBuffer(command_buffer);
+		ve_model->bindIndexBuffer(command_buffer);
+		command_buffer.bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics,
 			*pipeline_layout,
 			0,
 			*descriptor_sets[current_frame],
 			{}
 		);
-		ve_model->drawIndexed(command_buffers[current_frame]);
-		command_buffers[current_frame].endRendering();
-
-		// After rendering, transition swap chain image to presentation
-		ve_swap_chain->transitionImageLayout(
-			command_buffers[current_frame],
-			image_index,
-			vk::ImageLayout::eColorAttachmentOptimal,
-			vk::ImageLayout::ePresentSrcKHR,
-			vk::AccessFlagBits2::eColorAttachmentWrite,
-			{},
-			vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-			vk::PipelineStageFlagBits2::eBottomOfPipe
-		);
-		command_buffers[current_frame].end();
+		ve_model->drawIndexed(command_buffer);
 	}
 
 	void VeApp::updateFpsWindowTitle() {
