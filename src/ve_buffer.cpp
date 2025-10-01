@@ -1,6 +1,5 @@
 #include "ve_buffer.hpp"
 #include <cassert>
-#include <iostream>
 
 namespace ve {
 	// Aligns instance size to the minimum offset alignment required by the device,

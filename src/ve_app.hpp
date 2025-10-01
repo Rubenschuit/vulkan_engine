@@ -1,16 +1,15 @@
 #pragma once
-#include <ve_window.hpp>
-#include <ve_device.hpp>
-#include <ve_pipeline.hpp>
-#include <ve_renderer.hpp>
-#include <ve_config.hpp>
-#include <ve_model.hpp>
+#include "ve_window.hpp"
+#include "ve_device.hpp"
+#include "ve_pipeline.hpp"
+#include "ve_renderer.hpp"
+#include "ve_config.hpp"
+#include "ve_model.hpp"
+#include "ve_texture.hpp"
 
 #include <memory>
 #include <vector>
-#include <iostream>
-
-#include <glm/gtc/matrix_transform.hpp>
+#include <glm/glm.hpp>
 
 #include <chrono>
 
@@ -44,7 +43,7 @@ namespace ve {
 		void createDescriptorSetLayout();
 		void createPipelineLayout();
 
-		void drawFrame(vk::raii::CommandBuffer& command_buffer, uint32_t current_frame);
+		void drawFrame(vk::raii::CommandBuffer& command_buffer, uint32_t current_frame) const;
 
 		void createUniformBuffers();
 		void updateUniformBuffer(uint32_t current_frame);
@@ -56,6 +55,8 @@ namespace ve {
 		VeWindow ve_window{WIDTH, HEIGHT, "Vulkan Engine!"};
 		VeDevice ve_device{ve_window};
 		VeRenderer ve_renderer{ve_device, ve_window};
+
+		VeTexture texture{ve_device, "../textures/statue.jpeg"};
 
 		vk::raii::DescriptorSetLayout descriptor_set_layout{nullptr};
 		vk::raii::PipelineLayout pipeline_layout{nullptr};

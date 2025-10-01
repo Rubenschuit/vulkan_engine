@@ -20,6 +20,8 @@ namespace ve {
 
 	VeImage::~VeImage() {}
 
+	// Hardcoded:
+	// imageType, extent depth, mip, arraylayers, initlayout, sharingmode, samples, flags
 	void VeImage::createImage() {
 		assert(width > 0 && height > 0 && "Image width and height must be greater than zero");
 		assert(usage != static_cast<vk::ImageUsageFlags>(0) && "Image usage flags must not be empty");
@@ -34,7 +36,7 @@ namespace ve {
 			.tiling = tiling,
 			.initialLayout = vk::ImageLayout::eUndefined,
 			.usage = usage,
-			.sharingMode = vk::SharingMode::eExclusive, // hardcoded exclusive for now
+			.sharingMode = vk::SharingMode::eExclusive,
 			.samples = vk::SampleCountFlagBits::e1,
 			.flags = {}
 		};
@@ -54,7 +56,6 @@ namespace ve {
 	}
 
 	void VeImage::createImageView() {
-
 		assert(*image != VK_NULL_HANDLE && "Image must be valid when creating image view");
 		vk::ImageViewCreateInfo view_info {
 			.sType = vk::StructureType::eImageViewCreateInfo,
@@ -73,8 +74,9 @@ namespace ve {
 		assert(*image_view != VK_NULL_HANDLE && "Failed to create image view");
 	}
 
+	// Hardcoded: src and dst queue family indices to ignored,
+	// subresource range
 	void VeImage::transitionImageLayout(
-		vk::raii::CommandBuffer& command_buffer,
 		vk::ImageLayout old_layout,
 		vk::ImageLayout new_layout,
 		vk::AccessFlags2 src_access_mask,
@@ -83,7 +85,11 @@ namespace ve {
 		vk::PipelineStageFlags2 dst_stage) {
 
 		assert(*image != VK_NULL_HANDLE && "Image must be valid when transitioning image layout");
-
+		QueueKind kind = QueueKind::Graphics;
+		if (usage & vk::ImageUsageFlagBits::eTransferSrc || usage & vk::ImageUsageFlagBits::eTransferDst) {
+			kind = QueueKind::Transfer;
+		}
+		auto command_buffer = ve_device.beginSingleTimeCommands(kind);
 		vk::ImageMemoryBarrier2 barrier = {
 			.srcStageMask = src_stage,
 			.srcAccessMask = src_access_mask,
@@ -107,6 +113,7 @@ namespace ve {
 			.imageMemoryBarrierCount = 1,
 			.pImageMemoryBarriers = &barrier
 		};
-		command_buffer.pipelineBarrier2(dependency_info);
+		command_buffer->pipelineBarrier2(dependency_info);
+		ve_device.endSingleTimeCommands(*command_buffer, kind);
 	}
 } // namespace ve

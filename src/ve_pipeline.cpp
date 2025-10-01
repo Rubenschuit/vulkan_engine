@@ -9,7 +9,7 @@
 namespace ve {
 	VePipeline::VePipeline(
 			VeDevice& ve_device,
-			const std::string& shader_file_path,
+			const char* shader_file_path,
 			const PipelineConfigInfo& config_info) : ve_device(ve_device) {
 		createGraphicsPipeline(shader_file_path, config_info);
 	}
@@ -83,10 +83,10 @@ namespace ve {
 		};
 	}
 
-	std::vector<char> VePipeline::readFile(const std::string& file_path) {
+	std::vector<char> VePipeline::readFile(const char* file_path) {
 		std::ifstream file(file_path, std::ios::ate | std::ios::binary);
 		if (!file.is_open()) {
-			throw std::runtime_error("failed to open file: " + file_path);
+			throw std::runtime_error(std::string("failed to open file: ") + file_path);
 		}
 
 		size_t file_size = static_cast<size_t>(file.tellg());
@@ -99,7 +99,7 @@ namespace ve {
 	}
 
 	void VePipeline::createGraphicsPipeline(
-		const std::string& shader_file_path,
+		const char* shader_file_path,
 		const PipelineConfigInfo& config_info) {
 
 		auto shader_code = readFile(shader_file_path);

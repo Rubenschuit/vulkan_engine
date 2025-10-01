@@ -2,7 +2,6 @@
 
 #include <stdexcept>
 #include <array>
-#include <iostream>
 #include <set>
 #include <limits>
 #include <algorithm>
@@ -145,18 +144,13 @@ namespace ve {
 			vk::ImageAspectFlagBits::eDepth);
 
 		// transition the depth image to be optimal for a depth attachment using a single-time command buffer
-		{
-			auto cmd = ve_device.beginSingleTimeCommands();
-			depth_image->transitionImageLayout(
-				cmd,
-				vk::ImageLayout::eUndefined,
-				vk::ImageLayout::eDepthStencilAttachmentOptimal,
-				{},
-				vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-				vk::PipelineStageFlagBits2::eTopOfPipe,
-				vk::PipelineStageFlagBits2::eEarlyFragmentTests);
-			ve_device.endSingleTimeCommands(cmd);
-		}
+		depth_image->transitionImageLayout(
+			vk::ImageLayout::eUndefined,
+			vk::ImageLayout::eDepthStencilAttachmentOptimal,
+			{},
+			vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+			vk::PipelineStageFlagBits2::eTopOfPipe,
+			vk::PipelineStageFlagBits2::eEarlyFragmentTests);
 	}
 
 	// Create 2 semaphores and 1 fence per frame in flight

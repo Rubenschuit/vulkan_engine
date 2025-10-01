@@ -2,9 +2,7 @@
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-
-
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace ve {
 	VeApp::VeApp() {
@@ -30,8 +28,8 @@ namespace ve {
 	void VeApp::mainLoop() {
 		while (!glfwWindowShouldClose(ve_window.getGLFWwindow())) {
 			glfwPollEvents();
-			auto [result, command_buffer] = ve_renderer.beginFrame();
-			if (result) {
+			if (ve_renderer.beginFrame()) {  // Next image acquired successfully
+				auto& command_buffer = ve_renderer.getCurrentCommandBuffer();
 				// update
 				auto current_frame = ve_renderer.getCurrentFrame();
 				updateUniformBuffer(current_frame);
@@ -70,18 +68,29 @@ namespace ve {
 		ve_model = std::make_unique<VeModel>(ve_device, vertices, indices);
 	}
 
+	// One binding for the uniform buffer, another for the texture sampler
 	void VeApp::createDescriptorSetLayout() {
-		vk::DescriptorSetLayoutBinding binding{
-			.binding = 0,
-			.descriptorType = vk::DescriptorType::eUniformBuffer,
-			.descriptorCount = 1,
-			.stageFlags = vk::ShaderStageFlagBits::eVertex,
-			.pImmutableSamplers = nullptr
+		std::array<vk::DescriptorSetLayoutBinding, 2> bindings = {
+			vk::DescriptorSetLayoutBinding{
+				.binding = 0,
+				.descriptorType = vk::DescriptorType::eUniformBuffer,
+				.descriptorCount = 1,
+				.stageFlags = vk::ShaderStageFlagBits::eVertex,
+				.pImmutableSamplers = nullptr
+			},
+			vk::DescriptorSetLayoutBinding{
+				.binding = 1,
+				.descriptorType = vk::DescriptorType::eCombinedImageSampler,
+				.descriptorCount = 1,
+				.stageFlags = vk::ShaderStageFlagBits::eFragment,
+				.pImmutableSamplers = nullptr
+			}
 		};
+
 		vk::DescriptorSetLayoutCreateInfo layout_info{
 			.flags = {},
-			.bindingCount = 1,
-			.pBindings = &binding
+			.bindingCount = bindings.size(),
+			.pBindings = bindings.data()
 		};
 		descriptor_set_layout = vk::raii::DescriptorSetLayout(ve_device.getDevice(), layout_info);
 	}
@@ -166,19 +175,27 @@ namespace ve {
 	}
 
 	void VeApp::createDescriptorPool() {
-		vk::DescriptorPoolSize pool_size{
-			.type = vk::DescriptorType::eUniformBuffer,
-			.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)
+		std::array<vk::DescriptorPoolSize, 2> pool_sizes {
+			vk::DescriptorPoolSize {
+				.type = vk::DescriptorType::eUniformBuffer,
+				.descriptorCount = MAX_FRAMES_IN_FLIGHT
+			},
+			vk::DescriptorPoolSize {
+				.type = vk::DescriptorType::eCombinedImageSampler,
+				.descriptorCount = MAX_FRAMES_IN_FLIGHT
+			}
 		};
 		vk::DescriptorPoolCreateInfo pool_info{
 			.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
-			.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT),
-			.poolSizeCount = 1,
-			.pPoolSizes = &pool_size
+			.maxSets = MAX_FRAMES_IN_FLIGHT,
+			.poolSizeCount = pool_sizes.size(),
+			.pPoolSizes = pool_sizes.data()
 		};
+
 		descriptor_pool = vk::raii::DescriptorPool(ve_device.getDevice(), pool_info);
 	}
 
+	// Create a descriptor set for each frame in flight
 	void VeApp::createDescriptorSets() {
 		std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, *descriptor_set_layout);
 		vk::DescriptorSetAllocateInfo alloc_info{
@@ -195,21 +212,38 @@ namespace ve {
 				.offset = 0,
 				.range = sizeof(UniformBufferObject)
 			};
-			vk::WriteDescriptorSet descriptor_write{
-				.dstSet = *descriptor_sets[i],
-				.dstBinding = 0,
-				.dstArrayElement = 0,
-				.descriptorCount = 1,
-				.descriptorType = vk::DescriptorType::eUniformBuffer,
-				.pImageInfo = nullptr,
-				.pBufferInfo = &buffer_info,
-				.pTexelBufferView = nullptr
+			vk::DescriptorImageInfo image_info{
+				.sampler = texture.getSampler(),
+				.imageView = texture.getImageView(),
+				.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
 			};
-			ve_device.getDevice().updateDescriptorSets(descriptor_write, {});
+			std::array<vk::WriteDescriptorSet, 2> descriptor_writes = {
+				vk::WriteDescriptorSet {
+					.dstSet = *descriptor_sets[i],
+					.dstBinding = 0,
+					.dstArrayElement = 0,
+					.descriptorCount = 1,
+					.descriptorType = vk::DescriptorType::eUniformBuffer,
+					.pImageInfo = nullptr,
+					.pBufferInfo = &buffer_info,
+					.pTexelBufferView = nullptr
+				},
+				vk::WriteDescriptorSet {
+					.dstSet = *descriptor_sets[i],
+					.dstBinding = 1,
+					.dstArrayElement = 0,
+					.descriptorCount = 1,
+					.descriptorType = vk::DescriptorType::eCombinedImageSampler,
+					.pImageInfo = &image_info,
+					.pBufferInfo = nullptr,
+					.pTexelBufferView = nullptr
+				}
+			};
+			ve_device.getDevice().updateDescriptorSets(descriptor_writes, {});
 		}
 	}
 
-	void VeApp::drawFrame(vk::raii::CommandBuffer& command_buffer, uint32_t current_frame) {
+	void VeApp::drawFrame(vk::raii::CommandBuffer& command_buffer, uint32_t current_frame) const {
 		command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, ve_pipeline->getPipeline());
 		ve_model->bindVertexBuffer(command_buffer);
 		ve_model->bindIndexBuffer(command_buffer);

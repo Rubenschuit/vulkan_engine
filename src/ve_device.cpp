@@ -1,16 +1,12 @@
 #include "ve_device.hpp"
 
-
 // std headers
 #include <cstring>
-#include <set>
-#include <unordered_set>
 #include <ranges>
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
 #include <cstdlib>
-#include <memory>
 #include <cassert>
 
 
@@ -75,14 +71,18 @@ namespace ve {
 			required_layers.assign(validation_layers.begin(), validation_layers.end());
 		}
 
-		// Check if the required layers are supported by the Vulkan implementation.
+		// Check if the required layers are supported by the device
 		auto layer_properties = context.enumerateInstanceLayerProperties();
+		//any_of returns true if any element in the range satisfies the predicate
+		//none_of returns true if no elements in the range satisfy the predicate
+		// Here we check if any of the required layers are in none of the available layers
+		// If so, we throw an error
 		if (std::ranges::any_of(required_layers, [&layer_properties](auto const& required_layer) {
 			return std::ranges::none_of(layer_properties,
 									  [required_layer](auto const& layer_property)
 									  { return strcmp(layer_property.layerName, required_layer) == 0; });})
 		  ) {
-			throw std::runtime_error("One or more required layers are not supported!");
+			throw std::runtime_error("One or more required validation layers are not supported!");
 		}
 
 		std::vector<vk::ExtensionProperties> available_extensions = context.enumerateInstanceExtensionProperties();
@@ -92,22 +92,23 @@ namespace ve {
 		}
 
 		// Get the required instance extensions
-		auto extensions = getRequiredInstanceExtensions();
+		auto required_extensions = getRequiredInstanceExtensions();
 
-		std::cout << extensions.size() << " required extensions:" << std::endl;
-		for (const auto& extension : extensions) {
+		std::cout << required_extensions.size() << " required extensions:" << std::endl;
+		for (const auto& extension : required_extensions) {
 			std::cout << "\t" << extension << std::endl;
 		}
 
 		// Check if the required extensions are supported by the Vulkan implementation.
 		auto extension_properties = context.enumerateInstanceExtensionProperties();
-		for (uint32_t i = 0; i < extensions.size(); ++i)
+		for (uint32_t i = 0; i < required_extensions.size(); ++i)
 		{
+			// If none of the available extensions matches the required extension, throw an error
 			if (std::ranges::none_of(extension_properties,
-								  [extension = extensions[i]](auto const& extension_property)
-								  { return strcmp(extension_property.extensionName, extension) == 0; }))
+								     [req_extension = required_extensions[i]](auto const& extension_property) {
+									  	return strcmp(extension_property.extensionName, req_extension) == 0; }))
 			{
-				throw std::runtime_error("Required extension not supported: " + std::string(extensions[i]));
+				throw std::runtime_error("Required extension not supported: " + std::string(required_extensions[i]));
 			}
 		}
 
@@ -116,8 +117,8 @@ namespace ve {
 			.pApplicationInfo = &appInfo,
 			.enabledLayerCount = static_cast<uint32_t>(required_layers.size()),
 			.ppEnabledLayerNames = required_layers.data(),
-			.enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
-			.ppEnabledExtensionNames = extensions.data()};
+			.enabledExtensionCount = static_cast<uint32_t>(required_extensions.size()),
+			.ppEnabledExtensionNames = required_extensions.data()};
 
 		instance = vk::raii::Instance(context, createInfo);
 	}
@@ -179,6 +180,7 @@ namespace ve {
 
 		// Second, it must have a queue family that supports graphics
 		auto queue_families = p_device.getQueueFamilyProperties();
+		// return an iterator to the first queue family that supports graphics
 		const auto qfp_iter = std::ranges::find_if(queue_families,
 			[](vk::QueueFamilyProperties const& qfp) {
 				return (qfp.queueFlags & vk::QueueFlagBits::eGraphics) != static_cast<vk::QueueFlags>(0);
@@ -190,14 +192,28 @@ namespace ve {
 		// Third, it must support the required device extensions
 		auto d_extensions = p_device.enumerateDeviceExtensionProperties();
 		bool found = true;
-		for (auto const& extension : required_device_extensions) {
-			auto extensionIter = std::ranges::find_if(d_extensions,
-				[extension](auto const& ext) {
-					return strcmp(ext.extensionName, extension) == 0;
+		// For every required device extension, check if it is in the list of available extensions
+		for (auto const& r_extension : required_device_extensions) {
+			auto extension_iter = std::ranges::find_if(d_extensions,
+				[r_extension](auto const& ext) {
+					return strcmp(ext.extensionName, r_extension) == 0;
 				});
-			found = found && extensionIter != d_extensions.end();
+			found = found && (extension_iter != d_extensions.end());
 		}
 		if (!found) {
+			return false;
+		}
+
+		// Todo centralize features to check
+		// Fourth, it must support the required features (anisotropy, dynamic rendering, synchronization2, extended dynamic state)
+		auto features = p_device.getFeatures2<vk::PhysicalDeviceFeatures2,
+											  vk::PhysicalDeviceVulkan11Features,
+											  vk::PhysicalDeviceVulkan13Features,
+											  vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
+		if (!features.get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy ||
+			!features.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering ||
+			!features.get<vk::PhysicalDeviceVulkan13Features>().synchronization2 ||
+			!features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState) {
 			return false;
 		}
 
@@ -225,7 +241,7 @@ namespace ve {
 		}
 		physical_device = *dev_iter;
 
-		// print the name of the selected physical device (optional)
+		// print the name of the selected physical device
 		VkPhysicalDeviceProperties properties = physical_device.getProperties();
 		std::cout << "Using device: " << properties.deviceName << std::endl;
 	}
@@ -246,7 +262,7 @@ namespace ve {
 						   vk::PhysicalDeviceVulkan11Features,
 						   vk::PhysicalDeviceVulkan13Features,
 						   vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> feature_chain = {
-			{},
+			{.features = {.samplerAnisotropy = true}},
 			{.shaderDrawParameters = true},
 			{.dynamicRendering = true, .synchronization2 = true},
 			{.extendedDynamicState = true }
@@ -421,13 +437,37 @@ namespace ve {
 		assert(size > 0 && "Buffer size must be greater than zero");
 		assert(*src_buffer != VK_NULL_HANDLE && "Source buffer must be valid");
 		assert(*dst_buffer != VK_NULL_HANDLE && "Destination buffer must be valid");
-		vk::raii::CommandBuffer cmd = beginSingleTimeCommands(QueueKind::Transfer);
-		cmd.copyBuffer(*src_buffer, *dst_buffer, vk::BufferCopy{ 0, 0, size });
-		endSingleTimeCommands(cmd, QueueKind::Transfer);
+		auto cmd = beginSingleTimeCommands(QueueKind::Transfer);
+		cmd->copyBuffer(*src_buffer, *dst_buffer, vk::BufferCopy{ 0, 0, size });
+		endSingleTimeCommands(*cmd, QueueKind::Transfer);
 	}
 
-	// Single-time command buffer helpers (queue-selectable)
-	vk::raii::CommandBuffer VeDevice::beginSingleTimeCommands(QueueKind kind) {
+	// Assumes the image is already in eTransferDstOptimal layout
+	void VeDevice::copyBufferToImage(vk::raii::Buffer& src_buffer, vk::raii::Image& dst_image, uint32_t width, uint32_t height) {
+		assert(width > 0 && height > 0 && "Image width and height must be greater than zero");
+		assert(*src_buffer != VK_NULL_HANDLE && "Source buffer must be valid");
+		assert(*dst_image != VK_NULL_HANDLE && "Destination image must be valid");
+		assert(src_buffer.getMemoryRequirements().size < dst_image.getMemoryRequirements().size && "Source buffer size is smaller than the image size");
+		auto cmd = beginSingleTimeCommands(QueueKind::Transfer);
+		vk::BufferImageCopy region{
+			.bufferOffset = 0,
+			.bufferRowLength = 0, // tightly packed
+			.bufferImageHeight = 0,
+			.imageSubresource = vk::ImageSubresourceLayers{
+				.aspectMask = vk::ImageAspectFlagBits::eColor,
+				.mipLevel = 0,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			},
+			.imageOffset = vk::Offset3D{0, 0, 0},
+			.imageExtent = vk::Extent3D{width, height, 1}
+		};
+		cmd->copyBufferToImage(*src_buffer, *dst_image, vk::ImageLayout::eTransferDstOptimal, region);
+		endSingleTimeCommands(*cmd, QueueKind::Transfer);
+	}
+
+	// Single-time command buffer helpers (select queue/pool)
+	std::unique_ptr<vk::raii::CommandBuffer> VeDevice::beginSingleTimeCommands(QueueKind kind) {
 		vk::CommandPool pool = (kind == QueueKind::Graphics) ? *command_pool : *command_pool_transfer;
 		vk::CommandBufferAllocateInfo alloc_info{
 			.sType = vk::StructureType::eCommandBufferAllocateInfo,
@@ -435,8 +475,8 @@ namespace ve {
 			.level = vk::CommandBufferLevel::ePrimary,
 			.commandBufferCount = 1
 		};
-		vk::raii::CommandBuffer cmd = std::move(device.allocateCommandBuffers(alloc_info).front());
-		cmd.begin(vk::CommandBufferBeginInfo{ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+		auto cmd = std::make_unique<vk::raii::CommandBuffer>(std::move(vk::raii::CommandBuffers(device, alloc_info).front()));
+		cmd->begin(vk::CommandBufferBeginInfo{ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
 		return cmd;
 	}
 

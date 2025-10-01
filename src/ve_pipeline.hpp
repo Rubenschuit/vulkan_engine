@@ -33,7 +33,7 @@ namespace ve {
 	public:
 		VePipeline(
 			VeDevice&ve_device,
-			const std::string& shader_file_path,
+			const char* shader_file_path,
 			const PipelineConfigInfo& config_info);
 
 		~VePipeline();
@@ -46,10 +46,10 @@ namespace ve {
 		static void defaultPipelineConfigInfo(PipelineConfigInfo& config_info);
 
 	private:
-		static std::vector<char> readFile(const std::string& file_path);
+		static std::vector<char> readFile(const char* file_path);
 
 		void createGraphicsPipeline(
-			const std::string& shader_file_path,
+			const char* shader_file_path,
 			const PipelineConfigInfo& config_info);
 
 		void createShaderModule(const std::vector<char>& code, vk::raii::ShaderModule* shader_module);

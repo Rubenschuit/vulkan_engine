@@ -2,6 +2,8 @@
 
 #include "ve_device.hpp"
 
+// Hardcoded:
+// imageType, extent depth, mip, arraylayers, initlayout, sharingmode, samples, flags
 namespace ve {
 	class VeImage {
 	public:
@@ -29,7 +31,6 @@ namespace ve {
 		vk::Extent2D getExtent2D() const { return vk::Extent2D{ width, height }; }
 
 		void transitionImageLayout(
-			vk::raii::CommandBuffer& command_buffer,
 			vk::ImageLayout old_layout,
 			vk::ImageLayout new_layout,
 			vk::AccessFlags2 src_access_mask,

@@ -24,6 +24,11 @@ target_include_directories(VEngineLib
     $<BUILD_INTERFACE:${Vulkan_INCLUDE_DIRS}>
 )
 
+# Treat third-party headers as system includes to suppress their warnings
+if (STB_PATH)
+  target_include_directories(VEngineLib SYSTEM PUBLIC ${STB_PATH})
+endif()
+
 # Link dependencies
 target_link_libraries(VEngineLib PUBLIC ${GLFW_LIB} ${Vulkan_LIBRARIES})
 target_link_libraries(${PROJECT_NAME} PRIVATE VEngine::Lib)

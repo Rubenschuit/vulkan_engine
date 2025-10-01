@@ -58,12 +58,12 @@ namespace ve {
 			vk::raii::Buffer& buffer,
 			vk::raii::DeviceMemory& buffer_memory);
 		void copyBuffer(vk::raii::Buffer& src_buffer, vk::raii::Buffer& dst_buffer, vk::DeviceSize size);
+		void copyBufferToImage(vk::raii::Buffer& src_buffer, vk::raii::Image& dst_image, uint32_t width, uint32_t height);
 
 		vk::PhysicalDeviceProperties getDeviceProperties() const { return physical_device.getProperties(); }
 
-		enum class QueueKind { Graphics, Transfer };
 		// Single-time command buffer helpers (select queue/pool)
-		vk::raii::CommandBuffer beginSingleTimeCommands(QueueKind kind = QueueKind::Graphics);
+		std::unique_ptr<vk::raii::CommandBuffer> beginSingleTimeCommands(QueueKind kind = QueueKind::Graphics);
 		void endSingleTimeCommands(vk::raii::CommandBuffer& cmd, QueueKind kind = QueueKind::Graphics);
 
 	private:

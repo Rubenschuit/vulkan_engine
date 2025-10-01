@@ -46,7 +46,8 @@ namespace ve {
 		}
 	}
 
-	std::pair<bool, vk::raii::CommandBuffer&> VeRenderer::beginFrame() {
+	// Begin a frame; returns true when a frame is started and command buffer can be used
+	bool VeRenderer::beginFrame() {
 		assert(!is_frame_started && "Can't call beginFrame while already in progress");
 
 		// Wait until the previous frame is finished
@@ -56,7 +57,7 @@ namespace ve {
 		auto result = ve_swap_chain->acquireNextImage(&current_image_index);
 		if (result == vk::Result::eErrorOutOfDateKHR) {
 			recreateSwapChain();
-			return {false, command_buffers[0]}; // return a dummy command buffer reference
+			return false;
 		}
 		if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) {
 			throw std::runtime_error("failed to acquire swap chain image!");
@@ -72,7 +73,7 @@ namespace ve {
 
 		command_buffer.reset();
 		command_buffer.begin({});
-		return {true, command_buffer};
+		return true;
 	}
 
 	void VeRenderer::endFrame(vk::raii::CommandBuffer& command_buffer) {

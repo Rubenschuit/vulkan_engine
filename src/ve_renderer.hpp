@@ -2,11 +2,8 @@
 #include <ve_device.hpp>
 #include <ve_window.hpp>
 #include <ve_swap_chain.hpp>
-#include <ve_config.hpp>
-
 #include <memory>
 #include <vector>
-#include <iostream>
 
 
 namespace ve {
@@ -31,7 +28,9 @@ namespace ve {
 			return command_buffers[ve_swap_chain->getCurrentFrame()];
 		}
 
-		std::pair<bool, vk::raii::CommandBuffer&> beginFrame();
+		// Begin a new frame. Returns true if a frame was acquired and recording can start.
+		// When false is returned (e.g. swap chain out of date), no command buffer is valid for use.
+		bool beginFrame();
 		void endFrame(vk::raii::CommandBuffer& command_buffer);
 
 		void beginRender(vk::raii::CommandBuffer& command_buffer);
