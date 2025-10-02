@@ -56,9 +56,13 @@ namespace ve {
 		vk::raii::DescriptorPool descriptor_pool = nullptr;
 		std::vector<vk::raii::DescriptorSet> descriptor_sets;
 
-		// FPS tracking
-		std::chrono::high_resolution_clock::time_point fps_last_time{std::chrono::high_resolution_clock::now()};
+		// FPS/frametime tracking
+		using clock = std::chrono::steady_clock;
+		clock::time_point last_frame_time{clock::now()};
+		clock::time_point fps_window_start{clock::now()};
 		uint32_t fps_frame_count{0};
+		double sum_frame_ms{0.0};
+		double last_frame_ms{0.0};
 
 	};
 }

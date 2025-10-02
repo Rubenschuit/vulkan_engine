@@ -37,7 +37,7 @@ namespace ve {
 				VeFrameInfo frame_info{
 					.global_descriptor_set = descriptor_sets[current_frame],
 					.command_buffer = command_buffer,
-					.ve_model = *ve_model
+					.ve_model = *ve_model,
 				};
 
 				// update
@@ -64,16 +64,10 @@ namespace ve {
 			{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
 			{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
 			{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
-
-			{{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-			{{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-			{{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-			{{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
 		};
 
 		const std::vector<uint16_t> indices = {
-			0, 1, 2, 2, 3, 0,
-			4, 5, 6, 6, 7, 4
+			0, 1, 2, 2, 3, 0
 		};
 
 		ve_model = std::make_unique<VeModel>(ve_device, vertices, indices);
@@ -223,25 +217,34 @@ namespace ve {
 		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 		ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 		ubo.proj = glm::perspective(glm::radians(45.0f), ve_renderer.getExtentAspectRatio(), 0.1f, 10.0f);
-		// GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted.
+		// GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted
 		ubo.proj[1][1] *= -1;
+		float x = time;
+		ubo.offset = glm::vec2(2.0f * glm::sin(x), 2.0f * glm::cos(x ) - 1.0f);
 
 		uniform_buffers[current_frame]->writeToBuffer(&ubo);
 	}
 
 	void VeApp::updateFpsWindowTitle() {
-		using clock = std::chrono::high_resolution_clock;
-		fps_frame_count++;
+		// Per-frame delta using steady clock
 		auto now = clock::now();
-		auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - fps_last_time);
-		if (elapsed.count() >= 1000) {
-			// Compute FPS and update title
-			double fps = static_cast<double>(fps_frame_count) * 1000.0 / static_cast<double>(elapsed.count());
-			std::string title = std::string("Vulkan Engine!  ") + std::to_string(static_cast<int>(fps)) + " FPS";
-			glfwSetWindowTitle(ve_window.getGLFWwindow(), title.c_str());
-			// Reset
+		last_frame_ms = std::chrono::duration<double, std::milli>(now - last_frame_time).count();
+		last_frame_time = now;
+
+		// Accumulate into a 1-second window
+		sum_frame_ms += last_frame_ms;
+		fps_frame_count++;
+		auto window_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - fps_window_start).count();
+		if (window_ms >= 1000) {
+			double fps = (window_ms > 0) ? (1000.0 * static_cast<double>(fps_frame_count) / static_cast<double>(window_ms)) : 0.0;
+			double avg_ms = (fps_frame_count > 0) ? (sum_frame_ms / static_cast<double>(fps_frame_count)) : 0.0;
+			char buf[128];
+			snprintf(buf, sizeof(buf), "Vulkan Engine!  %d FPS  %.2f ms", static_cast<int>(fps), avg_ms);
+			glfwSetWindowTitle(ve_window.getGLFWwindow(), buf);
+			// Reset window counters
 			fps_frame_count = 0;
-			fps_last_time = now;
+			sum_frame_ms = 0.0;
+			fps_window_start = now;
 		}
 	}
 }

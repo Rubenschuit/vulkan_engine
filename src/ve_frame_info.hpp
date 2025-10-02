@@ -12,11 +12,13 @@ namespace ve {
 		glm::mat4 model;
 		glm::mat4 view;
 		glm::mat4 proj;
+		alignas(16) glm::vec2 offset;
 	};
 
 	struct VeFrameInfo {
 		vk::raii::DescriptorSet& global_descriptor_set;
 		vk::raii::CommandBuffer& command_buffer;
 		VeModel& ve_model;
+		float frame_time;
 	};
 }
