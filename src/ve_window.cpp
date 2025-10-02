@@ -1,3 +1,4 @@
+#include "pch.hpp"
 #include "ve_window.hpp"
 
 #include <stdexcept>

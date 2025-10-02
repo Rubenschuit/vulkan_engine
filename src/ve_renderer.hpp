@@ -1,3 +1,5 @@
+/* VeRenderer provides methods to to render the current frame.
+   It manages the swap chain and command buffers. */
 #pragma once
 #include <ve_device.hpp>
 #include <ve_window.hpp>

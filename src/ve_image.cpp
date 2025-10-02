@@ -1,3 +1,4 @@
+#include "pch.hpp"
 #include "ve_image.hpp"
 
 namespace ve {

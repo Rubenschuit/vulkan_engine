@@ -1,3 +1,4 @@
+#include "pch.hpp"
 #include "ve_swap_chain.hpp"
 
 #include <stdexcept>

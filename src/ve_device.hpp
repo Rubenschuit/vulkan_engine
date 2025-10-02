@@ -1,3 +1,9 @@
+/* This class is responsible for creating and managing the Vulkan device
+   and its associated resources, such as the command pool and queues.
+   It selects the appropriate physical device and creates a logical device.
+   It also sets up validation layers if enabled. Moreover it provides
+   methods for creating and managing Vulkan resources, such as buffers and images.
+   There are also methods for submitting single time command buffers to a queue. */
 #pragma once
 
 #include "ve_window.hpp"

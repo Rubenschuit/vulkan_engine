@@ -1,3 +1,4 @@
+/* VeWindow is responsible for creating and managing a GLFW window. */
 #pragma once
 
 #define GLFW_INCLUDE_VULKAN

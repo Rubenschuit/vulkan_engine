@@ -1,3 +1,6 @@
+/* VeSwapChain is responsible for managing the swap chain and
+   its associated resources. This includes image views, depth
+   resources and synchronization objects. */
 #pragma once
 
 #include "ve_device.hpp"
@@ -53,8 +56,9 @@ namespace ve {
 		void advanceFrame();
 
 		bool compareSwapFormats(const VeSwapChain& other) const {
-			return (other.swap_chain_image_format == swap_chain_image_format);
-			// todo probably need to add more here in the future, for example depth format
+			return (other.swap_chain_image_format == swap_chain_image_format &&
+					other.depth_image->getFormat() == depth_image->getFormat());
+
 		};
 
 	private:

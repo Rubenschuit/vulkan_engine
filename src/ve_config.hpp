@@ -5,7 +5,7 @@
 #include <vulkan/vulkan_beta.h> // for VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
 
 namespace ve {
-	constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+	constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
 
 	// Central list of required Vulkan device extensions
 	inline const std::vector<const char*> REQUIRED_DEVICE_EXTENSIONS = {

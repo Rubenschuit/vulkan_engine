@@ -1,3 +1,4 @@
+/* VeImage is an encapsulation of a Vulkan image and its associated resources. */
 #pragma once
 
 #include "ve_device.hpp"

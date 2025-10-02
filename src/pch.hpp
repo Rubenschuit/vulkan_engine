@@ -5,8 +5,12 @@
 // Only put headers that are: (1) widely used, (2) rarely changed.
 
 // Vulkan-Hpp configuration macros must appear before including <vulkan/...>
+#ifndef VULKAN_HPP_ENABLE_RAII
 #define VULKAN_HPP_ENABLE_RAII
+#endif
+#ifndef VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
+#endif
 
 #include <vulkan/vulkan_raii.hpp>
 

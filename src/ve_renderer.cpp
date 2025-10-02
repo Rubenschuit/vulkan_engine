@@ -1,3 +1,4 @@
+#include "pch.hpp"
 #include "ve_renderer.hpp"
 
 #include <stdexcept>
@@ -42,6 +43,7 @@ namespace ve {
 			ve_swap_chain = std::make_unique<VeSwapChain>(ve_device, extent, old_swap_chain);
 			if (!old_swap_chain->compareSwapFormats(*ve_swap_chain)) {
 				throw std::runtime_error("Swap chain image (or depth) format has changed!");
+				// Todo: Handle swap chain format changes (e.g. recreate pipelines)
 			}
 		}
 	}

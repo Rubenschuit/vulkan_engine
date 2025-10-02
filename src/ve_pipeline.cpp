@@ -1,3 +1,4 @@
+#include "pch.hpp"
 #include "ve_pipeline.hpp"
 #include "ve_device.hpp"
 #include "ve_model.hpp"

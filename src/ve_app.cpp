@@ -1,4 +1,6 @@
+#include "pch.hpp"
 #include "ve_app.hpp"
+#include "simple_render_system.hpp"
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -10,15 +12,12 @@ namespace ve {
 
 		loadModels();
 		createDescriptorSetLayout();
-		createPipelineLayout();
-		createPipeline();
 		createUniformBuffers();
 		createDescriptorPool();
 		createDescriptorSets();
 	}
 
-	VeApp::~VeApp() {
-	}
+	VeApp::~VeApp() {}
 
 	void VeApp::run() {
 		//std::cout << "max push constants size: " << ve_device.getDeviceProperties().limits.maxPushConstantsSize << " bytes\n";
@@ -26,18 +25,30 @@ namespace ve {
 	}
 
 	void VeApp::mainLoop() {
+		SimpleRenderSystem simple_render_system(ve_device, descriptor_set_layout, ve_renderer.getSwapChainImageFormat());
+
 		while (!glfwWindowShouldClose(ve_window.getGLFWwindow())) {
 			glfwPollEvents();
 			if (ve_renderer.beginFrame()) {  // Next image acquired successfully
+
+				// Setup frame info
 				auto& command_buffer = ve_renderer.getCurrentCommandBuffer();
-				// update
 				auto current_frame = ve_renderer.getCurrentFrame();
+				VeFrameInfo frame_info{
+					.global_descriptor_set = descriptor_sets[current_frame],
+					.command_buffer = command_buffer,
+					.ve_model = *ve_model
+				};
+
+				// update
 				updateUniformBuffer(current_frame);
 				updateFpsWindowTitle();
 
 				//rendering
 				ve_renderer.beginRender(command_buffer);
-				drawFrame(command_buffer, current_frame);
+
+				simple_render_system.drawFrame(frame_info);
+
 				ve_renderer.endRender(command_buffer);
 				ve_renderer.endFrame(command_buffer);
 			}
@@ -95,32 +106,6 @@ namespace ve {
 		descriptor_set_layout = vk::raii::DescriptorSetLayout(ve_device.getDevice(), layout_info);
 	}
 
-	void VeApp::createPipelineLayout() {
-		vk::PipelineLayoutCreateInfo pipeline_layout_info{
-			.sType = vk::StructureType::ePipelineLayoutCreateInfo,
-			.setLayoutCount = 1,
-			.pSetLayouts = &*descriptor_set_layout,
-			.pushConstantRangeCount = 0,
-			.pPushConstantRanges = nullptr
-		};
-		pipeline_layout = vk::raii::PipelineLayout(ve_device.getDevice(), pipeline_layout_info);
-	}
-
-	void VeApp::createPipeline() {
-		PipelineConfigInfo pipeline_config{};
-		VePipeline::defaultPipelineConfigInfo(pipeline_config);
-		// set formats for dynamic rendering
-		pipeline_config.color_format = ve_renderer.getSwapChainImageFormat();
-		assert(pipeline_layout != nullptr && "Pipeline layout is null");
-		pipeline_config.pipeline_layout = pipeline_layout;
-		ve_pipeline = std::make_unique<VePipeline>(
-			ve_device,
-			"../shaders/simple_shader.spv",
-			pipeline_config);
-		assert(ve_pipeline != nullptr && "Failed to create pipeline");
-
-	}
-
 	void VeApp::createUniformBuffers() {
 		vk::DeviceSize buffer_size = sizeof(UniformBufferObject);
 		assert(buffer_size > 0 && "Uniform buffer size is zero");
@@ -140,38 +125,6 @@ namespace ve {
 			));
 			uniform_buffers[i]->map();
 		}
-	}
-
-	void VeApp::updateUniformBuffer(uint32_t current_frame) {
-		// this assertion saved me a lot of debugging time
-		assert(current_frame < uniform_buffers.size() && "Current image index out of bounds");
-
-		// Calculate elapsed time since start of the program
-		static auto start_time = std::chrono::high_resolution_clock::now();
-		auto current_time = std::chrono::high_resolution_clock::now();
-    	float time = std::chrono::duration<float, std::chrono::seconds::period>(current_time - start_time).count();
-
-		UniformBufferObject ubo{};
-		// Coordinate system explanation:
-		//  Camera is at (2,2,2), looking at the origin (0,0,0)
-		//
-		//		+Y (up)
-		//		^
-		//		|
-		//		|
-		//		O------> +X (right)
-		//	   /
-		//	  /
-		//	+Z
-
-		// Rotate the model, centered at the origin, over time, around the Z axis
-		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.proj = glm::perspective(glm::radians(45.0f), ve_renderer.getExtentAspectRatio(), 0.1f, 10.0f);
-		// GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted.
-		ubo.proj[1][1] *= -1;
-
-		uniform_buffers[current_frame]->writeToBuffer(&ubo);
 	}
 
 	void VeApp::createDescriptorPool() {
@@ -195,7 +148,7 @@ namespace ve {
 		descriptor_pool = vk::raii::DescriptorPool(ve_device.getDevice(), pool_info);
 	}
 
-	// Create a descriptor set for each frame in flight
+	// Create a descriptor set for each frame in flight and then write the buffer and image info to it
 	void VeApp::createDescriptorSets() {
 		std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, *descriptor_set_layout);
 		vk::DescriptorSetAllocateInfo alloc_info{
@@ -239,22 +192,41 @@ namespace ve {
 					.pTexelBufferView = nullptr
 				}
 			};
+			// Update the descriptor sets with the buffer and image info
 			ve_device.getDevice().updateDescriptorSets(descriptor_writes, {});
 		}
 	}
 
-	void VeApp::drawFrame(vk::raii::CommandBuffer& command_buffer, uint32_t current_frame) const {
-		command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, ve_pipeline->getPipeline());
-		ve_model->bindVertexBuffer(command_buffer);
-		ve_model->bindIndexBuffer(command_buffer);
-		command_buffer.bindDescriptorSets(
-			vk::PipelineBindPoint::eGraphics,
-			*pipeline_layout,
-			0,
-			*descriptor_sets[current_frame],
-			{}
-		);
-		ve_model->drawIndexed(command_buffer);
+		void VeApp::updateUniformBuffer(uint32_t current_frame) {
+		// this assertion saved me a lot of debugging time
+		assert(current_frame < uniform_buffers.size() && "Current image index out of bounds");
+
+		// Calculate elapsed time since start of the program
+		static auto start_time = std::chrono::high_resolution_clock::now();
+		auto current_time = std::chrono::high_resolution_clock::now();
+    	float time = std::chrono::duration<float, std::chrono::seconds::period>(current_time - start_time).count();
+
+		UniformBufferObject ubo{};
+		// Coordinate system explanation:
+		//  Camera is at (2,2,2), looking at the origin (0,0,0)
+		//
+		//		+Y (up)
+		//		^
+		//		|
+		//		|
+		//		O------> +X (right)
+		//	   /
+		//	  /
+		//	+Z
+
+		// Rotate the model, centered at the origin, over time, around the Z axis
+		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.proj = glm::perspective(glm::radians(45.0f), ve_renderer.getExtentAspectRatio(), 0.1f, 10.0f);
+		// GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted.
+		ubo.proj[1][1] *= -1;
+
+		uniform_buffers[current_frame]->writeToBuffer(&ubo);
 	}
 
 	void VeApp::updateFpsWindowTitle() {

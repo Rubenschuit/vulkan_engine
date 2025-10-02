@@ -1,3 +1,5 @@
+/* The VeTexture class is responsible for loading texture images
+   and creating Vulkan image resources. */
 #pragma once
 
 #include "ve_device.hpp"

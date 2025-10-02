@@ -1,11 +1,11 @@
 #pragma once
 #include "ve_window.hpp"
 #include "ve_device.hpp"
-#include "ve_pipeline.hpp"
 #include "ve_renderer.hpp"
 #include "ve_config.hpp"
 #include "ve_model.hpp"
 #include "ve_texture.hpp"
+#include "ve_frame_info.hpp"
 
 #include <memory>
 #include <vector>
@@ -15,12 +15,6 @@
 
 
 namespace ve {
-
-	struct UniformBufferObject {
-		glm::mat4 model;
-		glm::mat4 view;
-		glm::mat4 proj;
-	};
 
 	class VeApp {
 	public:
@@ -39,16 +33,12 @@ namespace ve {
 	private:
 		void mainLoop();
 		void loadModels();
-		void createPipeline();
 		void createDescriptorSetLayout();
-		void createPipelineLayout();
-
-		void drawFrame(vk::raii::CommandBuffer& command_buffer, uint32_t current_frame) const;
-
 		void createUniformBuffers();
-		void updateUniformBuffer(uint32_t current_frame);
 		void createDescriptorPool();
 		void createDescriptorSets();
+
+		void updateUniformBuffer(uint32_t current_frame);
 		void updateFpsWindowTitle();
 
 
@@ -59,8 +49,6 @@ namespace ve {
 		VeTexture texture{ve_device, "../textures/statue.jpeg"};
 
 		vk::raii::DescriptorSetLayout descriptor_set_layout{nullptr};
-		vk::raii::PipelineLayout pipeline_layout{nullptr};
-		std::unique_ptr<VePipeline> ve_pipeline;
 
 		std::unique_ptr<VeModel> ve_model;
 

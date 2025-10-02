@@ -1,3 +1,5 @@
+/* This class manages the creation and configuration of Vulkan pipelines.
+   It also creates the necessary shader modules. */
 # pragma once
 
 #include <vulkan/vulkan_raii.hpp>
