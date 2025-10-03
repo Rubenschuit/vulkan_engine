@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "ve_app.hpp"
-#include "simple_render_system.hpp"
+#include "systems/simple_render_system.hpp"
+#include "systems/axes_render_system.hpp"
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -9,8 +10,7 @@
 namespace ve {
 	VeApp::VeApp() {
 		// First a window, device and swap chain are initialised
-
-		loadModels();
+		loadGameObjects();
 		createDescriptorSetLayout();
 		createUniformBuffers();
 		createDescriptorPool();
@@ -26,6 +26,7 @@ namespace ve {
 
 	void VeApp::mainLoop() {
 		SimpleRenderSystem simple_render_system(ve_device, descriptor_set_layout, ve_renderer.getSwapChainImageFormat());
+		AxesRenderSystem axes_render_system(ve_device, descriptor_set_layout, ve_renderer.getSwapChainImageFormat());
 
 		while (!glfwWindowShouldClose(ve_window.getGLFWwindow())) {
 			glfwPollEvents();
@@ -37,7 +38,7 @@ namespace ve {
 				VeFrameInfo frame_info{
 					.global_descriptor_set = descriptor_sets[current_frame],
 					.command_buffer = command_buffer,
-					.ve_model = *ve_model,
+					.game_objects = game_objects,
 				};
 
 				// update
@@ -47,7 +48,10 @@ namespace ve {
 				//rendering
 				ve_renderer.beginRender(command_buffer);
 
-				simple_render_system.drawFrame(frame_info);
+
+				simple_render_system.renderObjects(frame_info);
+				axes_render_system.renderAxes(frame_info);
+
 
 				ve_renderer.endRender(command_buffer);
 				ve_renderer.endFrame(command_buffer);
@@ -57,7 +61,7 @@ namespace ve {
 		ve_device.getDevice().waitIdle();
 	}
 
-	void VeApp::loadModels() {
+	void VeApp::loadGameObjects() {
 
 		const std::vector<VeModel::Vertex> vertices = {
 			{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
@@ -65,12 +69,18 @@ namespace ve {
 			{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
 			{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
 		};
-
 		const std::vector<uint16_t> indices = {
 			0, 1, 2, 2, 3, 0
 		};
-
-		ve_model = std::make_unique<VeModel>(ve_device, vertices, indices);
+		std::shared_ptr<VeModel> model = std::make_shared<VeModel>(ve_device, vertices, indices);
+		for (int j = 0; j < 7; j++) {
+			VeGameObject square = VeGameObject::createGameObject();
+			square.ve_model = model;
+			square.position = {0.0f, 0.0f, j * 0.4f};
+			square.scale = {0.4f + 0.2f * j, 0.4f + 0.2f * j, 1.0f};
+			square.color = {1.0f, 1.0f, 1.0f};
+			game_objects.emplace(square.getId(), std::move(square));
+		}
 	}
 
 	// One binding for the uniform buffer, another for the texture sampler
@@ -202,25 +212,27 @@ namespace ve {
 
 		UniformBufferObject ubo{};
 		// Coordinate system explanation:
-		//  Camera is at (2,2,2), looking at the origin (0,0,0)
+		//  Camera is at (2,-2,2), looking at the origin (0,0,0)
 		//
-		//		+Y (up)
+		//		+Z (up)
 		//		^
 		//		|
 		//		|
-		//		O------> +X (right)
+		//		O------> +X
 		//	   /
 		//	  /
-		//	+Z
+		//	-Y
 
 		// Rotate the model, centered at the origin, over time, around the Z axis
 		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.proj = glm::perspective(glm::radians(45.0f), ve_renderer.getExtentAspectRatio(), 0.1f, 10.0f);
+		ubo.view = glm::lookAt(glm::vec3(2.0f, -2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		ubo.proj = glm::perspective(glm::radians(55.0f), ve_renderer.getExtentAspectRatio(), 0.1f, 10.0f);
 		// GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted
 		ubo.proj[1][1] *= -1;
 		float x = time;
-		ubo.offset = glm::vec2(2.0f * glm::sin(x), 2.0f * glm::cos(x ) - 1.0f);
+		ubo.offset = glm::vec3(1.0f * glm::cos(x), glm::sin(x), 0.0f);
+		//ubo.offset = glm::vec3(0.0f, fmod(x, 3.0f), 0.0f);
+
 
 		uniform_buffers[current_frame]->writeToBuffer(&ubo);
 	}

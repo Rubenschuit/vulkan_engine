@@ -3,7 +3,7 @@
 #include "ve_device.hpp"
 #include "ve_renderer.hpp"
 #include "ve_config.hpp"
-#include "ve_model.hpp"
+#include "ve_game_object.hpp"
 #include "ve_texture.hpp"
 #include "ve_frame_info.hpp"
 
@@ -32,7 +32,7 @@ namespace ve {
 
 	private:
 		void mainLoop();
-		void loadModels();
+		void loadGameObjects();
 		void createDescriptorSetLayout();
 		void createUniformBuffers();
 		void createDescriptorPool();
@@ -46,12 +46,10 @@ namespace ve {
 		VeDevice ve_device{ve_window};
 		VeRenderer ve_renderer{ve_device, ve_window};
 
-		VeTexture texture{ve_device, "../textures/statue.jpeg"};
+		VeTexture texture{ve_device, "../textures/mots.jpeg"};
+		std::unordered_map<uint32_t, VeGameObject> game_objects;
 
 		vk::raii::DescriptorSetLayout descriptor_set_layout{nullptr};
-
-		std::unique_ptr<VeModel> ve_model;
-
 		std::vector<std::unique_ptr<VeBuffer>> uniform_buffers;
 		vk::raii::DescriptorPool descriptor_pool = nullptr;
 		std::vector<vk::raii::DescriptorSet> descriptor_sets;

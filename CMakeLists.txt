@@ -42,6 +42,8 @@ include(${CMAKE_SOURCE_DIR}/cmake/Targets.cmake)
 
 add_dependencies(VEngineLib Shaders)
 add_dependencies(${PROJECT_NAME} Shaders)
+add_dependencies(VEngineLib ShadersAxes)
+add_dependencies(${PROJECT_NAME} ShadersAxes)
 
 if (VE_BUILD_TESTS)
   include(${CMAKE_SOURCE_DIR}/cmake/Tests.cmake)

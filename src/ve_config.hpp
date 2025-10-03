@@ -7,6 +7,9 @@
 namespace ve {
 	constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
 
+	//constexpr vk::PresentModeKHR PRESENT_MODE = vk::PresentModeKHR::eMailbox;
+	constexpr vk::PresentModeKHR PRESENT_MODE = vk::PresentModeKHR::eImmediate;
+
 	// Central list of required Vulkan device extensions
 	inline const std::vector<const char*> REQUIRED_DEVICE_EXTENSIONS = {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME,

@@ -192,7 +192,7 @@ namespace ve {
 	// Immediate may be available, and is lowest latency, but may have tearing.
 	vk::PresentModeKHR VeSwapChain::chooseSwapPresentMode(const std::vector<vk::PresentModeKHR>& available_present_modes) {
 		for (const auto& available_present_mode : available_present_modes) {
-			if (available_present_mode == vk::PresentModeKHR::eImmediate) {
+			if (available_present_mode == ve::PRESENT_MODE) {
 				return available_present_mode;
 			}
 		}

@@ -8,9 +8,8 @@
 namespace ve {
 
 	struct SimplePushConstantData {
-		glm::vec2 offset;
-		glm::vec2 scale;
-		alignas(16) glm::vec3 color;
+		alignas(16) glm::vec3 offset{0.0f};
+		alignas(16) glm::vec3 scale{1.0f};
 	};
 
 	SimpleRenderSystem::SimpleRenderSystem(
@@ -58,7 +57,7 @@ namespace ve {
 
 	}
 
-	void SimpleRenderSystem::drawFrame(VeFrameInfo& frame_info) const {
+	void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, ve_pipeline->getPipeline());
 		frame_info.command_buffer.bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics,
@@ -68,24 +67,19 @@ namespace ve {
 			{}
 		);
 
-		for (int j = 0; j < 7; j++) {
+		for (auto& [id, obj] : frame_info.game_objects) {
 			SimplePushConstantData push{};
-			push.offset = {0.0f, -0.8f + j * 0.4f};
-			push.scale = {0.4f + 0.2f * j, 0.4f + 0.2f * j};
-			push.color = {1.0f - 0.15f * j, 1.0f - 0.15f * j, 0.0f + 0.1f * j};
-
+			push.offset = obj.position;
+			push.scale = obj.scale;
 			frame_info.command_buffer.pushConstants<SimplePushConstantData>(
 				*pipeline_layout,
 				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 				0,
 				push
 			);
-
-			frame_info.ve_model.bindVertexBuffer(frame_info.command_buffer);
-			frame_info.ve_model.bindIndexBuffer(frame_info.command_buffer);
-
-
-			frame_info.ve_model.drawIndexed(frame_info.command_buffer);
+			obj.ve_model->bindVertexBuffer(frame_info.command_buffer);
+			obj.ve_model->bindIndexBuffer(frame_info.command_buffer);
+			obj.ve_model->drawIndexed(frame_info.command_buffer);
 		}
 	}
 

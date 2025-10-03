@@ -19,7 +19,7 @@ namespace ve {
 		SimpleRenderSystem(const SimpleRenderSystem&) = delete;
 		SimpleRenderSystem& operator=(const SimpleRenderSystem&) = delete;
 
-		void drawFrame(VeFrameInfo& frame_info) const;
+		void renderObjects(VeFrameInfo& frame_info) const;
 
 	private:
 		void createPipelineLayout(vk::raii::DescriptorSetLayout& descriptor_set_layout);

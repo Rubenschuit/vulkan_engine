@@ -39,7 +39,7 @@ namespace ve {
 			.polygonMode = vk::PolygonMode::eFill,
 			.cullMode = vk::CullModeFlagBits::eNone,
 			.frontFace = vk::FrontFace::eClockwise,
-			.depthBiasEnable = VK_FALSE,
+			.depthBiasEnable = VK_TRUE,
 			.lineWidth = 1.0f,
 			.depthBiasConstantFactor = 0.0f,
 			.depthBiasClamp = 0.0f,

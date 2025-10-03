@@ -4,7 +4,10 @@
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
 #include <glm/glm.hpp>
+#include <map>
+
 #include "ve_model.hpp"
+#include "ve_game_object.hpp"
 
 namespace ve {
 
@@ -12,13 +15,13 @@ namespace ve {
 		glm::mat4 model;
 		glm::mat4 view;
 		glm::mat4 proj;
-		alignas(16) glm::vec2 offset;
+		alignas(16) glm::vec3 offset;
 	};
 
 	struct VeFrameInfo {
 		vk::raii::DescriptorSet& global_descriptor_set;
 		vk::raii::CommandBuffer& command_buffer;
-		VeModel& ve_model;
+		std::unordered_map<uint32_t, VeGameObject>& game_objects;
 		float frame_time;
 	};
 }
