@@ -6,6 +6,8 @@
 #include "ve_game_object.hpp"
 #include "ve_texture.hpp"
 #include "ve_frame_info.hpp"
+#include "input_controller.hpp"
+#include "ve_camera.hpp"
 
 #include <memory>
 #include <vector>
@@ -41,13 +43,19 @@ namespace ve {
 		void updateUniformBuffer(uint32_t current_frame);
 		void updateFpsWindowTitle();
 
-
 		VeWindow ve_window{WIDTH, HEIGHT, "Vulkan Engine!"};
 		VeDevice ve_device{ve_window};
 		VeRenderer ve_renderer{ve_device, ve_window};
 
-		VeTexture texture{ve_device, "../textures/mots.jpeg"};
+		VeTexture texture{ve_device, "../textures/mots.png"};
 		std::unordered_map<uint32_t, VeGameObject> game_objects;
+
+		InputController input_controller{ve_window};
+        VeCamera camera{}; // Y-up by default
+		const float fov = glm::radians(55.0f);
+		const float near_plane = 0.1f;
+		const float far_plane = 100.0f;
+		float last_aspect{0.0f};
 
 		vk::raii::DescriptorSetLayout descriptor_set_layout{nullptr};
 		std::vector<std::unique_ptr<VeBuffer>> uniform_buffers;
@@ -60,8 +68,8 @@ namespace ve {
 		clock::time_point fps_window_start{clock::now()};
 		uint32_t fps_frame_count{0};
 		double sum_frame_ms{0.0};
-		double last_frame_ms{0.0};
-
+		double last_frame_ms{0.0}; //TODO remove?
+		float frame_time{0.0f};
 	};
 }
 

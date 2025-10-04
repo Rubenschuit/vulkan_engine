@@ -46,6 +46,7 @@ namespace ve {
 				// Todo: Handle swap chain format changes (e.g. recreate pipelines)
 			}
 		}
+		std::cout << "Swap chain recreated: " << extent.width << "x" << extent.height << std::endl;
 	}
 
 	// Begin a frame; returns true when a frame is started and command buffer can be used
@@ -85,7 +86,9 @@ namespace ve {
 
 		// Submit the command buffer, present the image
 		auto result = ve_swap_chain->submitAndPresent(command_buffer, &current_image_index);
-		if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR || ve_window.wasWindowResized()) {
+		if (result == vk::Result::eErrorOutOfDateKHR ||
+				result == vk::Result::eSuboptimalKHR ||
+				ve_window.wasWindowResized()) {
 			ve_window.resetWindowResizedFlag();
 			recreateSwapChain();
 		} else if (result != vk::Result::eSuccess) {

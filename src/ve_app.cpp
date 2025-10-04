@@ -3,6 +3,7 @@
 #include "systems/simple_render_system.hpp"
 #include "systems/axes_render_system.hpp"
 
+
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/gtc/matrix_transform.hpp>
@@ -15,6 +16,10 @@ namespace ve {
 		createUniformBuffers();
 		createDescriptorPool();
 		createDescriptorSets();
+
+		// Initialize camera projection from current swapchain aspect
+		last_aspect = ve_renderer.getExtentAspectRatio();
+		camera.setPerspective(fov, last_aspect, near_plane, far_plane);
 	}
 
 	VeApp::~VeApp() {}
@@ -27,10 +32,15 @@ namespace ve {
 	void VeApp::mainLoop() {
 		SimpleRenderSystem simple_render_system(ve_device, descriptor_set_layout, ve_renderer.getSwapChainImageFormat());
 		AxesRenderSystem axes_render_system(ve_device, descriptor_set_layout, ve_renderer.getSwapChainImageFormat());
+		auto current_time = std::chrono::high_resolution_clock::now();
 
 		while (!glfwWindowShouldClose(ve_window.getGLFWwindow())) {
 			glfwPollEvents();
 			if (ve_renderer.beginFrame()) {  // Next image acquired successfully
+				// Calculate frame time
+				auto new_time = std::chrono::high_resolution_clock::now();
+				frame_time = std::chrono::duration<float, std::chrono::seconds::period>(new_time - current_time).count();
+				current_time = new_time;
 
 				// Setup frame info
 				auto& command_buffer = ve_renderer.getCurrentCommandBuffer();
@@ -39,9 +49,11 @@ namespace ve {
 					.global_descriptor_set = descriptor_sets[current_frame],
 					.command_buffer = command_buffer,
 					.game_objects = game_objects,
+					.frame_time = frame_time
 				};
 
 				// update
+				input_controller.processInput(frame_time, camera);
 				updateUniformBuffer(current_frame);
 				updateFpsWindowTitle();
 
@@ -49,9 +61,8 @@ namespace ve {
 				ve_renderer.beginRender(command_buffer);
 
 
-				simple_render_system.renderObjects(frame_info);
 				axes_render_system.renderAxes(frame_info);
-
+				simple_render_system.renderObjects(frame_info);
 
 				ve_renderer.endRender(command_buffer);
 				ve_renderer.endFrame(command_buffer);
@@ -73,10 +84,10 @@ namespace ve {
 			0, 1, 2, 2, 3, 0
 		};
 		std::shared_ptr<VeModel> model = std::make_shared<VeModel>(ve_device, vertices, indices);
-		for (int j = 0; j < 7; j++) {
+		for (int j = 0; j < 17; j++) {
 			VeGameObject square = VeGameObject::createGameObject();
 			square.ve_model = model;
-			square.position = {0.0f, 0.0f, j * 0.4f};
+			square.translation = {0.0f, j * 0.4f, 0.f};
 			square.scale = {0.4f + 0.2f * j, 0.4f + 0.2f * j, 1.0f};
 			square.color = {1.0f, 1.0f, 1.0f};
 			game_objects.emplace(square.getId(), std::move(square));
@@ -201,38 +212,23 @@ namespace ve {
 		}
 	}
 
-		void VeApp::updateUniformBuffer(uint32_t current_frame) {
+	void VeApp::updateUniformBuffer(uint32_t current_frame) {
 		// this assertion saved me a lot of debugging time
 		assert(current_frame < uniform_buffers.size() && "Current image index out of bounds");
 
-		// Calculate elapsed time since start of the program
-		static auto start_time = std::chrono::high_resolution_clock::now();
-		auto current_time = std::chrono::high_resolution_clock::now();
-    	float time = std::chrono::duration<float, std::chrono::seconds::period>(current_time - start_time).count();
-
 		UniformBufferObject ubo{};
-		// Coordinate system explanation:
-		//  Camera is at (2,-2,2), looking at the origin (0,0,0)
-		//
-		//		+Z (up)
-		//		^
-		//		|
-		//		|
-		//		O------> +X
-		//	   /
-		//	  /
-		//	-Y
 
-		// Rotate the model, centered at the origin, over time, around the Z axis
-		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.view = glm::lookAt(glm::vec3(2.0f, -2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.proj = glm::perspective(glm::radians(55.0f), ve_renderer.getExtentAspectRatio(), 0.1f, 10.0f);
-		// GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted
-		ubo.proj[1][1] *= -1;
-		float x = time;
-		ubo.offset = glm::vec3(1.0f * glm::cos(x), glm::sin(x), 0.0f);
-		//ubo.offset = glm::vec3(0.0f, fmod(x, 3.0f), 0.0f);
+		// Recompute camera view once per frame if needed
+		camera.updateIfDirty();
+		// If swapchain aspect changed (window resize), refresh camera projection
+		float aspect = ve_renderer.getExtentAspectRatio();
+		if (aspect > 0.0f && std::abs(aspect - last_aspect) > std::numeric_limits<float>::epsilon()) {
+			last_aspect = aspect;
+			camera.setPerspective(glm::radians(55.0f), last_aspect, near_plane, far_plane);
+		}
 
+		ubo.view = camera.getView();
+		ubo.proj = camera.getProj();
 
 		uniform_buffers[current_frame]->writeToBuffer(&ubo);
 	}

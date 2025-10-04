@@ -63,9 +63,9 @@ namespace ve {
 			.stencilTestEnable = VK_FALSE,
 		};
 		config_info.color_blend_attachment = {
-			.blendEnable = VK_FALSE,
-			.srcColorBlendFactor = vk::BlendFactor::eOne,
-			.dstColorBlendFactor = vk::BlendFactor::eZero,
+			.blendEnable = VK_TRUE,
+			.srcColorBlendFactor = vk::BlendFactor::eSrcAlpha,
+			.dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
 			.colorBlendOp = vk::BlendOp::eAdd,
 			.srcAlphaBlendFactor = vk::BlendFactor::eOne,
 			.dstAlphaBlendFactor = vk::BlendFactor::eZero,

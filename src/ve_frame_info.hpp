@@ -11,8 +11,12 @@
 
 namespace ve {
 
+	struct SimplePushConstantData {
+		glm::mat4 transform;
+		alignas(16) glm::vec3 color{1.0f};
+	};
+
 	struct UniformBufferObject {
-		glm::mat4 model;
 		glm::mat4 view;
 		glm::mat4 proj;
 		alignas(16) glm::vec3 offset;

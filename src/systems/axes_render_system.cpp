@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "axes_render_system.hpp"
+#include "glm/gtc/constants.hpp"
 
 namespace ve {
 
@@ -56,54 +57,71 @@ namespace ve {
 	}
 
 	void AxesRenderSystem::createAxesModel() {
-		// 3 axes, from origin to +1 in each axis, colored RGB
+		// 3 axes as cylinders from origin to +L along each axis, colored RGB
 		std::vector<VeModel::Vertex> vertices;
-		vertices.reserve(6 * 3); // 6 verts per axis * 3 axes
-
-		// Local axis dimensions: length (L) and half-width (W)
-		const float L = 10.0f;   // axis length from origin to +L
-		const float W = 0.005f;  // half thickness of the quad representing the axis
+		const int SEGMENTS = 24;           // circle segments per cylinder
+		const float L = 10.0f;              // cylinder length
+		const float R = 0.003f;            // cylinder radius
+		vertices.reserve(3 * SEGMENTS * 6); // 2 tris per quad, 3 axes
 
 		auto push_tri = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& color){
-		vertices.push_back({a, color, {0.f, 0.f}});
-		vertices.push_back({b, color, {0.f, 0.f}});
-		vertices.push_back({c, color, {0.f, 0.f}});
+			vertices.push_back({a, color, {0.f, 0.f}});
+			vertices.push_back({b, color, {0.f, 0.f}});
+			vertices.push_back({c, color, {0.f, 0.f}});
 		};
 
-		// X axis (red): along +X, quad extends in +/-Y
+		const float two_pi = glm::two_pi<float>();
+
+		// X-axis cylinder (red), rings in the YZ plane
 		{
-		glm::vec3 col{1.f, 0.f, 0.f};
-		glm::vec3 v0{0.f, -W, 0.f};
-		glm::vec3 v1{L, -W, 0.f};
-		glm::vec3 v2{L,  W, 0.f};
-		glm::vec3 v3{0.f,  W, 0.f};
-		push_tri(v0, v1, v2, col);
-		push_tri(v2, v3, v0, col);
+			glm::vec3 col{1.f, 0.f, 0.f};
+			for (int i = 0; i < SEGMENTS; ++i) {
+				float a0 = two_pi * (static_cast<float>(i) / SEGMENTS);
+				float a1 = two_pi * (static_cast<float>(i + 1) / SEGMENTS);
+				float y0 = R * std::cos(a0), z0 = R * std::sin(a0);
+				float y1 = R * std::cos(a1), z1 = R * std::sin(a1);
+				glm::vec3 v0{0.f, y0, z0};
+				glm::vec3 v1{L,  y0, z0};
+				glm::vec3 v2{L,  y1, z1};
+				glm::vec3 v3{0.f, y1, z1};
+				push_tri(v0, v1, v2, col);
+				push_tri(v2, v3, v0, col);
+			}
 		}
 
-		// Y axis (green): along +Y, quad extends in +/-X
+		// Y-axis cylinder (green), rings in the XZ plane
 		{
-		glm::vec3 col{0.f, 1.f, 0.f};
-		glm::vec3 v0{-W, 0.f, 0.f};
-		glm::vec3 v1{-W, L, 0.f};
-		glm::vec3 v2{ W, L, 0.f};
-		glm::vec3 v3{ W, 0.f, 0.f};
-		push_tri(v0, v1, v2, col);
-		push_tri(v2, v3, v0, col);
+			glm::vec3 col{0.f, 1.f, 0.f};
+			for (int i = 0; i < SEGMENTS; ++i) {
+				float a0 = two_pi * (static_cast<float>(i) / SEGMENTS);
+				float a1 = two_pi * (static_cast<float>(i + 1) / SEGMENTS);
+				float x0 = R * std::cos(a0), z0 = R * std::sin(a0);
+				float x1 = R * std::cos(a1), z1 = R * std::sin(a1);
+				glm::vec3 v0{x0, 0.f, z0};
+				glm::vec3 v1{x0, L,  z0};
+				glm::vec3 v2{x1, L,  z1};
+				glm::vec3 v3{x1, 0.f, z1};
+				push_tri(v0, v1, v2, col);
+				push_tri(v2, v3, v0, col);
+			}
 		}
 
-		// Z axis (blue): along +Z, quad extends in +/-X
+		// Z-axis cylinder (blue), rings in the XY plane
 		{
-		glm::vec3 col{0.f, 0.f, 1.f};
-		glm::vec3 v0{-W, 0.f, 0.f};
-		glm::vec3 v1{-W, 0.f, L};
-		glm::vec3 v2{ W, 0.f, L};
-		glm::vec3 v3{ W, 0.f, 0.f};
-		push_tri(v0, v1, v2, col);
-		push_tri(v2, v3, v0, col);
+			glm::vec3 col{0.f, 0.f, 1.f};
+			for (int i = 0; i < SEGMENTS; ++i) {
+				float a0 = two_pi * (static_cast<float>(i) / SEGMENTS);
+				float a1 = two_pi * (static_cast<float>(i + 1) / SEGMENTS);
+				float x0 = R * std::cos(a0), y0 = R * std::sin(a0);
+				float x1 = R * std::cos(a1), y1 = R * std::sin(a1);
+				glm::vec3 v0{x0, y0, 0.f};
+				glm::vec3 v1{x0, y0, L };
+				glm::vec3 v2{x1, y1, L };
+				glm::vec3 v3{x1, y1, 0.f};
+				push_tri(v0, v1, v2, col);
+				push_tri(v2, v3, v0, col);
+			}
 		}
-
-		// Non-indexed triangles
 		axes_model = std::make_unique<VeModel>(ve_device, vertices);
 	}
 

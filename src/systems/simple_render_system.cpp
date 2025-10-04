@@ -7,11 +7,6 @@
 
 namespace ve {
 
-	struct SimplePushConstantData {
-		alignas(16) glm::vec3 offset{0.0f};
-		alignas(16) glm::vec3 scale{1.0f};
-	};
-
 	SimpleRenderSystem::SimpleRenderSystem(
 			VeDevice& device,
 			vk::raii::DescriptorSetLayout& descriptor_set_layout,
@@ -69,8 +64,8 @@ namespace ve {
 
 		for (auto& [id, obj] : frame_info.game_objects) {
 			SimplePushConstantData push{};
-			push.offset = obj.position;
-			push.scale = obj.scale;
+			push.color = obj.color;
+			push.transform = obj.getTransform();
 			frame_info.command_buffer.pushConstants<SimplePushConstantData>(
 				*pipeline_layout,
 				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,

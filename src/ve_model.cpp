@@ -1,6 +1,9 @@
 #include "pch.hpp"
 #include "ve_model.hpp"
 
+#define TINYOBJLOADER_IMPLEMENTATION // define this in only *one* .cpp file
+#include <tiny_obj_loader.h>
+
 namespace ve {
 
 	VeModel::VeModel(VeDevice& device, const std::vector<Vertex>& vertices) : ve_device(device) {

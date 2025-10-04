@@ -11,7 +11,6 @@
 #include <glm/glm.hpp>
 
 
-
 namespace ve {
 	class VeModel {
 	public:

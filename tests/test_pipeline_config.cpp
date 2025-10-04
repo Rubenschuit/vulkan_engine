@@ -29,12 +29,12 @@ TEST_CASE("defaultPipelineConfigInfo sets sane Vulkan defaults", "[pipeline][con
     REQUIRE(cfg.multisample_info.sampleShadingEnable == VK_FALSE);
 
     // Color blend attachment: blending disabled, write all components
-    REQUIRE(cfg.color_blend_attachment.blendEnable == VK_FALSE);
+    REQUIRE(cfg.color_blend_attachment.blendEnable == VK_TRUE);
     REQUIRE((cfg.color_blend_attachment.colorWriteMask & (
-        vk::ColorComponentFlagBits::eR |
-        vk::ColorComponentFlagBits::eG |
-        vk::ColorComponentFlagBits::eB |
-        vk::ColorComponentFlagBits::eA)) == (
+			vk::ColorComponentFlagBits::eR |
+			vk::ColorComponentFlagBits::eG |
+			vk::ColorComponentFlagBits::eB |
+			vk::ColorComponentFlagBits::eA)) == (
         vk::ColorComponentFlagBits::eR |
         vk::ColorComponentFlagBits::eG |
         vk::ColorComponentFlagBits::eB |

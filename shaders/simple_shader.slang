@@ -6,7 +6,6 @@ struct VertexInput {
 };
 
 struct UniformBuffer {
-    float4x4 model;
     float4x4 view;
     float4x4 proj;
 	float3 offset;
@@ -14,8 +13,8 @@ struct UniformBuffer {
 ConstantBuffer<UniformBuffer> ubo;
 
 struct PushConstantData {
-	float3 offset;
-	float3 scale;
+	float4x4 transform;
+	float3 color;
 };
 [push_constant]
 PushConstantData push_constants;
@@ -29,14 +28,10 @@ struct VertexOutput {
 [shader("vertex")]
 VertexOutput vertMain(VertexInput input) {
     VertexOutput output;
-	float4 pos = mul(ubo.model, float4(input.in_pos, 1.0));
-	pos *= float4(push_constants.scale, 1.0f); // scale per object
-	pos += float4(push_constants.offset, 0.0f); // Translate per object
+	float4 pos = float4(input.in_pos, 1.0); // homogeneous coordinates
+	pos = mul(push_constants.transform, pos); // apply per-object transform
 	pos += float4(ubo.offset, 0.0f); // global translation
-
     output.pos = mul(ubo.proj, mul(ubo.view, pos));
-
-
     output.frag_color = input.in_color;
 	output.frag_tex_coord = input.in_tex_coord;
     return output;
@@ -46,5 +41,10 @@ Sampler2D texture;
 
 [shader("fragment")]
 float4 fragMain(VertexOutput in_vert) : SV_Target {
-    return float4(texture.Sample(in_vert.frag_tex_coord).rgb, 1.0);
+	float4 c = texture.Sample(in_vert.frag_tex_coord);
+	// Discard fully transparent texels so they don't write depth or color
+	if (c.a <= 0.001)
+		discard;
+	c.a = 0.9f;
+	return c;
 }

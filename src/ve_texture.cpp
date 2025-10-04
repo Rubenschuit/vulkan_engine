@@ -2,7 +2,7 @@
 #include "ve_texture.hpp"
 #include "ve_buffer.hpp"
 
-#define STB_IMAGE_IMPLEMENTATION // include implementations, without only prototypes
+#define STB_IMAGE_IMPLEMENTATION // include implementations, without: only prototypes
 #include <stb_image.h>
 #include <iostream>
 
