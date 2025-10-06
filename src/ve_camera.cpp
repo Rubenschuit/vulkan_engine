@@ -35,10 +35,11 @@ namespace ve {
 		viewDirty = true;
 	}
 
+	// TODO: fix yaw calc
 	void VeCamera::lookAt(const glm::vec3& target) {
 		glm::vec3 dir = glm::normalize(target - pos);
 		pitch = std::asin(glm::clamp(dir.y, -1.0f, 1.0f));
-		yaw = std::atan2(dir.z, dir.x);
+		yaw = std::atan2(dir.x, dir.z);
 		wrapYaw();
 		clampPitch();
 		viewDirty = true;
@@ -87,11 +88,13 @@ namespace ve {
 
 	// Update the camera orthonormal basis vectors and then update
 	// the view matrix
+	// TODO: currently assuemes world_up is Z-up
 	void VeCamera::updateView() {
 		forward = glm::normalize(glm::vec3(
-			std::cos(pitch) * std::cos(yaw),
-			std::sin(pitch),
-			std::cos(pitch) * std::sin(yaw)
+			-1.0f * std::cos(pitch) * std::cos(yaw),
+			std::cos(pitch) * std::sin(yaw),
+			std::sin(pitch)
+
 		));
 		right = glm::normalize(glm::cross(forward, world_up));
 		up = glm::normalize(glm::cross(right, forward));

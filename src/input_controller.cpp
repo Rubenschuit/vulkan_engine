@@ -4,7 +4,7 @@
 
 
 namespace ve {
-	InputController::InputController(VeWindow& ve_window) : ve_window(ve_window) {
+	InputController::InputController(VeWindow& ve_window) {
 		window = ve_window.getGLFWwindow();
 		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 		if (glfwRawMouseMotionSupported())

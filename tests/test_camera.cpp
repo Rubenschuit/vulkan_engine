@@ -7,10 +7,6 @@ static bool approxEqual(float a, float b, float eps = 1e-5f) {
 	return std::abs(a - b) <= eps;
 }
 
-static bool vecApprox(const glm::vec3& a, const glm::vec3& b, float eps = 1e-5f) {
-	return approxEqual(a.x, b.x, eps) && approxEqual(a.y, b.y, eps) && approxEqual(a.z, b.z, eps);
-}
-
 static bool matEqual(const glm::mat4& a, const glm::mat4& b, float eps = 0.0f) {
 	for (int r = 0; r < 4; ++r) for (int c = 0; c < 4; ++c) {
 		if (std::abs(a[r][c] - b[r][c]) > eps) return false;

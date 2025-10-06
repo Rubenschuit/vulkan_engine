@@ -47,11 +47,15 @@ namespace ve {
 		VeDevice ve_device{ve_window};
 		VeRenderer ve_renderer{ve_device, ve_window};
 
-		VeTexture texture{ve_device, "../textures/mots.png"};
+		const char* MODEL_PATH = "../models/viking_room.obj";
+		const char* TEXTURE_PATH = "../textures/viking_room.png";
+		//const char* TEXTURE_PATH = "../textures/mots.png";
+
+		VeTexture texture{ve_device, TEXTURE_PATH};
 		std::unordered_map<uint32_t, VeGameObject> game_objects;
 
 		InputController input_controller{ve_window};
-        VeCamera camera{}; // Y-up by default
+        VeCamera camera{{2.0f, 2.0f, 2.0f}, {0.0f, 0.0f, 1.0f}}; // Y-up by default
 		const float fov = glm::radians(55.0f);
 		const float near_plane = 0.1f;
 		const float far_plane = 100.0f;

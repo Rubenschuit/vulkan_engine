@@ -60,7 +60,7 @@ namespace ve {
 		// 3 axes as cylinders from origin to +L along each axis, colored RGB
 		std::vector<VeModel::Vertex> vertices;
 		const int SEGMENTS = 24;           // circle segments per cylinder
-		const float L = 10.0f;              // cylinder length
+		const float L = 100.0f;              // cylinder length
 		const float R = 0.003f;            // cylinder radius
 		vertices.reserve(3 * SEGMENTS * 6); // 2 tris per quad, 3 axes
 

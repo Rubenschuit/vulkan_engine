@@ -45,7 +45,7 @@ namespace ve {
 		}
 
 		glm::vec3 translation{0.0f};
-		glm::vec3 rotation{glm::half_pi<float>(), 0.0f, 0.0f}; // in radians
+		glm::vec3 rotation{0.0f, 0.0f, 0.0f}; // in radians
 		glm::vec3 scale{1.0f};
 		glm::vec3 color{1.0f};
 

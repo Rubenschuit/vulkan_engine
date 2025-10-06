@@ -24,11 +24,10 @@ namespace ve {
 			vk::BufferUsageFlags usage_flags,
 			vk::MemoryPropertyFlags memory_property_flags,
 			vk::DeviceSize min_offset_alignment)
-		: ve_device(ve_device),
-		instance_size(instance_size),
-		instance_count(instance_count),
-		usage_flags(usage_flags),
-		memory_property_flags(memory_property_flags) {
+		: instance_size(instance_size),
+		  instance_count(instance_count),
+		  usage_flags(usage_flags),
+		  memory_property_flags(memory_property_flags) {
 
 		alignment_size = getAlignment(instance_size, min_offset_alignment);
 		buffer_size = alignment_size * instance_count;

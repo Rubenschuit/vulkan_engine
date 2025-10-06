@@ -35,7 +35,6 @@ namespace ve {
 		void processMouseMovement(double xpos, double ypos);
 		void handleMouseToggle();
 
-		VeWindow& ve_window;
         GLFWwindow* window{nullptr};
 		//std::unordered_map<uint32_t, VeGameObject>& game_objects;
 

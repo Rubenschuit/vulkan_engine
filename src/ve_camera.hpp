@@ -7,10 +7,10 @@ namespace ve {
 
 	class VeCamera {
 	public:
-		// World up defaults to +Y, position defaults to (2,2,2)
+		// World up defaults to +Z, position defaults to (2,2,2)
 		// Looking down -X axis, yaw=0, pitch=0
 		// FOV 55 degrees, aspect 4:3, near 0.1, far 100
-		explicit VeCamera(glm::vec3 position = {2.0f, 2.0f, 2.0f}, glm::vec3 world_up = {0.0f, 1.0f, 0.0f});
+		explicit VeCamera(glm::vec3 position = {2.0f, 2.0f, 2.0f}, glm::vec3 world_up = {0.0f, 0.0f, 1.0f});
 
 		void setPosition(const glm::vec3& p);
 
@@ -46,7 +46,7 @@ namespace ve {
 		void updateProjection();
 
 		glm::vec3 pos;
-		glm::vec3 world_up{0.0f, 1.0f, 0.0f};
+		glm::vec3 world_up;
 		float yaw{0.0f};   // radians
 		float pitch{0.0f}; // radians
 		bool viewDirty{true};

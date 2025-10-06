@@ -32,7 +32,6 @@ namespace ve {
 			vk::DeviceSize getBufferSize() const { return buffer_size; }
 
 			private:
-			VeDevice& ve_device;
 			void* mapped = nullptr;
 			vk::raii::Buffer buffer{nullptr};
 			vk::raii::DeviceMemory buffer_memory{nullptr};

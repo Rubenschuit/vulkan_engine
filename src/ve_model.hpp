@@ -8,7 +8,10 @@
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
+#include <glm/gtx/hash.hpp>
+
 
 
 namespace ve {
@@ -21,10 +24,14 @@ namespace ve {
 
 			static std::vector<vk::VertexInputBindingDescription> getBindingDescriptions();
 			static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptions();
+			bool operator==(const Vertex& other) const {
+				return pos == other.pos && color == other.color && tex_coord == other.tex_coord;
+			}
 		};
 
 		VeModel(VeDevice& device, const std::vector<Vertex>& vertices);
-		VeModel(VeDevice& device, const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices);
+		VeModel(VeDevice& device, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
+		VeModel(VeDevice& device, char const* model_path);
 		~VeModel();
 
 		VeModel(const VeModel&) = delete;
@@ -37,7 +44,7 @@ namespace ve {
 
 	private:
 		void createVertexBuffers(const std::vector<Vertex>& vertices);
-		void createIndexBuffers(const std::vector<uint16_t>& indices);
+		void createIndexBuffers(const std::vector<uint32_t>& indices);
 
 		VeDevice& ve_device; // not owned, must outlive model
 
@@ -50,3 +57,12 @@ namespace ve {
 	};
 
 } // namespace ve
+
+// Provide a hash function for Vertex so we can use it in unordered_map
+// Needs to be outside the ve namespace because std is not allowed to be extended inside another namespace
+template<> struct std::hash<ve::VeModel::Vertex> {
+	size_t operator()(ve::VeModel::Vertex const& vertex) const noexcept {
+		return ((hash<glm::vec3>()(vertex.pos) ^ (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
+				(hash<glm::vec2>()(vertex.tex_coord) << 1);
+	}
+};

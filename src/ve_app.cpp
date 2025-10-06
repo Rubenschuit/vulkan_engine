@@ -61,8 +61,8 @@ namespace ve {
 				ve_renderer.beginRender(command_buffer);
 
 
-				axes_render_system.renderAxes(frame_info);
 				simple_render_system.renderObjects(frame_info);
+				axes_render_system.renderAxes(frame_info);
 
 				ve_renderer.endRender(command_buffer);
 				ve_renderer.endFrame(command_buffer);
@@ -74,23 +74,27 @@ namespace ve {
 
 	void VeApp::loadGameObjects() {
 
+		/*// Square model
 		const std::vector<VeModel::Vertex> vertices = {
 			{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
 			{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
 			{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
 			{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
 		};
-		const std::vector<uint16_t> indices = {
+		const std::vector<uint32_t> indices = {
 			0, 1, 2, 2, 3, 0
 		};
-		std::shared_ptr<VeModel> model = std::make_shared<VeModel>(ve_device, vertices, indices);
-		for (int j = 0; j < 17; j++) {
-			VeGameObject square = VeGameObject::createGameObject();
-			square.ve_model = model;
-			square.translation = {0.0f, j * 0.4f, 0.f};
-			square.scale = {0.4f + 0.2f * j, 0.4f + 0.2f * j, 1.0f};
-			square.color = {1.0f, 1.0f, 1.0f};
-			game_objects.emplace(square.getId(), std::move(square));
+		*/
+		std::shared_ptr<VeModel> model = std::make_shared<VeModel>(ve_device, MODEL_PATH);
+		for (int j = 0; j < 10; j++) {
+			for (int i = 0; i < 10; i++) {
+				VeGameObject square = VeGameObject::createGameObject();
+				square.ve_model = model;
+				square.translation = {i * 2.0f, j * 2.0f, 0.f};
+				//square.scale = {0.4f + 0.2f * j, 0.4f + 0.2f * j, 1.0f};
+				//square.color = {1.0f, 1.0f, 1.0f};
+				game_objects.emplace(square.getId(), std::move(square));
+			}
 		}
 	}
 
@@ -163,7 +167,7 @@ namespace ve {
 		descriptor_pool = vk::raii::DescriptorPool(ve_device.getDevice(), pool_info);
 	}
 
-	// Create a descriptor set for each frame in flight and then write the buffer and image info to it
+	// Create a descriptor set for each frame in flight with ubo and texture info
 	void VeApp::createDescriptorSets() {
 		std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, *descriptor_set_layout);
 		vk::DescriptorSetAllocateInfo alloc_info{
@@ -207,7 +211,7 @@ namespace ve {
 					.pTexelBufferView = nullptr
 				}
 			};
-			// Update the descriptor sets with the buffer and image info
+			// Update the descriptor sets on the device
 			ve_device.getDevice().updateDescriptorSets(descriptor_writes, {});
 		}
 	}

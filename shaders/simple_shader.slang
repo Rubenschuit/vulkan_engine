@@ -45,6 +45,6 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	// Discard fully transparent texels so they don't write depth or color
 	if (c.a <= 0.001)
 		discard;
-	c.a = 0.9f;
+	//c.a = 0.9f;
 	return c;
 }
