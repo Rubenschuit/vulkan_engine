@@ -10,6 +10,7 @@ struct UniformBuffer {
     float4x4 proj;
     float3 offset; // global translation, optional
 };
+[vk::binding(0, 0)]
 ConstantBuffer<UniformBuffer> ubo;
 
 struct PushConstantData {

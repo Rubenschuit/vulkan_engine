@@ -21,26 +21,28 @@ namespace ve {
 
 	SimpleRenderSystem::SimpleRenderSystem(
 			VeDevice& device,
-			vk::raii::DescriptorSetLayout& descriptor_set_layout,
+			vk::raii::DescriptorSetLayout& global_set_layout,
+			vk::raii::DescriptorSetLayout& material_set_layout,
 			vk::Format color_format) : ve_device(device) {
 
-		createPipelineLayout(descriptor_set_layout);
+		createPipelineLayout(global_set_layout, material_set_layout);
 		createPipeline(color_format);
 	}
 
 	SimpleRenderSystem::~SimpleRenderSystem() {
 	}
 
-	void SimpleRenderSystem::createPipelineLayout(vk::raii::DescriptorSetLayout& descriptor_set_layout) {
+	void SimpleRenderSystem::createPipelineLayout(vk::raii::DescriptorSetLayout& global_set_layout, vk::raii::DescriptorSetLayout& material_set_layout) {
 		vk::PushConstantRange push_constant_range{
 			.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 			.offset = 0, // Used for indexing multiple push constant ranges
 			.size = sizeof(SimplePushConstantData)
 		};
+		std::array<vk::DescriptorSetLayout, 2> set_layouts{*global_set_layout, *material_set_layout};
 		vk::PipelineLayoutCreateInfo pipeline_layout_info{
 			.sType = vk::StructureType::ePipelineLayoutCreateInfo,
-			.setLayoutCount = 1,
-			.pSetLayouts = &*descriptor_set_layout,
+			.setLayoutCount = static_cast<uint32_t>(set_layouts.size()),
+			.pSetLayouts = set_layouts.data(),
 			.pushConstantRangeCount = 1,
 			.pPushConstantRanges = &push_constant_range
 		};
@@ -66,11 +68,12 @@ namespace ve {
 
 	void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, ve_pipeline->getPipeline());
+		std::array<vk::DescriptorSet, 2> sets{*frame_info.global_descriptor_set, *frame_info.material_descriptor_set};
 		frame_info.command_buffer.bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics,
 			*pipeline_layout,
 			0,
-			*frame_info.global_descriptor_set,
+			sets,
 			{}
 		);
 

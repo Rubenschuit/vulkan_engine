@@ -11,16 +11,16 @@ namespace ve {
 
 	AxesRenderSystem::AxesRenderSystem(
 			VeDevice& device,
-			vk::raii::DescriptorSetLayout& descriptor_set_layout,
+			vk::raii::DescriptorSetLayout& global_set_layout,
 			vk::Format color_format) : ve_device(device) {
-		createPipelineLayout(descriptor_set_layout);
+		createPipelineLayout(global_set_layout);
 		createPipeline(color_format);
 		createAxesModel();
 	}
 
 	AxesRenderSystem::~AxesRenderSystem() {}
 
-	void AxesRenderSystem::createPipelineLayout(vk::raii::DescriptorSetLayout& descriptor_set_layout) {
+	void AxesRenderSystem::createPipelineLayout(vk::raii::DescriptorSetLayout& global_set_layout) {
 	vk::PushConstantRange push_constant_range{
 		.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 		.offset = 0,
@@ -29,7 +29,7 @@ namespace ve {
 	vk::PipelineLayoutCreateInfo pipeline_layout_info{
 		.sType = vk::StructureType::ePipelineLayoutCreateInfo,
 		.setLayoutCount = 1,
-		.pSetLayouts = &*descriptor_set_layout,
+		.pSetLayouts = &*global_set_layout,
 		.pushConstantRangeCount = 1,
 		.pPushConstantRanges = &push_constant_range
 	};

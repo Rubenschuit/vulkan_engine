@@ -12,12 +12,10 @@ namespace ve {
 	VeApp::VeApp() {
 		// First a window, device and swap chain are initialised
 		loadGameObjects();
-		createDescriptorSetLayout();
 		createUniformBuffers();
-		createDescriptorPool();
-		createDescriptorSets();
+		createDescriptors();
 
-		// Initialize camera projection from current swapchain aspect
+		// Initialise camera
 		last_aspect = ve_renderer.getExtentAspectRatio();
 		camera.setPerspective(fov, last_aspect, near_plane, far_plane);
 	}
@@ -30,8 +28,17 @@ namespace ve {
 	}
 
 	void VeApp::mainLoop() {
-		SimpleRenderSystem simple_render_system(ve_device, descriptor_set_layout, ve_renderer.getSwapChainImageFormat());
-		AxesRenderSystem axes_render_system(ve_device, descriptor_set_layout, ve_renderer.getSwapChainImageFormat());
+		SimpleRenderSystem simple_render_system(
+			ve_device,
+			global_set_layout->getDescriptorSetLayout(),
+			material_set_layout->getDescriptorSetLayout(),
+			ve_renderer.getSwapChainImageFormat()
+		);
+		AxesRenderSystem axes_render_system(
+			ve_device,
+			global_set_layout->getDescriptorSetLayout(),
+			ve_renderer.getSwapChainImageFormat()
+		);
 		auto current_time = std::chrono::high_resolution_clock::now();
 
 		while (!glfwWindowShouldClose(ve_window.getGLFWwindow())) {
@@ -46,12 +53,12 @@ namespace ve {
 				auto& command_buffer = ve_renderer.getCurrentCommandBuffer();
 				auto current_frame = ve_renderer.getCurrentFrame();
 				VeFrameInfo frame_info{
-					.global_descriptor_set = descriptor_sets[current_frame],
+					.global_descriptor_set = global_descriptor_sets[current_frame],
+					.material_descriptor_set = material_descriptor_set,
 					.command_buffer = command_buffer,
 					.game_objects = game_objects,
 					.frame_time = frame_time
 				};
-
 				// update
 				input_controller.processInput(frame_time, camera);
 				updateUniformBuffer(current_frame);
@@ -59,7 +66,6 @@ namespace ve {
 
 				//rendering
 				ve_renderer.beginRender(command_buffer);
-
 
 				simple_render_system.renderObjects(frame_info);
 				axes_render_system.renderAxes(frame_info);
@@ -74,7 +80,7 @@ namespace ve {
 
 	void VeApp::loadGameObjects() {
 
-		/*// obj model
+		/* quad model
 		const std::vector<VeModel::Vertex> vertices = {
 			{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
 			{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
@@ -138,33 +144,6 @@ namespace ve {
 
 	}
 
-	// One binding for the uniform buffer, another for the texture sampler
-	void VeApp::createDescriptorSetLayout() {
-		std::array<vk::DescriptorSetLayoutBinding, 2> bindings = {
-			vk::DescriptorSetLayoutBinding{
-				.binding = 0,
-				.descriptorType = vk::DescriptorType::eUniformBuffer,
-				.descriptorCount = 1,
-				.stageFlags = vk::ShaderStageFlagBits::eVertex,
-				.pImmutableSamplers = nullptr
-			},
-			vk::DescriptorSetLayoutBinding{
-				.binding = 1,
-				.descriptorType = vk::DescriptorType::eCombinedImageSampler,
-				.descriptorCount = 1,
-				.stageFlags = vk::ShaderStageFlagBits::eFragment,
-				.pImmutableSamplers = nullptr
-			}
-		};
-
-		vk::DescriptorSetLayoutCreateInfo layout_info{
-			.flags = {},
-			.bindingCount = bindings.size(),
-			.pBindings = bindings.data()
-		};
-		descriptor_set_layout = vk::raii::DescriptorSetLayout(ve_device.getDevice(), layout_info);
-	}
-
 	void VeApp::createUniformBuffers() {
 		vk::DeviceSize buffer_size = sizeof(UniformBufferObject);
 		assert(buffer_size > 0 && "Uniform buffer size is zero");
@@ -186,80 +165,43 @@ namespace ve {
 		}
 	}
 
-	void VeApp::createDescriptorPool() {
-		std::array<vk::DescriptorPoolSize, 2> pool_sizes {
-			vk::DescriptorPoolSize {
-				.type = vk::DescriptorType::eUniformBuffer,
-				.descriptorCount = MAX_FRAMES_IN_FLIGHT
-			},
-			vk::DescriptorPoolSize {
-				.type = vk::DescriptorType::eCombinedImageSampler,
-				.descriptorCount = MAX_FRAMES_IN_FLIGHT
-			}
-		};
-		vk::DescriptorPoolCreateInfo pool_info{
-			.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
-			.maxSets = MAX_FRAMES_IN_FLIGHT,
-			.poolSizeCount = pool_sizes.size(),
-			.pPoolSizes = pool_sizes.data()
-		};
+	void VeApp::createDescriptors() {
+		global_pool = VeDescriptorPool::Builder(ve_device)
+				.setMaxSets(MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT)
+				.addPoolSize(vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT)
+				.addPoolSize(vk::DescriptorType::eCombinedImageSampler, MAX_FRAMES_IN_FLIGHT)
+				.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
+				.build();
 
-		descriptor_pool = vk::raii::DescriptorPool(ve_device.getDevice(), pool_info);
-	}
+		global_set_layout = VeDescriptorSetLayout::Builder(ve_device)
+				.addBinding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eAllGraphics)
+				.build();
 
-	// Create a descriptor set for each frame in flight with ubo and texture info
-	void VeApp::createDescriptorSets() {
-		std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, *descriptor_set_layout);
-		vk::DescriptorSetAllocateInfo alloc_info{
-			.descriptorPool = *descriptor_pool,
-			.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT),
-			.pSetLayouts = layouts.data()
-		};
-		descriptor_sets.clear();
-		descriptor_sets = vk::raii::DescriptorSets(ve_device.getDevice(), alloc_info);
+		material_set_layout = VeDescriptorSetLayout::Builder(ve_device)
+				.addBinding(0, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
+				.build();
 
-		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-			vk::DescriptorBufferInfo buffer_info{
-				.buffer = *uniform_buffers[i]->getBuffer(),
-				.offset = 0,
-				.range = sizeof(UniformBufferObject)
-			};
-			vk::DescriptorImageInfo image_info{
-				.sampler = texture.getSampler(),
-				.imageView = texture.getImageView(),
-				.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
-			};
-			std::array<vk::WriteDescriptorSet, 2> descriptor_writes = {
-				vk::WriteDescriptorSet {
-					.dstSet = *descriptor_sets[i],
-					.dstBinding = 0,
-					.dstArrayElement = 0,
-					.descriptorCount = 1,
-					.descriptorType = vk::DescriptorType::eUniformBuffer,
-					.pImageInfo = nullptr,
-					.pBufferInfo = &buffer_info,
-					.pTexelBufferView = nullptr
-				},
-				vk::WriteDescriptorSet {
-					.dstSet = *descriptor_sets[i],
-					.dstBinding = 1,
-					.dstArrayElement = 0,
-					.descriptorCount = 1,
-					.descriptorType = vk::DescriptorType::eCombinedImageSampler,
-					.pImageInfo = &image_info,
-					.pBufferInfo = nullptr,
-					.pTexelBufferView = nullptr
-				}
-			};
-			// Update the descriptor sets on the device
-			ve_device.getDevice().updateDescriptorSets(descriptor_writes, {});
+		// create descriptor sets from global pool with global layout
+		global_descriptor_sets.clear();
+		global_descriptor_sets.reserve(static_cast<size_t>(MAX_FRAMES_IN_FLIGHT));
+		for (size_t i = 0; i < static_cast<size_t>(MAX_FRAMES_IN_FLIGHT); i++) {
+			auto buffer_info = uniform_buffers[i]->getDescriptorInfo();
+			vk::raii::DescriptorSet set{nullptr};
+			VeDescriptorWriter(*global_set_layout, *global_pool)
+				.writeBuffer(0, &buffer_info)
+				.build(set);
+			global_descriptor_sets.push_back(std::move(set));
 		}
+
+		// Create one material descriptor set for current texture
+		auto image_info = texture.getDescriptorInfo();
+		material_descriptor_set = vk::raii::DescriptorSet{nullptr};
+		VeDescriptorWriter(*material_set_layout, *global_pool)
+			.writeImage(0, &image_info)
+			.build(material_descriptor_set);
 	}
 
 	void VeApp::updateUniformBuffer(uint32_t current_frame) {
-		// this assertion saved me a lot of debugging time
-		assert(current_frame < uniform_buffers.size() && "Current image index out of bounds");
-
 		UniformBufferObject ubo{};
 
 		// Recompute camera view once per frame if needed
@@ -275,6 +217,7 @@ namespace ve {
 		ubo.proj = camera.getProj();
 
 		uniform_buffers[current_frame]->writeToBuffer(&ubo);
+		// No flush required with MEMORY_PROPERTY_HOST_COHERENT
 	}
 
 	void VeApp::updateFpsWindowTitle() {

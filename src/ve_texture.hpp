@@ -16,6 +16,14 @@ namespace ve {
 
 		vk::raii::Sampler& getSampler() { return texture_sampler; };
 		vk::raii::ImageView& getImageView() { return texture_image->getImageView(); };
+		vk::DescriptorImageInfo getDescriptorInfo() {
+			vk::DescriptorImageInfo image_info{
+				.sampler = texture_sampler,
+				.imageView = texture_image->getImageView(),
+				.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
+			};
+			return image_info;
+		}
 
 	private:
 		void createTextureImage(const char* texture_path);

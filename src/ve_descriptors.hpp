@@ -1,0 +1,104 @@
+/* Contains classes and builders for creating descriptor sets layouts,
+  descriptor pools, and writing descriptor sets.
+*/
+#pragma once
+
+#include "ve_device.hpp"
+
+// std
+#include <memory>
+#include <unordered_map>
+#include <vector>
+
+namespace ve {
+
+	class VeDescriptorSetLayout {
+	public:
+
+		class Builder {
+		public:
+			Builder(VeDevice &ve_device) : ve_device{ve_device} {}
+
+			Builder &addBinding(
+				uint32_t binding,
+				vk::DescriptorType descriptor_type,
+				vk::ShaderStageFlagBits stage_flags,
+				uint32_t count = 1);
+			std::unique_ptr<VeDescriptorSetLayout> build() const;
+
+		private:
+			VeDevice &ve_device;
+			std::unordered_map<uint32_t, vk::DescriptorSetLayoutBinding> bindings{};
+		};
+
+		VeDescriptorSetLayout(VeDevice &ve_device, std::unordered_map<uint32_t, vk::DescriptorSetLayoutBinding> bindings_map);
+		~VeDescriptorSetLayout();
+
+		VeDescriptorSetLayout(const VeDescriptorSetLayout &) = delete;
+		VeDescriptorSetLayout &operator=(const VeDescriptorSetLayout &) = delete;
+
+		vk::raii::DescriptorSetLayout& getDescriptorSetLayout() { return descriptor_set_layout; }
+
+	private:
+		VeDevice &ve_device;
+		vk::raii::DescriptorSetLayout descriptor_set_layout = nullptr;
+		std::unordered_map<uint32_t, vk::DescriptorSetLayoutBinding> bindings;
+
+		friend class VeDescriptorWriter;
+	};
+
+	class VeDescriptorPool {
+	public:
+
+		class Builder {
+		public:
+			Builder(VeDevice &ve_device) : ve_device{ve_device} {}
+
+			Builder &addPoolSize(vk::DescriptorType descriptor_type, uint32_t count);
+			Builder &setPoolFlags(vk::DescriptorPoolCreateFlagBits flags);
+			Builder &setMaxSets(uint32_t count);
+			std::unique_ptr<VeDescriptorPool> build() const;
+
+		private:
+			VeDevice &ve_device;
+			std::vector<vk::DescriptorPoolSize> pool_sizes{};
+			uint32_t max_sets = 1000;
+			vk::DescriptorPoolCreateFlagBits pool_flags{};
+		};
+
+		VeDescriptorPool(
+			VeDevice &ve_device,
+			uint32_t max_sets,
+			vk::DescriptorPoolCreateFlagBits pool_flags,
+			const std::vector<vk::DescriptorPoolSize> &pool_sizes);
+		~VeDescriptorPool();
+		VeDescriptorPool(const VeDescriptorPool &) = delete;
+		VeDescriptorPool &operator=(const VeDescriptorPool &) = delete;
+
+		void allocateDescriptor(const vk::raii::DescriptorSetLayout& descriptor_set_layout, vk::raii::DescriptorSet& descriptor_set) const;
+
+		void resetPool();
+
+	private:
+		VeDevice &ve_device;
+		vk::raii::DescriptorPool descriptor_pool = nullptr;
+		friend class VeDescriptorWriter;
+	};
+
+	class VeDescriptorWriter {
+	public:
+		VeDescriptorWriter(VeDescriptorSetLayout &set_layout, VeDescriptorPool &pool);
+
+		VeDescriptorWriter &writeBuffer(uint32_t binding, vk::DescriptorBufferInfo *buffer_info);
+		VeDescriptorWriter &writeImage(uint32_t binding, vk::DescriptorImageInfo *image_info);
+
+		void build(vk::raii::DescriptorSet &set);
+		void overwrite(vk::raii::DescriptorSet &set);
+
+	private:
+		VeDescriptorSetLayout &set_layout;
+		VeDescriptorPool &pool;
+		std::vector<vk::WriteDescriptorSet> writes;
+	};
+
+} // namespace ve

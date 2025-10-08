@@ -15,10 +15,12 @@ namespace ve {
 		glm::mat4 view;
 		glm::mat4 proj;
 		alignas(16) glm::vec3 offset;
+		alignas(16) glm::vec3 light_direction = glm::normalize(glm::vec3(-1.0f, 3.0f, 0.7f));
 	};
 
 	struct VeFrameInfo {
 		vk::raii::DescriptorSet& global_descriptor_set;
+		vk::raii::DescriptorSet& material_descriptor_set;
 		vk::raii::CommandBuffer& command_buffer;
 		std::unordered_map<uint32_t, VeGameObject>& game_objects;
 		float frame_time;

@@ -30,6 +30,14 @@ namespace ve {
 			vk::DeviceSize getInstanceSize() const { return instance_size; }
 			vk::DeviceSize getAlignmentSize() const { return alignment_size; }
 			vk::DeviceSize getBufferSize() const { return buffer_size; }
+			vk::DescriptorBufferInfo getDescriptorInfo(vk::DeviceSize size = VK_WHOLE_SIZE, vk::DeviceSize offset = 0) {
+				vk::DescriptorBufferInfo buffer_info{
+					.buffer = buffer,
+					.offset = offset,
+					.range = size
+				};
+				return buffer_info;
+			}
 
 			private:
 			void* mapped = nullptr;

@@ -10,11 +10,13 @@ struct UniformBuffer {
     float4x4 view;
     float4x4 proj;
 	float3 offset;
+	float3 light_direction;
 };
+[vk::binding(0, 0)]
 ConstantBuffer<UniformBuffer> ubo;
 
 struct PushConstantData {
-	float4x4 transform; // per-object transform (transl, rotat, scale)
+	float4x4 transform; // per-object  transform (transl, rotat, scale)
 	float4x4 normal_transform;
 	float has_texture;
 };
@@ -37,9 +39,8 @@ VertexOutput vertMain(VertexInput input) {
 	pos += float4(ubo.offset, 0.0f); // global translation
 
 	float3 normal_world = normalize(mul((float3x3)push_constants.normal_transform, input.in_normal));
-	float3 light_dir = normalize(float3(1.0, -0.9, 1.2));
 	float ambient = 0.1;
-	float light_intensity = max(dot(normal_world, light_dir), 0) + ambient;
+	float light_intensity = max(dot(normal_world, ubo.light_direction), 0) + ambient;
 
     output.pos = mul(ubo.proj, mul(ubo.view, pos)); // view and projection
     output.frag_color = input.in_color;
@@ -48,6 +49,7 @@ VertexOutput vertMain(VertexInput input) {
     return output;
 }
 
+[vk::binding(0, 1)]
 Sampler2D texture;
 
 [shader("fragment")]

@@ -8,6 +8,7 @@
 #include "ve_frame_info.hpp"
 #include "input_controller.hpp"
 #include "ve_camera.hpp"
+#include "ve_descriptors.hpp"
 
 #include <memory>
 #include <vector>
@@ -35,10 +36,8 @@ namespace ve {
 	private:
 		void mainLoop();
 		void loadGameObjects();
-		void createDescriptorSetLayout();
 		void createUniformBuffers();
-		void createDescriptorPool();
-		void createDescriptorSets();
+		void createDescriptors();
 
 		void updateUniformBuffer(uint32_t current_frame);
 		void updateFpsWindowTitle();
@@ -47,23 +46,28 @@ namespace ve {
 		VeDevice ve_device{ve_window};
 		VeRenderer ve_renderer{ve_device, ve_window};
 
-		const char* TEXTURE_PATH = "../textures/viking_room.png";
-		//const char* TEXTURE_PATH = "../textures/mots.png";
+		// Descriptor pool, layouts, sets
+		std::vector<std::unique_ptr<VeBuffer>> uniform_buffers;
+		std::unique_ptr<VeDescriptorPool> global_pool{};
+		std::unique_ptr<VeDescriptorSetLayout> global_set_layout{};
+		std::vector<vk::raii::DescriptorSet> global_descriptor_sets{};
+		std::unique_ptr<VeDescriptorSetLayout> material_set_layout{};
+		vk::raii::DescriptorSet material_descriptor_set{nullptr};
 
-		VeTexture texture{ve_device, TEXTURE_PATH};
+		// Objects and texture
+		VeTexture texture{ve_device, "../textures/viking_room.png"};
+		// model paths hardcoded in .cpp for now
 		std::unordered_map<uint32_t, VeGameObject> game_objects;
 
+		// Input handling
 		InputController input_controller{ve_window};
+
+		// Camera settings
         VeCamera camera{{2.0f, 2.0f, 2.0f}, {0.0f, 0.0f, 1.0f}};
 		const float fov = glm::radians(55.0f);
 		const float near_plane = 0.1f;
 		const float far_plane = 100.0f;
 		float last_aspect{0.0f};
-
-		vk::raii::DescriptorSetLayout descriptor_set_layout{nullptr};
-		std::vector<std::unique_ptr<VeBuffer>> uniform_buffers;
-		vk::raii::DescriptorPool descriptor_pool = nullptr;
-		std::vector<vk::raii::DescriptorSet> descriptor_sets;
 
 		// FPS/frametime tracking
 		using clock = std::chrono::steady_clock;
