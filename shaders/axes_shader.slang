@@ -1,6 +1,7 @@
 struct VertexInput {
     float3 in_pos : POSITION;
     float3 in_color : COLOR;
+	float3 in_normal : NORMAL; // ignored
     float2 in_tex_coord : TEXCOORD0; // ignored
 };
 

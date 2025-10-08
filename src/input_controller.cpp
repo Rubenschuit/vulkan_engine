@@ -62,6 +62,11 @@ namespace ve {
 			camera.moveUpWorld(-movement_delta);
 		if (glfwGetKey(window, key_mappings.move_down) == GLFW_PRESS)
 			camera.moveUpWorld(movement_delta);
+
+
+		if (glfwGetKey(window, key_mappings.reset_camera) == GLFW_PRESS) {
+			camera.lookAt(glm::vec3(0.0f, 0.0f, 0.0f));
+		}
 	}
 
 	void InputController::processMouseMovement(double xpos, double ypos) {

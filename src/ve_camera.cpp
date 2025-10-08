@@ -35,12 +35,42 @@ namespace ve {
 		viewDirty = true;
 	}
 
-	// TODO: fix yaw calc
+	// Compute yaw/pitch consistent with updateView. We have
+	//
+	//    -cos(pitch) * cos(yaw)        dir.x
+	// 	  cos(pitch) * sin(yaw)    =    dir.y
+ 	//	    	  sin(pitch)           	dir.z ,
+	//
+	// therefore
+	//
+	//	   pitch = arcsin(dir.z).
+	//
+	// The yaw angle follows from
+	//
+	//     (dir.y / -dir.x) = sin(yaw) / cos(yaw) = tan(yaw),
+    //
+	// so
+	//
+	//     yaw = arctan( dir.y / -dir.x).
+	//
 	void VeCamera::lookAt(const glm::vec3& target) {
-		glm::vec3 dir = glm::normalize(target - pos);
-		pitch = std::asin(glm::clamp(dir.y, -1.0f, 1.0f));
-		yaw = std::atan2(dir.x, dir.z);
-		wrapYaw();
+		glm::vec3 dir = target - pos;
+		float len = glm::length(dir);
+		if (len < 1e-6f) {
+			return; // nothing to do
+		}
+		dir = glm::normalize(dir);
+
+		pitch = std::asin(glm::dot(dir, world_up));
+
+		// Yaw from XY projection; mapping matches forward = (-cos p cos y, cos p sin y, sin p)
+		glm::vec2 xy{dir.x, dir.y};
+		float xy_len = glm::length(xy);
+		if (xy_len > 1e-6f) {
+			glm::vec2 d = glm::normalize(xy);
+			yaw = std::atan2(d.y, -d.x);
+			wrapYaw();
+		}
 		clampPitch();
 		viewDirty = true;
 	}

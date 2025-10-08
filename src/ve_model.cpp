@@ -33,7 +33,6 @@ namespace ve {
 		std::vector<Vertex> vertices;
 		std::unordered_map<Vertex, uint32_t> unique_vertices{};
 		std::vector<uint32_t> indices;
-		// Assume every vertex is unique
 		for (const auto& shape : shapes) {
 			for (const auto& index: shape.mesh.indices) {
 				Vertex vertex{};
@@ -44,7 +43,17 @@ namespace ve {
 					attrib.vertices[static_cast<size_t>(3 * index.vertex_index + 2)]
 				};
 
-				vertex.color = {1.0f, 1.0f, 1.0f};
+				vertex.color = {
+					attrib.colors[static_cast<size_t>(3 * index.vertex_index)],
+					attrib.colors[static_cast<size_t>(3 * index.vertex_index + 1)],
+					attrib.colors[static_cast<size_t>(3 * index.vertex_index + 2)]
+				};
+
+				vertex.normal = {
+					attrib.normals[static_cast<size_t>(3 * index.normal_index)],
+					attrib.normals[static_cast<size_t>(3 * index.normal_index + 1)],
+					attrib.normals[static_cast<size_t>(3 * index.normal_index + 2)]
+				};
 
 				vertex.tex_coord = {
 					attrib.texcoords[static_cast<size_t>(2 * index.texcoord_index)],
@@ -59,7 +68,7 @@ namespace ve {
 				indices.push_back(unique_vertices[vertex]);
 			}
 		}
-		std::cout << "Model has " << vertices.size() << " vertices and " << indices.size() << " indices\n";
+		std::cout << "Model " << model_path << " has " << vertices.size() << " vertices and " << indices.size() << " indices\n";
 		createVertexBuffers(vertices);
 		createIndexBuffers(indices);
 	}
@@ -161,7 +170,7 @@ namespace ve {
 	}
 
 	std::vector<vk::VertexInputAttributeDescription> VeModel::Vertex::getAttributeDescriptions() {
-		std::vector<vk::VertexInputAttributeDescription> attribute_descriptions(3);
+		std::vector<vk::VertexInputAttributeDescription> attribute_descriptions(4);
 		attribute_descriptions[0] = vk::VertexInputAttributeDescription{
 			.location = 0,
 			.binding = 0,
@@ -176,6 +185,12 @@ namespace ve {
 		};
 		attribute_descriptions[2] = vk::VertexInputAttributeDescription{
 			.location = 2,
+			.binding = 0,
+			.format = vk::Format::eR32G32B32Sfloat,
+			.offset = offsetof(Vertex, normal)
+		};
+		attribute_descriptions[3] = vk::VertexInputAttributeDescription{
+			.location = 3,
 			.binding = 0,
 			.format = vk::Format::eR32G32Sfloat,
 			.offset = offsetof(Vertex, tex_coord)

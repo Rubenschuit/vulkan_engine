@@ -7,6 +7,18 @@
 
 namespace ve {
 
+	/* Scalars have to be aligned by N (= 4 bytes given 32-bit floats).
+	   A float2 must be aligned by 2N (= 8 bytes).
+	   A float3 or float4 must be aligned by 4N (= 16 bytes).
+	   A nested structure must be aligned by the base alignment of its members rounded up to a multiple of 16.
+	   A float4x4 matrix must have the same alignment as a float4.    */
+	// TODO: currently exceeds max push constant size of 128 bytes on some hardware
+	struct SimplePushConstantData {
+		glm::mat4 transform;
+		glm::mat4 normal_transform;
+		alignas(4) float has_texture;
+	};
+
 	SimpleRenderSystem::SimpleRenderSystem(
 			VeDevice& device,
 			vk::raii::DescriptorSetLayout& descriptor_set_layout,
@@ -64,8 +76,9 @@ namespace ve {
 
 		for (auto& [id, obj] : frame_info.game_objects) {
 			SimplePushConstantData push{};
-			push.color = obj.color;
+			push.normal_transform = obj.getNormalTransform();
 			push.transform = obj.getTransform();
+			push.has_texture = obj.has_texture;
 			frame_info.command_buffer.pushConstants<SimplePushConstantData>(
 				*pipeline_layout,
 				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,

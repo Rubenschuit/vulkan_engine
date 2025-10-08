@@ -1,4 +1,5 @@
-/* Class representing a camera in 3D space, it controls the view and projection matrices */
+/* Class representing a camera in 3D space, it controls the view and projection matrices
+   Only works for world up = +Z currently */
 #pragma once
 
 #include <glm/glm.hpp>

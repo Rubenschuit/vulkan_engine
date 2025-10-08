@@ -21,6 +21,7 @@ namespace ve {
 			int look_right = GLFW_KEY_RIGHT;
 
 			int toggle_mouse_look = GLFW_KEY_TAB;
+			int reset_camera = GLFW_KEY_R;
 		};
 
 		InputController(VeWindow& window);

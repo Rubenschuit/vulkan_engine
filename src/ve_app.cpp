@@ -74,7 +74,7 @@ namespace ve {
 
 	void VeApp::loadGameObjects() {
 
-		/*// Square model
+		/*// obj model
 		const std::vector<VeModel::Vertex> vertices = {
 			{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
 			{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
@@ -85,17 +85,57 @@ namespace ve {
 			0, 1, 2, 2, 3, 0
 		};
 		*/
-		std::shared_ptr<VeModel> model = std::make_shared<VeModel>(ve_device, MODEL_PATH);
+		std::shared_ptr<VeModel> model = std::make_shared<VeModel>(ve_device, "../models/viking_room.obj");
 		for (int j = 0; j < 10; j++) {
 			for (int i = 0; i < 10; i++) {
-				VeGameObject square = VeGameObject::createGameObject();
-				square.ve_model = model;
-				square.translation = {i * 2.0f, j * 2.0f, 0.f};
-				//square.scale = {0.4f + 0.2f * j, 0.4f + 0.2f * j, 1.0f};
-				//square.color = {1.0f, 1.0f, 1.0f};
-				game_objects.emplace(square.getId(), std::move(square));
+				VeGameObject obj = VeGameObject::createGameObject();
+				obj.ve_model = model;
+				obj.translation = {i * 4.0f, j * 4.0f, 0.f};
+				obj.has_texture = 1.0f;
+				//obj.scale = {0.4f + 0.2f * j, 0.4f + 0.2f * j, 1.0f};
+				//obj.color = {1.0f, 1.0f, 1.0f};
+				game_objects.emplace(obj.getId(), std::move(obj));
 			}
 		}
+		std::shared_ptr<VeModel> model2 = std::make_shared<VeModel>(ve_device, "../models/cube.obj");
+		for (int j = 0; j < 10; j++) {
+			for (int i = 0; i < 10; i++) {
+				VeGameObject obj = VeGameObject::createGameObject();
+				obj.ve_model = model2;
+				obj.translation = {-1.0 * i * 4.0f - 4.0f, j * 4.0f, 0.f};
+				obj.has_texture = 0.0f;
+				//obj.scale = {0.4f + 0.2f * j, 0.4f + 0.2f * j, 1.0f};
+				//obj.color = {1.0f, 1.0f, 1.0f};
+				game_objects.emplace(obj.getId(), std::move(obj));
+			}
+		}
+		std::shared_ptr<VeModel> model3 = std::make_shared<VeModel>(ve_device, "../models/flat_vase.obj");
+		for (int j = 0; j < 10; j++) {
+			for (int i = 0; i < 10; i++) {
+				VeGameObject obj = VeGameObject::createGameObject();
+				obj.ve_model = model3;
+				obj.translation = {-1.0 * i * 4.0f - 8.0f, j * -4.0f - 4.0f, 0.f};
+				obj.has_texture = 0.0f;
+				obj.rotation = {glm::radians(-90.0f), 0.0f, 0.0f};
+				obj.scale = {16.0f, 3.0f, 6.0f};
+				//obj.color = {1.0f, 1.0f, 1.0f};
+				game_objects.emplace(obj.getId(), std::move(obj));
+			}
+		}
+		std::shared_ptr<VeModel> model4 = std::make_shared<VeModel>(ve_device, "../models/smooth_vase.obj");
+		for (int j = 0; j < 10; j++) {
+			for (int i = 0; i < 10; i++) {
+				VeGameObject obj = VeGameObject::createGameObject();
+				obj.ve_model = model4;
+				obj.translation = {i * 4.0f - 4.0f, j * -4.0f - 4.0f, 0.f};
+				obj.has_texture = 0.0f;
+				obj.rotation = {glm::radians(-90.0f), 0.0f, 0.0f};
+				obj.scale = {6.0f, 3.0f, 6.0f};
+				//obj.color = {1.0f, 1.0f, 1.0f};
+				game_objects.emplace(obj.getId(), std::move(obj));
+			}
+		}
+
 	}
 
 	// One binding for the uniform buffer, another for the texture sampler
@@ -251,7 +291,7 @@ namespace ve {
 			double fps = (window_ms > 0) ? (1000.0 * static_cast<double>(fps_frame_count) / static_cast<double>(window_ms)) : 0.0;
 			double avg_ms = (fps_frame_count > 0) ? (sum_frame_ms / static_cast<double>(fps_frame_count)) : 0.0;
 			char buf[128];
-			snprintf(buf, sizeof(buf), "Vulkan Engine!  %d FPS  %.2f ms", static_cast<int>(fps), avg_ms);
+			snprintf(buf, sizeof(buf), "Vulkan Engine!  %d FPS  %.2f ms                         location: (%.2f, %.2f, %.2f)", static_cast<int>(fps), avg_ms, camera.getPosition().x, camera.getPosition().y, camera.getPosition().z);
 			glfwSetWindowTitle(ve_window.getGLFWwindow(), buf);
 			// Reset window counters
 			fps_frame_count = 0;

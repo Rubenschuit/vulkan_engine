@@ -20,12 +20,14 @@ namespace ve {
 		struct Vertex {
 			glm::vec3 pos;
 			glm::vec3 color;
+			glm::vec3 normal;
 			glm::vec2 tex_coord;
 
 			static std::vector<vk::VertexInputBindingDescription> getBindingDescriptions();
 			static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptions();
 			bool operator==(const Vertex& other) const {
-				return pos == other.pos && color == other.color && tex_coord == other.tex_coord;
+				// Include normal in equality so that flat vs. smooth shaded meshes deduplicate differently
+				return pos == other.pos && color == other.color && normal == other.normal && tex_coord == other.tex_coord;
 			}
 		};
 
@@ -61,8 +63,12 @@ namespace ve {
 // Provide a hash function for Vertex so we can use it in unordered_map
 // Needs to be outside the ve namespace because std is not allowed to be extended inside another namespace
 template<> struct std::hash<ve::VeModel::Vertex> {
-	size_t operator()(ve::VeModel::Vertex const& vertex) const noexcept {
-		return ((hash<glm::vec3>()(vertex.pos) ^ (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
-				(hash<glm::vec2>()(vertex.tex_coord) << 1);
+	size_t operator()(ve::VeModel::Vertex const& v) const noexcept {
+		size_t seed = 0u;
+		seed ^= std::hash<glm::vec3>()(v.pos) + 0x9e3779b9 + (seed<<6) + (seed>>2);
+		seed ^= std::hash<glm::vec3>()(v.color) + 0x9e3779b9 + (seed<<6) + (seed>>2);
+		seed ^= std::hash<glm::vec3>()(v.normal) + 0x9e3779b9 + (seed<<6) + (seed>>2);
+		seed ^= std::hash<glm::vec2>()(v.tex_coord) + 0x9e3779b9 + (seed<<6) + (seed>>2);
+		return seed;
 	}
 };
