@@ -8,28 +8,22 @@ struct VertexInput {
 struct UniformBuffer {
     float4x4 view;
     float4x4 proj;
-    float3 offset; // global translation, optional
 };
 [vk::binding(0, 0)]
 ConstantBuffer<UniformBuffer> ubo;
-
-struct PushConstantData {
-    float3 offset; // per-object translation
-    float3 scale;  // per-object scale
-};
-[push_constant]
-PushConstantData push_constants;
 
 struct VertexOutput {
     float4 pos : SV_Position;
     float3 color;
 	float2 tex_coord; // unused
+	float3 normal; // unused
 };
 
 [shader("vertex")]
 VertexOutput vertMain(VertexInput input) {
     VertexOutput outV;
     outV.tex_coord = input.in_tex_coord; // unused
+	outV.normal = input.in_normal; // unused
     float4 pos = float4(input.in_pos, 1.0);
     outV.pos = mul(ubo.proj, mul(ubo.view, pos)); // only view and projection
     outV.color = input.in_color;

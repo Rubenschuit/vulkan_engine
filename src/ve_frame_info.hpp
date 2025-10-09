@@ -11,11 +11,16 @@
 
 namespace ve {
 
+	const glm::vec3 DEFAULT_LIGHT_POSITION = glm::vec3(-10.0f, 10.0f, 10.0f);
+	const glm::vec4 DEFAULT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+	const glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.02f); // w indicates light intensity
+
 	struct UniformBufferObject {
 		glm::mat4 view;
 		glm::mat4 proj;
-		alignas(16) glm::vec3 offset;
-		alignas(16) glm::vec3 light_direction = glm::normalize(glm::vec3(-1.0f, 3.0f, 0.7f));
+		glm::vec4 ambient_light_color = DEFAULT_AMBIENT_LIGHT_COLOR;
+		glm::vec4 light_color = DEFAULT_LIGHT_COLOR;
+		alignas(16) glm::vec3 light_position = DEFAULT_LIGHT_POSITION;
 	};
 
 	struct VeFrameInfo {

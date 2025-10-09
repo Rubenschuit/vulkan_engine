@@ -61,6 +61,9 @@ namespace ve {
 				};
 				// update
 				input_controller.processInput(frame_time, camera);
+
+
+
 				updateUniformBuffer(current_frame);
 				updateFpsWindowTitle();
 
@@ -80,17 +83,23 @@ namespace ve {
 
 	void VeApp::loadGameObjects() {
 
-		/* quad model
-		const std::vector<VeModel::Vertex> vertices = {
-			{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-			{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-			{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-			{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
-		};
-		const std::vector<uint32_t> indices = {
-			0, 1, 2, 2, 3, 0
-		};
-		*/
+		// Light source
+		auto quad = std::make_shared<VeModel>(ve_device, "../models/quad.obj");
+		VeGameObject obj = VeGameObject::createGameObject();
+		obj.ve_model = quad;
+		obj.has_texture = 1.0f;
+		obj.translation = ve::DEFAULT_LIGHT_POSITION;
+		game_objects.emplace(obj.getId(), std::move(obj));
+
+		// Floor
+		VeGameObject floor = VeGameObject::createGameObject();
+		floor.ve_model = quad;
+		floor.has_texture = 0.0f;
+		floor.rotation = {glm::radians(-90.0f), 0.0f, 0.0f};
+		floor.scale = {40.0f, 40.0f, 40.0f};
+		floor.translation = {0.0f, 0.0f, -0.1f};
+		game_objects.emplace(floor.getId(), std::move(floor));
+
 		std::shared_ptr<VeModel> model = std::make_shared<VeModel>(ve_device, "../models/viking_room.obj");
 		for (int j = 0; j < 10; j++) {
 			for (int i = 0; i < 10; i++) {
@@ -108,7 +117,7 @@ namespace ve {
 			for (int i = 0; i < 10; i++) {
 				VeGameObject obj = VeGameObject::createGameObject();
 				obj.ve_model = model2;
-				obj.translation = {-1.0 * i * 4.0f - 4.0f, j * 4.0f, 0.f};
+				obj.translation = {-1.0 * i * 4.0f - 4.0f, j * 4.0f, 1.0f};
 				obj.has_texture = 0.0f;
 				//obj.scale = {0.4f + 0.2f * j, 0.4f + 0.2f * j, 1.0f};
 				//obj.color = {1.0f, 1.0f, 1.0f};
@@ -123,7 +132,7 @@ namespace ve {
 				obj.translation = {-1.0 * i * 4.0f - 8.0f, j * -4.0f - 4.0f, 0.f};
 				obj.has_texture = 0.0f;
 				obj.rotation = {glm::radians(-90.0f), 0.0f, 0.0f};
-				obj.scale = {16.0f, 3.0f, 6.0f};
+				obj.scale = {6.0f, 3.0f, 6.0f};
 				//obj.color = {1.0f, 1.0f, 1.0f};
 				game_objects.emplace(obj.getId(), std::move(obj));
 			}
@@ -216,6 +225,15 @@ namespace ve {
 		ubo.view = camera.getView();
 		ubo.proj = camera.getProj();
 
+		// move lightposition over time TODO: make cleaner
+		float light_move_radius = 20.0f;
+		float light_move_speed = 0.1f; // radians per second
+		float light_x = light_move_radius * cos(light_move_speed * (float)glfwGetTime());
+		float light_y = light_move_radius * sin(light_move_speed * (float)glfwGetTime());
+		ubo.light_position = glm::vec3(light_x, light_y, 10.0f);
+		auto& quad = game_objects.at(0);
+		quad.translation = ubo.light_position; // move quad to light position
+
 		uniform_buffers[current_frame]->writeToBuffer(&ubo);
 		// No flush required with MEMORY_PROPERTY_HOST_COHERENT
 	}
@@ -234,7 +252,10 @@ namespace ve {
 			double fps = (window_ms > 0) ? (1000.0 * static_cast<double>(fps_frame_count) / static_cast<double>(window_ms)) : 0.0;
 			double avg_ms = (fps_frame_count > 0) ? (sum_frame_ms / static_cast<double>(fps_frame_count)) : 0.0;
 			char buf[128];
-			snprintf(buf, sizeof(buf), "Vulkan Engine!  %d FPS  %.2f ms                         location: (%.2f, %.2f, %.2f)", static_cast<int>(fps), avg_ms, camera.getPosition().x, camera.getPosition().y, camera.getPosition().z);
+			snprintf(buf, sizeof(buf), "Vulkan Engine!  %d FPS  %.2f ms         location: (%.2f, %.2f, %.2f)",
+							 static_cast<int>(fps), avg_ms,
+							 camera.getPosition().x, camera.getPosition().y, camera.getPosition().z
+			);
 			glfwSetWindowTitle(ve_window.getGLFWwindow(), buf);
 			// Reset window counters
 			fps_frame_count = 0;

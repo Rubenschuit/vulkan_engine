@@ -4,11 +4,6 @@
 
 namespace ve {
 
-	struct AxesPushConstants {
-		alignas(16) glm::vec3 offset{0.0f};
-		alignas(16) glm::vec3 scale{1.0f};
-	};
-
 	AxesRenderSystem::AxesRenderSystem(
 			VeDevice& device,
 			vk::raii::DescriptorSetLayout& global_set_layout,
@@ -21,17 +16,10 @@ namespace ve {
 	AxesRenderSystem::~AxesRenderSystem() {}
 
 	void AxesRenderSystem::createPipelineLayout(vk::raii::DescriptorSetLayout& global_set_layout) {
-	vk::PushConstantRange push_constant_range{
-		.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
-		.offset = 0,
-		.size = sizeof(AxesPushConstants)
-	};
 	vk::PipelineLayoutCreateInfo pipeline_layout_info{
 		.sType = vk::StructureType::ePipelineLayoutCreateInfo,
 		.setLayoutCount = 1,
 		.pSetLayouts = &*global_set_layout,
-		.pushConstantRangeCount = 1,
-		.pPushConstantRanges = &push_constant_range
 	};
 	pipeline_layout = vk::raii::PipelineLayout(ve_device.getDevice(), pipeline_layout_info);
 	}
@@ -134,15 +122,6 @@ namespace ve {
 			*frame_info.global_descriptor_set,
 			{}
 		);
-
-		AxesPushConstants push{}; // origin, unit scale
-		frame_info.command_buffer.pushConstants<AxesPushConstants>(
-			*pipeline_layout,
-			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
-			0,
-			push
-		);
-
 		axes_model->bindVertexBuffer(frame_info.command_buffer);
 		axes_model->draw(frame_info.command_buffer);
 	}
