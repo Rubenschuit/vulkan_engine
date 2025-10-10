@@ -85,4 +85,13 @@ if (VE_BUILD_SHADERS)
     OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
     OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/axes_shader.spv"
   )
+
+  add_slang_shader_target(ShadersPointLight
+    SOURCES "${PROJECT_SOURCE_DIR}/shaders/point_light_shader.slang"
+    VERT_ENTRY vertMain
+    FRAG_ENTRY fragMain
+    PROFILE spirv_1_5
+    OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
+    OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/point_light_shader.spv"
+  )
 endif()

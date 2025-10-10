@@ -43,6 +43,7 @@ namespace ve {
 					attrib.vertices[static_cast<size_t>(3 * index.vertex_index + 2)]
 				};
 
+				// if no color data is present, default to white
 				vertex.color = {
 					attrib.colors[static_cast<size_t>(3 * index.vertex_index)],
 					attrib.colors[static_cast<size_t>(3 * index.vertex_index + 1)],

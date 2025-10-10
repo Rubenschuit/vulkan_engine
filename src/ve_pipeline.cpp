@@ -82,6 +82,8 @@ namespace ve {
 			.attachmentCount = 1,
 			.pAttachments = &config_info.color_blend_attachment
 		};
+		config_info.attribute_descriptions = VeModel::Vertex::getAttributeDescriptions();
+		config_info.binding_descriptions = VeModel::Vertex::getBindingDescriptions();
 	}
 
 	std::vector<char> VePipeline::readFile(const char* file_path) {
@@ -123,14 +125,12 @@ namespace ve {
 				.pSpecializationInfo = nullptr
 			}
 		};
-		auto binding_descriptions = VeModel::Vertex::getBindingDescriptions();
-		auto attribute_descriptions = VeModel::Vertex::getAttributeDescriptions();
 		vk::PipelineVertexInputStateCreateInfo vertex_input_info{
 			.sType = vk::StructureType::ePipelineVertexInputStateCreateInfo,
-			.vertexBindingDescriptionCount = static_cast<uint32_t>(binding_descriptions.size()),
-			.pVertexBindingDescriptions = binding_descriptions.data(),
-			.vertexAttributeDescriptionCount = static_cast<uint32_t>(attribute_descriptions.size()),
-			.pVertexAttributeDescriptions = attribute_descriptions.data()
+			.vertexBindingDescriptionCount = static_cast<uint32_t>(config_info.binding_descriptions.size()),
+			.pVertexBindingDescriptions = config_info.binding_descriptions.data(),
+			.vertexAttributeDescriptionCount = static_cast<uint32_t>(config_info.attribute_descriptions.size()),
+			.pVertexAttributeDescriptions = config_info.attribute_descriptions.data()
 		};
 
 		vk::Format depth_format = ve_device.findSupportedFormat(

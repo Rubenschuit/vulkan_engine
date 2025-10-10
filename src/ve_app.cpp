@@ -2,6 +2,7 @@
 #include "ve_app.hpp"
 #include "systems/simple_render_system.hpp"
 #include "systems/axes_render_system.hpp"
+#include "systems/point_light_system.hpp"
 
 
 #define GLM_FORCE_RADIANS
@@ -39,6 +40,12 @@ namespace ve {
 			global_set_layout->getDescriptorSetLayout(),
 			ve_renderer.getSwapChainImageFormat()
 		);
+		PointLightSystem point_light_system(
+			ve_device,
+			global_set_layout->getDescriptorSetLayout(),
+			material_set_layout->getDescriptorSetLayout(),
+			ve_renderer.getSwapChainImageFormat()
+		);
 		auto current_time = std::chrono::high_resolution_clock::now();
 
 		while (!glfwWindowShouldClose(ve_window.getGLFWwindow())) {
@@ -61,17 +68,19 @@ namespace ve {
 				};
 				// update
 				input_controller.processInput(frame_time, camera);
+				updateCamera();
+				updateWindowTitle();
 
-
-
-				updateUniformBuffer(current_frame);
-				updateFpsWindowTitle();
+				UniformBufferObject ubo{};
+				point_light_system.update(frame_info, ubo);
+				updateUniformBuffer(current_frame, ubo);
 
 				//rendering
 				ve_renderer.beginRender(command_buffer);
 
 				simple_render_system.renderObjects(frame_info);
 				axes_render_system.renderAxes(frame_info);
+				point_light_system.render(frame_info);
 
 				ve_renderer.endRender(command_buffer);
 				ve_renderer.endFrame(command_buffer);
@@ -82,22 +91,40 @@ namespace ve {
 	}
 
 	void VeApp::loadGameObjects() {
+		// Create 10 point lights with ranging over all colors
+		const uint num_lights = 10; // max 10
+		const glm::vec3 colors[10] = {
+			{1.0f, 1.0f, 1.0f}, //white
+			{1.0f, 0.0f, 0.0f}, //red
+			{1.0f, 0.5f, 0.0f}, //orange
+			{1.0f, 1.0f, 0.0f}, //yellow
+			{0.0f, 1.0f, 0.0f}, //green
+			{0.0f, 1.0f, 0.5f}, //turquoise
+			{0.0f, 1.0f, 1.0f}, //cyan
+			{0.0f, 0.5f, 1.0f}, //light-blue
+			{0.0f, 0.0f, 1.0f}, //blue
+			{0.5f, 0.0f, 1.0f}  //purple
+		};
+		constexpr float radius = 25.0f;
+		constexpr float height = 10.0f;
 
-		// Light source
-		auto quad = std::make_shared<VeModel>(ve_device, "../models/quad.obj");
-		VeGameObject obj = VeGameObject::createGameObject();
-		obj.ve_model = quad;
-		obj.has_texture = 1.0f;
-		obj.translation = ve::DEFAULT_LIGHT_POSITION;
-		game_objects.emplace(obj.getId(), std::move(obj));
+		for (uint i = 0; i < num_lights; i++) {
+			auto point_light = VeGameObject::createPointLight(1.1f, 10.0f, colors[i % 10]);
+			glm::vec3 pos = {radius * cos(glm::two_pi<float>() / num_lights * i), radius * sin(glm::two_pi<float>() / num_lights * i), height};
+			point_light.transform.translation = pos;
+			game_objects.emplace(point_light.getId(), std::move(point_light));
+		}
 
 		// Floor
 		VeGameObject floor = VeGameObject::createGameObject();
+		auto quad = std::make_shared<VeModel>(ve_device, "../models/quad.obj");
 		floor.ve_model = quad;
 		floor.has_texture = 0.0f;
-		floor.rotation = {glm::radians(-90.0f), 0.0f, 0.0f};
-		floor.scale = {40.0f, 40.0f, 40.0f};
-		floor.translation = {0.0f, 0.0f, -0.1f};
+		floor.transform = {
+			.translation = {0.0f, 0.0f, -0.1f},
+			.rotation = {glm::radians(-90.0f), 0.0f, 0.0f},
+			.scale = {40.0f, 40.0f, 40.0f}
+		};
 		game_objects.emplace(floor.getId(), std::move(floor));
 
 		std::shared_ptr<VeModel> model = std::make_shared<VeModel>(ve_device, "../models/viking_room.obj");
@@ -105,7 +132,7 @@ namespace ve {
 			for (int i = 0; i < 10; i++) {
 				VeGameObject obj = VeGameObject::createGameObject();
 				obj.ve_model = model;
-				obj.translation = {i * 4.0f, j * 4.0f, 0.f};
+				obj.transform.translation = {i * 4.0f, j * 4.0f, 0.f};
 				obj.has_texture = 1.0f;
 				//obj.scale = {0.4f + 0.2f * j, 0.4f + 0.2f * j, 1.0f};
 				//obj.color = {1.0f, 1.0f, 1.0f};
@@ -117,8 +144,7 @@ namespace ve {
 			for (int i = 0; i < 10; i++) {
 				VeGameObject obj = VeGameObject::createGameObject();
 				obj.ve_model = model2;
-				obj.translation = {-1.0 * i * 4.0f - 4.0f, j * 4.0f, 1.0f};
-				obj.has_texture = 0.0f;
+				obj.transform.translation = {-1.0 * i * 4.0f - 4.0f, j * 4.0f, 1.0f};
 				//obj.scale = {0.4f + 0.2f * j, 0.4f + 0.2f * j, 1.0f};
 				//obj.color = {1.0f, 1.0f, 1.0f};
 				game_objects.emplace(obj.getId(), std::move(obj));
@@ -129,10 +155,11 @@ namespace ve {
 			for (int i = 0; i < 10; i++) {
 				VeGameObject obj = VeGameObject::createGameObject();
 				obj.ve_model = model3;
-				obj.translation = {-1.0 * i * 4.0f - 8.0f, j * -4.0f - 4.0f, 0.f};
-				obj.has_texture = 0.0f;
-				obj.rotation = {glm::radians(-90.0f), 0.0f, 0.0f};
-				obj.scale = {6.0f, 3.0f, 6.0f};
+				obj.transform = {
+					.translation = {-1.0 * i * 4.0f - 8.0f, j * -4.0f - 4.0f, 0.f},
+					.rotation = {glm::radians(-90.0f), 0.0f, 0.0f},
+					.scale = {6.0f, 3.0f, 6.0f}
+				};
 				//obj.color = {1.0f, 1.0f, 1.0f};
 				game_objects.emplace(obj.getId(), std::move(obj));
 			}
@@ -142,10 +169,11 @@ namespace ve {
 			for (int i = 0; i < 10; i++) {
 				VeGameObject obj = VeGameObject::createGameObject();
 				obj.ve_model = model4;
-				obj.translation = {i * 4.0f - 4.0f, j * -4.0f - 4.0f, 0.f};
-				obj.has_texture = 0.0f;
-				obj.rotation = {glm::radians(-90.0f), 0.0f, 0.0f};
-				obj.scale = {6.0f, 3.0f, 6.0f};
+				obj.transform = {
+					.translation = {i * 4.0f - 4.0f, j * -4.0f - 4.0f, 0.f},
+					.rotation = {glm::radians(-90.0f), 0.0f, 0.0f},
+					.scale = {6.0f, 3.0f, 6.0f}
+				};
 				//obj.color = {1.0f, 1.0f, 1.0f};
 				game_objects.emplace(obj.getId(), std::move(obj));
 			}
@@ -210,35 +238,26 @@ namespace ve {
 			.build(material_descriptor_set);
 	}
 
-	void VeApp::updateUniformBuffer(uint32_t current_frame) {
-		UniformBufferObject ubo{};
-
+	void VeApp::updateCamera() {
 		// Recompute camera view once per frame if needed
 		camera.updateIfDirty();
 		// If swapchain aspect changed (window resize), refresh camera projection
 		float aspect = ve_renderer.getExtentAspectRatio();
 		if (aspect > 0.0f && std::abs(aspect - last_aspect) > std::numeric_limits<float>::epsilon()) {
 			last_aspect = aspect;
-			camera.setPerspective(glm::radians(55.0f), last_aspect, near_plane, far_plane);
+			camera.setPerspective(fov, last_aspect, near_plane, far_plane);
 		}
+	}
 
+	// Updates the camera and uniform buffer object once per frame
+	void VeApp::updateUniformBuffer(uint32_t current_frame, UniformBufferObject& ubo) {
 		ubo.view = camera.getView();
 		ubo.proj = camera.getProj();
-
-		// move lightposition over time TODO: make cleaner
-		float light_move_radius = 20.0f;
-		float light_move_speed = 0.1f; // radians per second
-		float light_x = light_move_radius * cos(light_move_speed * (float)glfwGetTime());
-		float light_y = light_move_radius * sin(light_move_speed * (float)glfwGetTime());
-		ubo.light_position = glm::vec3(light_x, light_y, 10.0f);
-		auto& quad = game_objects.at(0);
-		quad.translation = ubo.light_position; // move quad to light position
-
 		uniform_buffers[current_frame]->writeToBuffer(&ubo);
 		// No flush required with MEMORY_PROPERTY_HOST_COHERENT
 	}
 
-	void VeApp::updateFpsWindowTitle() {
+	void VeApp::updateWindowTitle() {
 		// Per-frame delta using steady clock
 		auto now = clock::now();
 		last_frame_ms = std::chrono::duration<double, std::milli>(now - last_frame_time).count();
@@ -252,9 +271,10 @@ namespace ve {
 			double fps = (window_ms > 0) ? (1000.0 * static_cast<double>(fps_frame_count) / static_cast<double>(window_ms)) : 0.0;
 			double avg_ms = (fps_frame_count > 0) ? (sum_frame_ms / static_cast<double>(fps_frame_count)) : 0.0;
 			char buf[128];
-			snprintf(buf, sizeof(buf), "Vulkan Engine!  %d FPS  %.2f ms         location: (%.2f, %.2f, %.2f)",
+			snprintf(buf, sizeof(buf), "Vulkan Engine!  %d FPS  %.2f ms   location: (%.2f, %.2f, %.2f)    resolution: (%d, %d)",
 							 static_cast<int>(fps), avg_ms,
-							 camera.getPosition().x, camera.getPosition().y, camera.getPosition().z
+							 camera.getPosition().x, camera.getPosition().y, camera.getPosition().z,
+							 ve_window.getWidth(), ve_window.getHeight()
 			);
 			glfwSetWindowTitle(ve_window.getGLFWwindow(), buf);
 			// Reset window counters

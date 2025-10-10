@@ -28,6 +28,8 @@ namespace ve {
 		vk::RenderPass render_pass = nullptr;
 		uint32_t subpass = 0;
 		vk::Format color_format = vk::Format::eUndefined;
+		std::vector<vk::VertexInputAttributeDescription> attribute_descriptions{};
+		std::vector<vk::VertexInputBindingDescription> binding_descriptions{};
 		//vk::Format depth_format = vk::Format::eUndefined;
 	};
 

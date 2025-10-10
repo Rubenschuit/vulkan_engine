@@ -1,25 +1,18 @@
 #include "pch.hpp"
-#include "simple_render_system.hpp"
+#include "point_light_system.hpp"
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 
 namespace ve {
-
-	/* Scalars have to be aligned by N (= 4 bytes given 32-bit floats).
-	   A float2 must be aligned by 2N (= 8 bytes).
-	   A float3 or float4 must be aligned by 4N (= 16 bytes).
-	   A nested structure must be aligned by the base alignment of its members rounded up to a multiple of 16.
-	   A float4x4 matrix must have the same alignment as a float4.    */
-	// TODO: currently exceeds max push constant size of 128 bytes on some hardware
 	struct SimplePushConstantData {
-		glm::mat4 transform;
-		glm::mat4 normal_transform;
-		alignas(4) float has_texture;
+		glm::vec4 position;
+		glm::vec4 color;
+		float radius;
 	};
 
-	SimpleRenderSystem::SimpleRenderSystem(
+	PointLightSystem::PointLightSystem(
 			VeDevice& device,
 			vk::raii::DescriptorSetLayout& global_set_layout,
 			vk::raii::DescriptorSetLayout& material_set_layout,
@@ -29,10 +22,10 @@ namespace ve {
 		createPipeline(color_format);
 	}
 
-	SimpleRenderSystem::~SimpleRenderSystem() {
+	PointLightSystem::~PointLightSystem() {
 	}
 
-	void SimpleRenderSystem::createPipelineLayout(vk::raii::DescriptorSetLayout& global_set_layout, vk::raii::DescriptorSetLayout& material_set_layout) {
+	void PointLightSystem::createPipelineLayout(vk::raii::DescriptorSetLayout& global_set_layout, vk::raii::DescriptorSetLayout& material_set_layout) {
 		vk::PushConstantRange push_constant_range{
 			.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 			.offset = 0, // Used for indexing multiple push constant ranges
@@ -49,24 +42,26 @@ namespace ve {
 		pipeline_layout = vk::raii::PipelineLayout(ve_device.getDevice(), pipeline_layout_info);
 	}
 
-	void SimpleRenderSystem::createPipeline(vk::Format color_format) {
+	void PointLightSystem::createPipeline(vk::Format color_format) {
 		PipelineConfigInfo pipeline_config{};
 		VePipeline::defaultPipelineConfigInfo(pipeline_config);
 
 		// set formats for dynamic rendering
 		pipeline_config.color_format = color_format;
+		pipeline_config.attribute_descriptions.clear();
+		pipeline_config.binding_descriptions.clear();
 
 		assert(pipeline_layout != nullptr && "Pipeline layout is null");
 		pipeline_config.pipeline_layout = pipeline_layout;
 		ve_pipeline = std::make_unique<VePipeline>(
 			ve_device,
-			"../shaders/simple_shader.spv",
+			"../shaders/point_light_shader.spv",
 			pipeline_config);
 		assert(ve_pipeline != nullptr && "Failed to create pipeline");
 
 	}
 
-	void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
+	void PointLightSystem::render(VeFrameInfo& frame_info) const {
 		frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, ve_pipeline->getPipeline());
 		std::array<vk::DescriptorSet, 2> sets{*frame_info.global_descriptor_set, *frame_info.material_descriptor_set};
 		frame_info.command_buffer.bindDescriptorSets(
@@ -78,24 +73,44 @@ namespace ve {
 		);
 
 		for (auto& [id, obj] : frame_info.game_objects) {
-			// Skip non-mesh objects (e.g., point lights) or missing models
-			if (!obj.ve_model) continue;
+			if (obj.point_light_component == nullptr)
+				continue;
 			SimplePushConstantData push{};
-			push.normal_transform = obj.getNormalTransform();
-			push.transform = obj.getTransform();
-			push.has_texture = obj.has_texture;
+			push.position = glm::vec4{obj.transform.translation, 1.0f};
+			push.radius = obj.point_light_component->intensity; // use intensity as radius for visualization
+			push.color = glm::vec4{obj.color, 1.0f};
 			frame_info.command_buffer.pushConstants<SimplePushConstantData>(
 				*pipeline_layout,
 				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 				0,
 				push
 			);
-			obj.ve_model->bindVertexBuffer(frame_info.command_buffer);
-			obj.ve_model->bindIndexBuffer(frame_info.command_buffer);
-			obj.ve_model->drawIndexed(frame_info.command_buffer);
+			frame_info.command_buffer.draw(6, 1, 0, 0); // 6 vertices for point light
 		}
+
 	}
 
+	// Update UBO with point light data for global access in shaders
+	void PointLightSystem::update(VeFrameInfo& frame_info, UniformBufferObject& ubo) {
+		uint32_t num_lights = 0;
+		for (auto& [id, obj] : frame_info.game_objects) {
+			if (obj.point_light_component == nullptr)
+				continue;
+			assert(num_lights <= MAX_LIGHTS && "Number of point lights exceeds MAX_LIGHTS");
 
+			// rotate point lights in circle
+			auto speed = 0.2f;
+			auto rotate_matrix = glm::rotate(glm::mat4(1.0f), speed * frame_info.frame_time, glm::vec3(0.0f, 0.0f, 1.0f));
+			auto pos = glm::vec4{obj.transform.translation, 1.0f};
+			pos = rotate_matrix * pos;
+			obj.transform.translation = glm::vec3{pos};
+
+			ubo.point_lights[num_lights].position = glm::vec4{obj.transform.translation, 1.0f};
+			ubo.point_lights[num_lights].color = glm::vec4{obj.color, obj.point_light_component->intensity};
+			num_lights++;
+		}
+
+		ubo.num_lights = num_lights;
+	}
 }
 

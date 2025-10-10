@@ -39,8 +39,9 @@ namespace ve {
 		void createUniformBuffers();
 		void createDescriptors();
 
-		void updateUniformBuffer(uint32_t current_frame);
-		void updateFpsWindowTitle();
+		void updateCamera();
+		void updateUniformBuffer(uint32_t current_frame, UniformBufferObject& ubo);
+		void updateWindowTitle();
 
 		VeWindow ve_window{WIDTH, HEIGHT, "Vulkan Engine!"};
 		VeDevice ve_device{ve_window};

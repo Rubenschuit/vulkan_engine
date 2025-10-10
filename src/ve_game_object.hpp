@@ -7,6 +7,17 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace ve {
+
+	struct TransformComponent {
+		glm::vec3 translation{0.0f};
+		glm::vec3 rotation{0.0f, 0.0f, 0.0f}; // in radians
+		glm::vec3 scale{1.0f}; // non uniform scaling will not preserve correct normals atm
+	};
+
+	struct PointLightComponent {
+		float intensity{1.0f};
+	};
+
 	class VeGameObject {
 	public:
 		static VeGameObject createGameObject() {
@@ -14,6 +25,7 @@ namespace ve {
 			VeGameObject game_object = VeGameObject(current_id++);
 			return game_object;
 		}
+		static VeGameObject createPointLight(float intensity = 1.0f, float radius = 1.0f, glm::vec3 color = glm::vec3(1.0f));
 
 		uint32_t getId() const { return id; }
 		// Composes a transformation matrix from translation, rotation, and scale.
@@ -21,13 +33,13 @@ namespace ve {
 		// Computes the normal matrix (inverse transpose of the model matrix).
 		glm::mat3 getNormalTransform() const;
 
-		glm::vec3 translation{0.0f};
-		glm::vec3 rotation{0.0f, 0.0f, 0.0f}; // in radians
-		glm::vec3 scale{1.0f}; // non uniform scaling will not preserve correct normals atm
+		TransformComponent transform{};
 		glm::vec3 color{1.0f};
 		float has_texture{0.0f};
 
+		// optional components can be nullptr
 		std::shared_ptr<VeModel> ve_model;
+		std::unique_ptr<PointLightComponent> point_light_component;
 	private:
 		VeGameObject(uint32_t id) : id(id) {}
 

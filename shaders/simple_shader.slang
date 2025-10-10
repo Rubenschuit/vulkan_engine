@@ -6,12 +6,17 @@ struct VertexInput {
 	float2 in_tex_coord : TEXCOORD0;
 };
 
+struct PointLight {
+	float4 position;
+	float4 color;
+};
+
 struct UniformBuffer {
     float4x4 view;
     float4x4 proj;
 	float4 ambient_light_color;
-	float4 light_color;
-	float3 light_position;
+	PointLight point_lights[100]; // MAX_LIGHTS TODO use specialization constant
+	uint32_t num_lights;
 };
 [vk::binding(0, 0)] // binding 0, set 0
 ConstantBuffer<UniformBuffer> ubo;
@@ -61,13 +66,15 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	}
 
 	// Light calculations
+	float3 diffuse_light = ubo.ambient_light_color.xyz * ubo.ambient_light_color.w; // start with ambient light
+	float3 normal = normalize(in_vert.frag_normal_world);
+	for (uint32_t i = 0; i < ubo.num_lights; i++) {
+		float3 light_dir = ubo.point_lights[i].position.xyz - in_vert.frag_pos_world; // normalised later
+		float attenuation = 1.0 / (0.01 * dot(light_dir, light_dir) + 0.1); // distance light and viewer
+		float3 light_color = ubo.point_lights[i].color.xyz * ubo.point_lights[i].color.w * attenuation;
+		diffuse_light += light_color * max(dot(normal, normalize(light_dir)), 0);
+	}
 
-	float3 light_dir = ubo.light_position - in_vert.frag_pos_world; // normalised later
-	float attenuation = 1.0 / (0.01 * dot(light_dir, light_dir) + 0.1); // avoid darkness
-	float3 light_color = ubo.light_color.xyz * ubo.light_color.w * attenuation;
-	float3 ambient_light_color = ubo.ambient_light_color.xyz * ubo.ambient_light_color.w;
-	float3 diffuse_light = light_color * max(dot(normalize(in_vert.frag_normal_world), normalize(light_dir)), 0);
-	float3 light = ambient_light_color + diffuse_light;
 
-	return float4(in_vert.frag_color * light, 1.0f);
+	return float4(in_vert.frag_color * diffuse_light, 1.0f);
 }

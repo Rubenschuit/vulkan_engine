@@ -28,22 +28,18 @@ endif()
 project(${NAME} VERSION 0.1)
 
 include(${CMAKE_SOURCE_DIR}/cmake/Options.cmake)
-
 include(${CMAKE_SOURCE_DIR}/cmake/Leaks.cmake)
-
-
 include(${CMAKE_SOURCE_DIR}/cmake/Shaders.cmake)
-
-
 include(${CMAKE_SOURCE_DIR}/cmake/Dependencies.cmake)
-
 include(${CMAKE_SOURCE_DIR}/cmake/Targets.cmake)
-
 
 add_dependencies(VEngineLib Shaders)
 add_dependencies(${PROJECT_NAME} Shaders)
 add_dependencies(VEngineLib ShadersAxes)
 add_dependencies(${PROJECT_NAME} ShadersAxes)
+add_dependencies(VEngineLib ShadersPointLight)
+add_dependencies(${PROJECT_NAME} ShadersPointLight)
+
 
 if (VE_BUILD_TESTS)
   include(${CMAKE_SOURCE_DIR}/cmake/Tests.cmake)
