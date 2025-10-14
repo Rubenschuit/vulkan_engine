@@ -87,17 +87,17 @@ namespace ve {
 		}
 
 		std::vector<vk::ExtensionProperties> available_extensions = context.enumerateInstanceExtensionProperties();
-		std::cout << available_extensions.size() << " available extensions:" << std::endl;
+		VE_LOGD(available_extensions.size() << " available extensions:");
 		for (const auto& extension : available_extensions) {
-			std::cout << "\t" << extension.extensionName << std::endl;
+			VE_LOGD("\t" << extension.extensionName);
 		}
 
 		// Get the required instance extensions
 		auto required_extensions = getRequiredInstanceExtensions();
 
-		std::cout << required_extensions.size() << " required extensions:" << std::endl;
+		VE_LOGD(required_extensions.size() << " required extensions:");
 		for (const auto& extension : required_extensions) {
-			std::cout << "\t" << extension << std::endl;
+			VE_LOGD("\t" << extension);
 		}
 
 		// Check if the required extensions are supported by the Vulkan implementation.
@@ -107,7 +107,7 @@ namespace ve {
 			// If none of the available extensions matches the required extension, throw an error
 			if (std::ranges::none_of(extension_properties,
 								     [req_extension = required_extensions[i]](auto const& extension_property) {
-									  	return strcmp(extension_property.extensionName, req_extension) == 0; }))
+								  	return strcmp(extension_property.extensionName, req_extension) == 0; }))
 			{
 				throw std::runtime_error("Required extension not supported: " + std::string(required_extensions[i]));
 			}
@@ -230,7 +230,7 @@ namespace ve {
 		assert(*surface != VK_NULL_HANDLE && "Surface must be created before picking a physical device");
 		auto devices = instance.enumeratePhysicalDevices();
 		assert(devices.size() > 0 && "No GPU with Vulkan support found!");
-		std::cout << "Found " << devices.size() << " physical device(s)" << std::endl;
+		VE_LOGI("Found " << devices.size() << " physical device(s)");
 
 		// Find the first suitable device
 		const auto dev_iter = std::ranges::find_if(devices,
@@ -244,7 +244,7 @@ namespace ve {
 
 		// print the name of the selected physical device
 		VkPhysicalDeviceProperties properties = physical_device.getProperties();
-		std::cout << "Using device: " << properties.deviceName << std::endl;
+		VE_LOGI("Using device: " << properties.deviceName);
 	}
 
 	void VeDevice::createLogicalDevice() {
@@ -260,9 +260,9 @@ namespace ve {
 		// Note: Slang-generated SPIR-V for VS uses DrawParameters (BaseVertex/VertexIndex),
 		// so we must enable shaderDrawParameters from Vulkan 1.1 features.
 		vk::StructureChain<vk::PhysicalDeviceFeatures2,
-						   vk::PhysicalDeviceVulkan11Features,
-						   vk::PhysicalDeviceVulkan13Features,
-						   vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> feature_chain = {
+					   vk::PhysicalDeviceVulkan11Features,
+					   vk::PhysicalDeviceVulkan13Features,
+					   vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> feature_chain = {
 			{.features = {.samplerAnisotropy = true}},
 			{.shaderDrawParameters = true},
 			{.dynamicRendering = true, .synchronization2 = true},
@@ -327,8 +327,8 @@ namespace ve {
 		// get the first index into queueFamilyProperties which transfer but NOT graphics
 		uint32_t _queue_index = UINT32_MAX;
 		for (uint32_t qfp_index = 0; qfp_index < qf_properties.size(); qfp_index++) {
-			std::cout << "Queue family " << qfp_index << " supports flags: " << to_string(qf_properties[qfp_index].queueFlags) << std::endl;
-			std::cout << "Queue family " << qfp_index << " has " << qf_properties[qfp_index].queueCount << " queues" << std::endl;
+			VE_LOGD("Queue family " << qfp_index << " supports flags: " << to_string(qf_properties[qfp_index].queueFlags));
+			VE_LOGD("Queue family " << qfp_index << " has " << qf_properties[qfp_index].queueCount << " queues");
 			if ((qf_properties[qfp_index].queueFlags & vk::QueueFlagBits::eTransfer) &&
 				!(qf_properties[qfp_index].queueFlags & vk::QueueFlagBits::eGraphics)
 				) {
@@ -369,7 +369,7 @@ namespace ve {
 		return details;
 	}
 
-	// find a memory type index available that satisfies   the requested properties
+	// find a memory type index available that satisfies the requested properties
 	uint32_t VeDevice::findMemoryType(uint32_t type_filter, vk::MemoryPropertyFlags properties) {
 		vk::PhysicalDeviceMemoryProperties mem_properties = physical_device.getMemoryProperties();
 		for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++) {
@@ -382,6 +382,7 @@ namespace ve {
 		throw std::runtime_error("failed to find suitable memory type!");
 	}
 
+	// Finds a physical device supported format from a list of candidates
 	vk::Format VeDevice::findSupportedFormat(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features) {
 		assert(!candidates.empty() && "Candidates list must not be empty");
 		for (vk::Format format : candidates) {
@@ -447,23 +448,17 @@ namespace ve {
 	void VeDevice::copyBufferToImage(vk::raii::Buffer& src_buffer, vk::raii::Image& dst_image, uint32_t width, uint32_t height) {
 		assert(width > 0 && height > 0 && "Image width and height must be greater than zero");
 		assert(*src_buffer != VK_NULL_HANDLE && "Source buffer must be valid");
-		assert(*dst_image != VK_NULL_HANDLE && "Destination image must be valid");
-		assert(src_buffer.getMemoryRequirements().size < dst_image.getMemoryRequirements().size && "Source buffer size is smaller than the image size");
+		assert(*dst_image  != VK_NULL_HANDLE && "Destination image must be valid");
 		auto cmd = beginSingleTimeCommands(QueueKind::Transfer);
-		vk::BufferImageCopy region{
+		vk::BufferImageCopy copy_region{
 			.bufferOffset = 0,
-			.bufferRowLength = 0, // tightly packed
+			.bufferRowLength = 0,
 			.bufferImageHeight = 0,
-			.imageSubresource = vk::ImageSubresourceLayers{
-				.aspectMask = vk::ImageAspectFlagBits::eColor,
-				.mipLevel = 0,
-				.baseArrayLayer = 0,
-				.layerCount = 1
-			},
-			.imageOffset = vk::Offset3D{0, 0, 0},
-			.imageExtent = vk::Extent3D{width, height, 1}
+			.imageSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, 1 },
+			.imageOffset = { 0, 0, 0 },
+			.imageExtent = { width, height, 1 }
 		};
-		cmd->copyBufferToImage(*src_buffer, *dst_image, vk::ImageLayout::eTransferDstOptimal, region);
+		cmd->copyBufferToImage(*src_buffer, *dst_image, vk::ImageLayout::eTransferDstOptimal, copy_region);
 		endSingleTimeCommands(*cmd, QueueKind::Transfer);
 	}
 

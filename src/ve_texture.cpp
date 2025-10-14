@@ -21,7 +21,7 @@ namespace ve {
 		if (!pixels)
 			throw std::runtime_error("Failed to load " + std::string(texture_path));
 
-		std::cout << "channel size: " << channels << "\n";
+		VE_LOGD("Texture channels: " << channels);
 		// Create a local scope staging buffer
 		ve::VeBuffer staging_buffer(
 			ve_device,

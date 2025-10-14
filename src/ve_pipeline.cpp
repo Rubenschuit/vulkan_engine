@@ -163,7 +163,7 @@ namespace ve {
 		};
 		assert(config_info.pipeline_layout != nullptr && "Cannot create graphics pipeline: no pipelineLayout provided in config_info");
 
-		std::cout << "Shader module code size: " << shader_code.size() << " bytes (shared for vert/frag)" << std::endl;
+		VE_LOGD("Shader module code size: " << shader_code.size() << " bytes (shared for vert/frag)");
 
 		graphics_pipeline = vk::raii::Pipeline{ve_device.getDevice(), nullptr, pipeline_info};
 	}

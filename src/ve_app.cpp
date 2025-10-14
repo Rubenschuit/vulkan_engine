@@ -24,11 +24,6 @@ namespace ve {
 	VeApp::~VeApp() {}
 
 	void VeApp::run() {
-		//std::cout << "max push constants size: " << ve_device.getDeviceProperties().limits.maxPushConstantsSize << " bytes\n";
-		mainLoop();
-	}
-
-	void VeApp::mainLoop() {
 		SimpleRenderSystem simple_render_system(
 			ve_device,
 			global_set_layout->getDescriptorSetLayout(),
@@ -108,7 +103,7 @@ namespace ve {
 		constexpr float radius = 25.0f;
 		constexpr float height = 10.0f;
 
-		for (uint i = 0; i < num_lights; i++) {
+		for (uint i = 0; i < num_lights; i += 2) {
 			auto point_light = VeGameObject::createPointLight(1.1f, 10.0f, colors[i % 10]);
 			glm::vec3 pos = {radius * cos(glm::two_pi<float>() / num_lights * i), radius * sin(glm::two_pi<float>() / num_lights * i), height};
 			point_light.transform.translation = pos;

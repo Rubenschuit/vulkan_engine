@@ -69,7 +69,7 @@ namespace ve {
 				indices.push_back(unique_vertices[vertex]);
 			}
 		}
-		std::cout << "Model " << model_path << " has " << vertices.size() << " vertices and " << indices.size() << " indices\n";
+		VE_LOGI("Model " << model_path << " has " << vertices.size() << " vertices and " << indices.size() << " indices");
 		createVertexBuffers(vertices);
 		createIndexBuffers(indices);
 	}

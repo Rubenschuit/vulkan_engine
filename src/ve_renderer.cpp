@@ -46,7 +46,7 @@ namespace ve {
 				// Todo: Handle swap chain format changes (e.g. recreate pipelines)
 			}
 		}
-		std::cout << "Swap chain recreated: " << extent.width << "x" << extent.height << std::endl;
+		VE_LOGI("Swap chain recreated: " << extent.width << "x" << extent.height);
 	}
 
 	// Begin a frame; returns true when a frame is started and command buffer can be used

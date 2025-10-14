@@ -26,6 +26,7 @@ esac
 
 mkdir -p build
 cd build
+EXTRA_CMAKE_ARGS="-DVE_BUILD_TESTS=OFF"
 if [[ "$MODE" == 'test' ]]; then
   EXTRA_CMAKE_ARGS="-DVE_BUILD_TESTS=ON"
 fi

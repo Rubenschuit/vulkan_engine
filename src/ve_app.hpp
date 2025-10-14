@@ -34,7 +34,6 @@ namespace ve {
 		void run();
 
 	private:
-		void mainLoop();
 		void loadGameObjects();
 		void createUniformBuffers();
 		void createDescriptors();
@@ -47,12 +46,13 @@ namespace ve {
 		VeDevice ve_device{ve_window};
 		VeRenderer ve_renderer{ve_device, ve_window};
 
-		// Descriptor pool, layouts, sets
 		std::vector<std::unique_ptr<VeBuffer>> uniform_buffers;
+
+		// Descriptor pool, layouts, sets
 		std::unique_ptr<VeDescriptorPool> global_pool{};
 		std::unique_ptr<VeDescriptorSetLayout> global_set_layout{};
-		std::vector<vk::raii::DescriptorSet> global_descriptor_sets{};
 		std::unique_ptr<VeDescriptorSetLayout> material_set_layout{};
+		std::vector<vk::raii::DescriptorSet> global_descriptor_sets{};
 		vk::raii::DescriptorSet material_descriptor_set{nullptr};
 
 		// Objects and texture
