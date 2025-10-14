@@ -27,7 +27,7 @@ namespace ve {
 		}
 		static VeGameObject createPointLight(float intensity = 1.0f, float radius = 1.0f, glm::vec3 color = glm::vec3(1.0f));
 
-		uint32_t getId() const { return id; }
+		uint32_t getId() const { return m_id; }
 		// Composes a transformation matrix from translation, rotation, and scale.
 		glm::mat4 getTransform() const;
 		// Computes the normal matrix (inverse transpose of the model matrix).
@@ -41,8 +41,8 @@ namespace ve {
 		std::shared_ptr<VeModel> ve_model;
 		std::unique_ptr<PointLightComponent> point_light_component;
 	private:
-		VeGameObject(uint32_t id) : id(id) {}
+		VeGameObject(uint32_t id) : m_id(id) {}
 
-		uint32_t id;
+		uint32_t m_id;
 	};
 }

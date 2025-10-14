@@ -12,7 +12,7 @@ namespace ve {
 
 	class SimpleRenderSystem {
 	public:
-		SimpleRenderSystem(VeDevice& device, vk::raii::DescriptorSetLayout& global_set_layout, vk::raii::DescriptorSetLayout& material_set_layout, vk::Format color_format);
+		SimpleRenderSystem(VeDevice& device, const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout, vk::Format color_format);
 		~SimpleRenderSystem();
 
 		//destroy copy and move constructors and assignment operators
@@ -22,13 +22,13 @@ namespace ve {
 		void renderObjects(VeFrameInfo& frame_info) const;
 
 	private:
-		void createPipelineLayout(vk::raii::DescriptorSetLayout& global_set_layout, vk::raii::DescriptorSetLayout& material_set_layout);
+		void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout);
 		void createPipeline(vk::Format color_format);
 
-		VeDevice& ve_device;
+		VeDevice& m_ve_device;
 
-		vk::raii::PipelineLayout pipeline_layout{nullptr};
-		std::unique_ptr<VePipeline> ve_pipeline;
+		vk::raii::PipelineLayout m_pipeline_layout{nullptr};
+		std::unique_ptr<VePipeline> m_ve_pipeline;
 	};
 }
 

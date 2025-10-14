@@ -24,20 +24,20 @@ namespace ve {
 			vk::BufferUsageFlags usage_flags,
 			vk::MemoryPropertyFlags memory_property_flags,
 			vk::DeviceSize min_offset_alignment)
-		: instance_size(instance_size),
-		  instance_count(instance_count),
-		  usage_flags(usage_flags),
-		  memory_property_flags(memory_property_flags) {
+		: m_instance_size(instance_size),
+		  m_instance_count(instance_count),
+		  m_usage_flags(usage_flags),
+		  m_memory_property_flags(memory_property_flags) {
 
-		alignment_size = getAlignment(instance_size, min_offset_alignment);
-		buffer_size = alignment_size * instance_count;
+		m_alignment_size = getAlignment(instance_size, min_offset_alignment);
+		m_buffer_size = m_alignment_size * instance_count;
 
 		ve_device.createBuffer(
-			buffer_size,
-			usage_flags,
-			memory_property_flags,
-			buffer,
-			buffer_memory);
+			m_buffer_size,
+			m_usage_flags,
+			m_memory_property_flags,
+			m_buffer,
+			m_buffer_memory);
 	}
 
 	VeBuffer::~VeBuffer() {
@@ -46,28 +46,28 @@ namespace ve {
 	}
 
 	void VeBuffer::map(vk::DeviceSize size, vk::DeviceSize offset) {
-		assert(buffer_memory != nullptr && "Buffer memory is null");
-		mapped = buffer_memory.mapMemory(offset, size);
-		assert(mapped != nullptr && "Failed to map buffer memory");
+		assert(m_buffer_memory != nullptr && "Buffer memory is null");
+		m_mapped = m_buffer_memory.mapMemory(offset, size);
+		assert(m_mapped != nullptr && "Failed to map buffer memory");
 	}
 
 	void VeBuffer::unmap() {
-		if (mapped) {
-			buffer_memory.unmapMemory();
-			mapped = nullptr;
+		if (m_mapped) {
+			m_buffer_memory.unmapMemory();
+			m_mapped = nullptr;
 		}
 	}
 
 	void VeBuffer::writeToBuffer(void* data, vk::DeviceSize size, vk::DeviceSize offset) {
-		assert(mapped != nullptr && "Cannot write to unmapped buffer");
-		assert(size > buffer_size && "Size exceeds buffer size");
-		assert(offset + size > buffer_size && "Write exceeds buffer size");
+		assert(m_mapped != nullptr && "Cannot write to unmapped buffer");
+		assert(size > m_buffer_size && "Size exceeds buffer size");
+		assert(offset + size > m_buffer_size && "Write exceeds buffer size");
 		// If size is VK_WHOLE_SIZE, we write the whole buffer
 		if (size == VK_WHOLE_SIZE) {
-			memcpy(mapped, data, buffer_size);
+			memcpy(m_mapped, data, m_buffer_size);
 		}
 		else {
-			char* mem_offset = (char*)mapped;
+			char* mem_offset = (char*)m_mapped;
 			mem_offset += offset;
 			memcpy(mem_offset, data, size);
 		}

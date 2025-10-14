@@ -44,7 +44,7 @@ namespace ve {
 		return vk::False; // don't abort
 	}
 
-	VeDevice::VeDevice(VeWindow &window) : window(window) {
+	VeDevice::VeDevice(VeWindow &window) : m_window(window) {
 		createInstance();
 		setupDebugMessenger();
 		createSurface();
@@ -69,16 +69,16 @@ namespace ve {
 		// Get the required layers
 		std::vector<char const*> required_layers;
 		if (enable_validation_layers) {
-			required_layers.assign(validation_layers.begin(), validation_layers.end());
+			required_layers.assign(m_validation_layers.begin(), m_validation_layers.end());
 		}
 
 		// Check if the required layers are supported by the device
-		auto layer_properties = context.enumerateInstanceLayerProperties();
+		auto layer_properties = m_context.enumerateInstanceLayerProperties();
 		//any_of returns true if any element in the range satisfies the predicate
 		//none_of returns true if no elements in the range satisfy the predicate
 		// Here we check if any of the required layers are in none of the available layers
 		// If so, we throw an error
-		if (std::ranges::any_of(required_layers, [&layer_properties](auto const& required_layer) {
+				if (std::ranges::any_of(required_layers, [&layer_properties](auto const& required_layer) {
 			return std::ranges::none_of(layer_properties,
 									  [required_layer](auto const& layer_property)
 									  { return strcmp(layer_property.layerName, required_layer) == 0; });})
@@ -86,7 +86,7 @@ namespace ve {
 			throw std::runtime_error("One or more required validation layers are not supported!");
 		}
 
-		std::vector<vk::ExtensionProperties> available_extensions = context.enumerateInstanceExtensionProperties();
+				std::vector<vk::ExtensionProperties> available_extensions = m_context.enumerateInstanceExtensionProperties();
 		VE_LOGD(available_extensions.size() << " available extensions:");
 		for (const auto& extension : available_extensions) {
 			VE_LOGD("\t" << extension.extensionName);
@@ -101,7 +101,7 @@ namespace ve {
 		}
 
 		// Check if the required extensions are supported by the Vulkan implementation.
-		auto extension_properties = context.enumerateInstanceExtensionProperties();
+		auto extension_properties = m_context.enumerateInstanceExtensionProperties();
 		for (uint32_t i = 0; i < required_extensions.size(); ++i)
 		{
 			// If none of the available extensions matches the required extension, throw an error
@@ -121,7 +121,7 @@ namespace ve {
 			.enabledExtensionCount = static_cast<uint32_t>(required_extensions.size()),
 			.ppEnabledExtensionNames = required_extensions.data()};
 
-		instance = vk::raii::Instance(context, createInfo);
+		m_instance = vk::raii::Instance(m_context, createInfo);
 	}
 
 	void VeDevice::setupDebugMessenger() {
@@ -141,33 +141,33 @@ namespace ve {
 			.pfnUserCallback = &debugCallback,
 			.pUserData = nullptr // could be used to for example pass a pointer of the application class
 		};
-		debug_messenger = instance.createDebugUtilsMessengerEXT(create_info);
+		m_debug_messenger = m_instance.createDebugUtilsMessengerEXT(create_info);
 	}
 
 	void VeDevice::createCommandPool() {
-		assert(queue_index != UINT32_MAX && "Cannot create command pool: invalid queue index");
+		assert(m_queue_index != UINT32_MAX && "Cannot create command pool: invalid queue index");
 		vk::CommandPoolCreateInfo pool_info{
 			.sType = vk::StructureType::eCommandPoolCreateInfo,
 			.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
-			.queueFamilyIndex = queue_index
+			.queueFamilyIndex = m_queue_index
 		};
-		command_pool = vk::raii::CommandPool(device, pool_info);
-		assert(transfer_queue_index != UINT32_MAX && "Cannot create command pool: invalid transfer queue index");
+		m_command_pool = vk::raii::CommandPool(m_device, pool_info);
+		assert(m_transfer_queue_index != UINT32_MAX && "Cannot create command pool: invalid transfer queue index");
 		vk::CommandPoolCreateInfo pool_info_transfer{
 			.sType = vk::StructureType::eCommandPoolCreateInfo,
 			.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer | vk::CommandPoolCreateFlagBits::eTransient,
-			.queueFamilyIndex = transfer_queue_index
+			.queueFamilyIndex = m_transfer_queue_index
 		};
-		command_pool_transfer = vk::raii::CommandPool(device, pool_info_transfer);
+		m_command_pool_transfer = vk::raii::CommandPool(m_device, pool_info_transfer);
 	}
 
 	void VeDevice::createSurface() {
 		VkSurfaceKHR _surface; // glfw works with c api handles
-		assert(window.getGLFWwindow() != nullptr && "GLFW window is null");
-		if (glfwCreateWindowSurface(*instance, window.getGLFWwindow(), nullptr, &_surface) != VK_SUCCESS) {
+		assert(m_window.getGLFWwindow() != nullptr && "GLFW window is null");
+		if (glfwCreateWindowSurface(*m_instance, m_window.getGLFWwindow(), nullptr, &_surface) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create window surface!");
 		}
-		surface = vk::raii::SurfaceKHR(instance, _surface); // promote to RAII
+		m_surface = vk::raii::SurfaceKHR(m_instance, _surface); // promote to RAII
 	}
 
 	// Checks if a physical device supports Vulkan 1.3,
@@ -194,7 +194,7 @@ namespace ve {
 		auto d_extensions = p_device.enumerateDeviceExtensionProperties();
 		bool found = true;
 		// For every required device extension, check if it is in the list of available extensions
-		for (auto const& r_extension : required_device_extensions) {
+		for (auto const& r_extension : m_required_device_extensions) {
 			auto extension_iter = std::ranges::find_if(d_extensions,
 				[r_extension](auto const& ext) {
 					return strcmp(ext.extensionName, r_extension) == 0;
@@ -227,8 +227,8 @@ namespace ve {
 	// Selects a physical device (GPU) that is suitable for the application's needs
 	// We require Vulkan 1.3, a graphics queue and the extensions defined in ve_device.hpp
 	void VeDevice::pickPhysicalDevice() {
-		assert(*surface != VK_NULL_HANDLE && "Surface must be created before picking a physical device");
-		auto devices = instance.enumeratePhysicalDevices();
+		assert(*m_surface != VK_NULL_HANDLE && "Surface must be created before picking a physical device");
+		auto devices = m_instance.enumeratePhysicalDevices();
 		assert(devices.size() > 0 && "No GPU with Vulkan support found!");
 		VE_LOGI("Found " << devices.size() << " physical device(s)");
 
@@ -240,21 +240,21 @@ namespace ve {
 		if (dev_iter == devices.end()) {
 			throw std::runtime_error("failed to find a suitable GPU!");
 		}
-		physical_device = *dev_iter;
+		m_physical_device = *dev_iter;
 
 		// print the name of the selected physical device
-		VkPhysicalDeviceProperties properties = physical_device.getProperties();
+		VkPhysicalDeviceProperties properties = m_physical_device.getProperties();
 		VE_LOGI("Using device: " << properties.deviceName);
 	}
 
 	void VeDevice::createLogicalDevice() {
-		assert(*physical_device != VK_NULL_HANDLE && "Physical device must be selected before creating logical device");
-		queue_index = findQueueFamilies(physical_device);
-		assert(queue_index != UINT32_MAX && "Failed to find a valid queue family index");
-		//transfer_queue_index = findTransferQueueFamilies(physical_device);
+		assert(*m_physical_device != VK_NULL_HANDLE && "Physical device must be selected before creating logical device");
+		m_queue_index = findQueueFamilies(m_physical_device);
+		assert(m_queue_index != UINT32_MAX && "Failed to find a valid queue family index");
+		//TODO transfer_queue_index = findTransferQueueFamilies(physical_device);
 		// For now we use the same queue for graphics and transfer as m1 machines do not have a separate transfer queue
-		transfer_queue_index = queue_index;
-		assert(transfer_queue_index != UINT32_MAX && "Failed to find a valid transfer queue family index");
+		m_transfer_queue_index = m_queue_index;
+		assert(m_transfer_queue_index != UINT32_MAX && "Failed to find a valid transfer queue family index");
 
 		// Setup a chain of structures to enable required Vulkan features
 		// Note: Slang-generated SPIR-V for VS uses DrawParameters (BaseVertex/VertexIndex),
@@ -269,45 +269,45 @@ namespace ve {
 			{.extendedDynamicState = true }
 		};
 
-		assert(required_device_extensions.size() > 0 && "At least one device extension must be enabled");
+		assert(m_required_device_extensions.size() > 0 && "At least one device extension must be enabled");
 		float queue_priority = 0.0f;
 		vk::DeviceQueueCreateInfo device_queue_create_info {
-			.queueFamilyIndex = queue_index,
+			.queueFamilyIndex = m_queue_index,
 			.queueCount = 1,
 			.pQueuePriorities = &queue_priority };
 		vk::DeviceQueueCreateInfo device_queue_create_info_transfer {
-			.queueFamilyIndex = transfer_queue_index,
+			.queueFamilyIndex = m_transfer_queue_index,
 			.queueCount = 1,
 			.pQueuePriorities = &queue_priority };
 
 		std::vector<vk::DeviceQueueCreateInfo> queue_create_infos{};
 		queue_create_infos.push_back(device_queue_create_info);
-		if (queue_index != transfer_queue_index)
+		if (m_queue_index != m_transfer_queue_index)
 			queue_create_infos.push_back(device_queue_create_info_transfer);
 
 		vk::DeviceCreateInfo device_create_info {
 			.pNext = &feature_chain.get<vk::PhysicalDeviceFeatures2>(),
 			.queueCreateInfoCount = static_cast<uint32_t>(queue_create_infos.size()),
 			.pQueueCreateInfos = queue_create_infos.data(),
-			.enabledExtensionCount = static_cast<uint32_t>(required_device_extensions.size()),
-			.ppEnabledExtensionNames = required_device_extensions.data() };
+			.enabledExtensionCount = static_cast<uint32_t>(m_required_device_extensions.size()),
+			.ppEnabledExtensionNames = m_required_device_extensions.data() };
 
-		device = vk::raii::Device(physical_device, device_create_info);
-		queue = vk::raii::Queue(device, queue_index, 0);
-		transfer_queue = vk::raii::Queue(device, transfer_queue_index, 0);
+		m_device = vk::raii::Device(m_physical_device, device_create_info);
+		m_queue = vk::raii::Queue(m_device, m_queue_index, 0);
+		m_transfer_queue = vk::raii::Queue(m_device, m_transfer_queue_index, 0);
 	}
 
 	// Finds a queue family that supports both graphics and present
 	// Todo: add support for separate graphics and present queues and timeline semaphores?
 	uint32_t VeDevice::findQueueFamilies(const vk::raii::PhysicalDevice& p_device) {
-		assert(*surface != VK_NULL_HANDLE && "Surface must be valid when finding queue families");
+	assert(*m_surface != VK_NULL_HANDLE && "Surface must be valid when finding queue families");
 		auto qf_properties = p_device.getQueueFamilyProperties();
 		assert(!qf_properties.empty() && "Physical device has no queue families");
 		// get the first index into queueFamilyProperties which supports both graphics and present
 		uint32_t _queue_index = UINT32_MAX;
 		for (uint32_t qfp_index = 0; qfp_index < qf_properties.size(); qfp_index++) {
 			if ((qf_properties[qfp_index].queueFlags & vk::QueueFlagBits::eGraphics) &&
-				p_device.getSurfaceSupportKHR(qfp_index, *surface)) {
+				p_device.getSurfaceSupportKHR(qfp_index, *m_surface)) {
 				// found a queue family that supports both graphics and present
 				_queue_index = qfp_index;
 				break;
@@ -319,9 +319,9 @@ namespace ve {
 		return _queue_index;
 	}
 
-	// Not used for now as m1 machines do not have a separate transfer queue
+	// Not used for now as m1 machines do not have a dedicated transfer queue
 	uint32_t VeDevice::findTransferQueueFamilies(const vk::raii::PhysicalDevice& p_device) {
-		assert(*surface != VK_NULL_HANDLE && "Surface must be valid when finding queue families");
+		assert(*m_surface != VK_NULL_HANDLE && "Surface must be valid when finding queue families");
 		auto qf_properties = p_device.getQueueFamilyProperties();
 		assert(!qf_properties.empty() && "Physical device has no queue families");
 		// get the first index into queueFamilyProperties which transfer but NOT graphics
@@ -361,17 +361,17 @@ namespace ve {
 	}
 
 	SwapChainSupportDetails VeDevice::querySwapChainSupport(const vk::raii::PhysicalDevice& ve_device) {
-		assert(*surface != VK_NULL_HANDLE && "Surface must be valid when querying swap chain support");
+		assert(*m_surface != VK_NULL_HANDLE && "Surface must be valid when querying swap chain support");
 		SwapChainSupportDetails details;
-		details.capabilities = ve_device.getSurfaceCapabilitiesKHR(*surface);
-		details.formats = ve_device.getSurfaceFormatsKHR(*surface);
-		details.presentModes = ve_device.getSurfacePresentModesKHR(*surface);
+		details.capabilities = ve_device.getSurfaceCapabilitiesKHR(*m_surface);
+		details.formats = ve_device.getSurfaceFormatsKHR(*m_surface);
+		details.presentModes = ve_device.getSurfacePresentModesKHR(*m_surface);
 		return details;
 	}
 
 	// find a memory type index available that satisfies the requested properties
 	uint32_t VeDevice::findMemoryType(uint32_t type_filter, vk::MemoryPropertyFlags properties) {
-		vk::PhysicalDeviceMemoryProperties mem_properties = physical_device.getMemoryProperties();
+		vk::PhysicalDeviceMemoryProperties mem_properties = m_physical_device.getMemoryProperties();
 		for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++) {
 			// check if i'th bit of type_filter is set, this is equivalent to the i'th memory type being
 			// suitable. We also require this memory type to support all the properties.
@@ -386,7 +386,7 @@ namespace ve {
 	vk::Format VeDevice::findSupportedFormat(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features) {
 		assert(!candidates.empty() && "Candidates list must not be empty");
 		for (vk::Format format : candidates) {
-			vk::FormatProperties props = physical_device.getFormatProperties(format);
+			vk::FormatProperties props = m_physical_device.getFormatProperties(format);
 			if (tiling == vk::ImageTiling::eLinear && (props.linearTilingFeatures & features) == features) {
 				return format;
 			} else if (tiling == vk::ImageTiling::eOptimal && (props.optimalTilingFeatures & features) == features) {
@@ -422,7 +422,7 @@ namespace ve {
 			.usage = usage,
 			.sharingMode = vk::SharingMode::eExclusive
 		};
-		buffer = vk::raii::Buffer(device, buffer_create_info);
+		buffer = vk::raii::Buffer(m_device, buffer_create_info);
 
 		// Allocate and bind memory to buffer
 		vk::MemoryRequirements mem_requirements = buffer.getMemoryRequirements();
@@ -431,7 +431,7 @@ namespace ve {
 			.allocationSize = mem_requirements.size,
 			.memoryTypeIndex = findMemoryType(mem_requirements.memoryTypeBits, req_properties)
 		};
-		buffer_memory = vk::raii::DeviceMemory(device, alloc_info);
+		buffer_memory = vk::raii::DeviceMemory(m_device, alloc_info);
 		buffer.bindMemory(*buffer_memory, 0); // offset 0
 	}
 
@@ -445,7 +445,7 @@ namespace ve {
 	}
 
 	// Assumes the image is already in eTransferDstOptimal layout
-	void VeDevice::copyBufferToImage(vk::raii::Buffer& src_buffer, vk::raii::Image& dst_image, uint32_t width, uint32_t height) {
+	void VeDevice::copyBufferToImage(vk::raii::Buffer& src_buffer, const vk::raii::Image& dst_image, uint32_t width, uint32_t height) {
 		assert(width > 0 && height > 0 && "Image width and height must be greater than zero");
 		assert(*src_buffer != VK_NULL_HANDLE && "Source buffer must be valid");
 		assert(*dst_image  != VK_NULL_HANDLE && "Destination image must be valid");
@@ -464,14 +464,14 @@ namespace ve {
 
 	// Single-time command buffer helpers (select queue/pool)
 	std::unique_ptr<vk::raii::CommandBuffer> VeDevice::beginSingleTimeCommands(QueueKind kind) {
-		vk::CommandPool pool = (kind == QueueKind::Graphics) ? *command_pool : *command_pool_transfer;
+		vk::CommandPool pool = (kind == QueueKind::Graphics) ? *m_command_pool : *m_command_pool_transfer;
 		vk::CommandBufferAllocateInfo alloc_info{
 			.sType = vk::StructureType::eCommandBufferAllocateInfo,
 			.commandPool = pool,
 			.level = vk::CommandBufferLevel::ePrimary,
 			.commandBufferCount = 1
 		};
-		auto cmd = std::make_unique<vk::raii::CommandBuffer>(std::move(vk::raii::CommandBuffers(device, alloc_info).front()));
+		auto cmd = std::make_unique<vk::raii::CommandBuffer>(std::move(vk::raii::CommandBuffers(m_device, alloc_info).front()));
 		cmd->begin(vk::CommandBufferBeginInfo{ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
 		return cmd;
 	}
@@ -480,11 +480,11 @@ namespace ve {
 		cmd.end();
 		vk::SubmitInfo submit_info{ .commandBufferCount = 1, .pCommandBuffers = &*cmd };
 		if (kind == QueueKind::Graphics) {
-			queue.submit(submit_info);
-			queue.waitIdle();
+			m_queue.submit(submit_info);
+			m_queue.waitIdle();
 		} else {
-			transfer_queue.submit(submit_info);
-			transfer_queue.waitIdle();
+			m_transfer_queue.submit(submit_info);
+			m_transfer_queue.waitIdle();
 		}
 	}
 }

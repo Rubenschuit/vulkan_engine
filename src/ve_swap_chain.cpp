@@ -13,20 +13,20 @@
 namespace ve {
 
 	VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent)
-		: ve_device(device), window_extent(window_extent) {
+		: m_ve_device(device), m_window_extent(window_extent) {
 		init();
 	}
 
 	VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent, std::shared_ptr<VeSwapChain> old_swap_chain)
-		: ve_device(device), window_extent(window_extent), old_swap_chain(old_swap_chain) {
+		: m_ve_device(device), m_window_extent(window_extent), m_old_swap_chain(old_swap_chain) {
 		init();
 		// destroy old swap chain AFTER the new one is ready
-		old_swap_chain = nullptr;
+		m_old_swap_chain = nullptr;
 	}
 
 	VeSwapChain::~VeSwapChain() {
-		swap_chain_image_views.clear();
-		swap_chain = nullptr;
+		m_swap_chain_image_views.clear();
+		m_swap_chain = nullptr;
 	}
 
 	void VeSwapChain::init() {
@@ -38,9 +38,9 @@ namespace ve {
 
 	vk::Result VeSwapChain::acquireNextImage(uint32_t* image_index) {
 		// Signal the semaphore once the image is available
-		auto [result, _image_index] = swap_chain.acquireNextImage(
+		auto [result, _image_index] = m_swap_chain.acquireNextImage(
 			UINT64_MAX,
-			present_complete_semaphores[semaphore_index],
+			m_present_complete_semaphores[m_semaphore_index],
 			nullptr);
 		*image_index = _image_index;
 		return result;
@@ -50,55 +50,55 @@ namespace ve {
 		vk::PipelineStageFlags wait_dest_stage_mask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
 		const vk::SubmitInfo submit_info{
 			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &*present_complete_semaphores[semaphore_index],
+			.pWaitSemaphores = &*m_present_complete_semaphores[m_semaphore_index],
 			.pWaitDstStageMask = &wait_dest_stage_mask,
 			.commandBufferCount = 1,
 			.pCommandBuffers = &commandBuffer,
 			.signalSemaphoreCount = 1,
-			.pSignalSemaphores = &*render_finished_semaphores[*image_index]
+			.pSignalSemaphores = &*m_render_finished_semaphores[*image_index]
 		};
 
 		// Submit the command buffer to the graphics queue and signal the fence when it is done
-		ve_device.getQueue().submit(submit_info, *in_flight_fences[current_frame]);
+		m_ve_device.getQueue().submit(submit_info, *m_in_flight_fences[m_current_frame]);
 
 		const vk::PresentInfoKHR present_info{
 			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &*render_finished_semaphores[*image_index],
+			.pWaitSemaphores = &*m_render_finished_semaphores[*image_index],
 			.swapchainCount = 1,
-			.pSwapchains = &*swap_chain,
+			.pSwapchains = &*m_swap_chain,
 			.pImageIndices = image_index
 		};
 
 		// Present the image to the screen
-		return ve_device.getQueue().presentKHR(present_info);
+		return m_ve_device.getQueue().presentKHR(present_info);
 	}
 
 	void VeSwapChain::createSwapChain() {
-		swap_chain_support = ve_device.getSwapChainSupport();
-		surface_format = chooseSwapSurfaceFormat(swap_chain_support.formats);
-		present_mode = chooseSwapPresentMode(swap_chain_support.presentModes);
-		swap_chain_extent = chooseSwapExtent(swap_chain_support.capabilities);
-		swap_chain_image_format = surface_format.format;
+		m_swap_chain_support = m_ve_device.getSwapChainSupport();
+		m_surface_format = chooseSwapSurfaceFormat(m_swap_chain_support.formats);
+		m_present_mode = chooseSwapPresentMode(m_swap_chain_support.presentModes);
+		m_swap_chain_extent = chooseSwapExtent(m_swap_chain_support.capabilities);
+		m_swap_chain_image_format = m_surface_format.format;
 
 		// try to use one more than the minimum number of images to improve gpu utilization
 		// note that there is no guarantee that we can get that many images, so we need to check against the maximum as well
-		uint32_t image_count = swap_chain_support.capabilities.minImageCount + 1;
-		if (swap_chain_support.capabilities.maxImageCount > 0 && image_count > swap_chain_support.capabilities.maxImageCount) {
-			image_count = swap_chain_support.capabilities.maxImageCount;
+		uint32_t image_count = m_swap_chain_support.capabilities.minImageCount + 1;
+		if (m_swap_chain_support.capabilities.maxImageCount > 0 && image_count > m_swap_chain_support.capabilities.maxImageCount) {
+			image_count = m_swap_chain_support.capabilities.maxImageCount;
 		}
 
 		vk::SwapchainCreateInfoKHR create_info{
 			.sType = vk::StructureType::eSwapchainCreateInfoKHR,
-			.surface = *ve_device.getSurface(),
+			.surface = *m_ve_device.getSurface(),
 			.minImageCount = image_count,
-			.imageFormat = surface_format.format,
-			.imageColorSpace = surface_format.colorSpace,
-			.imageExtent = swap_chain_extent,
+			.imageFormat = m_surface_format.format,
+			.imageColorSpace = m_surface_format.colorSpace,
+			.imageExtent = m_swap_chain_extent,
 			.imageArrayLayers = 1, // always 1 unless developing stereoscopic 3D app
 			.imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
-			.preTransform = swap_chain_support.capabilities.currentTransform,
+			.preTransform = m_swap_chain_support.capabilities.currentTransform,
 			.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque,
-			.presentMode = present_mode,
+			.presentMode = m_present_mode,
 			.clipped = VK_TRUE,
 			.oldSwapchain = VK_NULL_HANDLE, // may be overwritten below if recreating
 			// graphics and presentation are in the same queue family, so we can use exclusive mode
@@ -109,35 +109,35 @@ namespace ve {
 
 		// If we are recreating (old_swap_chain retained), provide its handle so the driver
 		// can safely migrate resources and release the old one.
-		if (old_swap_chain != nullptr) {
-			// Dereference twice: first to get vk::raii::SwapchainKHR&, second to obtain raw handle
-			create_info.oldSwapchain = **old_swap_chain->getSwapChain();
+		if (m_old_swap_chain != nullptr) {
+			// Obtain raw handle from vk::raii::SwapchainKHR reference
+			create_info.oldSwapchain = *m_old_swap_chain->getSwapChain();
 		}
 
-		swap_chain = vk::raii::SwapchainKHR(ve_device.getDevice(), create_info);
-		swap_chain_images = swap_chain.getImages();
+		m_swap_chain = vk::raii::SwapchainKHR(m_ve_device.getDevice(), create_info);
+		m_swap_chain_images = m_swap_chain.getImages();
 	}
 
 	void VeSwapChain::createSwapChainImageViews() {
-		assert(swap_chain_image_views.empty());
+		assert(m_swap_chain_image_views.empty());
 		vk::ImageViewCreateInfo imageViewCreateInfo{
 			.viewType = vk::ImageViewType::e2D,
-			.format = surface_format.format,
+			.format = m_surface_format.format,
 			.subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }
 		};
-		for (auto image : swap_chain_images) {
+		for (auto image : m_swap_chain_images) {
 			imageViewCreateInfo.image = image;
 			// call the constructor of vk::raii::ImageView and add it to the vector
-			swap_chain_image_views.emplace_back(ve_device.getDevice(), imageViewCreateInfo);
+			m_swap_chain_image_views.emplace_back(m_ve_device.getDevice(), imageViewCreateInfo);
 		}
 	}
 
 	void VeSwapChain::createDepthResources() {
-		vk::Format depth_format = ve_device.findDepthFormat();
-		depth_image = std::make_unique<VeImage>(
-			ve_device,
-			swap_chain_extent.width,
-			swap_chain_extent.height,
+		vk::Format depth_format = m_ve_device.findDepthFormat();
+		m_depth_image = std::make_unique<VeImage>(
+			m_ve_device,
+			m_swap_chain_extent.width,
+			m_swap_chain_extent.height,
 			depth_format,
 			vk::ImageTiling::eOptimal,
 			vk::ImageUsageFlagBits::eDepthStencilAttachment,
@@ -145,7 +145,7 @@ namespace ve {
 			vk::ImageAspectFlagBits::eDepth);
 
 		// transition the depth image to be optimal for a depth attachment using a single-time command buffer
-		depth_image->transitionImageLayout(
+		m_depth_image->transitionImageLayout(
 			vk::ImageLayout::eUndefined,
 			vk::ImageLayout::eDepthStencilAttachmentOptimal,
 			{},
@@ -156,21 +156,21 @@ namespace ve {
 
 	// Create 2 semaphores and 1 fence per frame in flight
 	void VeSwapChain::createSyncObjects() {
-		present_complete_semaphores.clear();
-		render_finished_semaphores.clear();
-		in_flight_fences.clear();
+		m_present_complete_semaphores.clear();
+		m_render_finished_semaphores.clear();
+		m_in_flight_fences.clear();
 
 		vk::SemaphoreCreateInfo present_info{};
 		vk::SemaphoreCreateInfo render_info{};
 		vk::FenceCreateInfo fence_info{ .flags = vk::FenceCreateFlagBits::eSignaled };
 
-		for (size_t i = 0; i < swap_chain_images.size(); i++) {
-			present_complete_semaphores.emplace_back(ve_device.getDevice(), present_info);
-			render_finished_semaphores.emplace_back(ve_device.getDevice(), render_info);
+		for (size_t i = 0; i < m_swap_chain_images.size(); i++) {
+			m_present_complete_semaphores.emplace_back(m_ve_device.getDevice(), present_info);
+			m_render_finished_semaphores.emplace_back(m_ve_device.getDevice(), render_info);
 		}
 
 		for (size_t i = 0; i < ve::MAX_FRAMES_IN_FLIGHT; i++) {
-			in_flight_fences.emplace_back(ve_device.getDevice(), fence_info);
+			m_in_flight_fences.emplace_back(m_ve_device.getDevice(), fence_info);
 		}
 	}
 
@@ -207,7 +207,7 @@ namespace ve {
 		if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
 			return capabilities.currentExtent;
 		} else {
-			vk::Extent2D actual_extent = window_extent;
+			vk::Extent2D actual_extent = m_window_extent;
 			actual_extent.width = std::clamp(actual_extent.width,
 											 capabilities.minImageExtent.width,
 											 capabilities.maxImageExtent.width);
@@ -220,31 +220,31 @@ namespace ve {
 
 	void VeSwapChain::waitForFences() {
 		while (vk::Result::eTimeout ==
-			   ve_device.getDevice().waitForFences(*in_flight_fences[current_frame], vk::True, UINT64_MAX));
+			   m_ve_device.getDevice().waitForFences(*m_in_flight_fences[m_current_frame], vk::True, UINT64_MAX));
 		return;
 	}
 
 	// Reset the fence of the current frame back to unsignaled state
 	void VeSwapChain::resetFences() {
-		ve_device.getDevice().resetFences(*in_flight_fences[current_frame]);
+		m_ve_device.getDevice().resetFences(*m_in_flight_fences[m_current_frame]);
 	}
 
 	void VeSwapChain::advanceFrame() {
-		current_frame = (current_frame + 1) % ve::MAX_FRAMES_IN_FLIGHT;
-		semaphore_index = (semaphore_index + 1) % swap_chain_images.size();
+		m_current_frame = (m_current_frame + 1) % ve::MAX_FRAMES_IN_FLIGHT;
+		m_semaphore_index = (m_semaphore_index + 1) % m_swap_chain_images.size();
 	}
 
 		// Transition the image layout of the given swap chain image using
 	// pipeline barriers to ensure proper synchronization
 	void VeSwapChain::transitionImageLayout(
-				vk::raii::CommandBuffer& command_buffer,
-				uint32_t image_index,
-				vk::ImageLayout old_layout,
-				vk::ImageLayout new_layout,
-				vk::AccessFlags2 src_access_mask,
-				vk::AccessFlags2 dst_access_mask,
-				vk::PipelineStageFlags2 src_stage_mask,
-				vk::PipelineStageFlags2 dst_stage_mask) {
+			vk::raii::CommandBuffer& command_buffer,
+			uint32_t image_index,
+			vk::ImageLayout old_layout,
+			vk::ImageLayout new_layout,
+			vk::AccessFlags2 src_access_mask,
+			vk::AccessFlags2 dst_access_mask,
+			vk::PipelineStageFlags2 src_stage_mask,
+			vk::PipelineStageFlags2 dst_stage_mask) {
 
 		assert(image_index < getImageCount() && "Image index out of bounds");
 		vk::ImageMemoryBarrier2 barrier = {
@@ -256,7 +256,7 @@ namespace ve {
 			.newLayout = new_layout,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = swap_chain_images[image_index],
+			.image = m_swap_chain_images[image_index],
 			.subresourceRange = {
 				.aspectMask = vk::ImageAspectFlagBits::eColor,
 				.baseMipLevel = 0,
@@ -271,6 +271,11 @@ namespace ve {
 			.pImageMemoryBarriers = &barrier
 		};
 		command_buffer.pipelineBarrier2(dependency_info);
+	}
+
+	float VeSwapChain::getExtentAspectRatio() const {
+		return static_cast<float>(m_swap_chain_extent.width) /
+			   static_cast<float>(m_swap_chain_extent.height);
 	}
 }
 

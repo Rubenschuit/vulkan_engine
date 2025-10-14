@@ -7,7 +7,7 @@
 #include <iostream>
 
 namespace ve {
-	VeTexture::VeTexture(VeDevice& ve_device, const char* texture_path) : ve_device(ve_device) {
+	VeTexture::VeTexture(VeDevice& ve_device, const char* texture_path) : m_ve_device(ve_device) {
 
 		createTextureImage(texture_path);
 		createTextureSampler();
@@ -17,16 +17,16 @@ namespace ve {
 
 	void VeTexture::createTextureImage(const char* texture_path) {
 		// Load image from file using stb_image
-    	stbi_uc* pixels = stbi_load(texture_path, &width, &height, &channels, STBI_rgb_alpha);
+		stbi_uc* pixels = stbi_load(texture_path, &m_width, &m_height, &m_channels, STBI_rgb_alpha);
 		if (!pixels)
 			throw std::runtime_error("Failed to load " + std::string(texture_path));
 
-		VE_LOGD("Texture channels: " << channels);
+		VE_LOGD("Texture channels: " << m_channels);
 		// Create a local scope staging buffer
 		ve::VeBuffer staging_buffer(
-			ve_device,
+			m_ve_device,
 			4,                                        // instance size
-			static_cast<uint32_t>(width * height),    // instance count
+			static_cast<uint32_t>(m_width * m_height),    // instance count
 			vk::BufferUsageFlagBits::eTransferSrc,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 		);
@@ -38,10 +38,10 @@ namespace ve {
 		stbi_image_free(pixels);
 
 		// Create image
-		texture_image = std::make_unique<ve::VeImage>(
-			ve_device,
-			static_cast<uint32_t>(width),
-			static_cast<uint32_t>(height),
+		m_texture_image = std::make_unique<ve::VeImage>(
+			m_ve_device,
+			static_cast<uint32_t>(m_width),
+			static_cast<uint32_t>(m_height),
 			vk::Format::eR8G8B8A8Srgb,
 			vk::ImageTiling::eOptimal,
 			vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
@@ -52,7 +52,7 @@ namespace ve {
 		// TODO: consider combining these into one command buffer
 
 		//transition image to be optimal for receiving data from buffer
-		texture_image->transitionImageLayout(
+		m_texture_image->transitionImageLayout(
 			vk::ImageLayout::eUndefined,
 			vk::ImageLayout::eTransferDstOptimal,
 			{},
@@ -61,14 +61,14 @@ namespace ve {
 			vk::PipelineStageFlagBits2::eTransfer);
 
 		// Copy data from staging buffer to texture image
-		ve_device.copyBufferToImage(
+		m_ve_device.copyBufferToImage(
 			staging_buffer.getBuffer(),
-			texture_image->getImage(),
-			static_cast<uint32_t>(width),
-			static_cast<uint32_t>(height));
+			m_texture_image->getImage(),
+			static_cast<uint32_t>(m_width),
+			static_cast<uint32_t>(m_height));
 
 		// Transition image to be optimal for shader read access
-		texture_image->transitionImageLayout(
+		m_texture_image->transitionImageLayout(
 			vk::ImageLayout::eTransferDstOptimal,
 			vk::ImageLayout::eShaderReadOnlyOptimal,
 			vk::AccessFlagBits2::eTransferWrite,
@@ -79,7 +79,7 @@ namespace ve {
 
 	// Sets max anisotropy to the maximum value supported by the device or 16, whichever is lower
 	void VeTexture::createTextureSampler() {
-		auto max_anisotropy = std::min(16.0f, ve_device.getDeviceProperties().limits.maxSamplerAnisotropy);
+		auto max_anisotropy = std::min(16.0f, m_ve_device.getDeviceProperties().limits.maxSamplerAnisotropy);
 		vk::SamplerCreateInfo sampler_info{
 			.magFilter = vk::Filter::eLinear,
 			.minFilter = vk::Filter::eLinear,
@@ -97,7 +97,16 @@ namespace ve {
 			.minLod = 0.0f,
 			.maxLod = 0.0f
 		};
-		texture_sampler = vk::raii::Sampler(ve_device.getDevice(), sampler_info);
+		m_texture_sampler = vk::raii::Sampler(m_ve_device.getDevice(), sampler_info);
+	}
+
+	vk::DescriptorImageInfo VeTexture::getDescriptorInfo() const {
+		vk::DescriptorImageInfo image_info{
+			.sampler = m_texture_sampler,
+			.imageView = m_texture_image->getImageView(),
+			.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
+		};
+		return image_info;
 	}
 
 }

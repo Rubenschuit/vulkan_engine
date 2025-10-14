@@ -8,16 +8,16 @@ namespace ve {
 
 
 
-	VeModel::VeModel(VeDevice& device, const std::vector<Vertex>& vertices) : ve_device(device) {
+	VeModel::VeModel(VeDevice& device, const std::vector<Vertex>& vertices) : m_ve_device(device) {
 		createVertexBuffers(vertices);
 	}
 
-	VeModel::VeModel(VeDevice& device, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices) : ve_device(device) {
+	VeModel::VeModel(VeDevice& device, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices) : m_ve_device(device) {
 		createVertexBuffers(vertices);
 		createIndexBuffers(indices);
 	}
 
-	VeModel::VeModel(VeDevice& device, char const* model_path) : ve_device(device) {
+	VeModel::VeModel(VeDevice& device, char const* model_path) : m_ve_device(device) {
 		tinyobj::attrib_t attrib;
 		std::vector<tinyobj::shape_t> shapes;
 		std::vector<tinyobj::material_t> materials;
@@ -77,14 +77,14 @@ namespace ve {
 	VeModel::~VeModel() {}
 
 	void VeModel::createVertexBuffers(const std::vector<Vertex>& vertices) {
-		vertex_count = static_cast<uint32_t>(vertices.size());
-		assert(vertex_count >= 3 && "Vertex count must be at least 3!");
+		m_vertex_count = static_cast<uint32_t>(vertices.size());
+		assert(m_vertex_count >= 3 && "Vertex count must be at least 3!");
 
 		// Create a local scope staging buffer, accessible by CPU
 		ve::VeBuffer staging_buffer(
-			ve_device,
+			m_ve_device,
 			sizeof(vertices[0]),
-			vertex_count,
+			m_vertex_count,
 			vk::BufferUsageFlagBits::eTransferSrc,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 		);
@@ -95,29 +95,29 @@ namespace ve {
 		// unmap is called in the destructor of VeBuffer
 
 		// Create vertex buffer, accessible by GPU only
-		vertex_buffer = std::make_unique<ve::VeBuffer>(
-			ve_device,
+		m_vertex_buffer = std::make_unique<ve::VeBuffer>(
+			m_ve_device,
 			sizeof(vertices[0]),
-			vertex_count,
+			m_vertex_count,
 			vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
 			vk::MemoryPropertyFlagBits::eDeviceLocal,
 			1
 		);
 
 		// Copy vertex data from staging buffer to vertex buffer
-		auto buffer_size = sizeof(vertices[0]) * vertex_count;
-		ve_device.copyBuffer(staging_buffer.getBuffer(), vertex_buffer->getBuffer(), buffer_size);
+		auto buffer_size = sizeof(vertices[0]) * m_vertex_count;
+		m_ve_device.copyBuffer(staging_buffer.getBuffer(), m_vertex_buffer->getBuffer(), buffer_size);
 	}
 
 	void VeModel::createIndexBuffers(const std::vector<uint32_t>& indices) {
-		index_count = static_cast<uint32_t>(indices.size());
-		assert(index_count >= 3 && "Index count must be at least 3!");
+		m_index_count = static_cast<uint32_t>(indices.size());
+		assert(m_index_count >= 3 && "Index count must be at least 3!");
 
 		// Create a local scope staging buffer, accessible by CPU
 		ve::VeBuffer staging_buffer(
-			ve_device,
+			m_ve_device,
 			sizeof(indices[0]),
-			index_count,
+			m_index_count,
 			vk::BufferUsageFlagBits::eTransferSrc,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 		);
@@ -128,36 +128,36 @@ namespace ve {
 		// unmap is called in the destructor of VeBuffer
 
 		// Create index buffer, accessible by GPU only
-		index_buffer = std::make_unique<ve::VeBuffer>(
-			ve_device,
+		m_index_buffer = std::make_unique<ve::VeBuffer>(
+			m_ve_device,
 			sizeof(indices[0]),
-			index_count,
+			m_index_count,
 			vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst,
 			vk::MemoryPropertyFlagBits::eDeviceLocal,
 			1
 		);
 
 		// Copy index data from staging buffer to index buffer
-		auto buffer_size = sizeof(indices[0]) * index_count;
-		ve_device.copyBuffer(staging_buffer.getBuffer(), index_buffer->getBuffer(), buffer_size);
+		auto buffer_size = sizeof(indices[0]) * m_index_count;
+		m_ve_device.copyBuffer(staging_buffer.getBuffer(), m_index_buffer->getBuffer(), buffer_size);
 	}
 
 	void VeModel::bindVertexBuffer(vk::raii::CommandBuffer& command_buffer) {
-		vk::Buffer buffers[] = { vertex_buffer->getBuffer() };
+		vk::Buffer buffers[] = { m_vertex_buffer->getBuffer() };
 		vk::DeviceSize offsets[] = { 0 };
 		command_buffer.bindVertexBuffers(0, buffers, offsets);
 	}
 
 	void VeModel::bindIndexBuffer(vk::raii::CommandBuffer& command_buffer) {
-		command_buffer.bindIndexBuffer(index_buffer->getBuffer(), 0, vk::IndexType::eUint32);
+		command_buffer.bindIndexBuffer(m_index_buffer->getBuffer(), 0, vk::IndexType::eUint32);
 	}
 
 	void VeModel::draw(vk::raii::CommandBuffer& command_buffer) {
-		command_buffer.draw(vertex_count, 1, 0, 0);
+		command_buffer.draw(m_vertex_count, 1, 0, 0);
 	}
 
 	void VeModel::drawIndexed(vk::raii::CommandBuffer& command_buffer) {
-		command_buffer.drawIndexed(index_count, 1, 0, 0, 0);
+		command_buffer.drawIndexed(m_index_count, 1, 0, 0, 0);
 	}
 
 	std::vector<vk::VertexInputBindingDescription> VeModel::Vertex::getBindingDescriptions() {

@@ -47,12 +47,12 @@ namespace ve {
 		VeDevice(const VeDevice &) = delete;
 		VeDevice& operator=(const VeDevice &) = delete;
 
-		vk::raii::CommandPool& getCommandPool()  { return command_pool; }
-		vk::raii::Device& getDevice() { return device; }
-		vk::raii::Queue& getQueue() { return queue; }
-		vk::raii::SurfaceKHR* getSurface() { return &surface; }
+		vk::raii::CommandPool& getCommandPool()  { return m_command_pool; }
+		vk::raii::Device& getDevice() { return m_device; }
+		vk::raii::Queue& getQueue() { return m_queue; }
+		vk::raii::SurfaceKHR* getSurface() { return &m_surface; }
 
-		SwapChainSupportDetails getSwapChainSupport() { return querySwapChainSupport(physical_device); }
+		SwapChainSupportDetails getSwapChainSupport() { return querySwapChainSupport(m_physical_device); }
 		uint32_t findMemoryType(uint32_t type_filter, vk::MemoryPropertyFlags properties);
 		vk::Format findSupportedFormat(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features);
 		vk::Format findDepthFormat();
@@ -64,9 +64,9 @@ namespace ve {
 			vk::raii::Buffer& buffer,
 			vk::raii::DeviceMemory& buffer_memory);
 		void copyBuffer(vk::raii::Buffer& src_buffer, vk::raii::Buffer& dst_buffer, vk::DeviceSize size);
-		void copyBufferToImage(vk::raii::Buffer& src_buffer, vk::raii::Image& dst_image, uint32_t width, uint32_t height);
+		void copyBufferToImage(vk::raii::Buffer& src_buffer, const vk::raii::Image& dst_image, uint32_t width, uint32_t height);
 
-		vk::PhysicalDeviceProperties getDeviceProperties() const { return physical_device.getProperties(); }
+		vk::PhysicalDeviceProperties getDeviceProperties() const { return m_physical_device.getProperties(); }
 
 		// Single-time command buffer helpers (select queue/pool)
 		std::unique_ptr<vk::raii::CommandBuffer> beginSingleTimeCommands(QueueKind kind = QueueKind::Graphics);
@@ -86,23 +86,25 @@ namespace ve {
 		uint32_t findTransferQueueFamilies(const vk::raii::PhysicalDevice& p_device);
 		SwapChainSupportDetails querySwapChainSupport(const vk::raii::PhysicalDevice& device);
 
-		VeWindow &window;
-		vk::raii::Instance instance{nullptr};
-		vk::raii::Device device{nullptr};
-		vk::raii::Context context;
-		vk::raii::DebugUtilsMessengerEXT debug_messenger{nullptr};
-		vk::raii::SurfaceKHR surface{nullptr};
-		vk::raii::PhysicalDevice physical_device{nullptr};
+		VeWindow &m_window;
+		vk::raii::Instance m_instance{nullptr};
+		vk::raii::Device m_device{nullptr};
+		vk::raii::Context m_context;
+		vk::raii::DebugUtilsMessengerEXT m_debug_messenger{nullptr};
+		vk::raii::SurfaceKHR m_surface{nullptr};
+		vk::raii::PhysicalDevice m_physical_device{nullptr};
 
-		vk::raii::CommandPool command_pool{nullptr};
-		vk::raii::CommandPool command_pool_transfer{nullptr};
-		vk::raii::Queue queue{nullptr};
-		vk::raii::Queue transfer_queue{nullptr};
-		uint32_t queue_index = UINT32_MAX; // queue family index for graphics and present
-		uint32_t transfer_queue_index = UINT32_MAX; // queue family index for transfer
+		vk::raii::CommandPool m_command_pool{nullptr};
+		vk::raii::CommandPool m_command_pool_transfer{nullptr};
+		vk::raii::Queue m_queue{nullptr};
+		vk::raii::Queue m_transfer_queue{nullptr};
+		vk::raii::Queue m_compute_queue{nullptr};
+		uint32_t m_queue_index = UINT32_MAX; // queue family index for graphics and present
+		uint32_t m_transfer_queue_index = UINT32_MAX;
+		uint32_t m_compute_queue_index = UINT32_MAX;
 		//vk::raii::Queue present_queue{nullptr};
 
-		const std::vector<const char *> validation_layers = ve::VALIDATION_LAYERS;
-		std::vector<const char*> required_device_extensions = ve::REQUIRED_DEVICE_EXTENSIONS;
+		const std::vector<const char *> m_validation_layers = ve::VALIDATION_LAYERS;
+		std::vector<const char*> m_required_device_extensions = ve::REQUIRED_DEVICE_EXTENSIONS;
 	};
 }

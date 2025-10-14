@@ -14,9 +14,9 @@ namespace ve {
 
 	PointLightSystem::PointLightSystem(
 			VeDevice& device,
-			vk::raii::DescriptorSetLayout& global_set_layout,
-			vk::raii::DescriptorSetLayout& material_set_layout,
-			vk::Format color_format) : ve_device(device) {
+				const vk::raii::DescriptorSetLayout& global_set_layout,
+				const vk::raii::DescriptorSetLayout& material_set_layout,
+			vk::Format color_format) : m_ve_device(device) {
 
 		createPipelineLayout(global_set_layout, material_set_layout);
 		createPipeline(color_format);
@@ -25,7 +25,7 @@ namespace ve {
 	PointLightSystem::~PointLightSystem() {
 	}
 
-	void PointLightSystem::createPipelineLayout(vk::raii::DescriptorSetLayout& global_set_layout, vk::raii::DescriptorSetLayout& material_set_layout) {
+	void PointLightSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout) {
 		vk::PushConstantRange push_constant_range{
 			.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 			.offset = 0, // Used for indexing multiple push constant ranges
@@ -39,7 +39,7 @@ namespace ve {
 			.pushConstantRangeCount = 1,
 			.pPushConstantRanges = &push_constant_range
 		};
-		pipeline_layout = vk::raii::PipelineLayout(ve_device.getDevice(), pipeline_layout_info);
+		m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), pipeline_layout_info);
 	}
 
 	void PointLightSystem::createPipeline(vk::Format color_format) {
@@ -51,22 +51,22 @@ namespace ve {
 		pipeline_config.attribute_descriptions.clear();
 		pipeline_config.binding_descriptions.clear();
 
-		assert(pipeline_layout != nullptr && "Pipeline layout is null");
-		pipeline_config.pipeline_layout = pipeline_layout;
-		ve_pipeline = std::make_unique<VePipeline>(
-			ve_device,
+		assert(m_pipeline_layout != nullptr && "Pipeline layout is null");
+		pipeline_config.pipeline_layout = m_pipeline_layout;
+		m_ve_pipeline = std::make_unique<VePipeline>(
+			m_ve_device,
 			"../shaders/point_light_shader.spv",
 			pipeline_config);
-		assert(ve_pipeline != nullptr && "Failed to create pipeline");
+		assert(m_ve_pipeline != nullptr && "Failed to create pipeline");
 
 	}
 
 	void PointLightSystem::render(VeFrameInfo& frame_info) const {
-		frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, ve_pipeline->getPipeline());
+		frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 		std::array<vk::DescriptorSet, 2> sets{*frame_info.global_descriptor_set, *frame_info.material_descriptor_set};
 		frame_info.command_buffer.bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics,
-			*pipeline_layout,
+			*m_pipeline_layout,
 			0,
 			sets,
 			{}
@@ -80,7 +80,7 @@ namespace ve {
 			push.radius = obj.point_light_component->intensity; // use intensity as radius for visualization
 			push.color = glm::vec4{obj.color, 1.0f};
 			frame_info.command_buffer.pushConstants<SimplePushConstantData>(
-				*pipeline_layout,
+				*m_pipeline_layout,
 				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 				0,
 				push

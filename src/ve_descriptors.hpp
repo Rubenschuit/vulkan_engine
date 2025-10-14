@@ -17,7 +17,7 @@ namespace ve {
 
 		class Builder {
 		public:
-			Builder(VeDevice &ve_device) : ve_device{ve_device} {}
+			Builder(VeDevice &ve_device) : m_ve_device{ve_device} {}
 
 			Builder &addBinding(
 				uint32_t binding,
@@ -27,8 +27,8 @@ namespace ve {
 			std::unique_ptr<VeDescriptorSetLayout> build() const;
 
 		private:
-			VeDevice &ve_device;
-			std::unordered_map<uint32_t, vk::DescriptorSetLayoutBinding> bindings{};
+			VeDevice &m_ve_device;
+			std::unordered_map<uint32_t, vk::DescriptorSetLayoutBinding> m_bindings{};
 		};
 
 		VeDescriptorSetLayout(VeDevice &ve_device, std::unordered_map<uint32_t, vk::DescriptorSetLayoutBinding> bindings_map);
@@ -37,12 +37,12 @@ namespace ve {
 		VeDescriptorSetLayout(const VeDescriptorSetLayout &) = delete;
 		VeDescriptorSetLayout &operator=(const VeDescriptorSetLayout &) = delete;
 
-		vk::raii::DescriptorSetLayout& getDescriptorSetLayout() { return descriptor_set_layout; }
+		const vk::raii::DescriptorSetLayout& getDescriptorSetLayout() const { return m_descriptor_set_layout; }
 
 	private:
-		VeDevice &ve_device;
-		vk::raii::DescriptorSetLayout descriptor_set_layout = nullptr;
-		std::unordered_map<uint32_t, vk::DescriptorSetLayoutBinding> bindings;
+		VeDevice &m_ve_device;
+		vk::raii::DescriptorSetLayout m_descriptor_set_layout = nullptr;
+		std::unordered_map<uint32_t, vk::DescriptorSetLayoutBinding> m_bindings;
 
 		friend class VeDescriptorWriter;
 	};
@@ -52,7 +52,7 @@ namespace ve {
 
 		class Builder {
 		public:
-			Builder(VeDevice &ve_device) : ve_device{ve_device} {}
+			Builder(VeDevice &ve_device) : m_ve_device{ve_device} {}
 
 			Builder &addPoolSize(vk::DescriptorType descriptor_type, uint32_t count);
 			Builder &setPoolFlags(vk::DescriptorPoolCreateFlagBits flags);
@@ -60,10 +60,10 @@ namespace ve {
 			std::unique_ptr<VeDescriptorPool> build() const;
 
 		private:
-			VeDevice &ve_device;
-			std::vector<vk::DescriptorPoolSize> pool_sizes{};
-			uint32_t max_sets = 1000;
-			vk::DescriptorPoolCreateFlagBits pool_flags{};
+			VeDevice &m_ve_device;
+			std::vector<vk::DescriptorPoolSize> m_pool_sizes{};
+			uint32_t m_max_sets = 1000;
+			vk::DescriptorPoolCreateFlagBits m_pool_flags{};
 		};
 
 		VeDescriptorPool(
@@ -80,8 +80,8 @@ namespace ve {
 		void resetPool();
 
 	private:
-		VeDevice &ve_device;
-		vk::raii::DescriptorPool descriptor_pool = nullptr;
+		VeDevice &m_ve_device;
+		vk::raii::DescriptorPool m_descriptor_pool = nullptr;
 		friend class VeDescriptorWriter;
 	};
 
@@ -96,9 +96,9 @@ namespace ve {
 		void overwrite(vk::raii::DescriptorSet &set);
 
 	private:
-		VeDescriptorSetLayout &set_layout;
-		VeDescriptorPool &pool;
-		std::vector<vk::WriteDescriptorSet> writes;
+		VeDescriptorSetLayout &m_set_layout;
+		VeDescriptorPool &m_pool;
+		std::vector<vk::WriteDescriptorSet> m_writes;
 	};
 
 } // namespace ve

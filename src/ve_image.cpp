@@ -11,8 +11,8 @@ namespace ve {
 		vk::ImageUsageFlags usage,
 		vk::MemoryPropertyFlags properties,
 		vk::ImageAspectFlags aspect_flags)
-		: ve_device(ve_device), width(width), height(height), format(format),
-		  tiling(tiling), usage(usage), properties(properties), aspect_flags(aspect_flags) {
+		: m_ve_device(ve_device), m_width(width), m_height(height), m_format(format),
+		  m_tiling(tiling), m_usage(usage), m_properties(properties), m_aspect_flags(aspect_flags) {
 
 		createImage();
 		createImageView();
@@ -24,55 +24,55 @@ namespace ve {
 	// Hardcoded:
 	// imageType, extent depth, mip, arraylayers, initlayout, sharingmode, samples, flags
 	void VeImage::createImage() {
-		assert(width > 0 && height > 0 && "Image width and height must be greater than zero");
-		assert(usage != static_cast<vk::ImageUsageFlags>(0) && "Image usage flags must not be empty");
+		assert(m_width > 0 && m_height > 0 && "Image width and height must be greater than zero");
+		assert(m_usage != static_cast<vk::ImageUsageFlags>(0) && "Image usage flags must not be empty");
 		// Create image
 		vk::ImageCreateInfo image_info {
 			.sType = vk::StructureType::eImageCreateInfo,
 			.imageType = vk::ImageType::e2D,
-			.extent = vk::Extent3D{ width, height, 1 },
+			.extent = vk::Extent3D{ m_width, m_height, 1 },
 			.mipLevels = 1,
 			.arrayLayers = 1,
-			.format = format,
-			.tiling = tiling,
+			.format = m_format,
+			.tiling = m_tiling,
 			.initialLayout = vk::ImageLayout::eUndefined,
-			.usage = usage,
+			.usage = m_usage,
 			.sharingMode = vk::SharingMode::eExclusive,
 			.samples = vk::SampleCountFlagBits::e1,
 			.flags = {}
 		};
-		image = vk::raii::Image(ve_device.getDevice(), image_info);
-		assert(*image != VK_NULL_HANDLE && "Failed to create image");
+		m_image = vk::raii::Image(m_ve_device.getDevice(), image_info);
+		assert(*m_image != VK_NULL_HANDLE && "Failed to create image");
 
 		// Allocate and bind memory to image
-		vk::MemoryRequirements mem_requirements = image.getMemoryRequirements();
+		vk::MemoryRequirements mem_requirements = m_image.getMemoryRequirements();
 		vk::MemoryAllocateInfo alloc_info {
 			.sType = vk::StructureType::eMemoryAllocateInfo,
 			.allocationSize = mem_requirements.size,
-			.memoryTypeIndex = ve_device.findMemoryType(mem_requirements.memoryTypeBits, properties)
+			.memoryTypeIndex = m_ve_device.findMemoryType(mem_requirements.memoryTypeBits, m_properties)
 		};
-		image_memory = vk::raii::DeviceMemory(ve_device.getDevice(), alloc_info);
-		assert(*image_memory != VK_NULL_HANDLE && "Failed to allocate image memory");
-		image.bindMemory(*image_memory, 0); // offset 0
+		m_image_memory = vk::raii::DeviceMemory(m_ve_device.getDevice(), alloc_info);
+		assert(*m_image_memory != VK_NULL_HANDLE && "Failed to allocate image memory");
+		m_image.bindMemory(*m_image_memory, 0); // offset 0
 	}
 
 	void VeImage::createImageView() {
-		assert(*image != VK_NULL_HANDLE && "Image must be valid when creating image view");
+		assert(*m_image != VK_NULL_HANDLE && "Image must be valid when creating image view");
 		vk::ImageViewCreateInfo view_info {
 			.sType = vk::StructureType::eImageViewCreateInfo,
-			.image = *image,
+			.image = *m_image,
 			.viewType = vk::ImageViewType::e2D,
-			.format = format,
+			.format = m_format,
 			.subresourceRange = vk::ImageSubresourceRange {
-				.aspectMask = aspect_flags,
+				.aspectMask = m_aspect_flags,
 				.baseMipLevel = 0,
 				.levelCount = 1,
 				.baseArrayLayer = 0,
 				.layerCount = 1
 			}
 		};
-		image_view = vk::raii::ImageView(ve_device.getDevice(), view_info);
-		assert(*image_view != VK_NULL_HANDLE && "Failed to create image view");
+		m_image_view = vk::raii::ImageView(m_ve_device.getDevice(), view_info);
+		assert(*m_image_view != VK_NULL_HANDLE && "Failed to create image view");
 	}
 
 	// Hardcoded: src and dst queue family indices to ignored,
@@ -85,12 +85,12 @@ namespace ve {
 		vk::PipelineStageFlags2 src_stage,
 		vk::PipelineStageFlags2 dst_stage) {
 
-		assert(*image != VK_NULL_HANDLE && "Image must be valid when transitioning image layout");
+		assert(*m_image != VK_NULL_HANDLE && "Image must be valid when transitioning image layout");
 		QueueKind kind = QueueKind::Graphics;
-		if (usage & vk::ImageUsageFlagBits::eTransferSrc || usage & vk::ImageUsageFlagBits::eTransferDst) {
+		if (m_usage & vk::ImageUsageFlagBits::eTransferSrc || m_usage & vk::ImageUsageFlagBits::eTransferDst) {
 			kind = QueueKind::Transfer;
 		}
-		auto command_buffer = ve_device.beginSingleTimeCommands(kind);
+		auto command_buffer = m_ve_device.beginSingleTimeCommands(kind);
 		vk::ImageMemoryBarrier2 barrier = {
 			.srcStageMask = src_stage,
 			.srcAccessMask = src_access_mask,
@@ -100,9 +100,9 @@ namespace ve {
 			.newLayout = new_layout,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = *image,
+			.image = *m_image,
 			.subresourceRange = {
-				.aspectMask = aspect_flags,
+				.aspectMask = m_aspect_flags,
 				.baseMipLevel = 0,
 				.levelCount = 1,
 				.baseArrayLayer = 0,
@@ -115,6 +115,6 @@ namespace ve {
 			.pImageMemoryBarriers = &barrier
 		};
 		command_buffer->pipelineBarrier2(dependency_info);
-		ve_device.endSingleTimeCommands(*command_buffer, kind);
+		m_ve_device.endSingleTimeCommands(*command_buffer, kind);
 	}
 } // namespace ve

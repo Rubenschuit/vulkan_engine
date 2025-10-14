@@ -24,32 +24,32 @@ namespace ve {
 			void writeToBuffer(void* data, vk::DeviceSize size = VK_WHOLE_SIZE, vk::DeviceSize offset = 0);
 
 
-			vk::raii::Buffer& getBuffer() { return buffer; }
-			void* getMappedMemory() const { return mapped; }
-			uint32_t getInstanceCount() const { return instance_count; }
-			vk::DeviceSize getInstanceSize() const { return instance_size; }
-			vk::DeviceSize getAlignmentSize() const { return alignment_size; }
-			vk::DeviceSize getBufferSize() const { return buffer_size; }
+				vk::raii::Buffer& getBuffer() { return m_buffer; }
+				void* getMappedMemory() const { return m_mapped; }
+				uint32_t getInstanceCount() const { return m_instance_count; }
+				vk::DeviceSize getInstanceSize() const { return m_instance_size; }
+				vk::DeviceSize getAlignmentSize() const { return m_alignment_size; }
+				vk::DeviceSize getBufferSize() const { return m_buffer_size; }
 			vk::DescriptorBufferInfo getDescriptorInfo(vk::DeviceSize size = VK_WHOLE_SIZE, vk::DeviceSize offset = 0) {
 				vk::DescriptorBufferInfo buffer_info{
-					.buffer = buffer,
+						.buffer = m_buffer,
 					.offset = offset,
 					.range = size
 				};
 				return buffer_info;
 			}
 
-			private:
-			void* mapped = nullptr;
-			vk::raii::Buffer buffer{nullptr};
-			vk::raii::DeviceMemory buffer_memory{nullptr};
+				private:
+				void* m_mapped = nullptr;
+				vk::raii::Buffer m_buffer{nullptr};
+				vk::raii::DeviceMemory m_buffer_memory{nullptr};
 
-			vk::DeviceSize instance_size;
-			uint32_t instance_count;
-			vk::DeviceSize alignment_size;
-			vk::DeviceSize buffer_size;
-			vk::BufferUsageFlags usage_flags;
-			vk::MemoryPropertyFlags memory_property_flags;
+				vk::DeviceSize m_instance_size;
+				uint32_t m_instance_count;
+				vk::DeviceSize m_alignment_size;
+				vk::DeviceSize m_buffer_size;
+				vk::BufferUsageFlags m_usage_flags;
+				vk::MemoryPropertyFlags m_memory_property_flags;
 
 	};
 }

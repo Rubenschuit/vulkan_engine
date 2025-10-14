@@ -12,7 +12,7 @@ namespace ve {
 
 	class PointLightSystem {
 	public:
-		PointLightSystem(VeDevice& device, vk::raii::DescriptorSetLayout& global_set_layout, vk::raii::DescriptorSetLayout& material_set_layout, vk::Format color_format);
+		PointLightSystem(VeDevice& device, const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout, vk::Format color_format);
 		~PointLightSystem();
 
 		//destroy copy and move constructors and assignment operators
@@ -23,13 +23,13 @@ namespace ve {
 		void render(VeFrameInfo& frame_info) const;
 
 	private:
-		void createPipelineLayout(vk::raii::DescriptorSetLayout& global_set_layout, vk::raii::DescriptorSetLayout& material_set_layout);
+		void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout);
 		void createPipeline(vk::Format color_format);
 
-		VeDevice& ve_device;
+		VeDevice& m_ve_device;
 
-		vk::raii::PipelineLayout pipeline_layout{nullptr};
-		std::unique_ptr<VePipeline> ve_pipeline;
+		vk::raii::PipelineLayout m_pipeline_layout{nullptr};
+		std::unique_ptr<VePipeline> m_ve_pipeline;
 	};
 }
 

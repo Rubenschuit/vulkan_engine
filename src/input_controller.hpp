@@ -36,20 +36,20 @@ namespace ve {
 		void processMouseMovement(double xpos, double ypos);
 		void handleMouseToggle();
 
-        GLFWwindow* window{nullptr};
+        GLFWwindow* m_window{nullptr};
 		//std::unordered_map<uint32_t, VeGameObject>& game_objects;
 
-		KeyMappings key_mappings{};
-		double last_x = 0.0;
-		double last_y = 0.0;
-		float movement_speed = 2.5f;
-		float look_speed = 2.0f;
-		float mouse_sensitivity = 45.0f;
-		float yaw_delta = 0.0f;
-		float pitch_delta = 0.0f;
+		KeyMappings m_key_mappings{};
+		double m_last_x = 0.0;
+		double m_last_y = 0.0;
+		float m_movement_speed = 2.5f;
+		float m_look_speed = 2.0f;
+		float m_mouse_sensitivity = 45.0f;
+		float m_yaw_delta = 0.0f;
+		float m_pitch_delta = 0.0f;
 
 		// Mouse-look toggle state
-		bool mouse_look_enabled = true;
-		int prev_toggle_state = GLFW_RELEASE;
+		bool m_mouse_look_enabled = true;
+		int m_prev_toggle_state = GLFW_RELEASE;
 	};
 }

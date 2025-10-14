@@ -20,21 +20,21 @@ namespace ve {
 
 
 
-		GLFWwindow* getGLFWwindow() const { return window; }
-		int getWidth() const { return width; }
-		int getHeight() const { return height; }
-		vk::Extent2D getExtent() const { return {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}; }
-		bool wasWindowResized() const { return framebuffer_resized; }
-		void resetWindowResizedFlag() { framebuffer_resized = false; }
+		GLFWwindow* getGLFWwindow() const { return m_window; }
+		int getWidth() const { return m_width; }
+		int getHeight() const { return m_height; }
+		vk::Extent2D getExtent() const { return {static_cast<uint32_t>(m_width), static_cast<uint32_t>(m_height)}; }
+		bool wasWindowResized() const { return m_framebuffer_resized; }
+		void resetWindowResizedFlag() { m_framebuffer_resized = false; }
 
 	private:
 		void initWindow();
 		static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
 
-		GLFWwindow* window;
-		std::string window_name;
-		int width;
-		int height;
-		bool framebuffer_resized = false;
+		GLFWwindow* m_window;
+		std::string m_window_name;
+		int m_width;
+		int m_height;
+		bool m_framebuffer_resized = false;
 	};
 }

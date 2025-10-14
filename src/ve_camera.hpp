@@ -15,7 +15,7 @@ namespace ve {
 
 		void setPosition(const glm::vec3& p);
 
-		const glm::vec3& getPosition() const { return pos; }
+		const glm::vec3& getPosition() const { return m_pos; }
 
 		void setYawPitch(float yaw_rad, float pitch_rad);
 		void yawBy(float delta_rad);
@@ -34,11 +34,11 @@ namespace ve {
 
 		void updateIfDirty();
 
-		const glm::mat4& getView() const { return view; }
-		const glm::mat4& getProj() const { return proj; }
-		const glm::vec3& getForward() const { return forward; }
-		const glm::vec3& getRight() const { return right; }
-		const glm::vec3& getUp() const { return up; }
+		const glm::mat4& getView() const { return m_view; }
+		const glm::mat4& getProj() const { return m_proj; }
+		const glm::vec3& getForward() const { return m_forward; }
+		const glm::vec3& getRight() const { return m_right; }
+		const glm::vec3& getUp() const { return m_up; }
 
 	private:
 		void clampPitch();
@@ -46,23 +46,23 @@ namespace ve {
 		void updateView();
 		void updateProjection();
 
-		glm::vec3 pos;
-		glm::vec3 world_up;
-		float yaw{0.0f};   // radians
-		float pitch{0.0f}; // radians
-		bool viewDirty{true};
+		glm::vec3 m_pos;
+		glm::vec3 m_world_up;
+		float m_yaw{0.0f};   // radians
+		float m_pitch{0.0f}; // radians
+		bool m_view_dirty{true};
 
 		// Derived
-		glm::vec3 forward{1,0,0};
-		glm::vec3 right{0,0,1};
-		glm::vec3 up{0,1,0};
-		glm::mat4 view{1.0f};
+		glm::vec3 m_forward{1,0,0};
+		glm::vec3 m_right{0,0,1};
+		glm::vec3 m_up{0,1,0};
+		glm::mat4 m_view{1.0f};
 
 		// Projection
-		float fovY{glm::radians(55.0f)};
-		float aspectRatio{4.0f/3.0f};
-		float zNear{0.1f};
-		float zFar{100.0f};
-		glm::mat4 proj{1.0f};
+		float m_fov_y{glm::radians(55.0f)};
+		float m_aspect_ratio{4.0f/3.0f};
+		float m_z_near{0.1f};
+		float m_z_far{100.0f};
+		glm::mat4 m_proj{1.0f};
 	};
 }

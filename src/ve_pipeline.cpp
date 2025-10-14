@@ -11,7 +11,7 @@ namespace ve {
 	VePipeline::VePipeline(
 			VeDevice& ve_device,
 			const char* shader_file_path,
-			const PipelineConfigInfo& config_info) : ve_device(ve_device) {
+			const PipelineConfigInfo& config_info) : m_ve_device(ve_device) {
 		createGraphicsPipeline(shader_file_path, config_info);
 	}
 
@@ -37,7 +37,7 @@ namespace ve {
 			.depthClampEnable = VK_FALSE,
 			.rasterizerDiscardEnable = VK_FALSE,
 			.polygonMode = vk::PolygonMode::eFill,
-			.cullMode = vk::CullModeFlagBits::eNone,
+			.cullMode = vk::CullModeFlagBits::eFront,
 			.frontFace = vk::FrontFace::eClockwise,
 			.depthBiasEnable = VK_TRUE,
 			.lineWidth = 1.0f,
@@ -107,20 +107,20 @@ namespace ve {
 
 		auto shader_code = readFile(shader_file_path);
 		// Use the same combined SPIR-V for both stages; entry points differ per stage
-		createShaderModule(shader_code, &shader_module);
+		createShaderModule(shader_code, &m_shader_module);
 
 		vk::PipelineShaderStageCreateInfo shader_stages[2] = {
 			{
 				.sType = vk::StructureType::ePipelineShaderStageCreateInfo,
 				.stage = vk::ShaderStageFlagBits::eVertex,
-				.module = *shader_module,
+				.module = *m_shader_module,
 				.pName = "vertMain",
 				.pSpecializationInfo = nullptr
 			},
 			{
 				.sType = vk::StructureType::ePipelineShaderStageCreateInfo,
 				.stage = vk::ShaderStageFlagBits::eFragment,
-				.module = *shader_module,
+				.module = *m_shader_module,
 				.pName = "fragMain",
 				.pSpecializationInfo = nullptr
 			}
@@ -132,11 +132,11 @@ namespace ve {
 			.vertexAttributeDescriptionCount = static_cast<uint32_t>(config_info.attribute_descriptions.size()),
 			.pVertexAttributeDescriptions = config_info.attribute_descriptions.data()
 		};
-
-		vk::Format depth_format = ve_device.findSupportedFormat(
+		vk::Format depth_format = m_ve_device.findSupportedFormat(
 			{vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint},
 			vk::ImageTiling::eOptimal,
-			vk::FormatFeatureFlagBits::eDepthStencilAttachment);
+			vk::FormatFeatureFlagBits::eDepthStencilAttachment
+		);
 		vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo{
 			.colorAttachmentCount = 1,
 			.pColorAttachmentFormats = &config_info.color_format,
@@ -165,7 +165,7 @@ namespace ve {
 
 		VE_LOGD("Shader module code size: " << shader_code.size() << " bytes (shared for vert/frag)");
 
-		graphics_pipeline = vk::raii::Pipeline{ve_device.getDevice(), nullptr, pipeline_info};
+		m_graphics_pipeline = vk::raii::Pipeline{m_ve_device.getDevice(), nullptr, pipeline_info};
 	}
 
 	void VePipeline::createShaderModule(const std::vector<char>& code, vk::raii::ShaderModule* _shader_module) {
@@ -176,7 +176,7 @@ namespace ve {
 		};
 
 		try {
-			*_shader_module = vk::raii::ShaderModule(ve_device.getDevice(), create_info);
+			*_shader_module = vk::raii::ShaderModule(m_ve_device.getDevice(), create_info);
 		} catch (const std::exception& e) {
 			throw std::runtime_error("failed to create shader module: " + std::string(e.what()));
 		}

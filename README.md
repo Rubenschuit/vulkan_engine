@@ -34,10 +34,10 @@ Simple modern C++20 Vulkan renderer using Vulkan-Hpp RAII, GLFW, and Slang. This
 
 Or use the helper script:
 
-- ./unixBuild.sh        # Debug build + run
-- ./unixBuild.sh release  # Release build + run
-- ./unixBuild.sh test     # Build and run tests
-- ./unixBuild.sh clean    # Remove build/ and shader artifacts
+- ./unixBuild.sh
+- ./unixBuild.sh release
+- ./unixBuild.sh test
+- ./unixBuild.sh clean
 
 4) Run
 

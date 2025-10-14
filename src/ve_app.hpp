@@ -42,42 +42,43 @@ namespace ve {
 		void updateUniformBuffer(uint32_t current_frame, UniformBufferObject& ubo);
 		void updateWindowTitle();
 
-		VeWindow ve_window{WIDTH, HEIGHT, "Vulkan Engine!"};
-		VeDevice ve_device{ve_window};
-		VeRenderer ve_renderer{ve_device, ve_window};
+		VeWindow m_ve_window{WIDTH, HEIGHT, "Vulkan Engine!"};
+		VeDevice m_ve_device{m_ve_window};
+		VeRenderer m_ve_renderer{m_ve_device, m_ve_window};
 
-		std::vector<std::unique_ptr<VeBuffer>> uniform_buffers;
+		std::vector<std::unique_ptr<VeBuffer>> m_uniform_buffers;
 
 		// Descriptor pool, layouts, sets
-		std::unique_ptr<VeDescriptorPool> global_pool{};
-		std::unique_ptr<VeDescriptorSetLayout> global_set_layout{};
-		std::unique_ptr<VeDescriptorSetLayout> material_set_layout{};
-		std::vector<vk::raii::DescriptorSet> global_descriptor_sets{};
-		vk::raii::DescriptorSet material_descriptor_set{nullptr};
+		std::unique_ptr<VeDescriptorPool> m_global_pool{};
+		std::unique_ptr<VeDescriptorSetLayout> m_global_set_layout{};
+		std::unique_ptr<VeDescriptorSetLayout> m_material_set_layout{};
+		std::vector<vk::raii::DescriptorSet> m_global_descriptor_sets{};
+		vk::raii::DescriptorSet m_material_descriptor_set{nullptr};
 
 		// Objects and texture
-		VeTexture texture{ve_device, "../textures/viking_room.png"};
+		const char* m_texture_path = "../textures/viking_room.png";
+		VeTexture m_texture{m_ve_device, m_texture_path};
 		// model paths hardcoded in .cpp for now
-		std::unordered_map<uint32_t, VeGameObject> game_objects;
+		std::unordered_map<uint32_t, VeGameObject> m_game_objects;
 
 		// Input handling
-		InputController input_controller{ve_window};
+		InputController m_input_controller{m_ve_window};
 
 		// Camera settings
-        VeCamera camera{{2.0f, 2.0f, 2.0f}, {0.0f, 0.0f, 1.0f}};
-		const float fov = glm::radians(55.0f);
-		const float near_plane = 0.1f;
-		const float far_plane = 100.0f;
-		float last_aspect{0.0f};
+        VeCamera m_camera{{2.0f, 2.0f, 2.0f}, {0.0f, 0.0f, 1.0f}};
+		const float m_fov = glm::radians(55.0f);
+		const float m_near_plane = 0.1f;
+		const float m_far_plane = 100.0f;
+		float m_last_aspect{0.0f};
 
 		// FPS/frametime tracking
 		using clock = std::chrono::steady_clock;
-		clock::time_point last_frame_time{clock::now()};
-		clock::time_point fps_window_start{clock::now()};
-		uint32_t fps_frame_count{0};
-		double sum_frame_ms{0.0};
-		double last_frame_ms{0.0}; //TODO remove?
-		float frame_time{0.0f};
+		clock::time_point m_last_frame_time{clock::now()};
+		clock::time_point m_fps_window_start{clock::now()};
+		uint32_t m_fps_frame_count{0};
+		double m_sum_frame_ms{0.0};
+		double m_last_frame_ms{0.0}; //TODO remove?
+		float m_frame_time{0.0f};
 	};
 }
 

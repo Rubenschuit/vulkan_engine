@@ -48,14 +48,14 @@ namespace ve {
 		void createVertexBuffers(const std::vector<Vertex>& vertices);
 		void createIndexBuffers(const std::vector<uint32_t>& indices);
 
-		VeDevice& ve_device; // not owned, must outlive model
+		VeDevice& m_ve_device; // not owned, must outlive model
 
-		std::unique_ptr<ve::VeBuffer> vertex_buffer;
-		uint32_t vertex_count;
+		std::unique_ptr<ve::VeBuffer> m_vertex_buffer;
+		uint32_t m_vertex_count;
 
 		// TODO: Consdider consolidating index and vertex buffer into single buffer and use offsets
-		std::unique_ptr<ve::VeBuffer> index_buffer;
-		uint32_t index_count;
+		std::unique_ptr<ve::VeBuffer> m_index_buffer;
+		uint32_t m_index_count;
 	};
 
 } // namespace ve

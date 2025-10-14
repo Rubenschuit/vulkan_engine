@@ -12,7 +12,7 @@ namespace ve {
 
 	class AxesRenderSystem {
 	public:
-		AxesRenderSystem(VeDevice& device, vk::raii::DescriptorSetLayout& descriptor_set_layout, vk::Format color_format);
+		AxesRenderSystem(VeDevice& device, const vk::raii::DescriptorSetLayout& descriptor_set_layout, vk::Format color_format);
 		~AxesRenderSystem();
 
 		AxesRenderSystem(const AxesRenderSystem&) = delete;
@@ -21,13 +21,13 @@ namespace ve {
 		void renderAxes(VeFrameInfo& frame_info) const;
 
 	private:
-		void createPipelineLayout(vk::raii::DescriptorSetLayout& descriptor_set_layout);
+		void createPipelineLayout(const vk::raii::DescriptorSetLayout& descriptor_set_layout);
 		void createPipeline(vk::Format color_format);
 		void createAxesModel();
 
-		VeDevice& ve_device;
-		vk::raii::PipelineLayout pipeline_layout{nullptr};
-		std::unique_ptr<VePipeline> ve_pipeline;
-		std::unique_ptr<VeModel> axes_model;
+		VeDevice& m_ve_device;
+		vk::raii::PipelineLayout m_pipeline_layout{nullptr};
+		std::unique_ptr<VePipeline> m_ve_pipeline;
+		std::unique_ptr<VeModel> m_axes_model;
 	};
 }

@@ -14,28 +14,21 @@ namespace ve {
 		VeTexture(const VeTexture&) = delete;
 		VeTexture& operator=(const VeTexture&) = delete;
 
-		vk::raii::Sampler& getSampler() { return texture_sampler; };
-		vk::raii::ImageView& getImageView() { return texture_image->getImageView(); };
-		vk::DescriptorImageInfo getDescriptorInfo() {
-			vk::DescriptorImageInfo image_info{
-				.sampler = texture_sampler,
-				.imageView = texture_image->getImageView(),
-				.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
-			};
-			return image_info;
-		}
+		const vk::raii::Sampler& getSampler() const { return m_texture_sampler; };
+		const vk::raii::ImageView& getImageView() const { return m_texture_image->getImageView(); };
+		vk::DescriptorImageInfo getDescriptorInfo() const;
 
 	private:
 		void createTextureImage(const char* texture_path);
 		void createTextureSampler();
 
-		ve::VeDevice& ve_device;
-		int width;
-		int height;
-		int channels;
-		std::unique_ptr<ve::VeImage> texture_image;
+		ve::VeDevice& m_ve_device;
+		int m_width;
+		int m_height;
+		int m_channels;
+		std::unique_ptr<ve::VeImage> m_texture_image;
 
 		// Todo:: move sampler outside of texture class if we want to sample multiple images
-		vk::raii::Sampler texture_sampler{nullptr};
+		vk::raii::Sampler m_texture_sampler{nullptr};
 	};
 } // namespace ve

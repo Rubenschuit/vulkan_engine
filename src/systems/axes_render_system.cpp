@@ -6,8 +6,8 @@ namespace ve {
 
 	AxesRenderSystem::AxesRenderSystem(
 			VeDevice& device,
-			vk::raii::DescriptorSetLayout& global_set_layout,
-			vk::Format color_format) : ve_device(device) {
+				const vk::raii::DescriptorSetLayout& global_set_layout,
+			vk::Format color_format) : m_ve_device(device) {
 		createPipelineLayout(global_set_layout);
 		createPipeline(color_format);
 		createAxesModel();
@@ -15,13 +15,13 @@ namespace ve {
 
 	AxesRenderSystem::~AxesRenderSystem() {}
 
-	void AxesRenderSystem::createPipelineLayout(vk::raii::DescriptorSetLayout& global_set_layout) {
+	void AxesRenderSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout) {
 	vk::PipelineLayoutCreateInfo pipeline_layout_info{
 		.sType = vk::StructureType::ePipelineLayoutCreateInfo,
 		.setLayoutCount = 1,
 		.pSetLayouts = &*global_set_layout,
 	};
-	pipeline_layout = vk::raii::PipelineLayout(ve_device.getDevice(), pipeline_layout_info);
+	m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), pipeline_layout_info);
 	}
 
 	void AxesRenderSystem::createPipeline(vk::Format color_format) {
@@ -35,21 +35,21 @@ namespace ve {
 		cfg.rasterization_info.depthBiasConstantFactor = 8192.0f;
 		cfg.rasterization_info.depthBiasClamp = 0.0f;
 		cfg.color_format = color_format;
-		cfg.pipeline_layout = pipeline_layout;
-		ve_pipeline = std::make_unique<VePipeline>(
-			ve_device,
+		cfg.pipeline_layout = m_pipeline_layout;
+		m_ve_pipeline = std::make_unique<VePipeline>(
+			m_ve_device,
 			"../shaders/axes_shader.spv",
 			cfg
 		);
-		assert(ve_pipeline && "Failed to create axes pipeline");
+		assert(m_ve_pipeline && "Failed to create axes pipeline");
 	}
 
 	void AxesRenderSystem::createAxesModel() {
 		// 3 axes as cylinders from origin to +L along each axis, colored RGB
 		std::vector<VeModel::Vertex> vertices;
-		const int SEGMENTS = 24;           // circle segments per cylinder
-		const float L = 100.0f;              // cylinder length
-		const float R = 0.003f;            // cylinder radius
+		constexpr int SEGMENTS = 24;           // circle segments per cylinder
+		constexpr float L = 100.0f;            // cylinder length
+		constexpr float R = 0.003f;            // cylinder radius
 		vertices.reserve(3 * SEGMENTS * 6); // 2 tris per quad, 3 axes
 
 		auto push_tri = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& color){
@@ -110,20 +110,20 @@ namespace ve {
 				push_tri(v2, v3, v0, col);
 			}
 		}
-		axes_model = std::make_unique<VeModel>(ve_device, vertices);
+		m_axes_model = std::make_unique<VeModel>(m_ve_device, vertices);
 	}
 
 	void AxesRenderSystem::renderAxes(VeFrameInfo& frame_info) const {
-		frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, ve_pipeline->getPipeline());
+		frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 		frame_info.command_buffer.bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics,
-			*pipeline_layout,
+			*m_pipeline_layout,
 			0,
 			*frame_info.global_descriptor_set,
 			{}
 		);
-		axes_model->bindVertexBuffer(frame_info.command_buffer);
-		axes_model->draw(frame_info.command_buffer);
+		m_axes_model->bindVertexBuffer(frame_info.command_buffer);
+		m_axes_model->draw(frame_info.command_buffer);
 	}
 
 }

@@ -1,6 +1,6 @@
 /* This class manages the creation and configuration of Vulkan pipelines.
-   It also creates the necessary shader modules. */
-# pragma once
+	It also creates the necessary shader modules. */
+#pragma once
 
 #include <vulkan/vulkan_raii.hpp>
 
@@ -46,7 +46,7 @@ namespace ve {
 		VePipeline(const VePipeline&) = delete;
 		VePipeline& operator=(const VePipeline&) = delete;
 
-		vk::Pipeline getPipeline() { return *graphics_pipeline; }
+vk::Pipeline getPipeline() const { return *m_graphics_pipeline; }
 		static void defaultPipelineConfigInfo(PipelineConfigInfo& config_info);
 
 	private:
@@ -58,8 +58,8 @@ namespace ve {
 
 		void createShaderModule(const std::vector<char>& code, vk::raii::ShaderModule* shader_module);
 
-		VeDevice& ve_device; // will outlive the pipeline class
-		vk::raii::Pipeline graphics_pipeline{nullptr};
-		vk::raii::ShaderModule shader_module{nullptr};
+		VeDevice& m_ve_device; // will outlive the pipeline class
+		vk::raii::Pipeline m_graphics_pipeline{nullptr};
+		vk::raii::ShaderModule m_shader_module{nullptr};
 	};
 }
