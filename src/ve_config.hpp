@@ -3,9 +3,13 @@
 #include <vector>
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_beta.h> // for VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
+#include <glm/glm.hpp>
 
 namespace ve {
-	constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 3;
+	constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+
+	constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.02f); // w indicates light intensity
+	constexpr uint32_t MAX_LIGHTS = 100; // requirded for UBO alignment
 
 	//constexpr vk::PresentModeKHR PRESENT_MODE = vk::PresentModeKHR::eMailbox;
 	constexpr vk::PresentModeKHR PRESENT_MODE = vk::PresentModeKHR::eImmediate;
@@ -35,3 +39,4 @@ namespace ve {
 // TODO: Windows: test separate transfer queue on Windows with a discrete GPU
 // TODO: Consdider consolidating index and vertex buffer into single buffer and use offsets
 // TODO: Make sure the directories are setup correctly
+// TODO: consider moving the timeline semaphore from VeSwapChain somewhere else

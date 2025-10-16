@@ -9,7 +9,7 @@ namespace ve {
 	struct SimplePushConstantData {
 		glm::vec4 position;
 		glm::vec4 color;
-		float radius;
+		float scale;
 	};
 
 	PointLightSystem::PointLightSystem(
@@ -55,7 +55,7 @@ namespace ve {
 		pipeline_config.pipeline_layout = m_pipeline_layout;
 		m_ve_pipeline = std::make_unique<VePipeline>(
 			m_ve_device,
-			"../shaders/point_light_shader.spv",
+			"shaders/point_light_shader.spv",
 			pipeline_config);
 		assert(m_ve_pipeline != nullptr && "Failed to create pipeline");
 
@@ -77,8 +77,8 @@ namespace ve {
 				continue;
 			SimplePushConstantData push{};
 			push.position = glm::vec4{obj.transform.translation, 1.0f};
-			push.radius = obj.point_light_component->intensity; // use intensity as radius for visualization
-			push.color = glm::vec4{obj.color, 1.0f};
+			push.scale = obj.transform.scale.x;
+			push.color = glm::vec4{obj.color, obj.point_light_component->intensity};
 			frame_info.command_buffer.pushConstants<SimplePushConstantData>(
 				*m_pipeline_layout,
 				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
@@ -87,7 +87,6 @@ namespace ve {
 			);
 			frame_info.command_buffer.draw(6, 1, 0, 0); // 6 vertices for point light
 		}
-
 	}
 
 	// Update UBO with point light data for global access in shaders

@@ -63,7 +63,7 @@ namespace ve {
 		game_object.point_light_component->intensity = intensity;
 		game_object.color = color;
 		game_object.has_texture = 0.0f;
-		game_object.transform.scale = glm::vec3(radius);
+		game_object.transform.scale = glm::vec3(radius); // uniform scale for point light quad size
 		return game_object;
 	}
 }

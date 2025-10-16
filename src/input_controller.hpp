@@ -3,6 +3,7 @@
 #include "ve_game_object.hpp"
 #include "ve_window.hpp"
 #include "ve_camera.hpp"
+#include "systems/particle_system.hpp"
 
 namespace ve {
 	class InputController {
@@ -30,7 +31,7 @@ namespace ve {
 		InputController(const InputController&) = delete;
 		InputController& operator=(const InputController&) = delete;
 
-		void processInput(float delta_time, VeCamera& camera);
+		void processInput(float delta_time, VeCamera& camera, ParticleSystem& particle_system);
 
 	private:
 		void processMouseMovement(double xpos, double ypos);

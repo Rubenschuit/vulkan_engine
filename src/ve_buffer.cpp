@@ -17,13 +17,12 @@ namespace ve {
 		return instance_size;
 	}
 
-	VeBuffer::VeBuffer(
-			VeDevice& ve_device,
-			vk::DeviceSize instance_size,
-			uint32_t instance_count,
-			vk::BufferUsageFlags usage_flags,
-			vk::MemoryPropertyFlags memory_property_flags,
-			vk::DeviceSize min_offset_alignment)
+	VeBuffer::VeBuffer(VeDevice& ve_device,
+					   vk::DeviceSize instance_size,
+					   uint32_t instance_count,
+					   vk::BufferUsageFlags usage_flags,
+					   vk::MemoryPropertyFlags memory_property_flags,
+					   vk::DeviceSize min_offset_alignment)
 		: m_instance_size(instance_size),
 		  m_instance_count(instance_count),
 		  m_usage_flags(usage_flags),
@@ -60,17 +59,25 @@ namespace ve {
 
 	void VeBuffer::writeToBuffer(void* data, vk::DeviceSize size, vk::DeviceSize offset) {
 		assert(m_mapped != nullptr && "Cannot write to unmapped buffer");
-		assert(size > m_buffer_size && "Size exceeds buffer size");
-		assert(offset + size > m_buffer_size && "Write exceeds buffer size");
+		vk::DeviceSize effective_size = (size == VK_WHOLE_SIZE) ? m_buffer_size : size;
+		assert(effective_size <= m_buffer_size && "Size exceeds buffer size");
+		assert(offset + effective_size <= m_buffer_size && "Write exceeds buffer size");
 		// If size is VK_WHOLE_SIZE, we write the whole buffer
 		if (size == VK_WHOLE_SIZE) {
 			memcpy(m_mapped, data, m_buffer_size);
-		}
-		else {
-			char* mem_offset = (char*)m_mapped;
+		} else {
+			char* mem_offset = static_cast<char*>(m_mapped);
 			mem_offset += offset;
-			memcpy(mem_offset, data, size);
+			memcpy(mem_offset, data, effective_size);
 		}
 	}
 
+	vk::DescriptorBufferInfo VeBuffer::getDescriptorInfo(vk::DeviceSize size, vk::DeviceSize offset) const {
+		vk::DescriptorBufferInfo buffer_info{
+			.buffer = m_buffer,
+			.offset = offset,
+			.range = size
+		};
+		return buffer_info;
+	}
 }

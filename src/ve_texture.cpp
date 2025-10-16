@@ -16,12 +16,21 @@ namespace ve {
 	VeTexture::~VeTexture(){}
 
 	void VeTexture::createTextureImage(const char* texture_path) {
-		// Load image from file using stb_image
+		// Load image from file using stb_image; on failure, create a 1x1 white fallback
 		stbi_uc* pixels = stbi_load(texture_path, &m_width, &m_height, &m_channels, STBI_rgb_alpha);
-		if (!pixels)
-			throw std::runtime_error("Failed to load " + std::string(texture_path));
+		bool free_pixels = true;
+		std::vector<stbi_uc> fallback_pixels;
+		if (!pixels) {
+			VE_LOGW("Texture not found, using fallback: " << texture_path);
+			m_width = 1;
+			m_height = 1;
+			m_channels = 4;
+			fallback_pixels.assign({255, 255, 255, 255}); // 1x1 white RGBA
+			pixels = fallback_pixels.data();
+			free_pixels = false; // do not free fallback memory with stbi
+		}
 
-		VE_LOGD("Texture channels: " << m_channels);
+		// texture loaded
 		// Create a local scope staging buffer
 		ve::VeBuffer staging_buffer(
 			m_ve_device,
@@ -35,7 +44,9 @@ namespace ve {
 		staging_buffer.map();
 		staging_buffer.writeToBuffer((void*)pixels);
 		// unmap is called in the destructor of VeBuffer
-		stbi_image_free(pixels);
+		if (free_pixels) {
+			stbi_image_free(pixels);
+		}
 
 		// Create image
 		m_texture_image = std::make_unique<ve::VeImage>(

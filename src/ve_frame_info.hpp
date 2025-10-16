@@ -8,11 +8,9 @@
 
 #include "ve_model.hpp"
 #include "ve_game_object.hpp"
+#include "ve_config.hpp"
 
 namespace ve {
-
-	const glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.02f); // w indicates light intensity
-	const uint32_t MAX_LIGHTS = 100;
 
 	struct PointLight {
 		glm::vec4 position;
@@ -23,7 +21,7 @@ namespace ve {
 		glm::mat4 view;
 		glm::mat4 proj;
 		glm::vec4 ambient_light_color = DEFAULT_AMBIENT_LIGHT_COLOR;
-		PointLight point_lights[MAX_LIGHTS];
+		PointLight point_lights[ve::MAX_LIGHTS];
 		alignas(16) uint32_t num_lights = 0;
 		// reminder: alignment
 	};
@@ -32,7 +30,9 @@ namespace ve {
 		vk::raii::DescriptorSet& global_descriptor_set;
 		vk::raii::DescriptorSet& material_descriptor_set;
 		vk::raii::CommandBuffer& command_buffer;
+		vk::raii::CommandBuffer& compute_command_buffer; // For compute shaders
 		std::unordered_map<uint32_t, VeGameObject>& game_objects;
 		float frame_time;
+		uint32_t current_frame;
 	};
 }

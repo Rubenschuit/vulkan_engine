@@ -1,4 +1,3 @@
-
 struct VertexInput {
 	float3 in_pos : POSITION;
 	float3 in_color : COLOR;
@@ -8,7 +7,7 @@ struct VertexInput {
 
 struct PointLight {
 	float4 position;
-	float4 color;
+	float4 color; // .w = intensity
 };
 
 struct UniformBuffer {

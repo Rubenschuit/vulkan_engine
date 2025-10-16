@@ -6,7 +6,7 @@ namespace ve {
 
 	VeCamera::VeCamera(glm::vec3 position, glm::vec3 world_up)
 		: m_pos(position), m_world_up(world_up) {
-		lookAt(glm::vec3(0.0f, 0.0f, 0.0f));
+		lookAt(glm::vec3(0.0f, 0.0f, 5.0f));
 		updateView();
 		updateProjection();
 	}
@@ -53,6 +53,8 @@ namespace ve {
 	//
 	//     yaw = arctan( dir.y / -dir.x).
 	//
+	// Somewhat expensive, but only called when the camera is re-oriented
+	// to look at a specific point.
 	void VeCamera::lookAt(const glm::vec3& target) {
 		glm::vec3 dir = target - m_pos;
 		float len = glm::length(dir);
@@ -63,7 +65,7 @@ namespace ve {
 
 		m_pitch = std::asin(glm::dot(dir, m_world_up));
 
-		// Yaw from XY projection; mapping matches forward = (-cos p cos y, cos p sin y, sin p)
+		// Yaw from XY projection
 		glm::vec2 xy{dir.x, dir.y};
 		float xy_len = glm::length(xy);
 		if (xy_len > 1e-6f) {

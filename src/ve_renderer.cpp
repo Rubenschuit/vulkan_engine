@@ -21,6 +21,14 @@ namespace ve {
 		};
 		m_command_buffers = vk::raii::CommandBuffers(m_ve_device.getDevice(), alloc_info);
 		assert(m_command_buffers.size() == ve::MAX_FRAMES_IN_FLIGHT && "Failed to allocate command buffers");
+		vk::CommandBufferAllocateInfo alloc_info_compute{
+			.sType = vk::StructureType::eCommandBufferAllocateInfo,
+			.commandPool = *m_ve_device.getComputeCommandPool(),
+			.level = vk::CommandBufferLevel::ePrimary,
+			.commandBufferCount = ve::MAX_FRAMES_IN_FLIGHT
+		};
+		m_compute_command_buffers = vk::raii::CommandBuffers(m_ve_device.getDevice(), alloc_info_compute);
+		assert(m_compute_command_buffers.size() == ve::MAX_FRAMES_IN_FLIGHT && "Failed to allocate command buffers");
 	}
 
 	void VeRenderer::recreateSwapChain() {
@@ -53,8 +61,8 @@ namespace ve {
 	bool VeRenderer::beginFrame() {
 		assert(!m_is_frame_started && "Can't call beginFrame while already in progress");
 
-		// Wait until the previous frame is finished
-		m_ve_swap_chain->waitForFences();
+		// Wait until image is available
+		m_ve_swap_chain->waitForCurrentFence();
 
 		// Acquire an image from the swap chain
 		auto result = m_ve_swap_chain->acquireNextImage(&m_current_image_index);
@@ -66,25 +74,26 @@ namespace ve {
 			throw std::runtime_error("failed to acquire swap chain image!");
 		}
 
+		// frame acquired
 		m_is_frame_started = true;
+		m_ve_swap_chain->resetCurrentFence();
+		m_ve_swap_chain->updateTimelineValues();
 
-		// Reset the fence for the current frame
-		m_ve_swap_chain->resetFences();
-
-		// Record command buffer using the acquired image
 		auto& command_buffer = getCurrentCommandBuffer();
-
 		command_buffer.reset();
 		command_buffer.begin({});
+
 		return true;
 	}
 
+	// End the command buffer recording, submits the command buffer and presents the image.
 	void VeRenderer::endFrame(vk::raii::CommandBuffer& command_buffer) {
 		assert(m_is_frame_started && "Can't call endFrame while frame is not in progress");
 		assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end frame on command buffer from a different frame");
 		command_buffer.end();
 
-		// Submit the command buffer, present the image
+		// submit graphics and present
+		// Submit the command buffer, present the image in accordance with the timeline semaphore values
 		auto result = m_ve_swap_chain->submitAndPresent(command_buffer, &m_current_image_index);
 		if (result == vk::Result::eErrorOutOfDateKHR ||
 				result == vk::Result::eSuboptimalKHR ||
@@ -99,6 +108,8 @@ namespace ve {
 		m_is_frame_started = false;
 	}
 
+	// Starts command buffer recording, transitions the swap chain image to a color attachment
+	// and begins a dynamic rendering pass.
 	void VeRenderer::beginRender(vk::raii::CommandBuffer& command_buffer) {
 		assert(m_is_frame_started && "Can't call beginRender while frame is not in progress");
 		assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin render on command buffer from a different frame");
@@ -148,6 +159,7 @@ namespace ve {
 		command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), extent));
 	}
 
+	// Ends the dynamic rendering pass and transitions the swap chain image to presentation
 	void VeRenderer::endRender(vk::raii::CommandBuffer& command_buffer) {
 		assert(m_is_frame_started && "Can't call endRender while frame is not in progress");
 		assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end render on command buffer from a different frame");
@@ -165,6 +177,15 @@ namespace ve {
 			vk::PipelineStageFlagBits2::eColorAttachmentOutput,
 			vk::PipelineStageFlagBits2::eBottomOfPipe
 		);
+	}
+
+	// Expects a compute command buffer that has been recorded and ended.
+	// Submits the command buffer to the compute queue, signaling the timeline semaphore when done.
+	// Should be called between beginFrame() and endFrame().
+	void VeRenderer::submitCompute(vk::raii::CommandBuffer& compute_command_buffer) {
+		assert(m_is_frame_started && "Can't call submitCompute while frame is not in progress");
+		assert(&compute_command_buffer == &getCurrentComputeCommandBuffer() && "Can't submit compute on command buffer from a different frame");
+		m_ve_swap_chain->submitComputeWork(compute_command_buffer);
 	}
 
 }

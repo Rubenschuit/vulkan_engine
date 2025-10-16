@@ -39,8 +39,15 @@ namespace ve {
 		const std::vector<vk::raii::ImageView>& getSwapChainImageViews() const { return m_swap_chain_image_views; }
 		float getExtentAspectRatio() const;
 
+		bool compareSwapFormats(const VeSwapChain& other) const;
 		vk::Result acquireNextImage(uint32_t* imageIndex);
-		// Transitions the swap chain image at imageIndex from oldLayout to newLayout.
+		// Todo use raii
+		void submitComputeWork(vk::CommandBuffer commandBuffer);
+		vk::Result submitAndPresent(vk::CommandBuffer commandBuffer, uint32_t* imageIndex);
+		void waitForCurrentFence();
+		void resetCurrentFence();
+		void advanceFrame();
+		void updateTimelineValues();
 		void transitionImageLayout( vk::raii::CommandBuffer& command_buffer,
 									uint32_t image_index,
 									vk::ImageLayout old_layout,
@@ -49,17 +56,6 @@ namespace ve {
 									vk::AccessFlags2 dst_access_mask,
 									vk::PipelineStageFlags2 src_stage,
 									vk::PipelineStageFlags2 dst_stage);
-
-		// Submits the provided command buffer, along with fence, and presents the acquired image.
-		vk::Result submitAndPresent(vk::CommandBuffer commandBuffer, uint32_t* imageIndex);
-		void waitForFences();
-		void resetFences();
-		void advanceFrame();
-
-		bool compareSwapFormats(const VeSwapChain& other) const {
-			return (other.m_swap_chain_image_format == m_swap_chain_image_format &&
-					other.m_depth_image->getFormat() == m_depth_image->getFormat());
-		};
 
 	private:
 		void init();
@@ -85,9 +81,18 @@ namespace ve {
 		std::unique_ptr<VeImage> m_depth_image;
 
 		// Synchronization primitives
-		std::vector<vk::raii::Semaphore> m_present_complete_semaphores;
-		std::vector<vk::raii::Semaphore> m_render_finished_semaphores;
+		// TODO: consider moving the timeline semaphore somewhere else
+		vk::raii::Semaphore semaphore{nullptr};
+		uint64_t timeline_value = 0;
+		uint64_t compute_wait_value;
+        uint64_t compute_signal_value;
+        uint64_t graphics_wait_value;
+        uint64_t graphics_signal_value;
 		std::vector<vk::raii::Fence> m_in_flight_fences;
+		// Per-swapchain-image binary semaphores signaled by graphics submit and waited by present
+        std::vector<vk::raii::Semaphore> m_render_finished_semaphores;
+		// Per-frame binary semaphores signaled by acquire and waited by graphics submit
+		std::vector<vk::raii::Semaphore> m_image_available_semaphores;
 
 		SwapChainSupportDetails m_swap_chain_support;
 		vk::SurfaceFormatKHR m_surface_format;
@@ -98,6 +103,5 @@ namespace ve {
 		std::shared_ptr<VeSwapChain> m_old_swap_chain; // kept alive during recreation only
 
 		uint32_t m_current_frame = 0;
-		uint32_t m_semaphore_index = 0;
 	};
 }

@@ -26,8 +26,8 @@ namespace ve {
 			static std::vector<vk::VertexInputBindingDescription> getBindingDescriptions();
 			static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptions();
 			bool operator==(const Vertex& other) const {
-				// Include normal in equality so that flat vs. smooth shaded meshes deduplicate differently
-				return pos == other.pos && color == other.color && normal == other.normal && tex_coord == other.tex_coord;
+				return pos == other.pos && color == other.color &&
+					   normal == other.normal && tex_coord == other.tex_coord;
 			}
 		};
 

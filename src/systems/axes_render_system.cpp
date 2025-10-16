@@ -38,7 +38,7 @@ namespace ve {
 		cfg.pipeline_layout = m_pipeline_layout;
 		m_ve_pipeline = std::make_unique<VePipeline>(
 			m_ve_device,
-			"../shaders/axes_shader.spv",
+			"shaders/axes_shader.spv",
 			cfg
 		);
 		assert(m_ve_pipeline && "Failed to create axes pipeline");

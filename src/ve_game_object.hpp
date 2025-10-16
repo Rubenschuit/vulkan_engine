@@ -11,7 +11,7 @@ namespace ve {
 	struct TransformComponent {
 		glm::vec3 translation{0.0f};
 		glm::vec3 rotation{0.0f, 0.0f, 0.0f}; // in radians
-		glm::vec3 scale{1.0f}; // non uniform scaling will not preserve correct normals atm
+		glm::vec3 scale{1.0f};
 	};
 
 	struct PointLightComponent {

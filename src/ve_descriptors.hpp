@@ -22,7 +22,7 @@ namespace ve {
 			Builder &addBinding(
 				uint32_t binding,
 				vk::DescriptorType descriptor_type,
-				vk::ShaderStageFlagBits stage_flags,
+				vk::ShaderStageFlags stage_flags,
 				uint32_t count = 1);
 			std::unique_ptr<VeDescriptorSetLayout> build() const;
 
@@ -57,7 +57,8 @@ namespace ve {
 			Builder &addPoolSize(vk::DescriptorType descriptor_type, uint32_t count);
 			Builder &setPoolFlags(vk::DescriptorPoolCreateFlagBits flags);
 			Builder &setMaxSets(uint32_t count);
-			std::unique_ptr<VeDescriptorPool> build() const;
+				std::unique_ptr<VeDescriptorPool> build() const;
+				std::shared_ptr<VeDescriptorPool> buildShared() const;
 
 		private:
 			VeDevice &m_ve_device;

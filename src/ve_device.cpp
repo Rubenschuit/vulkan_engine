@@ -50,7 +50,7 @@ namespace ve {
 		createSurface();
 		pickPhysicalDevice();
 		createLogicalDevice();
-		createCommandPool();
+		createCommandPools();
 	}
 
 	VeDevice::~VeDevice() {
@@ -144,7 +144,7 @@ namespace ve {
 		m_debug_messenger = m_instance.createDebugUtilsMessengerEXT(create_info);
 	}
 
-	void VeDevice::createCommandPool() {
+	void VeDevice::createCommandPools() {
 		assert(m_queue_index != UINT32_MAX && "Cannot create command pool: invalid queue index");
 		vk::CommandPoolCreateInfo pool_info{
 			.sType = vk::StructureType::eCommandPoolCreateInfo,
@@ -159,6 +159,13 @@ namespace ve {
 			.queueFamilyIndex = m_transfer_queue_index
 		};
 		m_command_pool_transfer = vk::raii::CommandPool(m_device, pool_info_transfer);
+		assert(m_compute_queue_index != UINT32_MAX && "Cannot create command pool: invalid compute queue index");
+		vk::CommandPoolCreateInfo pool_info_compute{
+			.sType = vk::StructureType::eCommandPoolCreateInfo,
+			.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer | vk::CommandPoolCreateFlagBits::eTransient,
+			.queueFamilyIndex = m_compute_queue_index
+		};
+		m_command_pool_compute = vk::raii::CommandPool(m_device, pool_info_compute);
 	}
 
 	void VeDevice::createSurface() {
@@ -172,15 +179,15 @@ namespace ve {
 
 	// Checks if a physical device supports Vulkan 1.3,
 	// a graphics queue and the required extensions defined in ve_device.hpp
-	bool VeDevice::isDeviceSuitable(const vk::raii::PhysicalDevice& p_device) {
+	bool VeDevice::isDeviceSuitable(const vk::raii::PhysicalDevice& phyisical_device) {
 
 		// First, the device must support at least Vulkan 1.3
-		if (p_device.getProperties().apiVersion < VK_API_VERSION_1_3) {
+		if (phyisical_device.getProperties().apiVersion < VK_API_VERSION_1_3) {
 			return false;
 		}
 
 		// Second, it must have a queue family that supports graphics
-		auto queue_families = p_device.getQueueFamilyProperties();
+		auto queue_families = phyisical_device.getQueueFamilyProperties();
 		// return an iterator to the first queue family that supports graphics
 		const auto qfp_iter = std::ranges::find_if(queue_families,
 			[](vk::QueueFamilyProperties const& qfp) {
@@ -191,35 +198,37 @@ namespace ve {
 		}
 
 		// Third, it must support the required device extensions
-		auto d_extensions = p_device.enumerateDeviceExtensionProperties();
+		auto physical_device_extensions = phyisical_device.enumerateDeviceExtensionProperties();
 		bool found = true;
 		// For every required device extension, check if it is in the list of available extensions
 		for (auto const& r_extension : m_required_device_extensions) {
-			auto extension_iter = std::ranges::find_if(d_extensions,
+			auto extension_iter = std::ranges::find_if(physical_device_extensions,
 				[r_extension](auto const& ext) {
 					return strcmp(ext.extensionName, r_extension) == 0;
 				});
-			found = found && (extension_iter != d_extensions.end());
+			found = found && (extension_iter != physical_device_extensions.end());
 		}
 		if (!found) {
 			return false;
 		}
 
 		// Todo centralize features to check
-		// Fourth, it must support the required features (anisotropy, dynamic rendering, synchronization2, extended dynamic state)
-		auto features = p_device.getFeatures2<vk::PhysicalDeviceFeatures2,
+		// Fourth, it must support the required features
+		auto features = phyisical_device.getFeatures2<vk::PhysicalDeviceFeatures2,
 											  vk::PhysicalDeviceVulkan11Features,
 											  vk::PhysicalDeviceVulkan13Features,
-											  vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
+											  vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
+											  vk::PhysicalDeviceTimelineSemaphoreFeatures>();
 		if (!features.get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy ||
 			!features.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering ||
 			!features.get<vk::PhysicalDeviceVulkan13Features>().synchronization2 ||
-			!features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState) {
+			!features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState ||
+			!features.get<vk::PhysicalDeviceTimelineSemaphoreFeatures>().timelineSemaphore) {
 			return false;
 		}
 
 		// Finally, it must support swapchain for the given surface
-		auto swap_chain_support = querySwapChainSupport(p_device);
+		auto swap_chain_support = querySwapChainSupport(phyisical_device);
 		return !swap_chain_support.formats.empty() && !swap_chain_support.presentModes.empty();
 	}
 
@@ -234,8 +243,8 @@ namespace ve {
 
 		// Find the first suitable device
 		const auto dev_iter = std::ranges::find_if(devices,
-			[this](auto const& p_device) {
-				return isDeviceSuitable(p_device);
+			[this](auto const& phyisical_device) {
+				return isDeviceSuitable(phyisical_device);
 			});
 		if (dev_iter == devices.end()) {
 			throw std::runtime_error("failed to find a suitable GPU!");
@@ -251,10 +260,13 @@ namespace ve {
 		assert(*m_physical_device != VK_NULL_HANDLE && "Physical device must be selected before creating logical device");
 		m_queue_index = findQueueFamilies(m_physical_device);
 		assert(m_queue_index != UINT32_MAX && "Failed to find a valid queue family index");
-		//TODO transfer_queue_index = findTransferQueueFamilies(physical_device);
-		// For now we use the same queue for graphics and transfer as m1 machines do not have a separate transfer queue
+		//TODO: transfer_queue_index = findTransferQueueFamilies(physical_device);
+		// same for compute queue
+		// For now we use the same queue for m1 machine
 		m_transfer_queue_index = m_queue_index;
+		m_compute_queue_index = m_queue_index;
 		assert(m_transfer_queue_index != UINT32_MAX && "Failed to find a valid transfer queue family index");
+		assert(m_compute_queue_index != UINT32_MAX && "Failed to find a valid compute queue family index");
 
 		// Setup a chain of structures to enable required Vulkan features
 		// Note: Slang-generated SPIR-V for VS uses DrawParameters (BaseVertex/VertexIndex),
@@ -262,11 +274,13 @@ namespace ve {
 		vk::StructureChain<vk::PhysicalDeviceFeatures2,
 					   vk::PhysicalDeviceVulkan11Features,
 					   vk::PhysicalDeviceVulkan13Features,
-					   vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> feature_chain = {
+					   vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
+					   vk::PhysicalDeviceTimelineSemaphoreFeatures> feature_chain = {
 			{.features = {.samplerAnisotropy = true}},
 			{.shaderDrawParameters = true},
 			{.dynamicRendering = true, .synchronization2 = true},
-			{.extendedDynamicState = true }
+			{.extendedDynamicState = true },
+			{.timelineSemaphore = true}
 		};
 
 		assert(m_required_device_extensions.size() > 0 && "At least one device extension must be enabled");
@@ -274,41 +288,52 @@ namespace ve {
 		vk::DeviceQueueCreateInfo device_queue_create_info {
 			.queueFamilyIndex = m_queue_index,
 			.queueCount = 1,
-			.pQueuePriorities = &queue_priority };
+			.pQueuePriorities = &queue_priority
+		};
 		vk::DeviceQueueCreateInfo device_queue_create_info_transfer {
 			.queueFamilyIndex = m_transfer_queue_index,
 			.queueCount = 1,
-			.pQueuePriorities = &queue_priority };
+			.pQueuePriorities = &queue_priority
+		};
+		vk::DeviceQueueCreateInfo device_queue_create_info_compute {
+			.queueFamilyIndex = m_compute_queue_index,
+			.queueCount = 1,
+			.pQueuePriorities = &queue_priority
+		};
 
 		std::vector<vk::DeviceQueueCreateInfo> queue_create_infos{};
 		queue_create_infos.push_back(device_queue_create_info);
 		if (m_queue_index != m_transfer_queue_index)
 			queue_create_infos.push_back(device_queue_create_info_transfer);
+		if (m_queue_index != m_compute_queue_index)
+			queue_create_infos.push_back(device_queue_create_info_compute);
 
 		vk::DeviceCreateInfo device_create_info {
 			.pNext = &feature_chain.get<vk::PhysicalDeviceFeatures2>(),
 			.queueCreateInfoCount = static_cast<uint32_t>(queue_create_infos.size()),
 			.pQueueCreateInfos = queue_create_infos.data(),
 			.enabledExtensionCount = static_cast<uint32_t>(m_required_device_extensions.size()),
-			.ppEnabledExtensionNames = m_required_device_extensions.data() };
+			.ppEnabledExtensionNames = m_required_device_extensions.data()
+		};
 
 		m_device = vk::raii::Device(m_physical_device, device_create_info);
 		m_queue = vk::raii::Queue(m_device, m_queue_index, 0);
 		m_transfer_queue = vk::raii::Queue(m_device, m_transfer_queue_index, 0);
+		m_compute_queue = vk::raii::Queue(m_device, m_compute_queue_index, 0);
 	}
 
-	// Finds a queue family that supports both graphics and present
-	// Todo: add support for separate graphics and present queues and timeline semaphores?
-	uint32_t VeDevice::findQueueFamilies(const vk::raii::PhysicalDevice& p_device) {
+	// Finds a queue family that supports graphics, compute and present
+	// TODO: add support for separate graphics/transfer/compute/present queues and timeline semaphores
+	uint32_t VeDevice::findQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device) {
 	assert(*m_surface != VK_NULL_HANDLE && "Surface must be valid when finding queue families");
-		auto qf_properties = p_device.getQueueFamilyProperties();
+		auto qf_properties = phyisical_device.getQueueFamilyProperties();
 		assert(!qf_properties.empty() && "Physical device has no queue families");
-		// get the first index into queueFamilyProperties which supports both graphics and present
+		// get the first index into queueFamilyProperties which supports graphics, compute and present
 		uint32_t _queue_index = UINT32_MAX;
 		for (uint32_t qfp_index = 0; qfp_index < qf_properties.size(); qfp_index++) {
 			if ((qf_properties[qfp_index].queueFlags & vk::QueueFlagBits::eGraphics) &&
-				p_device.getSurfaceSupportKHR(qfp_index, *m_surface)) {
-				// found a queue family that supports both graphics and present
+				(qf_properties[qfp_index].queueFlags & vk::QueueFlagBits::eCompute) &&
+				phyisical_device.getSurfaceSupportKHR(qfp_index, *m_surface)) {
 				_queue_index = qfp_index;
 				break;
 			}
@@ -320,9 +345,9 @@ namespace ve {
 	}
 
 	// Not used for now as m1 machines do not have a dedicated transfer queue
-	uint32_t VeDevice::findTransferQueueFamilies(const vk::raii::PhysicalDevice& p_device) {
+	uint32_t VeDevice::findTransferQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device) {
 		assert(*m_surface != VK_NULL_HANDLE && "Surface must be valid when finding queue families");
-		auto qf_properties = p_device.getQueueFamilyProperties();
+		auto qf_properties = phyisical_device.getQueueFamilyProperties();
 		assert(!qf_properties.empty() && "Physical device has no queue families");
 		// get the first index into queueFamilyProperties which transfer but NOT graphics
 		uint32_t _queue_index = UINT32_MAX;
@@ -463,7 +488,7 @@ namespace ve {
 	}
 
 	// Single-time command buffer helpers (select queue/pool)
-	std::unique_ptr<vk::raii::CommandBuffer> VeDevice::beginSingleTimeCommands(QueueKind kind) {
+	[[nodiscard]] std::unique_ptr<vk::raii::CommandBuffer> VeDevice::beginSingleTimeCommands(QueueKind kind) {
 		vk::CommandPool pool = (kind == QueueKind::Graphics) ? *m_command_pool : *m_command_pool_transfer;
 		vk::CommandBufferAllocateInfo alloc_info{
 			.sType = vk::StructureType::eCommandBufferAllocateInfo,

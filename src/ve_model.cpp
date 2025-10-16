@@ -6,8 +6,6 @@
 
 namespace ve {
 
-
-
 	VeModel::VeModel(VeDevice& device, const std::vector<Vertex>& vertices) : m_ve_device(device) {
 		createVertexBuffers(vertices);
 	}
@@ -198,5 +196,4 @@ namespace ve {
 		};
 		return attribute_descriptions;
 	}
-
-} // namespace ve
+}

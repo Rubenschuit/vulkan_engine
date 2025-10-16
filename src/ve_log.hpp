@@ -67,9 +67,13 @@ namespace ve { namespace detail {
 
     inline void log_line(int lvl, const char* file, int line, const std::string& msg) {
         if (lvl > VE_LOG_LEVEL) return;
-        // Optional timestamp (disabled for simplicity) — can be added later
-        std::fprintf(stderr, "%s[%s]%s %s:%d: %s\n",
-                     level_to_color(lvl), level_to_str(lvl), reset_color(), file, line, msg.c_str());
+        // Optional timestamp
+        std::time_t now = std::time(nullptr);
+        std::tm* local_tm = std::localtime(&now);
+        char timestamp[100];
+        //std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", local_tm);
+    	std::fprintf(stderr, "%s[%s]%s %s %s:%d: %s\n",
+             level_to_color(lvl), level_to_str(lvl), reset_color(), timestamp, file, line, msg.c_str());
     }
 } }
 

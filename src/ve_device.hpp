@@ -47,9 +47,11 @@ namespace ve {
 		VeDevice(const VeDevice &) = delete;
 		VeDevice& operator=(const VeDevice &) = delete;
 
-		vk::raii::CommandPool& getCommandPool()  { return m_command_pool; }
+		vk::raii::CommandPool& getCommandPool() { return m_command_pool; }
+		vk::raii::CommandPool& getComputeCommandPool() { return m_command_pool_compute; }
 		vk::raii::Device& getDevice() { return m_device; }
 		vk::raii::Queue& getQueue() { return m_queue; }
+		vk::raii::Queue& getComputeQueue() { return m_compute_queue; }
 		vk::raii::SurfaceKHR* getSurface() { return &m_surface; }
 
 		SwapChainSupportDetails getSwapChainSupport() { return querySwapChainSupport(m_physical_device); }
@@ -78,12 +80,13 @@ namespace ve {
 		void createSurface();
 		void pickPhysicalDevice();
 		void createLogicalDevice();
-		void createCommandPool();
+		void createCommandPools();
 
 		bool isDeviceSuitable (const vk::raii::PhysicalDevice& device);
 		std::vector<const char *> getRequiredInstanceExtensions();
-		uint32_t findQueueFamilies(const vk::raii::PhysicalDevice& p_device);
-		uint32_t findTransferQueueFamilies(const vk::raii::PhysicalDevice& p_device);
+		uint32_t findQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device);
+		uint32_t findTransferQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device);
+		//TODO: uint32_t findComputeQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device);
 		SwapChainSupportDetails querySwapChainSupport(const vk::raii::PhysicalDevice& device);
 
 		VeWindow &m_window;
@@ -95,7 +98,8 @@ namespace ve {
 		vk::raii::PhysicalDevice m_physical_device{nullptr};
 
 		vk::raii::CommandPool m_command_pool{nullptr};
-		vk::raii::CommandPool m_command_pool_transfer{nullptr};
+		vk::raii::CommandPool m_command_pool_transfer{nullptr}; // eTransient
+		vk::raii::CommandPool m_command_pool_compute{nullptr};  // eTransient
 		vk::raii::Queue m_queue{nullptr};
 		vk::raii::Queue m_transfer_queue{nullptr};
 		vk::raii::Queue m_compute_queue{nullptr};

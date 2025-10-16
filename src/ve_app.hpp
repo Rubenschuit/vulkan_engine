@@ -9,6 +9,8 @@
 #include "input_controller.hpp"
 #include "ve_camera.hpp"
 #include "ve_descriptors.hpp"
+// forward declare to avoid heavy include in header
+namespace ve { class ParticleSystem; }
 
 #include <memory>
 #include <vector>
@@ -28,8 +30,8 @@ namespace ve {
 		VeApp(const VeApp&) = delete;
 		VeApp& operator=(const VeApp&) = delete;
 
-		static constexpr int WIDTH = 800;
-		static constexpr int HEIGHT = 600;
+		static constexpr int WIDTH = 1920;
+		static constexpr int HEIGHT = 1080;
 
 		void run();
 
@@ -49,14 +51,16 @@ namespace ve {
 		std::vector<std::unique_ptr<VeBuffer>> m_uniform_buffers;
 
 		// Descriptor pool, layouts, sets
-		std::unique_ptr<VeDescriptorPool> m_global_pool{};
+	std::shared_ptr<VeDescriptorPool> m_global_pool{};
+
 		std::unique_ptr<VeDescriptorSetLayout> m_global_set_layout{};
 		std::unique_ptr<VeDescriptorSetLayout> m_material_set_layout{};
+
 		std::vector<vk::raii::DescriptorSet> m_global_descriptor_sets{};
 		vk::raii::DescriptorSet m_material_descriptor_set{nullptr};
 
-		// Objects and texture
-		const char* m_texture_path = "../textures/viking_room.png";
+		// Objects and texture (use project-root relative path; loader falls back if missing)
+		const char* m_texture_path = "textures/viking_room.png";
 		VeTexture m_texture{m_ve_device, m_texture_path};
 		// model paths hardcoded in .cpp for now
 		std::unordered_map<uint32_t, VeGameObject> m_game_objects;
@@ -65,10 +69,10 @@ namespace ve {
 		InputController m_input_controller{m_ve_window};
 
 		// Camera settings
-        VeCamera m_camera{{2.0f, 2.0f, 2.0f}, {0.0f, 0.0f, 1.0f}};
-		const float m_fov = glm::radians(55.0f);
-		const float m_near_plane = 0.1f;
-		const float m_far_plane = 100.0f;
+        VeCamera m_camera{{20.0f, 20.0f, 20.0f}, {0.0f, 0.0f, 1.0f}};
+		float m_fov = glm::radians(80.0f);
+		float m_near_plane = 0.1f;
+		float m_far_plane = 10000.0f;
 		float m_last_aspect{0.0f};
 
 		// FPS/frametime tracking

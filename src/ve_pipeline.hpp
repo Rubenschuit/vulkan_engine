@@ -46,7 +46,7 @@ namespace ve {
 		VePipeline(const VePipeline&) = delete;
 		VePipeline& operator=(const VePipeline&) = delete;
 
-vk::Pipeline getPipeline() const { return *m_graphics_pipeline; }
+		vk::Pipeline getPipeline() const { return *m_graphics_pipeline; }
 		static void defaultPipelineConfigInfo(PipelineConfigInfo& config_info);
 
 	private:

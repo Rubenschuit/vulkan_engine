@@ -29,6 +29,10 @@ namespace ve {
 			assert(m_is_frame_started && "Frame is not in progress");
 			return m_command_buffers[m_ve_swap_chain->getCurrentFrame()];
 		}
+		vk::raii::CommandBuffer& getCurrentComputeCommandBuffer() {
+			assert(m_is_frame_started && "Frame is not in progress");
+			return m_compute_command_buffers[m_ve_swap_chain->getCurrentFrame()];
+		}
 
 		// Begin a new frame. Returns true if a frame was acquired and recording can start.
 		// When false is returned (e.g. swap chain out of date), no command buffer is valid for use.
@@ -38,6 +42,8 @@ namespace ve {
 		void beginRender(vk::raii::CommandBuffer& command_buffer);
 		void endRender(vk::raii::CommandBuffer& command_buffer);
 
+		void submitCompute(vk::raii::CommandBuffer& compute_command_buffer);
+
 	private:
 		void createCommandBuffers();
 		void recreateSwapChain();
@@ -46,6 +52,7 @@ namespace ve {
 		VeWindow& m_ve_window;
 		std::unique_ptr<VeSwapChain> m_ve_swap_chain;
 		std::vector<vk::raii::CommandBuffer> m_command_buffers;
+		std::vector<vk::raii::CommandBuffer> m_compute_command_buffers;
 
 		uint32_t m_current_image_index;
 		bool m_is_frame_started = false;

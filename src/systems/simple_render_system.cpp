@@ -60,7 +60,7 @@ namespace ve {
 		pipeline_config.pipeline_layout = m_pipeline_layout;
 		m_ve_pipeline = std::make_unique<VePipeline>(
 			m_ve_device,
-			"../shaders/simple_shader.spv",
+			"shaders/simple_shader.spv",
 			pipeline_config);
 		assert(m_ve_pipeline != nullptr && "Failed to create pipeline");
 
@@ -68,12 +68,11 @@ namespace ve {
 
 	void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-		std::array<vk::DescriptorSet, 2> sets{*frame_info.global_descriptor_set, *frame_info.material_descriptor_set};
 		frame_info.command_buffer.bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics,
 			*m_pipeline_layout,
-			0,
-			sets,
+			{},
+			{*frame_info.global_descriptor_set, *frame_info.material_descriptor_set},
 			{}
 		);
 

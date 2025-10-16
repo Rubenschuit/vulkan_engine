@@ -13,7 +13,7 @@ namespace ve {
 
 	InputController::~InputController() {}
 
-	void InputController::processInput(float delta_time, VeCamera& camera) {
+	void InputController::processInput(float delta_time, VeCamera& camera, ParticleSystem& particle_system) {
 		// Close window on double Escape key press
 		if (glfwGetKey(m_window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
 			glfwSetWindowShouldClose(m_window, true);
@@ -66,6 +66,10 @@ namespace ve {
 
 		if (glfwGetKey(m_window, m_key_mappings.reset_camera) == GLFW_PRESS) {
 			camera.lookAt(glm::vec3(0.0f, 0.0f, 0.0f));
+		}
+		// Particle system input
+		if (glfwGetKey(m_window, GLFW_KEY_F) == GLFW_PRESS) {
+			particle_system.restart();
 		}
 	}
 

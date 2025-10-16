@@ -39,15 +39,17 @@ add_dependencies(VEngineLib ShadersAxes)
 add_dependencies(${PROJECT_NAME} ShadersAxes)
 add_dependencies(VEngineLib ShadersPointLight)
 add_dependencies(${PROJECT_NAME} ShadersPointLight)
+add_dependencies(VEngineLib ShadersParticlesCompute)
+add_dependencies(${PROJECT_NAME} ShadersParticlesCompute)
+add_dependencies(VEngineLib ShadersParticlesBillboard)
+add_dependencies(${PROJECT_NAME} ShadersParticlesBillboard)
 
 
 if (VE_BUILD_TESTS)
-  include(${CMAKE_SOURCE_DIR}/cmake/Tests.cmake)
+	include(${CMAKE_SOURCE_DIR}/cmake/Tests.cmake)
 endif()
 
 # Configure optimization levels for release-oriented builds (does not change default build type)
 if (NOT MSVC)
-  # Strong optimization for Release, balanced for RelWithDebInfo
-  string(APPEND CMAKE_CXX_FLAGS_RELEASE " -O3 -DNDEBUG")
-  string(APPEND CMAKE_CXX_FLAGS_RELWITHDEBINFO " -O2 -g -DNDEBUG")
+	string(APPEND CMAKE_CXX_FLAGS_RELEASE " -O3 -DNDEBUG")
 endif()

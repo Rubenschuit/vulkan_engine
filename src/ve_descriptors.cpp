@@ -8,11 +8,11 @@ namespace ve {
 
 	// *************** Descriptor Set Layout Builder *********************
 
-	VeDescriptorSetLayout::Builder &VeDescriptorSetLayout::Builder::addBinding(
-			uint32_t binding,
-			vk::DescriptorType descriptor_type,
-			vk::ShaderStageFlagBits stage_flags,
-			uint32_t count) {
+    VeDescriptorSetLayout::Builder &VeDescriptorSetLayout::Builder::addBinding(
+	    uint32_t binding,
+	    vk::DescriptorType descriptor_type,
+	    vk::ShaderStageFlags stage_flags,
+	    uint32_t count) {
 		assert(m_bindings.count(binding) == 0 && "Binding already in use");
 		vk::DescriptorSetLayoutBinding layout_binding{
 			.binding = binding,
@@ -69,6 +69,10 @@ namespace ve {
 
 	std::unique_ptr<VeDescriptorPool> VeDescriptorPool::Builder::build() const {
 		return std::make_unique<VeDescriptorPool>(m_ve_device, m_max_sets, m_pool_flags, m_pool_sizes);
+	}
+
+	std::shared_ptr<VeDescriptorPool> VeDescriptorPool::Builder::buildShared() const {
+		return std::make_shared<VeDescriptorPool>(m_ve_device, m_max_sets, m_pool_flags, m_pool_sizes);
 	}
 
 	// *************** Descriptor Pool *********************

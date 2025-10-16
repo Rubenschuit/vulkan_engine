@@ -37,33 +37,83 @@ namespace ve {
 	}
 
 	vk::Result VeSwapChain::acquireNextImage(uint32_t* image_index) {
-		// Signal the semaphore once the image is available
+		// Signals the image-available semaphore (GPU side)
 		auto [result, _image_index] = m_swap_chain.acquireNextImage(
 			UINT64_MAX,
-			m_present_complete_semaphores[m_semaphore_index],
-			nullptr);
+			*m_image_available_semaphores[m_current_frame],
+			nullptr
+		);
 		*image_index = _image_index;
+		// image acquired
 		return result;
 	}
 
-	vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer commandBuffer, uint32_t* image_index) {
-		vk::PipelineStageFlags wait_dest_stage_mask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
-		const vk::SubmitInfo submit_info{
+	void VeSwapChain::submitComputeWork(vk::CommandBuffer command_buffer) {
+		const vk::TimelineSemaphoreSubmitInfo timeline_info{
+			.waitSemaphoreValueCount = 1,
+			.pWaitSemaphoreValues = &compute_wait_value,
+			.signalSemaphoreValueCount = 1,
+			.pSignalSemaphoreValues = &compute_signal_value
+		};
+		vk::PipelineStageFlags wait_stages[] = {vk::PipelineStageFlagBits::eComputeShader};
+		vk::SubmitInfo submit_info{
+			.pNext = &timeline_info,
 			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &*m_present_complete_semaphores[m_semaphore_index],
-			.pWaitDstStageMask = &wait_dest_stage_mask,
+			.pWaitSemaphores = &*semaphore,
+			.pWaitDstStageMask = wait_stages,
 			.commandBufferCount = 1,
-			.pCommandBuffers = &commandBuffer,
+			.pCommandBuffers = &command_buffer,
 			.signalSemaphoreCount = 1,
-			.pSignalSemaphores = &*m_render_finished_semaphores[*image_index]
+			.pSignalSemaphores = &*semaphore
 		};
 
-		// Submit the command buffer to the graphics queue and signal the fence when it is done
+		// Submit the command buffer to the compute queue and signal the fence when it is done
+		m_ve_device.getComputeQueue().submit(submit_info, nullptr);
+	}
+
+	vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer command_buffer, uint32_t* image_index) {
+		// Wait on image-available (binary) and compute timeline before starting graphics work.
+		vk::PipelineStageFlags wait_stages[2] = {
+			vk::PipelineStageFlagBits::eColorAttachmentOutput, // swapchain image usage
+			vk::PipelineStageFlagBits::eVertexInput            // instanced vertex buffer reads
+		};
+		// We will signal two semaphores (timeline + binary). For timeline submit info,
+		// signalSemaphoreValueCount must equal signalSemaphoreCount when any signaled semaphore is a timeline.
+		// Provide a dummy 0 for the binary semaphore; it will be ignored.
+		std::array<uint64_t, 2> signal_values{ graphics_signal_value, uint64_t{0} };
+		// For waits, include 0 for the binary and the expected value for the timeline.
+		std::array<uint64_t, 2> wait_values{ uint64_t{0}, graphics_wait_value };
+		vk::TimelineSemaphoreSubmitInfo timeline_info{
+			.waitSemaphoreValueCount = static_cast<uint32_t>(wait_values.size()),
+			.pWaitSemaphoreValues = wait_values.data(),
+			.signalSemaphoreValueCount = static_cast<uint32_t>(signal_values.size()),
+			.pSignalSemaphoreValues = signal_values.data()
+		};
+
+		// Wait on image-available (binary) and the timeline semaphore
+		std::array<vk::Semaphore, 2> wait_sems{ *m_image_available_semaphores[m_current_frame], *semaphore };
+		// Signal both the timeline semaphore (for internal frame graph) and a binary render-finished semaphore (for WSI present)
+		vk::Semaphore render_finished = *m_render_finished_semaphores[*image_index];
+		std::array<vk::Semaphore, 2> signal_sems{ *semaphore, render_finished };
+		vk::SubmitInfo submit_info{
+			.pNext = &timeline_info,
+			.waitSemaphoreCount = static_cast<uint32_t>(wait_sems.size()),
+			.pWaitSemaphores = wait_sems.data(),
+			.pWaitDstStageMask = wait_stages,
+			.commandBufferCount = 1,
+			.pCommandBuffers = &command_buffer,
+			.signalSemaphoreCount = static_cast<uint32_t>(signal_sems.size()),
+			.pSignalSemaphores = signal_sems.data()
+		};
+
+		// Submit the command buffer to the graphics queue and signal the per-frame fence to ensure safe CB reuse
 		m_ve_device.getQueue().submit(submit_info, *m_in_flight_fences[m_current_frame]);
 
+		// Present waits on the binary render-finished semaphore (GPU-side)
+		std::array<vk::Semaphore, 1> present_waits{ render_finished };
 		const vk::PresentInfoKHR present_info{
-			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &*m_render_finished_semaphores[*image_index],
+			.waitSemaphoreCount = static_cast<uint32_t>(present_waits.size()),
+			.pWaitSemaphores = present_waits.data(),
 			.swapchainCount = 1,
 			.pSwapchains = &*m_swap_chain,
 			.pImageIndices = image_index
@@ -132,6 +182,7 @@ namespace ve {
 		}
 	}
 
+	// TODO: create a depth image for each swap chain image
 	void VeSwapChain::createDepthResources() {
 		vk::Format depth_format = m_ve_device.findDepthFormat();
 		m_depth_image = std::make_unique<VeImage>(
@@ -156,21 +207,33 @@ namespace ve {
 
 	// Create 2 semaphores and 1 fence per frame in flight
 	void VeSwapChain::createSyncObjects() {
-		m_present_complete_semaphores.clear();
-		m_render_finished_semaphores.clear();
+		vk::SemaphoreTypeCreateInfo semaphoreType{
+			.semaphoreType = vk::SemaphoreType::eTimeline,
+			.initialValue = 0
+		};
+        semaphore = vk::raii::Semaphore(m_ve_device.getDevice(), {.pNext = &semaphoreType});
+        timeline_value = 0;
+
+		// fences
 		m_in_flight_fences.clear();
-
-		vk::SemaphoreCreateInfo present_info{};
-		vk::SemaphoreCreateInfo render_info{};
 		vk::FenceCreateInfo fence_info{ .flags = vk::FenceCreateFlagBits::eSignaled };
-
-		for (size_t i = 0; i < m_swap_chain_images.size(); i++) {
-			m_present_complete_semaphores.emplace_back(m_ve_device.getDevice(), present_info);
-			m_render_finished_semaphores.emplace_back(m_ve_device.getDevice(), render_info);
-		}
-
 		for (size_t i = 0; i < ve::MAX_FRAMES_IN_FLIGHT; i++) {
 			m_in_flight_fences.emplace_back(m_ve_device.getDevice(), fence_info);
+		}
+
+		// Create per-swapchain-image binary render-finished semaphores used by present
+		m_render_finished_semaphores.clear();
+		m_render_finished_semaphores.reserve(m_swap_chain_images.size());
+		vk::SemaphoreCreateInfo sem_ci{}; // binary semaphore by default
+		for (size_t i = 0; i < m_swap_chain_images.size(); ++i) {
+			m_render_finished_semaphores.emplace_back(m_ve_device.getDevice(), sem_ci);
+		}
+
+		// Create per-frame binary image-available semaphores used by acquire
+		m_image_available_semaphores.clear();
+		m_image_available_semaphores.reserve(ve::MAX_FRAMES_IN_FLIGHT);
+		for (size_t i = 0; i < ve::MAX_FRAMES_IN_FLIGHT; ++i) {
+			m_image_available_semaphores.emplace_back(m_ve_device.getDevice(), sem_ci);
 		}
 	}
 
@@ -218,23 +281,29 @@ namespace ve {
 		}
 	}
 
-	void VeSwapChain::waitForFences() {
+	void VeSwapChain::waitForCurrentFence() {
 		while (vk::Result::eTimeout ==
 			   m_ve_device.getDevice().waitForFences(*m_in_flight_fences[m_current_frame], vk::True, UINT64_MAX));
 		return;
 	}
 
 	// Reset the fence of the current frame back to unsignaled state
-	void VeSwapChain::resetFences() {
+	void VeSwapChain::resetCurrentFence() {
 		m_ve_device.getDevice().resetFences(*m_in_flight_fences[m_current_frame]);
 	}
 
 	void VeSwapChain::advanceFrame() {
 		m_current_frame = (m_current_frame + 1) % ve::MAX_FRAMES_IN_FLIGHT;
-		m_semaphore_index = (m_semaphore_index + 1) % m_swap_chain_images.size();
 	}
 
-		// Transition the image layout of the given swap chain image using
+	void VeSwapChain::updateTimelineValues() {
+		compute_wait_value = timeline_value;
+        compute_signal_value = ++timeline_value;
+        graphics_wait_value = compute_signal_value;
+        graphics_signal_value = ++timeline_value;
+	}
+
+	// Transition the image layout of the given swap chain image using
 	// pipeline barriers to ensure proper synchronization
 	void VeSwapChain::transitionImageLayout(
 			vk::raii::CommandBuffer& command_buffer,
@@ -276,6 +345,11 @@ namespace ve {
 	float VeSwapChain::getExtentAspectRatio() const {
 		return static_cast<float>(m_swap_chain_extent.width) /
 			   static_cast<float>(m_swap_chain_extent.height);
+	}
+
+	bool VeSwapChain::compareSwapFormats(const VeSwapChain& other) const {
+		return (other.m_swap_chain_image_format == m_swap_chain_image_format &&
+				other.m_depth_image->getFormat() == m_depth_image->getFormat());
 	}
 }
 
