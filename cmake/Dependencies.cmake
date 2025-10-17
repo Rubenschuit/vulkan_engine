@@ -4,6 +4,33 @@
 # - TinyObjLoader
 # - stb_image
 
+# Auto-detect common MSYS2/MinGW prefixes on Windows (if not provided)
+if (WIN32 AND NOT DEFINED MINGW_PATH)
+	set(_VE_MINGW_CANDIDATES
+		"C:/msys64/mingw64"
+		"C:/msys64/ucrt64"
+		"C:/msys64/clang64"
+		"C:/mingw64"
+	)
+	foreach(_ve_prefix IN LISTS _VE_MINGW_CANDIDATES)
+		if (EXISTS "${_ve_prefix}/include" AND EXISTS "${_ve_prefix}/lib")
+			set(MINGW_PATH "${_ve_prefix}" CACHE PATH "Auto-detected MSYS2/MinGW prefix" FORCE)
+			message(STATUS "Auto-detected MSYS2/MinGW prefix: ${MINGW_PATH}")
+			break()
+		endif()
+	endforeach()
+	unset(_ve_prefix)
+	unset(_VE_MINGW_CANDIDATES)
+endif()
+
+# If we have a MinGW prefix and we're not using MSVC, add it to search paths
+if (MINGW_PATH AND NOT MSVC)
+	list(PREPEND CMAKE_PREFIX_PATH "${MINGW_PATH}")
+	list(PREPEND CMAKE_INCLUDE_PATH "${MINGW_PATH}/include")
+	list(PREPEND CMAKE_LIBRARY_PATH "${MINGW_PATH}/lib")
+	message(STATUS "Added MinGW include/lib to CMake search paths")
+endif()
+
 # Vulkan SDK
 if (DEFINED VULKAN_SDK_PATH)
 	set(Vulkan_INCLUDE_DIRS "${VULKAN_SDK_PATH}/Include")
@@ -55,13 +82,23 @@ elseif (VE_FETCH_GLFW)
 	set(GLFW_INCLUDE_DIRS ${glfw_SOURCE_DIR}/include)
 	set(GLFW_LIB glfw)
 else()
+	# Try CMake config first
 	find_package(glfw3 3.3 QUIET)
 	if (glfw3_FOUND)
 		set(GLFW_INCLUDE_DIRS "")
 		set(GLFW_LIB glfw)
 		message(STATUS "Found system GLFW3")
 	else()
-		message(FATAL_ERROR "GLFW not found. Set GLFW_PATH, enable VE_FETCH_GLFW, or install glfw3.")
+		# On MSYS2/MinGW, glfw3 typically installs headers/libs under MINGW_PATH
+		if (MINGW_PATH AND NOT MSVC AND EXISTS "${MINGW_PATH}/include/GLFW/glfw3.h")
+			set(GLFW_INCLUDE_DIRS "${MINGW_PATH}/include")
+			# MSYS2 library name is usually glfw3 or glfw3dll; prefer static first
+			set(GLFW_LIB glfw3)
+			link_directories("${MINGW_PATH}/lib")
+			message(STATUS "Using GLFW from MSYS2 at: ${MINGW_PATH}")
+		else()
+			message(FATAL_ERROR "GLFW not found. Set GLFW_PATH, enable VE_FETCH_GLFW, or install glfw3.")
+		endif()
 	endif()
 endif()
 if (GLFW_EXTRA_LIB_DIR)
@@ -74,14 +111,18 @@ if (DEFINED GLM_PATH)
 	set(GLM_INCLUDE_DIRS "${GLM_PATH}")
 else()
 	# Try to find a system-installed GLM (Homebrew, default Unix locations, MSYS2)
-	find_path(GLM_INCLUDE_DIRS "glm/glm.hpp"
-		HINTS
-			$ENV{GLM_PATH}
-			/opt/homebrew/include
-			/usr/local/include
-			/usr/include
-			C:/msys64/mingw64/include
+	set(_VE_GLM_HINTS
+		$ENV{GLM_PATH}
+		/opt/homebrew/include
+		/usr/local/include
+		/usr/include
+		C:/msys64/mingw64/include
 	)
+	if (MINGW_PATH)
+		list(PREPEND _VE_GLM_HINTS "${MINGW_PATH}/include")
+	endif()
+	find_path(GLM_INCLUDE_DIRS "glm/glm.hpp" HINTS ${_VE_GLM_HINTS})
+	unset(_VE_GLM_HINTS)
 	if (GLM_INCLUDE_DIRS)
 		message(STATUS "Found GLM at: ${GLM_INCLUDE_DIRS}")
 	elseif (VE_FETCH_GLM) # Not found, fetch via FetchContent

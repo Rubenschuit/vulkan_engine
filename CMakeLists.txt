@@ -17,12 +17,16 @@ add_compile_definitions(VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1)
 
 message(STATUS "using ${CMAKE_GENERATOR}")
 if (CMAKE_GENERATOR STREQUAL "MinGW Makefiles")
-    if (NOT MINGW_PATH)
-      message(FATAL_ERROR "MINGW_PATH not set in .env.cmake")
-    endif()
-    set(USE_MINGW "True")
-    set(CMAKE_C_COMPILER ${MINGW_PATH}/bin/gcc.exe)
-    set(CMAKE_CXX_COMPILER  ${MINGW_PATH}/bin/g++.exe)
+  set(USE_MINGW TRUE)
+  if (DEFINED MINGW_PATH)
+    # If a MinGW prefix is provided, prefer its compilers
+    set(CMAKE_C_COMPILER "${MINGW_PATH}/bin/gcc.exe" CACHE FILEPATH "MinGW C compiler" FORCE)
+    set(CMAKE_CXX_COMPILER "${MINGW_PATH}/bin/g++.exe" CACHE FILEPATH "MinGW C++ compiler" FORCE)
+    message(STATUS "MinGW compilers set from MINGW_PATH: ${MINGW_PATH}")
+  else()
+    # Otherwise, rely on MinGW toolchain found in PATH
+    message(STATUS "MINGW_PATH not set; using MinGW compilers from PATH")
+  endif()
 endif()
 
 project(${NAME} VERSION 0.1)
