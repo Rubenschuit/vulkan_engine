@@ -16,6 +16,7 @@ namespace ve {
 
 	struct PointLightComponent {
 		float intensity{1.0f};
+		bool rotates{ true };
 	};
 
 	class VeGameObject {

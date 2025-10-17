@@ -1,6 +1,6 @@
-
 #include "pch.hpp"
 #include "input_controller.hpp"
+#include "systems/particle_system.hpp"
 
 
 namespace ve {
@@ -13,7 +13,8 @@ namespace ve {
 
 	InputController::~InputController() {}
 
-	void InputController::processInput(float delta_time, VeCamera& camera, ParticleSystem& particle_system) {
+	InputController::InputActions InputController::processInput(float delta_time, VeCamera& camera) {
+		InputActions actions{};
 		// Close window on double Escape key press
 		if (glfwGetKey(m_window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
 			glfwSetWindowShouldClose(m_window, true);
@@ -46,9 +47,9 @@ namespace ve {
 
 		// WASD movement input in the updated camera basis
 		if (glfwGetKey(m_window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
-			m_movement_speed = 15.0f; // Fast
+			m_movement_speed = SPRINT_SPEED; // Fast
 		else
-			m_movement_speed = 2.5f; // Normal
+			m_movement_speed = NORMAL_SPEED; // Normal
 		auto movement_delta = m_movement_speed * delta_time;
 		if (glfwGetKey(m_window, m_key_mappings.move_forward) == GLFW_PRESS)
 			camera.moveForward(movement_delta);
@@ -67,10 +68,35 @@ namespace ve {
 		if (glfwGetKey(m_window, m_key_mappings.reset_camera) == GLFW_PRESS) {
 			camera.lookAt(glm::vec3(0.0f, 0.0f, 0.0f));
 		}
-		// Particle system input
-		if (glfwGetKey(m_window, GLFW_KEY_F) == GLFW_PRESS) {
-			particle_system.restart();
+		// Particle system input (edge-trigger on press)
+		int cur_reset = glfwGetKey(m_window, m_key_mappings.reset_particles);
+		if (cur_reset == GLFW_PRESS && m_prev_reset_state == GLFW_RELEASE) {
+			actions.reset_particles = true;
 		}
+		m_prev_reset_state = cur_reset;
+
+		// Toggle reset disc mode with G
+		int cur_g = glfwGetKey(m_window, m_key_mappings.reset_disc_toggle);
+		if (cur_g == GLFW_PRESS && m_prev_g_state == GLFW_RELEASE) {
+			actions.reset_disc = true;
+		}
+		m_prev_g_state = cur_g;
+
+		// Number keys 1..4 to set mode
+		int cur_m1 = glfwGetKey(m_window, m_key_mappings.mode1);
+		if (cur_m1 == GLFW_PRESS && m_prev_mode1 == GLFW_RELEASE) actions.set_mode = 1;
+		m_prev_mode1 = cur_m1;
+		int cur_m2 = glfwGetKey(m_window, m_key_mappings.mode2);
+		if (cur_m2 == GLFW_PRESS && m_prev_mode2 == GLFW_RELEASE) actions.set_mode = 2;
+		m_prev_mode2 = cur_m2;
+		int cur_m3 = glfwGetKey(m_window, m_key_mappings.mode3);
+		if (cur_m3 == GLFW_PRESS && m_prev_mode3 == GLFW_RELEASE) actions.set_mode = 3;
+		m_prev_mode3 = cur_m3;
+		int cur_m4 = glfwGetKey(m_window, m_key_mappings.mode4);
+		if (cur_m4 == GLFW_PRESS && m_prev_mode4 == GLFW_RELEASE) actions.set_mode = 4;
+		m_prev_mode4 = cur_m4;
+
+		return actions;
 	}
 
 	void InputController::processMouseMovement(double xpos, double ypos) {

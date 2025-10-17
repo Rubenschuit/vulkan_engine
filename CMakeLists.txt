@@ -6,7 +6,7 @@ message(STATUS "Local .env.cmake: ${LOCAL_ENV}")
 
 cmake_minimum_required(VERSION 3.16) # Need newer policy defaults & FetchContent improvements
 
-set(NAME VEngine)
+set(NAME VeApp)
 
 # Enforce C++20 uniformly
 set(CMAKE_CXX_STANDARD 20)

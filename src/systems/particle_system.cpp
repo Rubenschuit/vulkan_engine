@@ -1,6 +1,8 @@
 #include "pch.hpp"
 #include "particle_system.hpp"
 #include <random>
+#include <chrono>
+#include <chrono>
 
 namespace ve {
 
@@ -8,10 +10,11 @@ namespace ve {
 								   std::shared_ptr<VeDescriptorPool> descriptor_pool,
 								   const vk::raii::DescriptorSetLayout& global_set_layout,
 								   vk::Format color_format,
-								   uint32_t particle_count)
+								   uint32_t particle_count,
+								   glm::vec3 origin	)
 		: m_ve_device(device), m_particle_count(particle_count),
-		  m_descriptor_pool(std::move(descriptor_pool)) {
-		VE_LOGI("ParticleSystem ctor: particles=" << m_particle_count);
+		  m_origin(origin), m_descriptor_pool(std::move(descriptor_pool)) {
+		VE_LOGI("ParticleSystem constructor: particles=" << m_particle_count);
 		createShaderStorageBuffers();
 		createUniformBuffers();
 		createDescriptorSetLayouts();
@@ -26,27 +29,20 @@ namespace ve {
 
 	// TODO: make less terrible
 	void ParticleSystem::restart() {
-		//wait until device is idle
-		m_ve_device.getDevice().waitIdle();
-		createShaderStorageBuffers();
-		createDescriptorSets();
+		// Schedule a GPU-side reset on next compute dispatch to avoid CPU stalls
+		m_pending_reset.store(true, std::memory_order_relaxed);
+		// Basic seed using time; could be improved or controlled by caller
+		auto now = std::chrono::high_resolution_clock::now().time_since_epoch();
+		m_reset_seed = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(now).count());
 	}
 
+	// TODO: too many rng calls for high particle counts
+	// maybe call on separate thread ?
 	void ParticleSystem::createShaderStorageBuffers() {
+
 		// Initialise particles
-		std::default_random_engine rnd_engine((unsigned)time(nullptr));
-		std::normal_distribution<float> rnd_dist(0.0f, 3.0f);
-		std::uniform_real_distribution<float> uni_dist(0.1f, 0.2f);
+		restart(); // sets m_reset_seed and m_pending_reset so the shader knows to init
 		std::vector<Particle> particles(m_particle_count);
-		for (auto& particle : particles) {
-			particle.position = glm::vec4(0.0f, 0.0f, 10.0f, uni_dist(rnd_engine)); // w is scale
-			//random velocity between -1 and 1
-			particle.velocity = glm::vec4(rnd_dist(rnd_engine),
-										  rnd_dist(rnd_engine),
-										  rnd_dist(rnd_engine),
-										  0.0f);
-			particle.color = glm::vec4(rnd_dist(rnd_engine), rnd_dist(rnd_engine), rnd_dist(rnd_engine), 1.0f);
-		}
 		// Staging buffer for upload to device local
 		vk::DeviceSize buffer_size = m_particle_count * sizeof(Particle);
 		VeBuffer staging_buffer(
@@ -108,9 +104,6 @@ namespace ve {
 		m_compute_descriptor_sets.reserve(MAX_FRAMES_IN_FLIGHT);
 
 		for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-			//vk::DescriptorBufferInfo bufferInfo(m_ubos[i]->getBuffer(), 0, sizeof(UniformBufferObject));
-            //vk::DescriptorBufferInfo storageBufferInfoLastFrame(m_ssbos[(i - 1) % MAX_FRAMES_IN_FLIGHT]->getBuffer(), 0, sizeof(Particle) * m_particle_count);
-            //vk::DescriptorBufferInfo storageBufferInfoCurrentFrame(m_ssbos[i]->getBuffer(), 0, sizeof(Particle) * m_particle_count);
 			vk::raii::DescriptorSet set{nullptr};
 			auto ubo_info = m_compute_uniform_buffers[i]->getDescriptorInfo();
 			auto ssbo_info = m_shader_storage_buffers[i]->getDescriptorInfo();
@@ -166,14 +159,32 @@ namespace ve {
 		m_pipeline = std::make_unique<VePipeline>(m_ve_device, "shaders/particle_billboard.spv", config);
 	}
 
-	void ParticleSystem::recordCompute(VeFrameInfo& frame_info) const {
-		// Update compute parameters UBO
+	// Updates the particle system by recording compute commands into the compute command buffer.
+	// updates the particle parameters UBO
+	void ParticleSystem::update(VeFrameInfo& frame_info) {
+		assert(frame_info.current_frame < MAX_FRAMES_IN_FLIGHT && "current_frame out of bounds");
+		assert(m_compute_uniform_buffers.size() == MAX_FRAMES_IN_FLIGHT && "compute_uniform_buffers size incorrect");
+		assert(m_total_time >= 0.0f && "total_time should be non-negative");
+		assert(frame_info.frame_time >= 0.0f && "delta_time should be non-negative");
+		m_total_time += frame_info.frame_time;
 		ParticleParams params{};
 		params.delta_time = frame_info.frame_time;
-		params.total_time = 0.0f;
+		params.total_time = m_total_time;
 		params.particle_count = m_particle_count;
+		params.origin = m_origin;
+		params.reset_kind = m_reset_kind;
+		params.mode = m_mode;
+		if (m_pending_reset.load(std::memory_order_relaxed)) {
+			params.reset = 1u;
+			params.seed = m_reset_seed;
+			m_total_time = 0.0f;
+			// Clear pending flag so it only applies once
+			m_pending_reset.store(false, std::memory_order_relaxed);
+		} else {
+			params.reset = 0u;
+			params.seed = 0u;
+		}
 		m_compute_uniform_buffers[frame_info.current_frame]->writeToBuffer(&params);
-
 		frame_info.compute_command_buffer.reset();
 		frame_info.compute_command_buffer.begin(vk::CommandBufferBeginInfo{});
 		frame_info.compute_command_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
@@ -184,6 +195,8 @@ namespace ve {
 			*m_compute_descriptor_sets[frame_info.current_frame],
 			{}
 		);
+
+
 		// Dispatch enough workgroups to cover all particles, even when not a multiple of 256
 		// shader discards excess threads
 		uint32_t group_count_x = (m_particle_count + 256 - 1) / 256; // ceilDiv
@@ -194,6 +207,9 @@ namespace ve {
 	}
 
 
+	// Renders all particles with a single draw call. The shader storage buffer
+	// with particle positions and colors is bound as a vertex buffer.
+	// Instance rendering is used to draw a quad for each particle.
 	void ParticleSystem::render(VeFrameInfo& frame_info) const {
 		frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipeline->getPipeline());
 
@@ -207,8 +223,15 @@ namespace ve {
 		vk::DeviceSize offsets[] = { 0 };
 		vk::Buffer buffers[] = { *m_shader_storage_buffers[frame_info.current_frame]->getBuffer() };
 		frame_info.command_buffer.bindVertexBuffers(0, buffers, offsets);
-		// No per-vertex geometry buffer; unit quad is generated in shader from SV_VertexID
-		frame_info.command_buffer.draw(6, m_particle_count, 0, 0);
+
+		// cap particles when spawning in
+		uint32_t particles_to_spawn = m_particle_count;
+		float delay_factor = 0.5f; // time to full spawn
+		if (m_total_time < delay_factor) {
+			particles_to_spawn = static_cast<uint32_t>(m_particle_count * (m_total_time / delay_factor));
+		}
+		// unit quad is generated in shader from SV_VertexID
+		frame_info.command_buffer.draw(6, particles_to_spawn, 0, 0);
 	}
 
 } // namespace ve

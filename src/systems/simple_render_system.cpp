@@ -66,6 +66,8 @@ namespace ve {
 
 	}
 
+	// Performs a draw call for each game object with a model component
+	// TODO: bind and draw all objects with the same model at once
 	void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 		frame_info.command_buffer.bindDescriptorSets(

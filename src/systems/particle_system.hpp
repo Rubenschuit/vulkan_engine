@@ -8,14 +8,20 @@
 
 #include <memory>
 #include <vector>
+#include <atomic>
+#include <atomic>
 
 namespace ve {
 
 	struct ParticleParams {
 		float delta_time;
-		float total_time;
+		float total_time = 0.0f;
 		uint32_t particle_count;
-		uint32_t pad0;
+		uint32_t reset; // 1 = reset particles this dispatch
+		uint32_t seed;  // rng seed for reset
+		uint32_t reset_kind = 1u; // 1 = point, 2 = disc
+		int32_t mode = 4; // default to galaxyMassive
+		alignas(16) glm::vec3 origin;
 	};
 
 	struct Particle {
@@ -43,15 +49,19 @@ namespace ve {
 					std::shared_ptr<VeDescriptorPool> descriptor_pool,
 					const vk::raii::DescriptorSetLayout& global_set_layout,
 					vk::Format color_format,
-					uint32_t particle_count);
+					uint32_t particle_count,
+					glm::vec3 origin);
 		~ParticleSystem();
 
 		ParticleSystem(const ParticleSystem&) = delete;
 		ParticleSystem& operator=(const ParticleSystem&) = delete;
 
-		void recordCompute(VeFrameInfo& frame_info) const;
+		void update(VeFrameInfo& frame_info);
 		void render(VeFrameInfo& frame_info) const;
-		void restart(); // reset particle positions
+		void restart(); // schedule GPU reset of particle positions
+        void setMode(int32_t mode) { m_mode = mode; }
+        void resetPoint() { m_reset_kind = 1u; restart(); }
+        void resetDisc() { m_reset_kind = 2u; restart(); }
 
 
 	private:
@@ -65,7 +75,10 @@ namespace ve {
 		void createPipeline(vk::Format color_format);
 
 		VeDevice& m_ve_device;
+
 		uint32_t m_particle_count = 0;
+		float m_total_time = 0.0f;
+		glm::vec3 m_origin{0.0f, 0.0f, 10.0f};
 
 		// Descriptor layouts for this system
 		std::unique_ptr<VeDescriptorSetLayout> m_compute_set_layout;
@@ -74,6 +87,13 @@ namespace ve {
 		std::vector<std::unique_ptr<VeBuffer>> m_compute_uniform_buffers;  // small UBO per frame
 		std::vector<std::unique_ptr<VeBuffer>> m_shader_storage_buffers; // large SSBO per frame
 		std::vector<vk::raii::DescriptorSet> m_compute_descriptor_sets;
+
+		// Reset control
+		// atomic not necessary (no multi-threading yet)
+		std::atomic<bool> m_pending_reset{false};
+		uint32_t m_reset_seed{0};
+		uint32_t m_reset_kind{1u}; // 1=point, 2=disc
+		int32_t m_mode{1}; // 1..4 modes
 
 		// Shared pool for descriptor allocations (shared to ensure lifetime across systems)
 		std::shared_ptr<VeDescriptorPool> m_descriptor_pool;

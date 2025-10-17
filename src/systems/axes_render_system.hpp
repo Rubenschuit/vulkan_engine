@@ -18,7 +18,7 @@ namespace ve {
 		AxesRenderSystem(const AxesRenderSystem&) = delete;
 		AxesRenderSystem& operator=(const AxesRenderSystem&) = delete;
 
-		void renderAxes(VeFrameInfo& frame_info) const;
+		void render(VeFrameInfo& frame_info) const;
 
 	private:
 		void createPipelineLayout(const vk::raii::DescriptorSetLayout& descriptor_set_layout);

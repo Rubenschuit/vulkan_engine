@@ -58,6 +58,8 @@ namespace ve {
 	}
 
 	// Begin a frame; returns true when a frame is started and command buffer can be used
+	// Returns false if swap chain is out of date
+	// throws runtime error if acquire fails for other reasons
 	bool VeRenderer::beginFrame() {
 		assert(!m_is_frame_started && "Can't call beginFrame while already in progress");
 

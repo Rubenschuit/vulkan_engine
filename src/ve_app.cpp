@@ -49,9 +49,11 @@ namespace ve {
 			m_global_pool,
 			m_global_set_layout->getDescriptorSetLayout(),
 			m_ve_renderer.getSwapChainImageFormat(),
-			423456 // number of particles
+			1423456, // number of particles
+			glm::vec3{0.0f, -200.0f, 10.0f}
 		);
 		auto current_time = std::chrono::high_resolution_clock::now();
+		auto total_time = 0.0f;
 
 		// Main loop
 		while (!glfwWindowShouldClose(m_ve_window.getGLFWwindow())) {
@@ -60,6 +62,7 @@ namespace ve {
 			// Compute time delta for a frame
 			auto new_time = std::chrono::high_resolution_clock::now();
 			float dt = std::chrono::duration<float, std::chrono::seconds::period>(new_time - current_time).count();
+			total_time += dt;
 			// Clamp to avoid large physics steps after stalls (e.g., window resize)
 			const float max_dt = 1.0f / 30.0f; // ~33ms
 			if (dt < 0.0f)
@@ -67,7 +70,7 @@ namespace ve {
 			if (dt > max_dt)
 				dt = max_dt;
 
-			//
+			// Attempt to begin the frame
 			if (!m_ve_renderer.beginFrame()) {
 				current_time = new_time;
 				continue;
@@ -87,12 +90,23 @@ namespace ve {
 				.compute_command_buffer = compute_command_buffer,
 				.game_objects = m_game_objects,
 				.frame_time = m_frame_time,
+				.total_time = total_time,
 				.current_frame = current_frame
 			};
 
 			// update
-			//TODO: find a better way then to pass the particle system to the input controller
-			m_input_controller.processInput(m_frame_time, m_camera, m_particle_system);
+			auto actions = m_input_controller.processInput(m_frame_time, m_camera);
+			// Handle particle actions
+			if (actions.set_mode >= 1 && actions.set_mode <= 4) {
+				m_particle_system.setMode(actions.set_mode);
+			}
+			if (actions.reset_particles) {
+				m_particle_system.resetPoint();
+			}
+			else if (actions.reset_disc) {
+				m_particle_system.resetDisc();
+			}
+
 			updateCamera();
 			updateWindowTitle();
 
@@ -102,14 +116,14 @@ namespace ve {
 			updateUniformBuffer(current_frame, ubo);
 
 			// Record and submit particle compute work
-			m_particle_system.recordCompute(frame_info);
+			m_particle_system.update(frame_info);
 			m_ve_renderer.submitCompute(compute_command_buffer);
 
 			// render
 			m_ve_renderer.beginRender(command_buffer);
 
 			simple_render_system.renderObjects(frame_info);
-			axes_render_system.renderAxes(frame_info);
+			axes_render_system.render(frame_info);
 			point_light_system.render(frame_info);
 			m_particle_system.render(frame_info);
 
@@ -146,6 +160,7 @@ namespace ve {
 		constexpr float pos_radius = 45.0f;
 		constexpr float height = 10.0f;
 
+		// Create point lights evenly distributed in a circle
 		for (uint32_t i = 0; i < num_lights; i += 1) {
 			auto point_light = VeGameObject::createPointLight(intensity, radius, colors[i % 10]);
 			glm::vec3 pos = {
@@ -158,10 +173,11 @@ namespace ve {
 		}
 		// 'black hole' light
 		{
-			auto point_light = VeGameObject::createPointLight(1.0f, 4.0f, glm::vec3(0.0f, 0.0f, 0.0f));
-			glm::vec3 pos = {0.0f, 0.0f, 20.0f};
-			point_light.transform.translation = pos;
-			m_game_objects.emplace(point_light.getId(), std::move(point_light));
+			auto black_hole = VeGameObject::createPointLight(1.0f, 4.0f, glm::vec3(0.0f, 0.0f, 0.0f));
+			glm::vec3 pos = {0.0f, -200.0f, 10.0f};
+			black_hole.transform.translation = pos;
+			black_hole.point_light_component->rotates = false;
+			m_game_objects.emplace(black_hole.getId(), std::move(black_hole));
 		}
 
 		// Floor
@@ -171,8 +187,7 @@ namespace ve {
 		floor.has_texture = 0.0f;
 		floor.transform = {
 			.translation = {0.0f, 0.0f, -0.1f},
-			.rotation = {glm::radians(-90.0f), 0.0f, 0.0f},
-			.scale = {80.0f, 80.0f, 80.0f}
+			.scale = {80.0f, 80.0f, 800.0f}
 		};
 		m_game_objects.emplace(floor.getId(), std::move(floor));
 
@@ -192,6 +207,7 @@ namespace ve {
 				VeGameObject obj = VeGameObject::createGameObject();
 				obj.ve_model = model2;
 				obj.transform.translation = {-1.0 * i * 4.0f - 4.0f, j * 4.0f, 1.0f};
+				obj.transform.scale = {1.0f, 1.0f, 1.0f};
 				m_game_objects.emplace(obj.getId(), std::move(obj));
 			}
 		}
@@ -246,25 +262,25 @@ namespace ve {
 	}
 
 	void VeApp::createDescriptors() {
-	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
+		m_global_pool = VeDescriptorPool::Builder(m_ve_device)
 			// Global sets (per-frame) + compute sets (per-frame) + material set (1) + slack
 			.setMaxSets(2 * MAX_FRAMES_IN_FLIGHT + 4)
 			// Uniform buffers: global (per frame) + compute (per frame)
 			.addPoolSize(vk::DescriptorType::eUniformBuffer, 2 * MAX_FRAMES_IN_FLIGHT)
-			// Sampler for material set (1 is enough; leave margin if desired)
-			.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 2)
+			// Sampler for material set
+			.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 1)
 			// Compute storage buffers: 2 per frame (prev + current)
 			.addPoolSize(vk::DescriptorType::eStorageBuffer, 2 * MAX_FRAMES_IN_FLIGHT)
 			.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
-		.buildShared();
+			.buildShared();
 
 		m_global_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
-				.addBinding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eAllGraphics)
-				.build();
+			.addBinding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eAllGraphics)
+			.build();
 
 		m_material_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
-				.addBinding(0, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
-				.build();
+			.addBinding(0, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
+			.build();
 
 		// create descriptor sets from global pool with global layout
 		m_global_descriptor_sets.clear();
@@ -305,6 +321,8 @@ namespace ve {
 		// No flush required with MEMORY_PROPERTY_HOST_COHERENT
 	}
 
+	// Print FPS and frame time to window title every 100 ms
+	// aswell as camera position and window resolution
 	void VeApp::updateWindowTitle() {
 		// Per-frame delta using steady clock
 		auto now = clock::now();

@@ -16,13 +16,13 @@ EXTRA_CMAKE_ARGS=""
 case "$MODE" in
 	release)
 		BUILD_TYPE="Release"
-		echo "Building in Release mode" ;;
+		echo "Building in Release mode";;
 	test)
-		echo "Building in Debug mode (tests enabled)" ;;
+		echo "Building in Debug mode (tests enabled)";;
 	leaks)
-		echo "Building in Debug mode (leaks check)" ;;
+		echo "Building in Debug mode (leaks check)";;
 	*)
-		echo "Building in Debug mode" ;;
+		echo "Building in Debug mode";;
 esac
 
 mkdir -p build
@@ -43,14 +43,15 @@ if [[ "$MODE" == 'test' ]]; then
 	exit 0
 elif [[ "$MODE" == 'leaks' ]]; then
 	if [[ "$(uname)" == "Darwin" ]]; then
-		./build/VEngine &
+		./build/VeApp &
 		PID=$!
-		sleep 1 # Give the app a moment to start
+		sleep 5 # Give the app a moment to run
+
 		leaks $PID || true
 		kill $PID || true
 	else
 		echo "'leaks' mode is only supported on macOS."
 	fi
 else
-	./build/VEngine
+	./build/VeApp
 fi

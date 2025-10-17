@@ -39,7 +39,6 @@ VertexOutput vertMain(uint id : SV_VertexID) {
 
  	out.pos = mul(ubo.proj, position_cameraspace);
 
-
     return out;
 }
 

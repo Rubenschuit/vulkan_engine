@@ -33,6 +33,7 @@ namespace ve {
 		vk::raii::CommandBuffer& compute_command_buffer; // For compute shaders
 		std::unordered_map<uint32_t, VeGameObject>& game_objects;
 		float frame_time;
+		float total_time;
 		uint32_t current_frame;
 	};
 }

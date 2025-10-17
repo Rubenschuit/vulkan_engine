@@ -113,7 +113,8 @@ namespace ve {
 		m_axes_model = std::make_unique<VeModel>(m_ve_device, vertices);
 	}
 
-	void AxesRenderSystem::renderAxes(VeFrameInfo& frame_info) const {
+	// Performs one draw call for the coordinate axes model
+	void AxesRenderSystem::render(VeFrameInfo& frame_info) const {
 		frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 		frame_info.command_buffer.bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics,

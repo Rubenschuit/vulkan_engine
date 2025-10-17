@@ -32,21 +32,34 @@ Simple modern C++20 Vulkan renderer using Vulkan-Hpp RAII, GLFW, and Slang. This
 	- cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 	- cmake --build build --config Release
 
-Or use the helper script:
+4) Run
+
+- From build directory: ./VeApp
+
+Or use script to build and run:
 
 - ./unixBuild.sh
 - ./unixBuild.sh release
 - ./unixBuild.sh test
 - ./unixBuild.sh clean
 
-4) Run
-
-- From build directory: ./VEngine
 
 
 ## Windows
 
-todo
+Visual Studio
+1) Install Vulkan SDK (Windows installer) and ensure `slangc` is on PATH
+2) Configure + build:
+	 - cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DVE_FETCH_GLFW=ON
+	 - cmake --build build --config Debug
+3) Run: build/Debug/VeApp.exe
+
+MinGW Makefiles
+1) Install MSYS2 MinGW-w64 and open the MinGW x64 shell (ensure `g++` and `slangc` are available).
+2) Configure + build:
+	 - cmake -S . -B build -G "MinGW Makefiles" -DVE_FETCH_GLFW=ON
+	 - cmake --build build
+3) Run: build/VeApp.exe
 
 ## Linux
 
