@@ -22,6 +22,7 @@ target_include_directories(VEngineLib
 		${TINYOBJ_PATH}
 		$<BUILD_INTERFACE:${GLFW_INCLUDE_DIRS}>
 		$<BUILD_INTERFACE:${Vulkan_INCLUDE_DIRS}>
+		$<BUILD_INTERFACE:${GLM_INCLUDE_DIRS}>
 )
 
 # Treat third-party headers as system includes to suppress their warnings

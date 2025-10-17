@@ -68,6 +68,38 @@ if (GLFW_EXTRA_LIB_DIR)
 	link_directories(${GLFW_EXTRA_LIB_DIR})
 endif()
 
+# GLM (header-only)
+if (DEFINED GLM_PATH)
+	message(STATUS "Using GLM path specified in .env: ${GLM_PATH}")
+	set(GLM_INCLUDE_DIRS "${GLM_PATH}")
+else()
+	# Try to find a system-installed GLM (Homebrew, default Unix locations, MSYS2)
+	find_path(GLM_INCLUDE_DIRS "glm/glm.hpp"
+		HINTS
+			$ENV{GLM_PATH}
+			/opt/homebrew/include
+			/usr/local/include
+			/usr/include
+			C:/msys64/mingw64/include
+	)
+	if (GLM_INCLUDE_DIRS)
+		message(STATUS "Found GLM at: ${GLM_INCLUDE_DIRS}")
+	elseif (VE_FETCH_GLM) # Not found, fetch via FetchContent
+		include(FetchContent)
+		FetchContent_Declare(glm
+			GIT_REPOSITORY https://github.com/g-truc/glm.git
+			GIT_TAG 1.0.1
+		)
+		FetchContent_MakeAvailable(glm)
+		set(GLM_INCLUDE_DIRS ${glm_SOURCE_DIR})
+	endif()
+	if (GLM_INCLUDE_DIRS)
+		message(STATUS "Using GLM include path: ${GLM_INCLUDE_DIRS}")
+	else()
+		message(WARNING "GLM not found. Set GLM_PATH, enable VE_FETCH_GLM, or install GLM so headers are discoverable.")
+	endif()
+endif()
+
 # TinyObj
 if (NOT TINYOBJ_PATH)
 	message(STATUS "TINYOBJ_PATH not specified in .env.cmake, using external/tinyobjloader")

@@ -20,12 +20,12 @@ if "%GEN%"=="" set GEN=mingw
 
 :: Clean mode
 if /I "%MODE%"=="clean" (
-  if exist build rmdir /S /Q build
-  if exist build_mingw rmdir /S /Q build_mingw
-  if exist build_msvc rmdir /S /Q build_msvc
-  for %%f in (shaders\*.spv) do if exist "%%~ff" del /Q /F "%%~ff"
-  echo [INFO] Cleaned build directories and shaders/*.spv
-  exit /b 0
+	if exist build rmdir /S /Q build
+	if exist build_mingw rmdir /S /Q build_mingw
+	if exist build_msvc rmdir /S /Q build_msvc
+	for %%f in (shaders\*.spv) do if exist "%%~ff" del /Q /F "%%~ff"
+	echo [INFO] Cleaned build directories and shaders/*.spv
+	exit /b 0
 )
 
 :: Determine build type
@@ -38,11 +38,11 @@ if /I "%MODE%"=="test" set EXTRA_CMAKE_ARGS=-DVE_BUILD_TESTS=ON
 
 :: Choose generator and build dir
 if /I "%GEN%"=="msvc" (
-  set CMAKE_GEN=Visual Studio 17 2022
-  set BUILD_DIR=build_msvc
+	set CMAKE_GEN=Visual Studio 17 2022
+	set BUILD_DIR=build_msvc
 ) else (
-  set CMAKE_GEN=MinGW Makefiles
-  set BUILD_DIR=build_mingw
+	set CMAKE_GEN=MinGW Makefiles
+	set BUILD_DIR=build_mingw
 )
 
 echo [INFO] Configuring for %GEN% ("%CMAKE_GEN%"), %BUILD_TYPE%
@@ -54,44 +54,44 @@ if /I not "%GEN%"=="msvc" set CONFIGURE_CMD=%CONFIGURE_CMD% -DCMAKE_BUILD_TYPE=%
 echo [CMD ] %CONFIGURE_CMD%
 %CONFIGURE_CMD%
 if errorlevel 1 (
-  echo [ERR ] CMake configure failed.
-  exit /b %ERRORLEVEL%
+	echo [ERR ] CMake configure failed.
+	exit /b %ERRORLEVEL%
 )
 
 :: Build
 if /I "%GEN%"=="msvc" (
-  echo [INFO] Building (%BUILD_TYPE%)
-  cmake --build "%BUILD_DIR%" --config %BUILD_TYPE%
+	echo [INFO] Building (%BUILD_TYPE%)
+	cmake --build "%BUILD_DIR%" --config %BUILD_TYPE%
 ) else (
-  echo [INFO] Building (single-config: %BUILD_TYPE%)
-  cmake --build "%BUILD_DIR%"
+	echo [INFO] Building (single-config: %BUILD_TYPE%)
+	cmake --build "%BUILD_DIR%"
 )
 if errorlevel 1 (
-  echo [ERR ] Build failed.
-  exit /b %ERRORLEVEL%
+	echo [ERR ] Build failed.
+	exit /b %ERRORLEVEL%
 )
 
 :: Optionally build shaders target
 if /I "%GEN%"=="msvc" (
-  cmake --build "%BUILD_DIR%" --config %BUILD_TYPE% --target Shaders
+	cmake --build "%BUILD_DIR%" --config %BUILD_TYPE% --target Shaders
 ) else (
-  cmake --build "%BUILD_DIR%" --target Shaders
+	cmake --build "%BUILD_DIR%" --target Shaders
 )
 
 :: Tests
 if /I "%MODE%"=="test" (
-  echo [INFO] Running tests via CTest
-  if /I "%GEN%"=="msvc" (
-    ctest --test-dir "%BUILD_DIR%" -C %BUILD_TYPE% --output-on-failure
-  ) else (
-    ctest --test-dir "%BUILD_DIR%" --output-on-failure
-  )
-  exit /b %ERRORLEVEL%
+	echo [INFO] Running tests via CTest
+	if /I "%GEN%"=="msvc" (
+		ctest --test-dir "%BUILD_DIR%" -C %BUILD_TYPE% --output-on-failure
+	) else (
+		ctest --test-dir "%BUILD_DIR%" --output-on-failure
+	)
+		exit /b %ERRORLEVEL%
 )
 
 :: Leaks mode (macOS only) - not supported on Windows; just run
 if /I "%MODE%"=="leaks" (
-  echo [WARN] 'leaks' mode is macOS-only; running the app without leak check.
+	echo [WARN] 'leaks' mode is macOS-only; running the app without leak check.
 )
 
 :: Run the app
@@ -99,10 +99,10 @@ set APP_PATH=%BUILD_DIR%\VeApp.exe
 if /I "%GEN%"=="msvc" set APP_PATH=%BUILD_DIR%\%BUILD_TYPE%\VeApp.exe
 
 if exist "%APP_PATH%" (
-  echo [INFO] Running %APP_PATH%
-  "%APP_PATH%"
-  exit /b %ERRORLEVEL%
+	echo [INFO] Running %APP_PATH%
+	"%APP_PATH%"
+	exit /b %ERRORLEVEL%
 ) else (
-  echo [ERR ] Executable not found: %APP_PATH%
-  exit /b 2
+	echo [ERR ] Executable not found: %APP_PATH%
+	exit /b 2
 )
