@@ -18,8 +18,8 @@ function(add_slang_spirv_target TARGET)
 		message(FATAL_ERROR "add_slang_spirv_target: TYPE must be GRAPHICS or COMPUTE")
 	endif()
 
-	if (NOT SLANGC_EXECUTABLE)
-		message(FATAL_ERROR "add_slang_spirv_target: SLANGC_EXECUTABLE not found")
+	if (NOT SLANGC)
+		message(FATAL_ERROR "add_slang_spirv_target: slangc not found (SLANGC unset)")
 	endif()
 
 	string(TOUPPER ${SLANG_TYPE} _TYPE_UP)
@@ -54,12 +54,7 @@ function(add_slang_spirv_target TARGET)
 		endif()
 	endif()
 
-	add_custom_command(
-		OUTPUT ${_OUT_DIR}
-		COMMAND ${CMAKE_COMMAND} -E make_directory ${_OUT_DIR}
-		COMMENT "Creating shader output directory: ${_OUT_DIR}"
-		VERBATIM
-	)
+	# Ensure output directory exists at build time within shader compile rules (avoid declaring a directory as an OUTPUT)
 
 	set(_SPV_FILES)
 	foreach(SLANG_SRC ${SLANG_SOURCES})
@@ -72,18 +67,18 @@ function(add_slang_spirv_target TARGET)
 		if (_TYPE_UP STREQUAL "GRAPHICS")
 			add_custom_command(
 				OUTPUT ${_OUT_FILE}
-				COMMAND ${SLANGC_EXECUTABLE} ${SLANG_SRC} -target spirv -profile ${_PROFILE} -entry ${_VERT_ENTRY} -stage vertex -entry ${_FRAG_ENTRY} -stage fragment -emit-spirv-directly -fvk-use-entrypoint-name -o ${_OUT_FILE}
-				DEPENDS ${SLANG_SRC} ${_OUT_DIR}
-				WORKING_DIRECTORY ${_OUT_DIR}
+				COMMAND ${CMAKE_COMMAND} -E make_directory "${_OUT_DIR}"
+				COMMAND "${SLANGC}" "${SLANG_SRC}" -target spirv -profile ${_PROFILE} -entry ${_VERT_ENTRY} -stage vertex -entry ${_FRAG_ENTRY} -stage fragment -emit-spirv-directly -fvk-use-entrypoint-name -o "${_OUT_FILE}"
+				DEPENDS "${SLANG_SRC}"
 				COMMENT "Slang compiling ${_FN}.slang -> ${_FN}.spv (vert=${_VERT_ENTRY}, frag=${_FRAG_ENTRY})"
 				VERBATIM
 			)
 		else()
 			add_custom_command(
 				OUTPUT ${_OUT_FILE}
-				COMMAND ${SLANGC_EXECUTABLE} ${SLANG_SRC} -target spirv -profile ${_PROFILE} -entry ${_ENTRY} -stage compute -emit-spirv-directly -fvk-use-entrypoint-name -o ${_OUT_FILE}
-				DEPENDS ${SLANG_SRC} ${_OUT_DIR}
-				WORKING_DIRECTORY ${_OUT_DIR}
+				COMMAND ${CMAKE_COMMAND} -E make_directory "${_OUT_DIR}"
+				COMMAND "${SLANGC}" "${SLANG_SRC}" -target spirv -profile ${_PROFILE} -entry ${_ENTRY} -stage compute -emit-spirv-directly -fvk-use-entrypoint-name -o "${_OUT_FILE}"
+				DEPENDS "${SLANG_SRC}"
 				COMMENT "Slang compiling ${_FN}.slang -> ${_FN}.spv (compute entry=${_ENTRY})"
 				VERBATIM
 			)
@@ -94,10 +89,45 @@ function(add_slang_spirv_target TARGET)
 	add_custom_target(${TARGET} DEPENDS ${_SPV_FILES})
 endfunction()
 
-if (VE_BUILD_SHADERS)
-	find_program(SLANGC_EXECUTABLE slangc HINTS $ENV{SLANG_HOME}/bin /usr/local/bin /usr/bin)
-	if (NOT SLANGC_EXECUTABLE)
-		message(FATAL_ERROR "slangc not found; install Slang or set VE_BUILD_SHADERS=OFF to skip shader compilation")
+	# Build candidate hint paths for slangc across platforms
+	set(_SLANG_HINTS
+		$ENV{SLANG_HOME}/bin
+		${SLANG_HOME}/bin
+		$ENV{SLANG_ROOT}/bin
+		${SLANG_ROOT}/bin
+		$ENV{SLANG_PATH}/bin
+		${SLANG_PATH}/bin
+		/usr/local/bin
+		/usr/bin
+		./bin
+	)
+
+	# Common Windows locations (Program Files, vcpkg, MSYS2/MinGW)
+	if (WIN32)
+		list(APPEND _SLANG_HINTS
+			$ENV{ProgramFiles}/Slang/bin
+			$ENV{ProgramW6432}/Slang/bin
+			$ENV{ProgramFiles}/Slang/bin/windows-x64/release
+			$ENV{ProgramW6432}/Slang/bin/windows-x64/release
+			${MINGW_PATH}/bin
+			C:/msys64/mingw64/bin
+			C:/msys64/usr/bin
+			$ENV{VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/tools/slang
+			${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/tools/slang
+			$ENV{VCPKG_ROOT}/installed/x64-windows/tools/slang
+			$ENV{VCPKG_ROOT}/installed/x64-windows-static/tools/slang
+		)
+	endif()
+
+	unset(SLANGC CACHE)
+	find_program(SLANGC
+		NAMES slangc
+		HINTS ${_SLANG_HINTS}
+	)
+	if (NOT SLANGC)
+		message(FATAL_ERROR "slangc not found. Slang is required. Set SLANG_HOME or ensure slangc is on PATH.")
+	else()
+		message(STATUS "Found slangc: ${SLANGC}")
 	endif()
 
 	add_slang_spirv_target(Shaders
@@ -149,4 +179,3 @@ if (VE_BUILD_SHADERS)
 		OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
 		OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/particle_billboard.spv"
 	)
-endif()

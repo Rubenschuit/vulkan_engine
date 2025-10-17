@@ -1,66 +1,123 @@
 # Vulkan Engine
 
-Simple modern C++20 Vulkan renderer using Vulkan-Hpp RAII, GLFW, and Slang. This repository builds a small engine library (`VEngineLib`) and an executable (`VEngine`). Shaders are compiled to SPIR-V.
+Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. Produces a static library (`VEngineLib`) and an app (`VeApp`). Shaders compile to SPIR-V.
 
-## Prerequisites
+## Features
+- Clear split between engine library and application (to be improved)
+- Cross-platform builds: Windows (MSVC or MinGW), macOS (MoltenVK), and Linux
+- Uses modern Vulkan features like dynamic rendering and timeline semaphores
+- Simple render system to render .obj files with textures
+- Simple point light system
+- Particle system with compute shaders
+- FPS-style camera
+- More coming...
+
+## Requirements
 
 - CMake ≥ 3.16
-- A C++20 compiler (Clang 14+/MSVC 2019+/GCC 11+)
-- Vulkan SDK (MoltenVK on macOS)
-- GLFW 3.3+
-- Slang (`slangc`) on PATH for shader compilation
+- C++20 toolchain (Clang 14+/MSVC 2019+/GCC 11+)
+- Vulkan SDK ≥ 1.3 (MoltenVK on macOS)
+- Slang compiler (`slangc`) — required for building shaders
+- GLFW 3.3+ (automatically fetched if missing)
+- Tinyobjloader (included in external)
+- stb_image (included in external)
+
+Optional environment file: `.env.cmake` in repository root. Common variables:
+- `MINGW_PATH`
+- `GLFW_PATH`
+- `VULKAN_SDK_PATH`
+- `SLANG_HOME`
+
+#### Downloads:
+- Slang: https://github.com/shader-slang/slang/releases
+- Vulkan SDK (LunarG): https://vulkan.lunarg.com/sdk/home
+
+Note: CMake will auto-discover Slang (`slangc`) and the Vulkan SDK in common install locations and via standard environment variables. Use `.env.cmake` only when installing to uncommon/custom paths, or to explicitly override detection.
+
+Download instructions and common install locations:
+- ##### Windows
+	- Slang: `C:\Program Files\Slang\bin\slangc.exe`
+	- Vulkan SDK: `C:\VulkanSDK\<version>` 
+
+	With MSYS2/MinGW (run in the MinGW64 shell):
+	```bash
+	pacman -S --needed \
+		mingw-w64-x86_64-toolchain \
+		mingw-w64-x86_64-cmake \
+		mingw-w64-x86_64-glfw \
+		mingw-w64-x86_64-glm \
+	# Slang is not in MSYS2; install via releases or vcpkg (see links above)
+	```
+	Alternatively, use VS with vcpkg.
+
+- ##### macOS
+	- Slang: `/usr/local/bin/slangc`
+	- Vulkan SDK: `/Applications/VulkanSDK/<version>`
+
+	With homebrew:	
+	```bash
+	brew install cmake glfw glm
+	```
+- ##### Linux
+	- Slang: `/usr/local/bin/slangc`
+	- Vulkan SDK: system install (distro packages) or SDK under `/usr/local`
+
+	TODO: add packages
 
 
-## macOS (MoltenVK)
+## Quick start with scripts
 
-1) Install dependencies
+##### macOS and Linux:
 
-- Using Homebrew:
-	- brew install glfw glm glslang
+```bash
+./unixBuild.sh           # Debug build, run
+./unixBuild.sh release   # Release build, run
+./unixBuild.sh test      # Build + run tests
+./unixBuild.sh clean     # Remove build and shaders/*.spv
+```
 
-2) Vulkan SDK
+##### Windows (cmd or PowerShell):
 
-- https://vulkan.lunarg.com/doc/sdk/1.4.321.0/mac/getting_started.html
+```bat
+windowsBuild.bat                 # Debug + MinGW, run
+windowsBuild.bat release msvc    # Release + MSVC, run
+windowsBuild.bat test mingw      # Build tests with MinGW
+windowsBuild.bat clean           # Clean build dirs and shaders/*.spv
 
-3) Configure and build
+```
 
-- Debug (default):
-	- cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-	- cmake --build build
+## Manual build
+From repository root:
 
-- Release:
-	- cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-	- cmake --build build --config Release
+##### macOS:
 
-4) Run
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+./build/VeApp
+```
 
-- From build directory: ./VeApp
+##### Windows with Visual Studio:
 
-Or use script to build and run:
+```bat
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DVE_FETCH_GLFW=ON
+cmake --build build --config Debug
+build\Debug\VeApp.exe
+```
 
-- ./unixBuild.sh
-- ./unixBuild.sh release
-- ./unixBuild.sh test
-- ./unixBuild.sh clean
+##### Windows with MinGW:
 
+```bat
+cmake -S . -B build -G "MinGW Makefiles"
+cmake --build build
+build\VeApp.exe
+```
 
+##### Linux
 
-## Windows
+TODO
 
-Visual Studio
-1) Install Vulkan SDK (Windows installer) and ensure `slangc` is on PATH
-2) Configure + build:
-	 - cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DVE_FETCH_GLFW=ON
-	 - cmake --build build --config Debug
-3) Run: build/Debug/VeApp.exe
+## Tests
 
-MinGW Makefiles
-1) Install MSYS2 MinGW-w64 and open the MinGW x64 shell (ensure `g++` and `slangc` are available).
-2) Configure + build:
-	 - cmake -S . -B build -G "MinGW Makefiles" -DVE_FETCH_GLFW=ON
-	 - cmake --build build
-3) Run: build/VeApp.exe
-
-## Linux
-
-todo
+- Enable with `-DVE_BUILD_TESTS=ON` or run `./unixBuild.sh test` / `windowsBuild.bat test <gen>`.
+- Tests run via CTest: `ctest --test-dir build --output-on-failure` (add `-C Debug/Release` for MSVC).

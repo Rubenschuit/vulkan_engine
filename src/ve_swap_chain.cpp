@@ -50,6 +50,8 @@ namespace ve {
 
 	void VeSwapChain::submitComputeWork(vk::CommandBuffer command_buffer) {
 		const vk::TimelineSemaphoreSubmitInfo timeline_info{
+			.sType = vk::StructureType::eTimelineSemaphoreSubmitInfo,
+			.pNext = nullptr,
 			.waitSemaphoreValueCount = 1,
 			.pWaitSemaphoreValues = &compute_wait_value,
 			.signalSemaphoreValueCount = 1,
@@ -84,6 +86,8 @@ namespace ve {
 		// For waits, include 0 for the binary and the expected value for the timeline.
 		std::array<uint64_t, 2> wait_values{ uint64_t{0}, graphics_wait_value };
 		vk::TimelineSemaphoreSubmitInfo timeline_info{
+			.sType = vk::StructureType::eTimelineSemaphoreSubmitInfo,
+			.pNext = nullptr,
 			.waitSemaphoreValueCount = static_cast<uint32_t>(wait_values.size()),
 			.pWaitSemaphoreValues = wait_values.data(),
 			.signalSemaphoreValueCount = static_cast<uint32_t>(signal_values.size()),
@@ -112,11 +116,13 @@ namespace ve {
 		// Present waits on the binary render-finished semaphore (GPU-side)
 		std::array<vk::Semaphore, 1> present_waits{ render_finished };
 		const vk::PresentInfoKHR present_info{
+			.pNext = nullptr,
 			.waitSemaphoreCount = static_cast<uint32_t>(present_waits.size()),
 			.pWaitSemaphores = present_waits.data(),
 			.swapchainCount = 1,
 			.pSwapchains = &*m_swap_chain,
-			.pImageIndices = image_index
+			.pImageIndices = image_index,
+			.pResults = nullptr
 		};
 
 		// Present the image to the screen
@@ -139,6 +145,8 @@ namespace ve {
 
 		vk::SwapchainCreateInfoKHR create_info{
 			.sType = vk::StructureType::eSwapchainCreateInfoKHR,
+			.pNext = nullptr,
+			.flags = {},
 			.surface = *m_ve_device.getSurface(),
 			.minImageCount = image_count,
 			.imageFormat = m_surface_format.format,
@@ -146,20 +154,19 @@ namespace ve {
 			.imageExtent = m_swap_chain_extent,
 			.imageArrayLayers = 1, // always 1 unless developing stereoscopic 3D app
 			.imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
+			.imageSharingMode = vk::SharingMode::eExclusive,
+			.queueFamilyIndexCount = 0, // optional
+			.pQueueFamilyIndices = nullptr, // optional
 			.preTransform = m_swap_chain_support.capabilities.currentTransform,
 			.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque,
 			.presentMode = m_present_mode,
 			.clipped = VK_TRUE,
-			.oldSwapchain = VK_NULL_HANDLE, // may be overwritten below if recreating
-			// graphics and presentation are in the same queue family, so we can use exclusive mode
-			.imageSharingMode = vk::SharingMode::eExclusive,
-			.queueFamilyIndexCount = 0, // optional
-			.pQueueFamilyIndices = nullptr // optional
+			.oldSwapchain = VK_NULL_HANDLE // may be overwritten below if recreating
 		};
 
 		// If we are recreating (old_swap_chain retained), provide its handle so the driver
 		// can safely migrate resources and release the old one.
-		if (m_old_swap_chain != nullptr) {
+		if (m_old_swap_chain != VK_NULL_HANDLE) {
 			// Obtain raw handle from vk::raii::SwapchainKHR reference
 			create_info.oldSwapchain = *m_old_swap_chain->getSwapChain();
 		}
@@ -170,15 +177,20 @@ namespace ve {
 
 	void VeSwapChain::createSwapChainImageViews() {
 		assert(m_swap_chain_image_views.empty());
-		vk::ImageViewCreateInfo imageViewCreateInfo{
+		vk::ImageViewCreateInfo create_info{
+			.sType = vk::StructureType::eImageViewCreateInfo,
+			.pNext = nullptr,
+			.flags = {},
+			.image = VK_NULL_HANDLE, // will set per iteration
 			.viewType = vk::ImageViewType::e2D,
 			.format = m_surface_format.format,
+			.components = {},
 			.subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 }
 		};
 		for (auto image : m_swap_chain_images) {
-			imageViewCreateInfo.image = image;
+			create_info.image = image;
 			// call the constructor of vk::raii::ImageView and add it to the vector
-			m_swap_chain_image_views.emplace_back(m_ve_device.getDevice(), imageViewCreateInfo);
+			m_swap_chain_image_views.emplace_back(m_ve_device.getDevice(), create_info);
 		}
 	}
 
@@ -207,11 +219,14 @@ namespace ve {
 
 	// Create 2 semaphores and 1 fence per frame in flight
 	void VeSwapChain::createSyncObjects() {
-		vk::SemaphoreTypeCreateInfo semaphoreType{
+		vk::SemaphoreTypeCreateInfo semaphore_type{
+			.sType = vk::StructureType::eSemaphoreTypeCreateInfo,
+			.pNext = nullptr,
 			.semaphoreType = vk::SemaphoreType::eTimeline,
 			.initialValue = 0
 		};
-        semaphore = vk::raii::Semaphore(m_ve_device.getDevice(), {.pNext = &semaphoreType});
+		vk::SemaphoreCreateInfo timeline_sem_ci{ .pNext = &semaphore_type };
+		semaphore = vk::raii::Semaphore(m_ve_device.getDevice(), timeline_sem_ci);
         timeline_value = 0;
 
 		// fences

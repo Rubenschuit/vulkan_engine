@@ -170,7 +170,7 @@ namespace ve {
 
 	void VeDevice::createSurface() {
 		VkSurfaceKHR _surface; // glfw works with c api handles
-		assert(m_window.getGLFWwindow() != nullptr && "GLFW window is null");
+		assert(m_window.getGLFWwindow() != VK_NULL_HANDLE && "GLFW window is null");
 		if (glfwCreateWindowSurface(*m_instance, m_window.getGLFWwindow(), nullptr, &_surface) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create window surface!");
 		}
@@ -278,7 +278,7 @@ namespace ve {
 					   vk::PhysicalDeviceTimelineSemaphoreFeatures> feature_chain = {
 			{.features = {.samplerAnisotropy = true}},
 			{.shaderDrawParameters = true},
-			{.dynamicRendering = true, .synchronization2 = true},
+			{.synchronization2 = true, .dynamicRendering = true},
 			{.extendedDynamicState = true },
 			{.timelineSemaphore = true}
 		};
@@ -372,7 +372,7 @@ namespace ve {
 		uint32_t glfw_extensionCount = 0;
 		auto glfw_extensions = glfwGetRequiredInstanceExtensions(&glfw_extensionCount);
 
-		assert(glfw_extensions != nullptr && glfw_extensionCount > 0 && "GLFW did not provide required instance extensions");
+		assert(glfw_extensions != VK_NULL_HANDLE && glfw_extensionCount > 0 && "GLFW did not provide required instance extensions");
 
 		// glfw extensions are always required
 		std::vector<const char*> extensions(glfw_extensions, glfw_extensions + glfw_extensionCount);

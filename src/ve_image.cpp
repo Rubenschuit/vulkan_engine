@@ -29,17 +29,20 @@ namespace ve {
 		// Create image
 		vk::ImageCreateInfo image_info {
 			.sType = vk::StructureType::eImageCreateInfo,
+			.pNext = nullptr,
+			.flags = {},
 			.imageType = vk::ImageType::e2D,
+			.format = m_format,
 			.extent = vk::Extent3D{ m_width, m_height, 1 },
 			.mipLevels = 1,
 			.arrayLayers = 1,
-			.format = m_format,
+			.samples = vk::SampleCountFlagBits::e1,
 			.tiling = m_tiling,
-			.initialLayout = vk::ImageLayout::eUndefined,
 			.usage = m_usage,
 			.sharingMode = vk::SharingMode::eExclusive,
-			.samples = vk::SampleCountFlagBits::e1,
-			.flags = {}
+			.queueFamilyIndexCount = 0,
+			.pQueueFamilyIndices = nullptr,
+			.initialLayout = vk::ImageLayout::eUndefined
 		};
 		m_image = vk::raii::Image(m_ve_device.getDevice(), image_info);
 		assert(*m_image != VK_NULL_HANDLE && "Failed to create image");
@@ -48,6 +51,7 @@ namespace ve {
 		vk::MemoryRequirements mem_requirements = m_image.getMemoryRequirements();
 		vk::MemoryAllocateInfo alloc_info {
 			.sType = vk::StructureType::eMemoryAllocateInfo,
+			.pNext = nullptr,
 			.allocationSize = mem_requirements.size,
 			.memoryTypeIndex = m_ve_device.findMemoryType(mem_requirements.memoryTypeBits, m_properties)
 		};
@@ -60,9 +64,12 @@ namespace ve {
 		assert(*m_image != VK_NULL_HANDLE && "Image must be valid when creating image view");
 		vk::ImageViewCreateInfo view_info {
 			.sType = vk::StructureType::eImageViewCreateInfo,
+			.pNext = nullptr,
+			.flags = {},
 			.image = *m_image,
 			.viewType = vk::ImageViewType::e2D,
 			.format = m_format,
+			.components = {},
 			.subresourceRange = vk::ImageSubresourceRange {
 				.aspectMask = m_aspect_flags,
 				.baseMipLevel = 0,
@@ -92,6 +99,8 @@ namespace ve {
 		}
 		auto command_buffer = m_ve_device.beginSingleTimeCommands(kind);
 		vk::ImageMemoryBarrier2 barrier = {
+			.sType = vk::StructureType::eImageMemoryBarrier2,
+			.pNext = nullptr,
 			.srcStageMask = src_stage,
 			.srcAccessMask = src_access_mask,
 			.dstStageMask = dst_stage,
@@ -110,7 +119,13 @@ namespace ve {
 			}
 		};
 		vk::DependencyInfo dependency_info = {
+			.sType = vk::StructureType::eDependencyInfo,
+			.pNext = nullptr,
 			.dependencyFlags = {},
+			.memoryBarrierCount = 0,
+			.pMemoryBarriers = nullptr,
+			.bufferMemoryBarrierCount = 0,
+			.pBufferMemoryBarriers = nullptr,
 			.imageMemoryBarrierCount = 1,
 			.pImageMemoryBarriers = &barrier
 		};

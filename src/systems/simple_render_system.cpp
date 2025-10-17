@@ -56,13 +56,13 @@ namespace ve {
 		// set formats for dynamic rendering
 		pipeline_config.color_format = color_format;
 
-		assert(m_pipeline_layout != nullptr && "Pipeline layout is null");
+		assert(m_pipeline_layout != VK_NULL_HANDLE && "Pipeline layout is null");
 		pipeline_config.pipeline_layout = m_pipeline_layout;
 		m_ve_pipeline = std::make_unique<VePipeline>(
 			m_ve_device,
 			"shaders/simple_shader.spv",
 			pipeline_config);
-		assert(m_ve_pipeline != nullptr && "Failed to create pipeline");
+		assert(m_ve_pipeline != VK_NULL_HANDLE && "Failed to create pipeline");
 
 	}
 

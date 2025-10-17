@@ -49,7 +49,7 @@ namespace ve {
 			m_global_pool,
 			m_global_set_layout->getDescriptorSetLayout(),
 			m_ve_renderer.getSwapChainImageFormat(),
-			1423456, // number of particles
+			434567, // number of particles
 			glm::vec3{0.0f, -200.0f, 10.0f}
 		);
 		auto current_time = std::chrono::high_resolution_clock::now();

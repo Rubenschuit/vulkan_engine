@@ -94,19 +94,19 @@ namespace ve {
 		vk::SamplerCreateInfo sampler_info{
 			.magFilter = vk::Filter::eLinear,
 			.minFilter = vk::Filter::eLinear,
+			.mipmapMode = vk::SamplerMipmapMode::eLinear,
 			.addressModeU = vk::SamplerAddressMode::eRepeat,
 			.addressModeV = vk::SamplerAddressMode::eRepeat,
 			.addressModeW = vk::SamplerAddressMode::eRepeat,
+			.mipLodBias = 0.0f,
 			.anisotropyEnable = vk::True,
 			.maxAnisotropy = max_anisotropy,
-			.borderColor = vk::BorderColor::eIntOpaqueBlack,
-			.unnormalizedCoordinates = vk::False,
 			.compareEnable = vk::False,
 			.compareOp = vk::CompareOp::eAlways,
-			.mipmapMode = vk::SamplerMipmapMode::eLinear,
-			.mipLodBias = 0.0f,
 			.minLod = 0.0f,
-			.maxLod = 0.0f
+			.maxLod = 0.0f,
+			.borderColor = vk::BorderColor::eIntOpaqueBlack,
+			.unnormalizedCoordinates = vk::False
 		};
 		m_texture_sampler = vk::raii::Sampler(m_ve_device.getDevice(), sampler_info);
 	}

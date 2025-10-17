@@ -70,9 +70,11 @@ namespace ve { namespace detail {
         // Optional timestamp
         std::time_t now = std::time(nullptr);
         std::tm* local_tm = std::localtime(&now);
-        char timestamp[100];
-        //std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", local_tm);
-    	std::fprintf(stderr, "%s[%s]%s %s %s:%d: %s\n",
+        char timestamp[32] = {0};
+        if (local_tm) {
+            std::strftime(timestamp, sizeof(timestamp), "%H:%M:%S", local_tm);
+        }
+        std::fprintf(stderr, "%s[%s]%s %s %s:%d: %s\n",
              level_to_color(lvl), level_to_str(lvl), reset_color(), timestamp, file, line, msg.c_str());
     }
 } }
@@ -82,7 +84,8 @@ namespace ve { namespace detail {
         std::ostringstream _ve_log_oss; \
         _ve_log_oss << EXPR; \
 		std::filesystem::path p = std::filesystem::path(__FILE__).filename(); \
-        ::ve::detail::log_line((LVL), p.c_str(), __LINE__, _ve_log_oss.str()); \
+        std::string filename = p.string(); \
+        ::ve::detail::log_line((LVL), filename.c_str(), __LINE__, _ve_log_oss.str()); \
     } \
 } while(0)
 

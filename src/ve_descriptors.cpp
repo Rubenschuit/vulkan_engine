@@ -17,8 +17,8 @@ namespace ve {
 		vk::DescriptorSetLayoutBinding layout_binding{
 			.binding = binding,
 			.descriptorType = descriptor_type,
-			.stageFlags = stage_flags,
-			.descriptorCount = count
+			.descriptorCount = count,
+			.stageFlags = stage_flags
 		};
 		m_bindings[binding] = layout_binding;
 		return *this;
@@ -130,10 +130,11 @@ namespace ve {
 			"Binding single descriptor info, but binding expects multiple");
 
 		vk::WriteDescriptorSet write{
-			.descriptorType = binding_description.descriptorType,
 			.dstBinding = binding,
-			.pBufferInfo = buffer_info,
-			.descriptorCount = 1
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = binding_description.descriptorType,
+			.pBufferInfo = buffer_info
 		};
 
 		m_writes.push_back(write);
@@ -151,10 +152,11 @@ namespace ve {
 			"Binding single descriptor info, but binding expects multiple");
 
 		vk::WriteDescriptorSet write{
-			.descriptorType = binding_description.descriptorType,
 			.dstBinding = binding,
-			.pImageInfo = image_info,
-			.descriptorCount = 1
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = binding_description.descriptorType,
+			.pImageInfo = image_info
 		};
 		m_writes.push_back(write);
 		return *this;

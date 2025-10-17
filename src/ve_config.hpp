@@ -20,7 +20,9 @@ namespace ve {
 		VK_KHR_SPIRV_1_4_EXTENSION_NAME,
 		VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
 		VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+#if defined(__APPLE__)
 		VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME // required for portability on macOS
+#endif
 	};
 
 	// Central list of required Vulkan instance extensions (GLFW-required are added at runtime)

@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 
 namespace ve {
+	//TODO put scale in pos.w
 	struct SimplePushConstantData {
 		glm::vec4 position;
 		glm::vec4 color;
@@ -51,13 +52,13 @@ namespace ve {
 		pipeline_config.attribute_descriptions.clear();
 		pipeline_config.binding_descriptions.clear();
 
-		assert(m_pipeline_layout != nullptr && "Pipeline layout is null");
+		assert(m_pipeline_layout != VK_NULL_HANDLE && "Pipeline layout is null");
 		pipeline_config.pipeline_layout = m_pipeline_layout;
 		m_ve_pipeline = std::make_unique<VePipeline>(
 			m_ve_device,
 			"shaders/point_light_shader.spv",
 			pipeline_config);
-		assert(m_ve_pipeline != nullptr && "Failed to create pipeline");
+		assert(m_ve_pipeline != VK_NULL_HANDLE && "Failed to create pipeline");
 
 	}
 

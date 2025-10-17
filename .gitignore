@@ -55,5 +55,8 @@ dkms.conf
 .DS_Store
 *.spv
 build/
+build_mingw/
+build_msvc/
 .clang-format
 .editorconfig
+.env.cmake

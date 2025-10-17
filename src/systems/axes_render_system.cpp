@@ -49,7 +49,7 @@ namespace ve {
 		std::vector<VeModel::Vertex> vertices;
 		constexpr int SEGMENTS = 24;           // circle segments per cylinder
 		constexpr float L = 100.0f;            // cylinder length
-		constexpr float R = 0.003f;            // cylinder radius
+		constexpr float R = 0.01f;            // cylinder radius
 		vertices.reserve(3 * SEGMENTS * 6); // 2 tris per quad, 3 axes
 
 		auto push_tri = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& color){

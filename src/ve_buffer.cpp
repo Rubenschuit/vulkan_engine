@@ -45,9 +45,9 @@ namespace ve {
 	}
 
 	void VeBuffer::map(vk::DeviceSize size, vk::DeviceSize offset) {
-		assert(m_buffer_memory != nullptr && "Buffer memory is null");
+		assert(m_buffer_memory != VK_NULL_HANDLE && "Buffer memory is null");
 		m_mapped = m_buffer_memory.mapMemory(offset, size);
-		assert(m_mapped != nullptr && "Failed to map buffer memory");
+		assert(m_mapped != VK_NULL_HANDLE && "Failed to map buffer memory");
 	}
 
 	void VeBuffer::unmap() {
@@ -58,7 +58,7 @@ namespace ve {
 	}
 
 	void VeBuffer::writeToBuffer(void* data, vk::DeviceSize size, vk::DeviceSize offset) {
-		assert(m_mapped != nullptr && "Cannot write to unmapped buffer");
+		assert(m_mapped != VK_NULL_HANDLE && "Cannot write to unmapped buffer");
 		vk::DeviceSize effective_size = (size == VK_WHOLE_SIZE) ? m_buffer_size : size;
 		assert(effective_size <= m_buffer_size && "Size exceeds buffer size");
 		assert(offset + effective_size <= m_buffer_size && "Write exceeds buffer size");

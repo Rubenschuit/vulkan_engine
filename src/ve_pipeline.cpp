@@ -22,33 +22,42 @@ namespace ve {
 		// Tell the pipeline to expect dynamic viewport and scissor states
 		config_info.dynamic_state_enables = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
 		config_info.dynamic_state_info = vk::PipelineDynamicStateCreateInfo{
+			.sType = vk::StructureType::ePipelineDynamicStateCreateInfo,
+			.pNext = nullptr,
+			.flags = {},
 			.dynamicStateCount = static_cast<uint32_t>(config_info.dynamic_state_enables.size()),
 			.pDynamicStates = config_info.dynamic_state_enables.data()
 		};
-		config_info.viewport_info = { .viewportCount = 1, .scissorCount = 1 };
+		config_info.viewport_info = { .sType = vk::StructureType::ePipelineViewportStateCreateInfo, .pNext = nullptr, .flags = {}, .viewportCount = 1, .pViewports = nullptr, .scissorCount = 1, .pScissors = nullptr };
 
 		config_info.input_assembly_info = {
 			.sType = vk::StructureType::ePipelineInputAssemblyStateCreateInfo,
+			.pNext = nullptr,
+			.flags = {},
 			.topology = vk::PrimitiveTopology::eTriangleList,
 			.primitiveRestartEnable = VK_FALSE
 		};
 		config_info.rasterization_info = {
 			.sType = vk::StructureType::ePipelineRasterizationStateCreateInfo,
+			.pNext = nullptr,
+			.flags = {},
 			.depthClampEnable = VK_FALSE,
 			.rasterizerDiscardEnable = VK_FALSE,
 			.polygonMode = vk::PolygonMode::eFill,
 			.cullMode = vk::CullModeFlagBits::eFront,
 			.frontFace = vk::FrontFace::eClockwise,
 			.depthBiasEnable = VK_TRUE,
-			.lineWidth = 1.0f,
 			.depthBiasConstantFactor = 0.0f,
 			.depthBiasClamp = 0.0f,
-			.depthBiasSlopeFactor = 0.0f
+			.depthBiasSlopeFactor = 0.0f,
+			.lineWidth = 1.0f
 		};
 		config_info.multisample_info = {
 			.sType = vk::StructureType::ePipelineMultisampleStateCreateInfo,
-			.sampleShadingEnable = VK_FALSE,
+			.pNext = nullptr,
+			.flags = {},
 			.rasterizationSamples = vk::SampleCountFlagBits::e1,
+			.sampleShadingEnable = VK_FALSE,
 			.minSampleShading = 1.0f,
 			.pSampleMask = nullptr,
 			.alphaToCoverageEnable = VK_FALSE,
@@ -56,11 +65,17 @@ namespace ve {
 		};
 		config_info.depth_stencil_info = {
 			.sType = vk::StructureType::ePipelineDepthStencilStateCreateInfo,
+			.pNext = nullptr,
+			.flags = {},
 			.depthTestEnable = VK_TRUE,
 			.depthWriteEnable = VK_TRUE,
 			.depthCompareOp = vk::CompareOp::eLess,
 			.depthBoundsTestEnable = VK_FALSE,
 			.stencilTestEnable = VK_FALSE,
+			.front = {},
+			.back = {},
+			.minDepthBounds = 0.0f,
+			.maxDepthBounds = 1.0f
 		};
 		config_info.color_blend_attachment = {
 			.blendEnable = VK_TRUE,
@@ -77,6 +92,8 @@ namespace ve {
 		};
 		config_info.color_blend_info = {
 			.sType = vk::StructureType::ePipelineColorBlendStateCreateInfo,
+			.pNext = nullptr,
+			.flags = {},
 			.logicOpEnable = VK_FALSE,
 			.logicOp = vk::LogicOp::eCopy,
 			.attachmentCount = 1,
@@ -138,30 +155,36 @@ namespace ve {
 			vk::FormatFeatureFlagBits::eDepthStencilAttachment
 		);
 		vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo{
+			.sType = vk::StructureType::ePipelineRenderingCreateInfo,
+			.pNext = nullptr,
+			.viewMask = 0,
 			.colorAttachmentCount = 1,
 			.pColorAttachmentFormats = &config_info.color_format,
-			.depthAttachmentFormat = depth_format
+			.depthAttachmentFormat = depth_format,
+			.stencilAttachmentFormat = vk::Format::eUndefined
 		};
 		vk::GraphicsPipelineCreateInfo pipeline_info{
 			.sType = vk::StructureType::eGraphicsPipelineCreateInfo,
 			.pNext = &pipelineRenderingCreateInfo,
+			.flags = {},
 			.stageCount = 2,
 			.pStages = shader_stages,
 			.pVertexInputState = &vertex_input_info,
 			.pInputAssemblyState = &config_info.input_assembly_info,
+			.pTessellationState = nullptr,
 			.pViewportState = &config_info.viewport_info,
 			.pRasterizationState = &config_info.rasterization_info,
 			.pMultisampleState = &config_info.multisample_info,
+			.pDepthStencilState = &config_info.depth_stencil_info,
 			.pColorBlendState = &config_info.color_blend_info,
 			.pDynamicState = &config_info.dynamic_state_info,
-			.pDepthStencilState = &config_info.depth_stencil_info,
 			.layout = config_info.pipeline_layout,
 			.renderPass = nullptr,
 			.subpass = config_info.subpass,
 			.basePipelineHandle = VK_NULL_HANDLE,
 			.basePipelineIndex = -1
 		};
-		assert(config_info.pipeline_layout != nullptr && "Cannot create graphics pipeline: no pipelineLayout provided in config_info");
+		assert(config_info.pipeline_layout != VK_NULL_HANDLE && "Cannot create graphics pipeline: no pipelineLayout provided in config_info");
 
 		m_graphics_pipeline = vk::raii::Pipeline{m_ve_device.getDevice(), nullptr, pipeline_info};
 	}
