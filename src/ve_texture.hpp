@@ -1,5 +1,5 @@
 /* The VeTexture class is responsible for loading texture images
-   and creating Vulkan image resources. */
+   and creating Vulkan image resources.  */
 #pragma once
 
 #include "ve_device.hpp"
@@ -9,6 +9,7 @@ namespace ve {
 	class VeTexture {
 	public:
 		VeTexture(ve::VeDevice& device, const char* texture_path);
+		VeTexture(ve::VeDevice& device, const char* texture_path[6]);
 		~VeTexture();
 
 		VeTexture(const VeTexture&) = delete;
@@ -21,6 +22,7 @@ namespace ve {
 	private:
 		void createTextureImage(const char* texture_path);
 		void createTextureSampler();
+		void createCubeTextureImage(const char* texture_path[6]);
 
 		ve::VeDevice& m_ve_device;
 		int m_width;

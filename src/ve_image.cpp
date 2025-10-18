@@ -10,10 +10,17 @@ namespace ve {
 		vk::ImageTiling tiling,
 		vk::ImageUsageFlags usage,
 		vk::MemoryPropertyFlags properties,
-		vk::ImageAspectFlags aspect_flags)
+		vk::ImageAspectFlags aspect_flags,
+		bool is_cubemap)
 		: m_ve_device(ve_device), m_width(width), m_height(height), m_format(format),
-		  m_tiling(tiling), m_usage(usage), m_properties(properties), m_aspect_flags(aspect_flags) {
+		  m_tiling(tiling), m_usage(usage), m_properties(properties),
+		  m_aspect_flags(aspect_flags),
+		  m_array_layers(is_cubemap ? 6 : 1) {
 
+		if (is_cubemap) {
+			m_image_create_flags |= vk::ImageCreateFlagBits::eCubeCompatible;
+			m_image_view_type = vk::ImageViewType::eCube;
+		}
 		createImage();
 		createImageView();
 
@@ -30,12 +37,12 @@ namespace ve {
 		vk::ImageCreateInfo image_info {
 			.sType = vk::StructureType::eImageCreateInfo,
 			.pNext = nullptr,
-			.flags = {},
+			.flags = m_image_create_flags,
 			.imageType = vk::ImageType::e2D,
 			.format = m_format,
 			.extent = vk::Extent3D{ m_width, m_height, 1 },
 			.mipLevels = 1,
-			.arrayLayers = 1,
+			.arrayLayers = m_array_layers,
 			.samples = vk::SampleCountFlagBits::e1,
 			.tiling = m_tiling,
 			.usage = m_usage,
@@ -67,7 +74,7 @@ namespace ve {
 			.pNext = nullptr,
 			.flags = {},
 			.image = *m_image,
-			.viewType = vk::ImageViewType::e2D,
+			.viewType = m_image_view_type,
 			.format = m_format,
 			.components = {},
 			.subresourceRange = vk::ImageSubresourceRange {
@@ -75,7 +82,7 @@ namespace ve {
 				.baseMipLevel = 0,
 				.levelCount = 1,
 				.baseArrayLayer = 0,
-				.layerCount = 1
+				.layerCount = m_array_layers
 			}
 		};
 		m_image_view = vk::raii::ImageView(m_ve_device.getDevice(), view_info);
@@ -115,7 +122,7 @@ namespace ve {
 				.baseMipLevel = 0,
 				.levelCount = 1,
 				.baseArrayLayer = 0,
-				.layerCount = 1
+				.layerCount = m_array_layers
 			}
 		};
 		vk::DependencyInfo dependency_info = {

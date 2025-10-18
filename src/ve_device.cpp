@@ -470,7 +470,7 @@ namespace ve {
 	}
 
 	// Assumes the image is already in eTransferDstOptimal layout
-	void VeDevice::copyBufferToImage(vk::raii::Buffer& src_buffer, const vk::raii::Image& dst_image, uint32_t width, uint32_t height) {
+	void VeDevice::copyBufferToImage(vk::raii::Buffer& src_buffer, const vk::raii::Image& dst_image, uint32_t width, uint32_t height, uint32_t array_layers) {
 		assert(width > 0 && height > 0 && "Image width and height must be greater than zero");
 		assert(*src_buffer != VK_NULL_HANDLE && "Source buffer must be valid");
 		assert(*dst_image  != VK_NULL_HANDLE && "Destination image must be valid");
@@ -479,7 +479,7 @@ namespace ve {
 			.bufferOffset = 0,
 			.bufferRowLength = 0,
 			.bufferImageHeight = 0,
-			.imageSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, 1 },
+			.imageSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, array_layers },
 			.imageOffset = { 0, 0, 0 },
 			.imageExtent = { width, height, 1 }
 		};

@@ -42,3 +42,4 @@ namespace ve {
 // TODO: Consdider consolidating index and vertex buffer into single buffer and use offsets
 // TODO: Make sure the directories are setup correctly
 // TODO: consider moving the timeline semaphore from VeSwapChain somewhere else
+// TODO: Fix window resize crash on windows

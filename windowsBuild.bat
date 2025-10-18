@@ -4,7 +4,7 @@ setlocal EnableExtensions
 :: windowsBuild.bat
 :: Usage:
 ::   windowsBuild.bat [mode] [generator]
-::     mode: debug (default) | release | test | leaks | clean
+::     mode: debug (default) | release | test | clean
 ::     generator: mingw (default) | msvc
 ::
 :: Examples:
@@ -87,11 +87,6 @@ if /I "%MODE%"=="test" (
 		ctest --test-dir "%BUILD_DIR%" --output-on-failure
 	)
 		exit /b %ERRORLEVEL%
-)
-
-:: Leaks mode (macOS only) - not supported on Windows; just run
-if /I "%MODE%"=="leaks" (
-	echo [WARN] 'leaks' mode is macOS-only; running the app without leak check.
 )
 
 :: Run the app

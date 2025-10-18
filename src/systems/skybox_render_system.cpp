@@ -1,5 +1,5 @@
 #include "pch.hpp"
-#include "simple_render_system.hpp"
+#include "skybox_render_system.hpp"
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -7,19 +7,11 @@
 
 namespace ve {
 
-	/* Scalars have to be aligned by N (= 4 bytes given 32-bit floats).
-	   A float2 must be aligned by 2N (= 8 bytes).
-	   A float3 or float4 must be aligned by 4N (= 16 bytes).
-	   A nested structure must be aligned by the base alignment of its members rounded up to a multiple of 16.
-	   A float4x4 matrix must have the same alignment as a float4.    */
-	// TODO: currently exceeds max push constant size of 128 bytes on some hardware
 	struct SimplePushConstantData {
 		glm::mat4 transform;
-		glm::mat4 normal_transform;
-		alignas(4) float has_texture;
 	};
 
-	SimpleRenderSystem::SimpleRenderSystem(
+	SkyboxRenderSystem::SkyboxRenderSystem(
 			VeDevice& device,
 				const vk::raii::DescriptorSetLayout& global_set_layout,
 				const vk::raii::DescriptorSetLayout& material_set_layout,
@@ -27,12 +19,18 @@ namespace ve {
 
 		createPipelineLayout(global_set_layout, material_set_layout);
 		createPipeline(color_format);
+		loadCubeModel();
 	}
 
-	SimpleRenderSystem::~SimpleRenderSystem() {
+	SkyboxRenderSystem::~SkyboxRenderSystem() {}
+
+	void SkyboxRenderSystem::loadCubeModel() {
+		std::shared_ptr<VeModel> model = std::make_shared<VeModel>(m_ve_device, "models/cube.obj");
+		m_cube_object.ve_model = model;
+		m_cube_object.transform.scale = {1500.0f, 1500.0f, 1500.0f};
 	}
 
-	void SimpleRenderSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout) {
+	void SkyboxRenderSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout) {
 		vk::PushConstantRange push_constant_range{
 			.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 			.offset = 0, // Used for indexing multiple push constant ranges
@@ -49,18 +47,23 @@ namespace ve {
 		m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), pipeline_layout_info);
 	}
 
-	void SimpleRenderSystem::createPipeline(vk::Format color_format) {
+	void SkyboxRenderSystem::createPipeline(vk::Format color_format) {
 		PipelineConfigInfo pipeline_config{};
 		VePipeline::defaultPipelineConfigInfo(pipeline_config);
 
 		// set formats for dynamic rendering
 		pipeline_config.color_format = color_format;
+		// Alter culling for skybox: only inside faces should be visible
+		pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eBack;
+		pipeline_config.rasterization_info.frontFace = vk::FrontFace::eClockwise;
+		auto attribute_descriptions = VeModel::Vertex::getAttributeDescriptions();
+		pipeline_config.attribute_descriptions = {attribute_descriptions[0]};
 
 		assert(m_pipeline_layout != VK_NULL_HANDLE && "Pipeline layout is null");
 		pipeline_config.pipeline_layout = m_pipeline_layout;
 		m_ve_pipeline = std::make_unique<VePipeline>(
 			m_ve_device,
-			"shaders/simple_shader.spv",
+			"shaders/skybox_shader.spv",
 			pipeline_config);
 		assert(m_ve_pipeline != VK_NULL_HANDLE && "Failed to create pipeline");
 
@@ -68,33 +71,33 @@ namespace ve {
 
 	// Performs a draw call for each game object with a model component
 	// TODO: bind and draw all objects with the same model at once
-	void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
+	void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 		frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 		frame_info.command_buffer.bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics,
 			*m_pipeline_layout,
 			{},
-			{*frame_info.global_descriptor_set, *frame_info.material_descriptor_set},
+			{*frame_info.global_descriptor_set, *frame_info.cubemap_descriptor_set},
 			{}
 		);
+		SimplePushConstantData push{};
+		assert (m_cube_object.ve_model != nullptr && "Cube model is null");
+		float speed = 0.008f;
+		m_cube_object.transform.rotation += glm::vec3{-speed * frame_info.frame_time, 0.2 * speed * frame_info.frame_time, 0.0f};
 
-		for (auto& [id, obj] : frame_info.game_objects) {
-			// Skip non-mesh objects (e.g., point lights) or missing models
-			if (!obj.ve_model) continue;
-			SimplePushConstantData push{};
-			push.normal_transform = obj.getNormalTransform();
-			push.transform = obj.getTransform();
-			push.has_texture = obj.has_texture;
-			frame_info.command_buffer.pushConstants<SimplePushConstantData>(
-				*m_pipeline_layout,
-				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
-				0,
-				push
-			);
-			obj.ve_model->bindVertexBuffer(frame_info.command_buffer);
-			obj.ve_model->bindIndexBuffer(frame_info.command_buffer);
-			obj.ve_model->drawIndexed(frame_info.command_buffer);
-		}
+		push.transform =  m_cube_object.getTransform();
+		frame_info.command_buffer.pushConstants<SimplePushConstantData>(
+			*m_pipeline_layout,
+			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+			0,
+			push
+		);
+
+		m_cube_object.ve_model->bindVertexBuffer(frame_info.command_buffer);
+		m_cube_object.ve_model->bindIndexBuffer(frame_info.command_buffer);
+		m_cube_object.ve_model->drawIndexed(frame_info.command_buffer);
 	}
+
+
 }
 

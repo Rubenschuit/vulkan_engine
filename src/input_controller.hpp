@@ -56,7 +56,7 @@ namespace ve {
 		double m_last_x = 0.0;
 		double m_last_y = 0.0;
 		const float NORMAL_SPEED = 5.0f;
-		const float SPRINT_SPEED = 15.0f;
+		const float SPRINT_SPEED = 60.0f;
 		float m_movement_speed = NORMAL_SPEED;
 		float m_look_speed = 2.0f;
 		float m_mouse_sensitivity = 40.0f;

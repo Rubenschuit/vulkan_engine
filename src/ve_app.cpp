@@ -4,6 +4,7 @@
 #include "systems/axes_render_system.hpp"
 #include "systems/point_light_system.hpp"
 #include "systems/particle_system.hpp"
+#include "systems/skybox_render_system.hpp"
 
 
 #define GLM_FORCE_RADIANS
@@ -27,6 +28,12 @@ namespace ve {
 	void VeApp::run() {
 		VE_LOGI("VeApp::run starting. Window=" << m_ve_window.getWidth() << "x" << m_ve_window.getHeight());
 		// Init render systems
+		SkyboxRenderSystem skybox_render_system(
+			m_ve_device,
+			m_global_set_layout->getDescriptorSetLayout(),
+			m_material_set_layout->getDescriptorSetLayout(),
+			m_ve_renderer.getSwapChainImageFormat()
+		);
 		SimpleRenderSystem simple_render_system(
 			m_ve_device,
 			m_global_set_layout->getDescriptorSetLayout(),
@@ -86,6 +93,7 @@ namespace ve {
 			VeFrameInfo frame_info{
 				.global_descriptor_set = m_global_descriptor_sets[current_frame],
 				.material_descriptor_set = m_material_descriptor_set,
+				.cubemap_descriptor_set = m_cubemap_descriptor_set,
 				.command_buffer = command_buffer,
 				.compute_command_buffer = compute_command_buffer,
 				.game_objects = m_game_objects,
@@ -122,6 +130,7 @@ namespace ve {
 			// render
 			m_ve_renderer.beginRender(command_buffer);
 
+			skybox_render_system.render(frame_info);
 			simple_render_system.renderObjects(frame_info);
 			axes_render_system.render(frame_info);
 			point_light_system.render(frame_info);
@@ -263,12 +272,12 @@ namespace ve {
 
 	void VeApp::createDescriptors() {
 		m_global_pool = VeDescriptorPool::Builder(m_ve_device)
-			// Global sets (per-frame) + compute sets (per-frame) + material set (1) + slack
+			// Global sets (per-frame) + compute sets (per-frame) + material set (2) + slack
 			.setMaxSets(2 * MAX_FRAMES_IN_FLIGHT + 4)
 			// Uniform buffers: global (per frame) + compute (per frame)
 			.addPoolSize(vk::DescriptorType::eUniformBuffer, 2 * MAX_FRAMES_IN_FLIGHT)
-			// Sampler for material set
-			.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 1)
+			// Sampler for material sets
+			.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 2)
 			// Compute storage buffers: 2 per frame (prev + current)
 			.addPoolSize(vk::DescriptorType::eStorageBuffer, 2 * MAX_FRAMES_IN_FLIGHT)
 			.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
@@ -300,6 +309,13 @@ namespace ve {
 		VeDescriptorWriter(*m_material_set_layout, *m_global_pool)
 			.writeImage(0, &image_info)
 			.build(m_material_descriptor_set);
+
+		// Create one cubemap descriptor set for skybox
+		auto cubemap_image_info = m_skybox.getDescriptorInfo();
+		m_cubemap_descriptor_set = vk::raii::DescriptorSet{nullptr};
+		VeDescriptorWriter(*m_material_set_layout, *m_global_pool)
+			.writeImage(0, &cubemap_image_info)
+			.build(m_cubemap_descriptor_set);
 	}
 
 	void VeApp::updateCamera() {
@@ -323,6 +339,7 @@ namespace ve {
 
 	// Print FPS and frame time to window title every 100 ms
 	// aswell as camera position and window resolution
+	// TODO: log actual resolution (for apple retina for example), not just window size.
 	void VeApp::updateWindowTitle() {
 		// Per-frame delta using steady clock
 		auto now = clock::now();

@@ -130,6 +130,16 @@ endfunction()
 		message(STATUS "Found slangc: ${SLANGC}")
 	endif()
 
+	add_slang_spirv_target(ShadersSkybox
+		TYPE GRAPHICS
+		SOURCES "${PROJECT_SOURCE_DIR}/shaders/skybox_shader.slang"
+		VERT_ENTRY vertMain
+		FRAG_ENTRY fragMain
+		PROFILE spirv_1_5
+		OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
+		OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/skybox_shader.spv"
+	)
+
 	add_slang_spirv_target(Shaders
 		TYPE GRAPHICS
 		SOURCES "${PROJECT_SOURCE_DIR}/shaders/simple_shader.slang"

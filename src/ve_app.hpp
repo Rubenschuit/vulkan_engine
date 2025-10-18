@@ -51,16 +51,24 @@ namespace ve {
 		std::vector<std::unique_ptr<VeBuffer>> m_uniform_buffers;
 
 		// Descriptor pool, layouts, sets
-	std::shared_ptr<VeDescriptorPool> m_global_pool{};
+		std::shared_ptr<VeDescriptorPool> m_global_pool{};
 
 		std::unique_ptr<VeDescriptorSetLayout> m_global_set_layout{};
 		std::unique_ptr<VeDescriptorSetLayout> m_material_set_layout{};
 
 		std::vector<vk::raii::DescriptorSet> m_global_descriptor_sets{};
 		vk::raii::DescriptorSet m_material_descriptor_set{nullptr};
+		vk::raii::DescriptorSet m_cubemap_descriptor_set{nullptr};
 
 		// Objects and texture (use project-root relative path; loader falls back if missing)
 		const char* m_texture_path = "textures/viking_room.png";
+		const char* m_skybox_path[6] = {"textures/skybox/Starfield_And_Haze_left.png",
+									 "textures/skybox/Starfield_And_Haze_right.png",
+									 "textures/skybox/Starfield_And_Haze_up.png",
+									 "textures/skybox/Starfield_And_Haze_down.png",
+									 "textures/skybox/Starfield_And_Haze_front.png",
+									 "textures/skybox/Starfield_And_Haze_back.png" };
+		VeTexture m_skybox{m_ve_device, m_skybox_path};
 		VeTexture m_texture{m_ve_device, m_texture_path};
 		// model paths hardcoded in .cpp for now
 		std::unordered_map<uint32_t, VeGameObject> m_game_objects;

@@ -16,7 +16,8 @@ namespace ve {
 			vk::ImageTiling tiling,
 			vk::ImageUsageFlags usage,
 			vk::MemoryPropertyFlags properties,
-			vk::ImageAspectFlags aspect_flags);
+			vk::ImageAspectFlags aspect_flags,
+			bool is_cubemap = false);
 		~VeImage();
 
 		VeImage(const VeImage&) = delete;
@@ -51,6 +52,9 @@ namespace ve {
 		vk::ImageUsageFlags m_usage;
 		vk::MemoryPropertyFlags m_properties;
 		vk::ImageAspectFlags m_aspect_flags;
+		uint32_t m_array_layers;
+		vk::ImageCreateFlags m_image_create_flags{};
+		vk::ImageViewType m_image_view_type{vk::ImageViewType::e2D};
 
 		vk::raii::Image m_image{nullptr};
 		vk::raii::DeviceMemory m_image_memory{nullptr};

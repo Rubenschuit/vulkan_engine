@@ -152,13 +152,13 @@ Particle simulateGravityFloor(Particle p) {
 		if (p.velocity.z < 0.0f) {
 			p.velocity.z = -p.velocity.z * 0.8f;
 		}
-		p.velocity.x *= 0.98f;
+		p.velocity.x *= 0.98f; // friction
 		p.velocity.y *= 0.98f;
 	}
 	return p;
 }
 
-// chatgpt generated code for:
+// chatgpt generated code (terrible):
 // 3) Galaxy spiral: central gravity + tangential drive + spiral arm attraction
 Particle simulateGalaxy(Particle p) {
 	// Relative position in galaxy plane (XY), with origin as center
@@ -203,7 +203,7 @@ Particle simulateGalaxy(Particle p) {
 	return p;
 }
 
-// chatgpt generated code:
+// chatgpt generated code (not good):
 // ---- Massive galaxy  ----
 float v_circ_flat(float r, float v0, float r0) {
 	// Flat rotation curve: approaches v0, smoothed near center by r0
@@ -264,29 +264,29 @@ Particle simulateGalaxyMassive(Particle p) {
 void resetPoint(uint i) {
 	uint state = (i + 1u) * 747796405u ^ params.seed;
 
-		// Scale in [0.1, 0.2)
-		float scale = 0.1f + 0.1f * rand01(state);
+	// Scale in [0.1, 0.2)
+	float scale = 0.1f + 0.1f * rand01(state);
 
-		// Position around (0,0,10) with small normal noise
+	// Position around (0,0,10) with small normal noise
 
-		float3 pos = params.origin + float3(0.0f, 0.0f, 10.0f);
-		pos += 0.1* rand_normal2(state).xyy; // small normal noise
+	float3 pos = params.origin + float3(0.0f, 0.0f, 10.0f);
+	pos += 0.1* rand_normal2(state).xyy; // small normal noise
 
-		// Velocity random normal
-		float2 vxy = rand_normal2(state);
-		float vz = rand_normal2(state).x;
-		float3 vel = float3(vxy.x, vxy.y, vz);
+	// Velocity random normal
+	float2 vxy = rand_normal2(state);
+	float vz = rand_normal2(state).x;
+	float3 vel = float3(vxy.x, vxy.y, vz);
 
-		// Color random in [0,1)
-		float3 col = float3(rand01(state), rand01(state), rand01(state));
+	// Color random in [0,1)
+	float3 col = float3(rand01(state), rand01(state), rand01(state));
 
-		Particle p0;
-		p0.position = float4(pos, scale);
-		p0.velocity = float4(vel, 0.0f);
-		p0.color = float4(col, 1.0f);
+	Particle p0;
+	p0.position = float4(pos, scale);
+	p0.velocity = float4(vel, 0.0f);
+	p0.color = float4(col, 1.0f);
 
-		particles_out[i] = p0;
-		particles_prev[i] = p0; // keep prev/current in sync
+	particles_out[i] = p0;
+	particles_prev[i] = p0; // keep prev/current in sync
 }
 
 void resetDisc(uint i) {

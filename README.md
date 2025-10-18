@@ -98,7 +98,7 @@ Download instructions and common install locations:
 
 ##### Windows (cmd or PowerShell):
 
-```bat
+```bash
 windowsBuild.bat                 # Debug + MinGW, run
 windowsBuild.bat release msvc    # Release + MSVC, run
 windowsBuild.bat test mingw      # Build tests with MinGW

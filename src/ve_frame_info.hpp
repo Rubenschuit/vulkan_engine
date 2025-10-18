@@ -29,6 +29,7 @@ namespace ve {
 	struct VeFrameInfo {
 		vk::raii::DescriptorSet& global_descriptor_set;
 		vk::raii::DescriptorSet& material_descriptor_set;
+		vk::raii::DescriptorSet& cubemap_descriptor_set; // For skybox rendering
 		vk::raii::CommandBuffer& command_buffer;
 		vk::raii::CommandBuffer& compute_command_buffer; // For compute shaders
 		std::unordered_map<uint32_t, VeGameObject>& game_objects;

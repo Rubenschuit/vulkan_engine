@@ -8,8 +8,11 @@
 
 namespace ve {
 	VeTexture::VeTexture(VeDevice& ve_device, const char* texture_path) : m_ve_device(ve_device) {
-
 		createTextureImage(texture_path);
+		createTextureSampler();
+	}
+	VeTexture::VeTexture(VeDevice& ve_device, const char* texture_path[6]) : m_ve_device(ve_device) {
+		createCubeTextureImage(texture_path);
 		createTextureSampler();
 	}
 
@@ -76,7 +79,8 @@ namespace ve {
 			staging_buffer.getBuffer(),
 			m_texture_image->getImage(),
 			static_cast<uint32_t>(m_width),
-			static_cast<uint32_t>(m_height));
+			static_cast<uint32_t>(m_height)
+		);
 
 		// Transition image to be optimal for shader read access
 		m_texture_image->transitionImageLayout(
@@ -86,6 +90,89 @@ namespace ve {
 			vk::AccessFlagBits2::eShaderRead,
 			vk::PipelineStageFlagBits2::eTransfer,
 			vk::PipelineStageFlagBits2::eFragmentShader);
+	}
+
+	void VeTexture::createCubeTextureImage(const char* texture_path[6]) {
+		assert(texture_path != nullptr && "Passed null pointer for texture path array");
+		assert(texture_path[0] != nullptr && "Passed null pointer for texture path");
+		assert(texture_path[1] != nullptr && "Passed null pointer for texture path");
+		assert(texture_path[2] != nullptr && "Passed null pointer for texture path");
+		assert(texture_path[3] != nullptr && "Passed null pointer for texture path");
+		assert(texture_path[4] != nullptr && "Passed null pointer for texture path");
+		assert(texture_path[5] != nullptr && "Passed null pointer for texture path");
+		stbi_uc* pixels[6];
+		for (int i = 0; i < 6; i++) {
+			VE_LOGI("Loading cube map face: " << texture_path[i]);
+			// width, height, channels should be the same for all faces
+			pixels[i] = stbi_load(texture_path[i], &m_width, &m_height, &m_channels, STBI_rgb_alpha);
+		}
+
+		// textures loaded
+		// Create a local scope staging buffer
+		ve::VeBuffer staging_buffer(
+			m_ve_device,
+			4,                                        // instance size
+			static_cast<uint32_t>(m_width * m_height * 6),    // instance count
+			vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+		);
+		VE_LOGD("Created staging buffer for cube map with size: " << (m_width * m_height * 6 * 4) << " bytes");
+
+		// Copy image data to staging buffer
+		staging_buffer.map();
+		staging_buffer.writeToBuffer((void*)pixels[0]);
+		// unmap is called in the destructor of VeBuffer
+
+		VE_LOGD("Copied cube map data to staging buffer");
+
+		for (int i = 0; i < 6; i++) {
+			stbi_image_free(pixels[i]);
+		}
+
+		// Create image
+		m_texture_image = std::make_unique<ve::VeImage>(
+			m_ve_device,
+			static_cast<uint32_t>(m_width),
+			static_cast<uint32_t>(m_height),
+			vk::Format::eR8G8B8A8Srgb,
+			vk::ImageTiling::eOptimal,
+			vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			vk::ImageAspectFlagBits::eColor,
+			true // is cubemap
+		);
+		// Next we execute synchronously 3 single-time command buffers:
+		// TODO: consider combining these into one command buffer
+
+		VE_LOGD("Created cube map image");
+
+		//transition image to be optimal for receiving data from buffer
+		m_texture_image->transitionImageLayout(
+			vk::ImageLayout::eUndefined,
+			vk::ImageLayout::eTransferDstOptimal,
+			{},
+			vk::AccessFlagBits2::eTransferWrite,
+			vk::PipelineStageFlagBits2::eTopOfPipe,
+			vk::PipelineStageFlagBits2::eTransfer);
+
+		// Copy data from staging buffer to texture image
+		m_ve_device.copyBufferToImage(
+			staging_buffer.getBuffer(),
+			m_texture_image->getImage(),
+			static_cast<uint32_t>(m_width),
+			static_cast<uint32_t>(m_height),
+			6
+		);
+
+		// Transition image to be optimal for shader read access
+		m_texture_image->transitionImageLayout(
+			vk::ImageLayout::eTransferDstOptimal,
+			vk::ImageLayout::eShaderReadOnlyOptimal,
+			vk::AccessFlagBits2::eTransferWrite,
+			vk::AccessFlagBits2::eShaderRead,
+			vk::PipelineStageFlagBits2::eTransfer,
+			vk::PipelineStageFlagBits2::eFragmentShader);
+		VE_LOGD("Transitioned cube map image layout");
 	}
 
 	// Sets max anisotropy to the maximum value supported by the device or 16, whichever is lower
