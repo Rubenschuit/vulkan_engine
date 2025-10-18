@@ -12,6 +12,26 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 - FPS-style camera
 - More coming...
 
+## Table of Contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+	- [Downloads](#downloads)
+		- [Windows](#windows)
+		- [macOS](#macos)
+		- [Linux](#linux)
+- [Quick start with scripts](#quick-start-with-scripts)
+	- [macOS and Linux](#macos-and-linux)
+	- [Windows (cmd or PowerShell)](#windows-cmd-or-powershell)
+- [Manual build](#manual-build)
+	- [macOS](#macos)
+	- [Windows (Visual Studio)](#windows-with-visual-studio)
+	- [Windows (MinGW)](#windows-with-mingw)
+	- [Linux](#linux-1)
+- [Tests](#tests)
+ - [Credits](#credits)
+
+
 ## Requirements
 
 - CMake ≥ 3.16
@@ -37,7 +57,7 @@ Note: CMake will auto-discover Slang (`slangc`) and the Vulkan SDK in common ins
 Download instructions and common install locations:
 - ##### Windows
 	- Slang: `C:\Program Files\Slang\bin\slangc.exe`
-	- Vulkan SDK: `C:\VulkanSDK\<version>` 
+	- Vulkan SDK: `C:\VulkanSDK\<version>`
 
 	With MSYS2/MinGW (run in the MinGW64 shell):
 	```bash
@@ -54,7 +74,7 @@ Download instructions and common install locations:
 	- Slang: `/usr/local/bin/slangc`
 	- Vulkan SDK: `/Applications/VulkanSDK/<version>`
 
-	With homebrew:	
+	With homebrew:
 	```bash
 	brew install cmake glfw glm
 	```
@@ -121,3 +141,10 @@ TODO
 
 - Enable with `-DVE_BUILD_TESTS=ON` or run `./unixBuild.sh test` / `windowsBuild.bat test <gen>`.
 - Tests run via CTest: `ctest --test-dir build --output-on-failure` (add `-C Debug/Release` for MSVC).
+
+## Credits
+
+Huge thanks to:
+
+- Brendan Galea for his excellent Vulkan video series: https://www.youtube.com/@BrendanGalea
+- The Khronos Vulkan Tutorial: https://docs.vulkan.org/tutorial/latest/00_Introduction.html
