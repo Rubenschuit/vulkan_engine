@@ -101,11 +101,24 @@ namespace ve {
 		assert(texture_path[4] != nullptr && "Passed null pointer for texture path");
 		assert(texture_path[5] != nullptr && "Passed null pointer for texture path");
 		stbi_uc* pixels[6];
+		int face_w = 0, face_h = 0, face_c = 0;
 		for (int i = 0; i < 6; i++) {
 			VE_LOGI("Loading cube map face: " << texture_path[i]);
-			// width, height, channels should be the same for all faces
-			pixels[i] = stbi_load(texture_path[i], &m_width, &m_height, &m_channels, STBI_rgb_alpha);
+			int w = 0, h = 0, c = 0;
+			// Force RGBA (4 bytes per pixel) for all faces
+			pixels[i] = stbi_load(texture_path[i], &w, &h, &c, STBI_rgb_alpha);
+			assert(pixels[i] != nullptr && "Failed to load cube map face texture");
+			if (i == 0) {
+				face_w = w; face_h = h; face_c = 4; // after conversion
+			} else {
+				// All faces of a cubemap must match dimensions
+				assert(w == face_w && h == face_h && "Cubemap faces must have identical dimensions");
+			}
 		}
+		// Store dimensions in members
+		m_width = face_w;
+		m_height = face_h;
+		m_channels = face_c;
 
 		// textures loaded
 		// Create a local scope staging buffer
@@ -118,9 +131,14 @@ namespace ve {
 		);
 		VE_LOGD("Created staging buffer for cube map with size: " << (m_width * m_height * 6 * 4) << " bytes");
 
-		// Copy image data to staging buffer
+		// Copy image data to staging buffer (concatenate the 6 faces)
 		staging_buffer.map();
-		staging_buffer.writeToBuffer((void*)pixels[0]);
+		const vk::DeviceSize layer_size = static_cast<vk::DeviceSize>(m_width) * static_cast<vk::DeviceSize>(m_height) * 4;
+		for (int i = 0; i < 6; ++i) {
+			assert(pixels[i] != nullptr && "Cubemap face pixels are null");
+			const vk::DeviceSize offset = layer_size * static_cast<vk::DeviceSize>(i);
+			staging_buffer.writeToBuffer((void*)pixels[i], layer_size, offset);
+		}
 		// unmap is called in the destructor of VeBuffer
 
 		VE_LOGD("Copied cube map data to staging buffer");

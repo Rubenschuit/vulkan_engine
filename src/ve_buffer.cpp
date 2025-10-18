@@ -68,7 +68,9 @@ namespace ve {
 		} else {
 			char* mem_offset = static_cast<char*>(m_mapped);
 			mem_offset += offset;
+			VE_LOGD("Writing to buffer at offset: " << offset << " with size: " << effective_size);
 			memcpy(mem_offset, data, effective_size);
+			VE_LOGD("Finished writing to buffer");
 		}
 	}
 

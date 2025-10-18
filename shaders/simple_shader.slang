@@ -21,9 +21,13 @@ struct UniformBuffer {
 ConstantBuffer<UniformBuffer> ubo;
 
 struct PushConstantData {
-	float4x4 transform; // per-object  transform (transl, rotat, scale)
-	float4x4 normal_transform;
-	float has_texture;
+	// Explicit layout to total exactly 128 bytes
+	[vk::offset(0)]   float4x4 transform;   // 64
+	[vk::offset(64)]  float4   nrm_col0;    // 16
+	[vk::offset(80)]  float4   nrm_col1;    // 16
+	[vk::offset(96)]  float4   nrm_col2;    // 16  -> 64+48=112
+	[vk::offset(112)] float    has_texture; // 4
+	[vk::offset(116)] float3   _pad;        // 12 -> 128
 };
 [push_constant]
 PushConstantData push_constants;
@@ -45,7 +49,12 @@ VertexOutput vertMain(VertexInput input) {
 
 	output.pos = mul(ubo.proj, mul(ubo.view, world_pos)); // view and projection
 	output.frag_pos_world = world_pos.xyz;
-	output.frag_normal_world = normalize(mul((float3x3)push_constants.normal_transform, input.in_normal));
+	// Reconstruct 3x3 normal matrix from explicit columns and apply
+	float3 nrm;
+	nrm.x = dot(push_constants.nrm_col0.xyz, input.in_normal);
+	nrm.y = dot(push_constants.nrm_col1.xyz, input.in_normal);
+	nrm.z = dot(push_constants.nrm_col2.xyz, input.in_normal);
+	output.frag_normal_world = normalize(nrm);
     output.frag_color = input.in_color;
 	output.frag_tex_coord = input.in_tex_coord;
     return output;

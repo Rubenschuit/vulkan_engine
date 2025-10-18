@@ -166,7 +166,9 @@ namespace ve {
 		assert(m_compute_uniform_buffers.size() == MAX_FRAMES_IN_FLIGHT && "compute_uniform_buffers size incorrect");
 		assert(m_total_time >= 0.0f && "total_time should be non-negative");
 		assert(frame_info.frame_time >= 0.0f && "delta_time should be non-negative");
+
 		m_total_time += frame_info.frame_time;
+
 		ParticleParams params{};
 		params.delta_time = frame_info.frame_time;
 		params.total_time = m_total_time;

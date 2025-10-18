@@ -32,7 +32,7 @@ namespace ve {
 
 	void SkyboxRenderSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout) {
 		vk::PushConstantRange push_constant_range{
-			.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+			.stageFlags = vk::ShaderStageFlagBits::eVertex,
 			.offset = 0, // Used for indexing multiple push constant ranges
 			.size = sizeof(SimplePushConstantData)
 		};
@@ -88,7 +88,7 @@ namespace ve {
 		push.transform =  m_cube_object.getTransform();
 		frame_info.command_buffer.pushConstants<SimplePushConstantData>(
 			*m_pipeline_layout,
-			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+			vk::ShaderStageFlagBits::eVertex,
 			0,
 			push
 		);

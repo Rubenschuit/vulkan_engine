@@ -12,12 +12,18 @@ namespace ve {
 	   A float3 or float4 must be aligned by 4N (= 16 bytes).
 	   A nested structure must be aligned by the base alignment of its members rounded up to a multiple of 16.
 	   A float4x4 matrix must have the same alignment as a float4.    */
-	// TODO: currently exceeds max push constant size of 128 bytes on some hardware
+	// Pack to match Vulkan/HLSL constant-buffer style layout:
+	// - float4x4 uses 4 registers (64 bytes)
+	// - float3x3 occupies 3 registers with 16-byte stride (48 bytes)
+	// Represent normal matrix as 3x4 columns on CPU to match 16-byte stride.
+	// Total = 64 + 48 + 4 + 12(pad) = 128 bytes
 	struct SimplePushConstantData {
-		glm::mat4 transform;
-		glm::mat4 normal_transform;
-		alignas(4) float has_texture;
+		alignas(16) glm::mat4  transform;            // 64
+		alignas(16) glm::mat3x4 normal_transform;    // 48 (3 columns x vec4)
+		alignas(4)  float      has_texture;          // 4
+		alignas(4)  float      _pad[3]{};            // 12 -> 128 total
 	};
+	static_assert(sizeof(SimplePushConstantData) == 128, "Push constants must be 128 bytes for stable layout");
 
 	SimpleRenderSystem::SimpleRenderSystem(
 			VeDevice& device,
@@ -82,7 +88,11 @@ namespace ve {
 			// Skip non-mesh objects (e.g., point lights) or missing models
 			if (!obj.ve_model) continue;
 			SimplePushConstantData push{};
-			push.normal_transform = obj.getNormalTransform();
+			// Pack glm::mat3 into 3 vec4 columns (last component is padding)
+			const glm::mat3 nrm = obj.getNormalTransform();
+			push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
+			push.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
+			push.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
 			push.transform = obj.getTransform();
 			push.has_texture = obj.has_texture;
 			frame_info.command_buffer.pushConstants<SimplePushConstantData>(
