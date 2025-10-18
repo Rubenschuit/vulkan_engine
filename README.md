@@ -120,8 +120,8 @@ cmake --build build
 ##### Windows with Visual Studio:
 
 ```bat
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DVE_FETCH_GLFW=ON
-cmake --build build --config Debug
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build
 build\Debug\VeApp.exe
 ```
 
