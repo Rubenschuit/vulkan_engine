@@ -20,7 +20,28 @@ namespace ve {
 			glfwSetWindowShouldClose(m_window, true);
 		}
 
-		handleMouseToggle();
+		// Handle mouse-look toggle (Tab). Also drive UI visibility from this state.
+		{
+			int cur_btn = glfwGetKey(m_window, m_key_mappings.toggle_mouse_look);
+			if (cur_btn == GLFW_PRESS && m_prev_toggle_state == GLFW_RELEASE) {
+				m_mouse_look_enabled = !m_mouse_look_enabled;
+				actions.ui_toggle = true;
+				// Update cursor modes according to the new state
+				if (m_mouse_look_enabled) {
+					glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+					if (glfwRawMouseMotionSupported())
+						glfwSetInputMode(m_window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+					// Reset last positions to avoid jump on re-enable
+					glfwGetCursorPos(m_window, &m_last_x, &m_last_y);
+				} else {
+					glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+					if (glfwRawMouseMotionSupported())
+						glfwSetInputMode(m_window, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
+				}
+			}
+			m_prev_toggle_state = cur_btn;
+			actions.ui_visible = !m_mouse_look_enabled;
+		}
 
 		// Keyboard look
 		m_yaw_delta = 0.0f;

@@ -12,6 +12,23 @@ namespace ve {
 
 	VeRenderer::~VeRenderer() {}
 
+	float VeRenderer::getExtentAspectRatio() const { return m_ve_swap_chain->getExtentAspectRatio(); }
+	vk::Format VeRenderer::getSwapChainImageFormat() const { return m_ve_swap_chain->getSwapChainImageFormat(); }
+	size_t VeRenderer::getImageCount() const { return m_ve_swap_chain->getImageCount(); }
+	vk::Extent2D VeRenderer::getExtent() const { return m_ve_swap_chain->getSwapChainExtent(); }
+	uint32_t VeRenderer::getCurrentFrame() const {
+		assert(m_is_frame_started && "Frame is not in progress");
+		return m_ve_swap_chain->getCurrentFrame();
+	}
+	vk::raii::CommandBuffer& VeRenderer::getCurrentCommandBuffer() {
+		assert(m_is_frame_started && "Frame is not in progress");
+		return m_command_buffers[m_ve_swap_chain->getCurrentFrame()];
+	}
+	vk::raii::CommandBuffer& VeRenderer::getCurrentComputeCommandBuffer() {
+		assert(m_is_frame_started && "Frame is not in progress");
+		return m_compute_command_buffers[m_ve_swap_chain->getCurrentFrame()];
+	}
+
 	void VeRenderer::createCommandBuffers() {
 		vk::CommandBufferAllocateInfo alloc_info{
 			.sType = vk::StructureType::eCommandBufferAllocateInfo,
@@ -92,6 +109,8 @@ namespace ve {
 	void VeRenderer::endFrame(vk::raii::CommandBuffer& command_buffer) {
 		assert(m_is_frame_started && "Can't call endFrame while frame is not in progress");
 		assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end frame on command buffer from a different frame");
+
+		transitionToPresent(command_buffer);
 		command_buffer.end();
 
 		// submit graphics and present
@@ -112,7 +131,7 @@ namespace ve {
 
 	// Starts command buffer recording, transitions the swap chain image to a color attachment
 	// and begins a dynamic rendering pass.
-	void VeRenderer::beginRender(vk::raii::CommandBuffer& command_buffer) {
+	void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer) {
 		assert(m_is_frame_started && "Can't call beginRender while frame is not in progress");
 		assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin render on command buffer from a different frame");
 
@@ -162,13 +181,17 @@ namespace ve {
 	}
 
 	// Ends the dynamic rendering pass and transitions the swap chain image to presentation
-	void VeRenderer::endRender(vk::raii::CommandBuffer& command_buffer) {
+	void VeRenderer::endSceneRender(vk::raii::CommandBuffer& command_buffer) {
 		assert(m_is_frame_started && "Can't call endRender while frame is not in progress");
 		assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end render on command buffer from a different frame");
 
 		command_buffer.endRendering();
+	}
 
-		// After rendering, transition swap chain image to presentation
+	void VeRenderer::transitionToPresent(vk::raii::CommandBuffer& command_buffer) {
+		assert(m_is_frame_started && "Can't call transitionToPresent while frame is not in progress");
+		assert(&command_buffer == &getCurrentCommandBuffer() && "Can't transition on command buffer from a different frame");
+		// After all rendering, transition swap chain image to presentation
 		m_ve_swap_chain->transitionImageLayout(
 			command_buffer,
 			m_current_image_index,

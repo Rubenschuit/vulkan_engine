@@ -60,3 +60,4 @@ build_msvc/
 .clang-format
 .editorconfig
 .env.cmake
+imgui.ini

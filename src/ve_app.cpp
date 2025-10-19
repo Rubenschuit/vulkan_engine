@@ -5,6 +5,7 @@
 #include "systems/point_light_system.hpp"
 #include "systems/particle_system.hpp"
 #include "systems/skybox_render_system.hpp"
+#include <imgui.h>
 
 
 #define GLM_FORCE_RADIANS
@@ -17,6 +18,8 @@ namespace ve {
 		loadGameObjects();
 		createUniformBuffers();
 		createDescriptors();
+		initSystems();
+		initUI();
 
 		// Initialise camera
 		m_last_aspect = m_ve_renderer.getExtentAspectRatio();
@@ -27,42 +30,12 @@ namespace ve {
 
 	void VeApp::run() {
 		VE_LOGI("VeApp::run starting. Window=" << m_ve_window.getWidth() << "x" << m_ve_window.getHeight());
-		// Init render systems
-		SkyboxRenderSystem skybox_render_system(
-			m_ve_device,
-			m_global_set_layout->getDescriptorSetLayout(),
-			m_material_set_layout->getDescriptorSetLayout(),
-			m_ve_renderer.getSwapChainImageFormat()
-		);
-		SimpleRenderSystem simple_render_system(
-			m_ve_device,
-			m_global_set_layout->getDescriptorSetLayout(),
-			m_material_set_layout->getDescriptorSetLayout(),
-			m_ve_renderer.getSwapChainImageFormat()
-		);
-		AxesRenderSystem axes_render_system(
-			m_ve_device,
-			m_global_set_layout->getDescriptorSetLayout(),
-			m_ve_renderer.getSwapChainImageFormat()
-		);
-		PointLightSystem point_light_system(
-			m_ve_device,
-			m_global_set_layout->getDescriptorSetLayout(),
-			m_material_set_layout->getDescriptorSetLayout(),
-			m_ve_renderer.getSwapChainImageFormat()
-		);
-		ParticleSystem m_particle_system(
-			m_ve_device,
-			m_global_pool,
-			m_global_set_layout->getDescriptorSetLayout(),
-			m_ve_renderer.getSwapChainImageFormat(),
-			434567, // number of particles
-			glm::vec3{0.0f, -200.0f, 10.0f}
-		);
+
 		auto current_time = std::chrono::high_resolution_clock::now();
 		auto total_time = 0.0f;
+		bool ui_visible = false;
 
-		// Main loop
+		// ------------- Main loop -------------
 		while (!glfwWindowShouldClose(m_ve_window.getGLFWwindow())) {
 			glfwPollEvents();
 
@@ -77,7 +50,8 @@ namespace ve {
 			if (dt > max_dt)
 				dt = max_dt;
 
-			// Attempt to begin the frame
+			// --------------- Begin frame ---------------
+
 			if (!m_ve_renderer.beginFrame()) {
 				current_time = new_time;
 				continue;
@@ -102,43 +76,27 @@ namespace ve {
 				.current_frame = current_frame
 			};
 
-			// update
-			auto actions = m_input_controller.processInput(m_frame_time, m_camera);
-			// Handle particle actions
-			if (actions.set_mode >= 1 && actions.set_mode <= 4) {
-				m_particle_system.setMode(actions.set_mode);
-			}
-			if (actions.reset_particles) {
-				m_particle_system.resetPoint();
-			}
-			else if (actions.reset_disc) {
-				m_particle_system.resetDisc();
-			}
-
+			// --------------- Update ---------------
+			// All input (keyboard/mouse) and UI intents are applied inside updateParticles
 			updateCamera();
 			updateWindowTitle();
 
 			// update global ubo
 			UniformBufferObject ubo{};
-			point_light_system.update(frame_info, ubo);
+			m_point_light_system->update(frame_info, ubo);
 			updateUniformBuffer(current_frame, ubo);
 
-			// Record and submit particle compute work
-			m_particle_system.update(frame_info);
-			m_ve_renderer.submitCompute(compute_command_buffer);
+			// Compute pass for particles (applies input + UI intents)
+			updateParticles(frame_info);
 
-			// render
-			m_ve_renderer.beginRender(command_buffer);
+			// --------------- Render ---------------
 
-			skybox_render_system.render(frame_info);
-			simple_render_system.renderObjects(frame_info);
-			axes_render_system.render(frame_info);
-			point_light_system.render(frame_info);
-			m_particle_system.render(frame_info);
+			renderScene(frame_info);
 
-			m_ve_renderer.endRender(command_buffer);
+			// Draw UI for next frame intents and update context from ui input
+			imgui_layer->renderUI(context);
 
-
+			// Now transition the current swapchain image to PresentSrcKHR and present the frame
 			m_ve_renderer.endFrame(command_buffer);
 
 		}
@@ -147,6 +105,55 @@ namespace ve {
 		// log average fps and frametime over entire run currently these get reset on window resize
 		VE_LOGI("VeApp::run finished. Average FPS: " << (m_fps_frame_count / (m_sum_frame_ms / 1000.0f)));
 		VE_LOGI("VeApp::run finished. Average Frame Time: " << (m_sum_frame_ms / m_fps_frame_count) << " ms");
+	}
+
+	// TODO: move m_input_controller.processInput
+	void VeApp::updateParticles(VeFrameInfo& frame_info) {
+		// 1) Apply input actions
+		auto actions = m_input_controller.processInput(m_frame_time, m_camera);
+		context.visible = actions.ui_visible; // Tab toggles UI visibility
+		if (actions.set_mode >= 1 && actions.set_mode <= 4) {
+			m_particle_system->setMode(actions.set_mode);
+		}
+		if (actions.reset_particles) {
+			m_particle_system->resetPoint();
+		} else if (actions.reset_disc) {
+			m_particle_system->resetDisc();
+		}
+
+		// 2) Apply UI intents captured in previous renderUI
+		m_particle_system->stageParticleCount(context.pending_particle_count);
+		if (context.apply_particle_count) {
+			m_particle_system->applyStagedParticleCount();
+			context.apply_particle_count = false;
+		}
+		if (context.reset_particle_count) {
+			m_particle_system->scheduleRestart();
+			context.reset_particle_count = false;
+		}
+
+		m_particle_system->setMean(context.particle_velocity_mean);
+		m_particle_system->setStddev(context.particle_velocity_stddev);
+		context.apply_velocity_params = false;
+
+
+		// 3) Record and submit particle compute work
+		m_particle_system->update(frame_info);
+		m_ve_renderer.submitCompute(frame_info.compute_command_buffer);
+	}
+
+	void VeApp::renderScene(VeFrameInfo& frame_info) {
+		auto& command_buffer = frame_info.command_buffer;
+		m_ve_renderer.beginSceneRender(command_buffer);
+
+		// systems
+		m_skybox_render_system->render(frame_info);
+		m_simple_render_system->renderObjects(frame_info);
+		m_axes_render_system->render(frame_info);
+		m_point_light_system->render(frame_info);
+		m_particle_system->render(frame_info);
+
+		m_ve_renderer.endSceneRender(command_buffer);
 	}
 
 	void VeApp::loadGameObjects() {
@@ -316,6 +323,53 @@ namespace ve {
 		VeDescriptorWriter(*m_material_set_layout, *m_global_pool)
 			.writeImage(0, &cubemap_image_info)
 			.build(m_cubemap_descriptor_set);
+	}
+
+	void VeApp::initSystems() {
+		m_simple_render_system = std::make_unique<SimpleRenderSystem>(
+			m_ve_device,
+			m_global_set_layout->getDescriptorSetLayout(),
+			m_material_set_layout->getDescriptorSetLayout(),
+			m_ve_renderer.getSwapChainImageFormat()
+		);
+		m_axes_render_system = std::make_unique<AxesRenderSystem>(
+			m_ve_device,
+			m_global_set_layout->getDescriptorSetLayout(),
+			m_ve_renderer.getSwapChainImageFormat()
+		);
+		m_point_light_system = std::make_unique<PointLightSystem>(
+			m_ve_device,
+			m_global_set_layout->getDescriptorSetLayout(),
+			m_material_set_layout->getDescriptorSetLayout(),
+			m_ve_renderer.getSwapChainImageFormat()
+		);
+		m_particle_system = std::make_unique<ParticleSystem>(
+			m_ve_device,
+			m_global_pool,
+			m_global_set_layout->getDescriptorSetLayout(),
+			m_ve_renderer.getSwapChainImageFormat(),
+			434567, // number of particles
+			glm::vec3{0.0f, -200.0f, 10.0f}
+		);
+		m_skybox_render_system = std::make_unique<SkyboxRenderSystem>(
+			m_ve_device,
+			m_global_set_layout->getDescriptorSetLayout(),
+			m_material_set_layout->getDescriptorSetLayout(),
+			m_ve_renderer.getSwapChainImageFormat()
+		);
+	}
+
+	void VeApp::initUI() {
+		imgui_layer = std::make_unique<ImGuiLayer>(m_ve_window, m_ve_device, m_ve_renderer);
+		context = {
+			.visible = false,
+			.pending_particle_count = m_particle_system->getPendingParticleCount(),
+			.apply_particle_count = false,
+			.reset_particle_count = false,
+			.particle_velocity_mean = m_particle_system->getMean(),
+			.particle_velocity_stddev = m_particle_system->getStddev(),
+			.apply_velocity_params = false
+		};
 	}
 
 	void VeApp::updateCamera() {

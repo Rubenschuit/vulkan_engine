@@ -34,6 +34,21 @@ endif()
 target_link_libraries(VEngineLib PUBLIC ${GLFW_LIB} ${Vulkan_LIBRARIES})
 target_link_libraries(${PROJECT_NAME} PRIVATE VEngine::Lib)
 
+# Add Dear ImGui sources to VEngineLib
+if (IMGUI_DIR)
+	set(IMGUI_SOURCES
+		${IMGUI_DIR}/imgui.cpp
+		${IMGUI_DIR}/imgui_draw.cpp
+		${IMGUI_DIR}/imgui_tables.cpp
+		${IMGUI_DIR}/imgui_widgets.cpp
+		${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+		${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+	)
+	target_sources(VEngineLib PRIVATE ${IMGUI_SOURCES})
+	# Mark ImGui headers as system to silence warnings coming from third-party headers
+	target_include_directories(VEngineLib SYSTEM PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+endif()
+
 if (APPLE)
 	target_link_libraries(VEngineLib PUBLIC
 		"-framework Cocoa" "-framework IOKit" "-framework CoreVideo" "-framework Metal"

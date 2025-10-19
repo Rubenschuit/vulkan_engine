@@ -72,6 +72,8 @@ struct Params {
 	uint32_t particle_count;
 	uint32_t reset; // 1 = reinitialize particles this dispatch
 	uint32_t seed;  // rng seed for reset
+	float mean;
+	float stddev;
 	uint32_t reset_kind; // 1 = point, 2 = disc
 	int mode; // 1=weirdOrbiting, 2=gravityFloor, 3=galaxy, 4=galaxyMassive
 	float3 origin;
@@ -107,8 +109,8 @@ float rand01(inout uint state) {
 
 // Box-Muller to approximate normal distribution
 float2 rand_normal2(inout uint state) {
-	float mean = 0.0f;
-	float stddev = 3.0f;
+	float mean = params.mean;
+	float stddev = params.stddev;
 	float u1 = max(1e-6f, rand01(state));
 	float u2 = rand01(state);
 	float r = sqrt(-2.0f * log(u1));
