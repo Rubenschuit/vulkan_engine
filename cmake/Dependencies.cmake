@@ -5,7 +5,7 @@
 # - stb_image
 
 # Auto-detect common MSYS2/MinGW prefixes on Windows (if not provided)
-if (WIN32 AND NOT DEFINED MINGW_PATH)
+if (WIN32 AND NOT DEFINED MINGW_PATH AND CMAKE_GENERATOR STREQUAL "MinGW Makefiles")
 	set(_VE_MINGW_CANDIDATES
 		"C:/msys64/mingw64"
 		"C:/msys64/ucrt64"
@@ -116,8 +116,14 @@ else()
 		/opt/homebrew/include
 		/usr/local/include
 		/usr/include
-		C:/msys64/mingw64/include
 	)
+	if (CMAKE_GENERATOR STREQUAL "MinGW Makefiles")
+		list(APPEND _VE_GLM_HINTS
+			"C:/msys64/mingw64/include"
+			"C:/msys64/ucrt64/include"
+			"C:/msys64/clang64/include"
+		)
+	endif()
 	if (MINGW_PATH)
 		list(PREPEND _VE_GLM_HINTS "${MINGW_PATH}/include")
 	endif()

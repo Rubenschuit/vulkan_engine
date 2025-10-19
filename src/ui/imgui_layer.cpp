@@ -41,7 +41,7 @@ static VkDescriptorPool createImguiDescriptorPool(vk::raii::Device& device) {
 }
 
 ImGuiLayer::ImGuiLayer(VeWindow& window, VeDevice& device, VeRenderer& renderer)
-    : m_window(window), m_device(device), m_renderer(renderer) {
+    : m_device(device), m_renderer(renderer) {
     // Create ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -145,10 +145,13 @@ void ImGuiLayer::renderUI(UIContext& context) {
 		// Ui displaying controls such as wasd movement, c to crouch, space to jump
 		// 1,2,3,4 for particle behavior
 		if (ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+			// bottom right
+			ImGui::SetWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 200, ImGui::GetIO().DisplaySize.y - 200), ImGuiCond_Always);
 			ImGui::Text("Other Controls Here");
 			ImGui::Text("WASD: Move");
 			ImGui::Text("C: Crouch");
 			ImGui::Text("Space: Jump");
+
 			ImGui::Text("1: Particle Mode 1");
 			ImGui::Text("2: Particle Mode 2");
 			ImGui::Text("3: Particle Mode 3");
@@ -156,6 +159,33 @@ void ImGuiLayer::renderUI(UIContext& context) {
 
 		}
 		ImGui::End();
+
+		// crude performance window
+		static auto time_start = std::chrono::high_resolution_clock::now();
+		auto now = std::chrono::high_resolution_clock::now();
+		auto time_elapsed = std::chrono::duration<float, std::chrono::seconds::period>(now - time_start).count();
+		static int frame_count = 0;
+		static float fps = 0.0f;
+		static float frame_time_ms = 0.0f;
+		frame_count++;
+		if (frame_count >= 60) {
+			frame_count = 0;
+			fps = 1.0f / time_elapsed;
+			frame_time_ms = time_elapsed * 1000.0f;
+		}
+
+		if (ImGui::Begin("Performance", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+			//set location to top right
+			ImGui::SetWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 200, 10), ImGuiCond_Always);
+			ImGui::Separator();
+			ImGui::Text("FPS: %.1f", fps);
+			ImGui::Text("Frame Time: %.2f ms", frame_time_ms);
+			//resolution
+			auto extent = m_renderer.getExtent();
+			ImGui::Text("Resolution: %d x %d", extent.width, extent.height);
+		}
+		ImGui::End();
+		time_start = now;
 	}
 	endFrame(m_renderer.getCurrentCommandBuffer());
 }

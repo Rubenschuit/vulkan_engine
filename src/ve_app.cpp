@@ -33,7 +33,6 @@ namespace ve {
 
 		auto current_time = std::chrono::high_resolution_clock::now();
 		auto total_time = 0.0f;
-		bool ui_visible = false;
 
 		// ------------- Main loop -------------
 		while (!glfwWindowShouldClose(m_ve_window.getGLFWwindow())) {
@@ -392,8 +391,6 @@ namespace ve {
 	}
 
 	// Print FPS and frame time to window title every 100 ms
-	// aswell as camera position and window resolution
-	// TODO: log actual resolution (for apple retina for example), not just window size.
 	void VeApp::updateWindowTitle() {
 		// Per-frame delta using steady clock
 		auto now = clock::now();
@@ -408,10 +405,14 @@ namespace ve {
 			double fps = (window_ms > 0) ? (1000.0 * static_cast<double>(m_fps_frame_count) / static_cast<double>(window_ms)) : 0.0;
 			double avg_ms = (m_fps_frame_count > 0) ? (m_sum_frame_ms / static_cast<double>(m_fps_frame_count)) : 0.0;
 			char buf[128];
-			snprintf(buf, sizeof(buf), "Vulkan Engine!  %d FPS  %.2f ms   location: (%.2f, %.2f, %.2f)    resolution: (%d, %d)",
-					 static_cast<int>(fps), avg_ms,
-					 m_camera.getPosition().x, m_camera.getPosition().y, m_camera.getPosition().z,
-					 m_ve_window.getWidth(), m_ve_window.getHeight()
+			// add release/debug mode with ifdef
+#ifdef NDEBUG
+			const char* mode_str = "Release";
+#else
+			const char* mode_str = "Debug";
+#endif
+			snprintf(buf, sizeof(buf), "Vulkan Engine! -- %s mode          FPS %d   %.2f ms",
+					 mode_str, static_cast<int>(fps), avg_ms
 			);
 			glfwSetWindowTitle(m_ve_window.getGLFWwindow(), buf);
 			// Reset window counters

@@ -48,7 +48,6 @@ public:
 private:
     void uploadFonts();
 
-    VeWindow& m_window;
     VeDevice& m_device;
     VeRenderer& m_renderer;
     VkDescriptorPool m_descriptor_pool = VK_NULL_HANDLE;

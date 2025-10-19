@@ -39,10 +39,10 @@ if /I "%MODE%"=="test" set EXTRA_CMAKE_ARGS=-DVE_BUILD_TESTS=ON
 :: Choose generator and build dir
 if /I "%GEN%"=="msvc" (
 	set CMAKE_GEN=Visual Studio 17 2022
-	set BUILD_DIR=build_msvc
+	set BUILD_DIR=build
 ) else (
 	set CMAKE_GEN=MinGW Makefiles
-	set BUILD_DIR=build_mingw
+	set BUILD_DIR=build
 )
 
 echo [INFO] Configuring for %GEN% ("%CMAKE_GEN%"), %BUILD_TYPE%

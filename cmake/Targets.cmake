@@ -47,6 +47,18 @@ if (IMGUI_DIR)
 	target_sources(VEngineLib PRIVATE ${IMGUI_SOURCES})
 	# Mark ImGui headers as system to silence warnings coming from third-party headers
 	target_include_directories(VEngineLib SYSTEM PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+
+	# Suppress noisy conversion/sign warnings for ImGui sources only
+	if (MSVC)
+		set(_IMGUI_MSVC_FLAGS /wd4244 /wd4267 /wd4365 /wd4389)
+		set_source_files_properties(${IMGUI_SOURCES} PROPERTIES COMPILE_OPTIONS "${_IMGUI_MSVC_FLAGS}")
+	else()
+		set(_IMGUI_FLAGS -Wno-conversion -Wno-sign-conversion)
+		if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+			list(APPEND _IMGUI_FLAGS -Wno-implicit-int-conversion -Wno-implicit-int-float-conversion -Wno-shorten-64-to-32)
+		endif()
+		set_source_files_properties(${IMGUI_SOURCES} PROPERTIES COMPILE_OPTIONS "${_IMGUI_FLAGS}")
+	endif()
 endif()
 
 if (APPLE)
@@ -72,7 +84,7 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CM
 
 if (WIN32)
 	message(STATUS "CREATING BUILD FOR WINDOWS")
-	if (USE_MINGW)
+	if (USE_MINGW AND MINGW_PATH)
 		target_include_directories(VEngineLib PUBLIC ${MINGW_PATH}/include)
 		target_link_directories(VEngineLib PUBLIC ${MINGW_PATH}/lib)
 	endif()
