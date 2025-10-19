@@ -27,7 +27,6 @@ struct PushConstantData {
 	[vk::offset(80)]  float4   nrm_col1;    // 16
 	[vk::offset(96)]  float4   nrm_col2;    // 16  -> 64+48=112
 	[vk::offset(112)] float    has_texture; // 4
-	[vk::offset(116)] float3   _pad;        // 12 -> 128
 };
 [push_constant]
 PushConstantData push_constants;

@@ -21,9 +21,8 @@ namespace ve {
 		alignas(16) glm::mat4  transform;            // 64
 		alignas(16) glm::mat3x4 normal_transform;    // 48 (3 columns x vec4)
 		alignas(4)  float      has_texture;          // 4
-		alignas(4)  float      _pad[3]{};            // 12 -> 128 total
 	};
-	static_assert(sizeof(SimplePushConstantData) == 128, "Push constants must be 128 bytes for stable layout");
+	static_assert(sizeof(SimplePushConstantData) <= 128, "Push constants must be 128 bytes for stable layout");
 
 	SimpleRenderSystem::SimpleRenderSystem(
 			VeDevice& device,

@@ -68,6 +68,13 @@ namespace ve {
 									 "textures/skybox/Starfield_And_Haze_down.png",
 									 "textures/skybox/Starfield_And_Haze_front.png",
 									 "textures/skybox/Starfield_And_Haze_back.png" };
+		/*
+		const char* m_skybox_path[6] = {"textures/mots.png",
+									 "textures/mots.png",
+									 "textures/mots.png",
+									 "textures/mots.png",
+									 "textures/mots.png",
+									 "textures/mots.png" };*/
 		VeTexture m_skybox{m_ve_device, m_skybox_path};
 		VeTexture m_texture{m_ve_device, m_texture_path};
 		// model paths hardcoded in .cpp for now
@@ -80,7 +87,7 @@ namespace ve {
         VeCamera m_camera{{20.0f, 20.0f, 20.0f}, {0.0f, 0.0f, 1.0f}};
 		float m_fov = glm::radians(80.0f);
 		float m_near_plane = 0.1f;
-		float m_far_plane = 10000.0f;
+		float m_far_plane = 100000.0f;
 		float m_last_aspect{0.0f};
 
 		// FPS/frametime tracking

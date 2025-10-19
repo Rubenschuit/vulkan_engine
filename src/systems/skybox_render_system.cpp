@@ -27,7 +27,7 @@ namespace ve {
 	void SkyboxRenderSystem::loadCubeModel() {
 		std::shared_ptr<VeModel> model = std::make_shared<VeModel>(m_ve_device, "models/cube.obj");
 		m_cube_object.ve_model = model;
-		m_cube_object.transform.scale = {1500.0f, 1500.0f, 1500.0f};
+		m_cube_object.transform.scale = 4.0f * glm::vec3(1500.0f, 1500.0f, 1500.0f);
 	}
 
 	void SkyboxRenderSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout) {
