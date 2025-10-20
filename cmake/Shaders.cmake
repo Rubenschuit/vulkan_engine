@@ -89,103 +89,73 @@ function(add_slang_spirv_target TARGET)
 	add_custom_target(${TARGET} DEPENDS ${_SPV_FILES})
 endfunction()
 
-	# Build candidate hint paths for slangc across platforms
-	set(_SLANG_HINTS
-		$ENV{SLANG_HOME}/bin
-		${SLANG_HOME}/bin
-		$ENV{SLANG_ROOT}/bin
-		${SLANG_ROOT}/bin
-		$ENV{SLANG_PATH}/bin
-		${SLANG_PATH}/bin
-		/usr/local/bin
-		/usr/bin
-		./bin
-	)
+# Build candidate hint paths for slangc across platforms
+set(_SLANG_HINTS
+	$ENV{SLANG_HOME}/bin
+	${SLANG_HOME}/bin
+	$ENV{SLANG_ROOT}/bin
+	${SLANG_ROOT}/bin
+	$ENV{SLANG_PATH}/bin
+	${SLANG_PATH}/bin
+	/usr/local/bin
+	/usr/bin
+	./bin
+)
 
-	# Common Windows locations (Program Files, vcpkg, MSYS2/MinGW)
-	if (WIN32)
-		list(APPEND _SLANG_HINTS
-			$ENV{ProgramFiles}/Slang/bin
-			$ENV{ProgramW6432}/Slang/bin
-			$ENV{ProgramFiles}/Slang/bin/windows-x64/release
-			$ENV{ProgramW6432}/Slang/bin/windows-x64/release
-			${MINGW_PATH}/bin
-			C:/msys64/mingw64/bin
-			C:/msys64/usr/bin
-			$ENV{VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/tools/slang
-			${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/tools/slang
-			$ENV{VCPKG_ROOT}/installed/x64-windows/tools/slang
-			$ENV{VCPKG_ROOT}/installed/x64-windows-static/tools/slang
+# Common Windows locations (Program Files, vcpkg, MSYS2/MinGW)
+if (WIN32)
+	list(APPEND _SLANG_HINTS
+		$ENV{ProgramFiles}/Slang/bin
+		$ENV{ProgramW6432}/Slang/bin
+		$ENV{ProgramFiles}/Slang/bin/windows-x64/release
+		$ENV{ProgramW6432}/Slang/bin/windows-x64/release
+		${MINGW_PATH}/bin
+		C:/msys64/mingw64/bin
+		C:/msys64/usr/bin
+		$ENV{VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/tools/slang
+		${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/tools/slang
+		$ENV{VCPKG_ROOT}/installed/x64-windows/tools/slang
+		$ENV{VCPKG_ROOT}/installed/x64-windows-static/tools/slang
+	)
+endif()
+
+unset(SLANGC CACHE)
+find_program(SLANGC
+	NAMES slangc
+	HINTS ${_SLANG_HINTS}
+)
+if (NOT SLANGC)
+	message(FATAL_ERROR "slangc not found. Slang is required. Set SLANG_HOME or ensure slangc is on PATH.")
+else()
+	message(STATUS "Found slangc: ${SLANGC}")
+endif()
+
+# Glob recurese all .slang files in shaders/ directory
+file(GLOB_RECURSE SLANG_SHADER_FILES "${PROJECT_SOURCE_DIR}/shaders/*.slang")
+# Create a target for each shader file and add target to list
+foreach(SLANG_SHADER ${SLANG_SHADER_FILES})
+	get_filename_component(SLANG_SHADER_NAME ${SLANG_SHADER} NAME_WE)
+	add_slang_spirv_target(${SLANG_SHADER_NAME}
+		TYPE GRAPHICS
+		SOURCES ${SLANG_SHADER}
+		VERT_ENTRY vertMain
+		FRAG_ENTRY fragMain
+		PROFILE spirv_1_5
+		OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
+		OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/${SLANG_SHADER_NAME}.spv"
+	)
+	if ( SLANG_SHADER_NAME MATCHES ".*_compute$")
+		add_slang_spirv_target(${SLANG_SHADER_NAME}c
+			TYPE COMPUTE
+			SOURCES ${SLANG_SHADER}
+			ENTRY compMain
+			PROFILE spirv_1_5
+			OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
+			OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/${SLANG_SHADER_NAME}c.spv"
 		)
+		list(APPEND SHADER_TARGETS ${SLANG_SHADER_NAME}c)
 	endif()
+	# Add to list of shader targets
+	list(APPEND SHADER_TARGETS ${SLANG_SHADER_NAME})
 
-	unset(SLANGC CACHE)
-	find_program(SLANGC
-		NAMES slangc
-		HINTS ${_SLANG_HINTS}
-	)
-	if (NOT SLANGC)
-		message(FATAL_ERROR "slangc not found. Slang is required. Set SLANG_HOME or ensure slangc is on PATH.")
-	else()
-		message(STATUS "Found slangc: ${SLANGC}")
-	endif()
-
-	add_slang_spirv_target(ShadersSkybox
-		TYPE GRAPHICS
-		SOURCES "${PROJECT_SOURCE_DIR}/shaders/skybox_shader.slang"
-		VERT_ENTRY vertMain
-		FRAG_ENTRY fragMain
-		PROFILE spirv_1_5
-		OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
-		OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/skybox_shader.spv"
-	)
-
-	add_slang_spirv_target(Shaders
-		TYPE GRAPHICS
-		SOURCES "${PROJECT_SOURCE_DIR}/shaders/simple_shader.slang"
-		VERT_ENTRY vertMain
-		FRAG_ENTRY fragMain
-		PROFILE spirv_1_5
-		OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
-		OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/simple_shader.spv"
-	)
-
-	add_slang_spirv_target(ShadersAxes
-		TYPE GRAPHICS
-		SOURCES "${PROJECT_SOURCE_DIR}/shaders/axes_shader.slang"
-		VERT_ENTRY vertMain
-		FRAG_ENTRY fragMain
-		PROFILE spirv_1_5
-		OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
-		OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/axes_shader.spv"
-	)
-
-	add_slang_spirv_target(ShadersPointLight
-		TYPE GRAPHICS
-		SOURCES "${PROJECT_SOURCE_DIR}/shaders/point_light_shader.slang"
-		VERT_ENTRY vertMain
-		FRAG_ENTRY fragMain
-		PROFILE spirv_1_5
-		OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
-		OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/point_light_shader.spv"
-	)
-
-	add_slang_spirv_target(ShadersParticlesCompute
-		TYPE COMPUTE
-		SOURCES "${PROJECT_SOURCE_DIR}/shaders/particle_compute.slang"
-		ENTRY compMain
-		PROFILE spirv_1_5
-		OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
-		OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/particle_compute.spv"
-	)
-
-	# Graphics variant for particle billboards (vert/frag in same Slang file)
-	add_slang_spirv_target(ShadersParticlesBillboard
-		TYPE GRAPHICS
-		SOURCES "${PROJECT_SOURCE_DIR}/shaders/particle_compute.slang"
-		VERT_ENTRY vertMain
-		FRAG_ENTRY fragMain
-		PROFILE spirv_1_5
-		OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
-		OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/particle_billboard.spv"
-	)
+endforeach()

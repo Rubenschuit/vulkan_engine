@@ -131,7 +131,7 @@ void ParticleSystem::createComputePipelineLayout() {
 }
 
 void ParticleSystem::createComputePipeline() {
-	const char* shader_path = "shaders/particle_compute.spv";
+	const char* shader_path = "shaders/particle_computec.spv";
 	m_compute_pipeline = std::make_unique<VeComputePipeline>(m_ve_device, shader_path, m_compute_pipeline_layout);
 }
 
@@ -160,7 +160,7 @@ void ParticleSystem::createPipeline(vk::Format color_format) {
 	config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	config.depth_stencil_info.depthWriteEnable = VK_FALSE;
 	config.rasterization_info.depthBiasEnable = VK_FALSE;
-	m_pipeline = std::make_unique<VePipeline>(m_ve_device, "shaders/particle_billboard.spv", config);
+	m_pipeline = std::make_unique<VePipeline>(m_ve_device, "shaders/particle_compute.spv", config);
 }
 
 // Updates the particle system by recording compute commands into the compute command buffer.

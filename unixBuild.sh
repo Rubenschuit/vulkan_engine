@@ -46,8 +46,6 @@ fi
 # Configure and build into ./build
 cmake -S . -B build -DCMAKE_BUILD_TYPE="$BUILD_TYPE" $EXTRA_CMAKE_ARGS
 cmake --build build -j
-# Ensure shader SPIR-V targets are also up to date (redundant if add_dependencies is set)
-cmake --build build --target Shaders -j || true
 
 if [[ "$MODE" == 'test' ]]; then
 	# Run all tests via CTest; each test file builds its own executable

@@ -45,3 +45,5 @@ enum class QueueKind { Graphics, Transfer };
 // TODO: Make sure the directories are setup correctly
 // TODO: consider moving the timeline semaphore from VeSwapChain somewhere else
 // TODO: Fix window resize crash on windows
+// TODO: Add working directory path variable to make executing from different folder possible
+// TODO: Centralise frame time measurement code (e.g. in VeApp/imgui_layer)

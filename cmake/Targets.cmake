@@ -11,7 +11,7 @@ foreach(src_file ${ALL_SOURCES})
 	endif()
 endforeach()
 
-add_library(VEngineLib STATIC ${ENGINE_SOURCES})
+add_library(VEngineLib SHARED ${ENGINE_SOURCES})
 add_library(VEngine::Lib ALIAS VEngineLib)
 add_executable(${PROJECT_NAME} ${MAIN_SOURCE})
 
@@ -41,6 +41,7 @@ if (IMGUI_DIR)
 		${IMGUI_DIR}/imgui_draw.cpp
 		${IMGUI_DIR}/imgui_tables.cpp
 		${IMGUI_DIR}/imgui_widgets.cpp
+		${IMGUI_DIR}/imgui_demo.cpp
 		${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
 		${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
 	)
@@ -81,6 +82,27 @@ else()
 endif()
 
 set_property(TARGET ${PROJECT_NAME} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/build")
+
+# Set sensible output directories for libs and executables when building locally
+if (NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+	set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+endif()
+if (NOT CMAKE_LIBRARY_OUTPUT_DIRECTORY)
+	set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+endif()
+
+# Ensure the executable can find the shared library at runtime during development
+if (APPLE OR UNIX)
+	# Use rpath relative to the binary so the executable finds the shared lib in ../bin
+	set_target_properties(${PROJECT_NAME} PROPERTIES
+		BUILD_RPATH "$ORIGIN"
+		INSTALL_RPATH "$ORIGIN"
+	)
+	set_target_properties(VEngineLib PROPERTIES
+		BUILD_RPATH "$ORIGIN"
+		INSTALL_RPATH "$ORIGIN"
+	)
+endif()
 
 if (WIN32)
 	message(STATUS "CREATING BUILD FOR WINDOWS")

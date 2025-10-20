@@ -56,7 +56,11 @@ Note: CMake will auto-discover Slang (`slangc`) and the Vulkan SDK in common ins
 
 - Vulkan SDK (LunarG): https://vulkan.lunarg.com/sdk/home
 
-Download instructions:
+- Optional (will be fetched if no path is set):
+	- GLFW: https://www.glfw.org/download.html
+	- GLM: https://github.com/g-truc/glm/releases
+
+To install required packages:
 - ##### Windows
 	With MSYS2/MinGW (run in the MinGW64 shell):
 	```bash
@@ -92,7 +96,7 @@ usage:
 ##### Windows (cmd or PowerShell):
 
 ```cmd
-windowsBuild.bat release msvc
+.\windowsBuild.bat
 ```
 Usage:
 
@@ -100,7 +104,7 @@ Usage:
 
 	mode: debug | release (default) | test | clean
 
-	generator: mingw (default) | msvc
+	generator: mingw | msvc (default)
 
 
 ## Manual build
@@ -119,7 +123,7 @@ cmake --build build
 ```bat
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-build\Debug\VeApp.exe
+build\release\VeApp.exe
 ```
 
 ##### Linux

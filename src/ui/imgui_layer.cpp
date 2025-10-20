@@ -121,6 +121,7 @@ void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd) {
 void ImGuiLayer::renderUI(UIContext& context) {
 	beginFrame();
 	if (context.visible) {
+		ImGui::ShowDemoWindow(nullptr);
 		ImGui::SetNextWindowBgAlpha(0.9f);
 		// popup window for particle controls
 		if (ImGui::Begin("Particles", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -129,7 +130,7 @@ void ImGuiLayer::renderUI(UIContext& context) {
 			ImGui::Separator();
 			ImGui::SliderInt("Count", &count, 1000, 1000000);
 			ImGui::Separator();
-			ImGui::SliderFloat("Velocity mean", &context.particle_velocity_mean, -6, 6);
+			ImGui::SliderFloat("Velocity mean", &context.particle_velocity_mean, -60, 60);
 			ImGui::Separator();
 			ImGui::SliderFloat("Velocity stddev", &context.particle_velocity_stddev, 0, 60);
 

@@ -16,7 +16,7 @@ setlocal EnableExtensions
 set MODE=%~1
 if "%MODE%"=="" set MODE=debug
 set GEN=%~2
-if "%GEN%"=="" set GEN=mingw
+if "%GEN%"=="" set GEN=msvc
 
 :: Clean mode
 if /I "%MODE%"=="clean" (
