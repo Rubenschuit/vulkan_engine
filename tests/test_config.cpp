@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <ve_config.hpp>
+#include "ve_config.hpp"
 
 TEST_CASE("ve_config basic constants and lists", "[config]") {
     // Frames in flight reasonable

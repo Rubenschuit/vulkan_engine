@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <ve_buffer.hpp>
+#include <core/ve_buffer.hpp>
 
 TEST_CASE("VeBuffer::getAlignment rounds up correctly", "[buffer][alignment]") {
     using DS = vk::DeviceSize;

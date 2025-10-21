@@ -28,7 +28,6 @@ static const float2 quad[6] = {
 };
 
 
-
 [shader("vertex")]
 VertexOutput vertMain(VertexInput input, uint id : SV_VertexID) {
 

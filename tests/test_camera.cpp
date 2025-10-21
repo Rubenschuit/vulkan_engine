@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <ve_camera.hpp>
+#include <game/ve_camera.hpp>
 #include <glm/glm.hpp>
 #include <glm/geometric.hpp>
 

@@ -1,24 +1,17 @@
 # Collect sources
-file(GLOB_RECURSE ALL_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/*.cpp)
-
-set(ENGINE_SOURCES)
-set(MAIN_SOURCE)
-foreach(src_file ${ALL_SOURCES})
-	if (src_file MATCHES ".*/main.cpp$")
-		set(MAIN_SOURCE ${src_file})
-	else()
-		list(APPEND ENGINE_SOURCES ${src_file})
-	endif()
-endforeach()
+file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/engine/src/*.cpp)
+file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/app/src/*.cpp)
 
 add_library(VEngineLib SHARED ${ENGINE_SOURCES})
 add_library(VEngine::Lib ALIAS VEngineLib)
-add_executable(${PROJECT_NAME} ${MAIN_SOURCE})
+
+add_executable(${PROJECT_NAME} ${APP_SOURCES})
 
 # Common include paths for engine (public so tests and exe inherit)
 target_include_directories(VEngineLib
 	PUBLIC
-		${PROJECT_SOURCE_DIR}/src
+		${PROJECT_SOURCE_DIR}/engine/src
+		${PROJECT_SOURCE_DIR}/include
 		${TINYOBJ_PATH}
 		$<BUILD_INTERFACE:${GLFW_INCLUDE_DIRS}>
 		$<BUILD_INTERFACE:${Vulkan_INCLUDE_DIRS}>
@@ -69,7 +62,7 @@ if (APPLE)
 endif()
 
 # PCH & warnings
-target_precompile_headers(VEngineLib PRIVATE src/pch.hpp)
+target_precompile_headers(VEngineLib PRIVATE engine/src/pch.hpp)
 target_precompile_headers(${PROJECT_NAME} REUSE_FROM VEngineLib)
 
 if (MSVC)
@@ -111,3 +104,30 @@ if (WIN32)
 		target_link_directories(VEngineLib PUBLIC ${MINGW_PATH}/lib)
 	endif()
 endif()
+
+target_include_directories(VEngineLib
+	PUBLIC
+		${PROJECT_SOURCE_DIR}/include
+		${PROJECT_SOURCE_DIR}/engine/src
+)
+
+target_include_directories(${PROJECT_NAME}
+	PUBLIC
+		${PROJECT_SOURCE_DIR}/engine/src
+		${PROJECT_SOURCE_DIR}/include
+)
+
+target_include_directories(${PROJECT_NAME}
+	PUBLIC
+		${PROJECT_SOURCE_DIR}/engine/src
+		${PROJECT_SOURCE_DIR}/include
+)
+target_include_directories(${PROJECT_NAME}
+	PUBLIC
+		${PROJECT_SOURCE_DIR}/engine/src
+		${PROJECT_SOURCE_DIR}/include
+)
+
+
+
+
