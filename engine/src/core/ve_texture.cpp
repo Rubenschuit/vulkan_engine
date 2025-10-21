@@ -8,11 +8,11 @@
 
 namespace ve {
 
-VeTexture::VeTexture(VeDevice& ve_device, std::string texture_path) : m_ve_device(ve_device) {
+VeTexture::VeTexture(VeDevice& ve_device, const std::filesystem::path& texture_path) : m_ve_device(ve_device) {
 	createTextureImage(texture_path);
 	createTextureSampler();
 }
-VeTexture::VeTexture(VeDevice& ve_device, std::vector<std::string> texture_paths) : m_ve_device(ve_device) {
+VeTexture::VeTexture(VeDevice& ve_device, const std::vector<std::filesystem::path>& texture_paths) : m_ve_device(ve_device) {
 
 	createCubeTextureImage(texture_paths);
 	createTextureSampler();
@@ -20,9 +20,9 @@ VeTexture::VeTexture(VeDevice& ve_device, std::vector<std::string> texture_paths
 
 VeTexture::~VeTexture(){}
 
-void VeTexture::createTextureImage(std::string texture_path) {
+void VeTexture::createTextureImage(const std::filesystem::path& texture_path) {
 	// Load image from file using stb_image; on failure, create a 1x1 white fallback
-	stbi_uc* pixels = stbi_load(texture_path.data(), &m_width, &m_height, &m_channels, STBI_rgb_alpha);
+	stbi_uc* pixels = stbi_load(texture_path.string().c_str(), &m_width, &m_height, &m_channels, STBI_rgb_alpha);
 	bool free_pixels = true;
 	std::vector<stbi_uc> fallback_pixels;
 	if (!pixels) {
@@ -94,7 +94,7 @@ void VeTexture::createTextureImage(std::string texture_path) {
 		vk::PipelineStageFlagBits2::eFragmentShader);
 }
 
-void VeTexture::createCubeTextureImage(std::vector<std::string> texture_paths) {
+void VeTexture::createCubeTextureImage(const std::vector<std::filesystem::path>& texture_paths) {
 	assert(texture_paths.size() == 6 && "Cubemap requires 6 texture paths");
 	stbi_uc* pixels[6];
 	int face_w = 0, face_h = 0, face_c = 0;
@@ -102,7 +102,7 @@ void VeTexture::createCubeTextureImage(std::vector<std::string> texture_paths) {
 		VE_LOGI("Loading cube map face: " << texture_paths[i]);
 		int w = 0, h = 0, c = 0;
 		// Force RGBA (4 bytes per pixel) for all faces
-		pixels[i] = stbi_load(texture_paths[i].data(), &w, &h, &c, STBI_rgb_alpha);
+		pixels[i] = stbi_load(texture_paths[i].string().c_str(), &w, &h, &c, STBI_rgb_alpha);
 		assert(pixels[i] != nullptr && "Failed to load cube map face texture");
 		if (i == 0) {
 			face_w = w; face_h = h; face_c = 4; // after conversion

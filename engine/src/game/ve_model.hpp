@@ -34,7 +34,7 @@ public:
 
 	VeModel(VeDevice& device, const std::vector<Vertex>& vertices);
 	VeModel(VeDevice& device, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
-	VeModel(VeDevice& device, std::string model_path);
+	VeModel(VeDevice& device, const std::filesystem::path& model_path);
 	~VeModel();
 
 	VeModel(const VeModel&) = delete;

@@ -7,7 +7,7 @@
 
 namespace ve {
 
-VeApp::VeApp(const char* working_dir) : working_directory(working_dir) {
+VeApp::VeApp(const std::filesystem::path& working_dir) : working_directory(working_dir) {
 	// First a window, device and swap chain are initialised
 	loadGameObjects();
 	createUniformBuffers();
@@ -331,20 +331,20 @@ void VeApp::initSystems() {
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
-		working_directory + "/shaders/simple_shader.spv"
+		working_directory / "shaders" / "simple_shader.spv"
 	);
 	m_axes_render_system = std::make_unique<AxesRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
-		working_directory + "/shaders/axes_shader.spv"
+		working_directory / "shaders" / "axes_shader.spv"
 	);
 	m_point_light_system = std::make_unique<PointLightSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
-		working_directory + "/shaders/point_light_shader.spv"
+		working_directory / "shaders" / "point_light_shader.spv"
 	);
 	m_particle_system = std::make_unique<ParticleSystem>(
 		m_ve_device,
@@ -353,15 +353,15 @@ void VeApp::initSystems() {
 		m_ve_renderer.getSwapChainImageFormat(),
 		434567, // number of particles
 		glm::vec3{0.0f, -200.0f, 10.0f},
-		working_directory + "/shaders/particle_compute.spv"
+		working_directory / "shaders" / "particle_compute.spv"
 	);
 	m_skybox_render_system = std::make_unique<SkyboxRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
-		working_directory + "/shaders/skybox_shader.spv",
-		working_directory + "/models/cube.obj"
+		working_directory / "shaders" / "skybox_shader.spv",
+		working_directory / "models" / "cube.obj"
 	);
 }
 

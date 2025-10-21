@@ -33,6 +33,6 @@ private:
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_ve_pipeline;
 	std::unique_ptr<VeModel> m_axes_model;
-	std::string m_shader_path;
+	std::filesystem::path m_shader_path;
 };
 }

@@ -9,8 +9,8 @@ namespace ve {
 
 class VeTexture {
 public:
-	VeTexture(ve::VeDevice& device, std::string texture_path);
-	VeTexture(ve::VeDevice& device, std::vector<std::string> texture_paths);
+	VeTexture(ve::VeDevice& device, const std::filesystem::path& texture_path);
+	VeTexture(ve::VeDevice& device, const std::vector<std::filesystem::path>& texture_paths);
 	~VeTexture();
 
 	VeTexture(const VeTexture&) = delete;
@@ -21,9 +21,9 @@ public:
 	vk::DescriptorImageInfo getDescriptorInfo() const;
 
 private:
-	void createTextureImage(std::string texture_path);
+	void createTextureImage(const std::filesystem::path& texture_path);
 	void createTextureSampler();
-	void createCubeTextureImage(std::vector<std::string> texture_paths);
+	void createCubeTextureImage(const std::vector<std::filesystem::path>& texture_paths);
 
 	ve::VeDevice& m_ve_device;
 	int m_width;

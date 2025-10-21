@@ -6,7 +6,7 @@ namespace ve {
 
 class VeApp {
 public:
-	VeApp(const char* working_dir);
+	VeApp(const std::filesystem::path& working_dir);
 	~VeApp();
 
 	//destroy copy and move constructors and assignment operators
@@ -32,7 +32,7 @@ private:
 	void updateParticles(VeFrameInfo& frame_info, InputActions& actions);
 	void renderScene(VeFrameInfo& frame_info);
 
-	const std::string working_directory;
+	const std::filesystem::path working_directory;
 
 	VeWindow m_ve_window{WIDTH, HEIGHT, APP_NAME};
 	VeDevice m_ve_device{m_ve_window};
@@ -51,20 +51,20 @@ private:
 	vk::raii::DescriptorSet m_cubemap_descriptor_set{nullptr};
 
 	// Objects
-	std::filesystem::path  m_cube_model_path = working_directory + "/models/cube.obj";
-	std::filesystem::path  m_viking_room_model_path = working_directory + "/models/viking_room.obj";
-	std::filesystem::path  m_quad_model_path = working_directory + "/models/quad.obj";
-	std::filesystem::path  m_flat_vase_model_path = working_directory + "/models/flat_vase.obj";
-	std::filesystem::path  m_smooth_vase_model_path = working_directory + "/models/smooth_vase.obj";
+	std::filesystem::path  m_cube_model_path = working_directory / "models" / "cube.obj";
+	std::filesystem::path  m_viking_room_model_path = working_directory / "models" / "viking_room.obj";
+	std::filesystem::path  m_quad_model_path = working_directory / "models" / "quad.obj";
+	std::filesystem::path  m_flat_vase_model_path = working_directory / "models" / "flat_vase.obj";
+	std::filesystem::path  m_smooth_vase_model_path = working_directory / "models" / "smooth_vase.obj";
 
 	// Textures
-	std::string m_texture_path = working_directory + "/textures/viking_room.png";
-	std::vector<std::string>  m_skybox_paths = {working_directory + "/textures/skybox/Starfield_And_Haze_left.png",
-									working_directory + "/textures/skybox/Starfield_And_Haze_right.png",
-									working_directory + "/textures/skybox/Starfield_And_Haze_up.png",
-									working_directory + "/textures/skybox/Starfield_And_Haze_down.png",
-									working_directory + "/textures/skybox/Starfield_And_Haze_front.png",
-									working_directory + "/textures/skybox/Starfield_And_Haze_back.png" };
+	std::filesystem::path m_texture_path = working_directory / "textures" / "viking_room.png";
+	std::vector<std::filesystem::path>  m_skybox_paths = {working_directory / "textures" / "skybox" / "Starfield_And_Haze_left.png",
+									working_directory / "textures" / "skybox" / "Starfield_And_Haze_right.png",
+									working_directory / "textures" / "skybox" / "Starfield_And_Haze_up.png",
+									working_directory / "textures" / "skybox" / "Starfield_And_Haze_down.png",
+									working_directory / "textures" / "skybox" / "Starfield_And_Haze_front.png",
+									working_directory / "textures" / "skybox" / "Starfield_And_Haze_back.png" };
 		/*
 	const char* m_skybox_path[6] = {working_directory + "/textures/mots.png",
 									working_directory + "/textures/mots.png",

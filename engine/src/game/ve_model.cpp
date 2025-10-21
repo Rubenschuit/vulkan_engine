@@ -15,13 +15,13 @@ VeModel::VeModel(VeDevice& device, const std::vector<Vertex>& vertices, const st
 	createIndexBuffers(indices);
 }
 
-VeModel::VeModel(VeDevice& device, std::string model_path) : m_ve_device(device) {
+VeModel::VeModel(VeDevice& device, const std::filesystem::path& model_path) : m_ve_device(device) {
 	tinyobj::attrib_t attrib;
 	std::vector<tinyobj::shape_t> shapes;
 	std::vector<tinyobj::material_t> materials;
 	std::string warn, err;
 
-	if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, model_path.c_str())) {
+	if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, model_path.string().c_str())) {
 		throw std::runtime_error(warn + err);
 	}
 	if (shapes.size() == 0) {
