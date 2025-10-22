@@ -2,16 +2,16 @@
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/engine/src/*.cpp)
 file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/app/src/*.cpp)
 
-add_library(VEngineLib STATIC ${ENGINE_SOURCES})
+add_library(VEngineLib SHARED ${ENGINE_SOURCES})
 if (MSVC)
-	#target_compile_definitions(VEngineLib PRIVATE VENGINE_EXPORTS) # Define export macro for DLL declspec on Windows\
-    target_compile_options(VEngineLib PRIVATE /wd4251) # Suppress DLL interface warnings
+	target_compile_definitions(VEngineLib PRIVATE VENGINE_EXPORTS) # Define export macro for DLL declspec on Windows\
+    #target_compile_options(VEngineLib PRIVATE /wd4251) # Suppress DLL interface warnings
 endif()
 add_library(VEngine::Lib ALIAS VEngineLib)
 
 add_executable(${PROJECT_NAME} ${APP_SOURCES})
 if (MSVC)
-	target_compile_options(${PROJECT_NAME} PRIVATE /wd4251) # Suppress DLL interface warnings
+	#target_compile_options(${PROJECT_NAME} PRIVATE /wd4251) # Suppress DLL interface warnings
 endif()
 
 # Common include paths for engine (public so tests and exe inherit)

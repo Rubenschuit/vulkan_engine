@@ -1,6 +1,8 @@
+// Included by application using VEngine
 #pragma once
 
-// Included by application
+#include "core/ve_entry_point.hpp"
+#include "core/ve_application.hpp"
 
 #include "ve_export.hpp" // for VENGINE_API
 

@@ -3,11 +3,11 @@
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/gtc/matrix_transform.hpp>
 
-#include "ve_app.hpp"
+#include "sandbox.hpp"
 
 namespace ve {
 
-VeApp::VeApp(const std::filesystem::path& working_dir) : working_directory(working_dir) {
+Sandbox::Sandbox(const std::filesystem::path& working_dir) : working_directory(working_dir) {
 	// First a window, device and swap chain are initialised
 	loadGameObjects();
 	createUniformBuffers();
@@ -20,10 +20,10 @@ VeApp::VeApp(const std::filesystem::path& working_dir) : working_directory(worki
 	m_camera.setPerspective(m_fov, m_last_aspect, m_near_plane, m_far_plane);
 }
 
-VeApp::~VeApp() {}
+Sandbox::~Sandbox() {}
 
-void VeApp::run() {
-	VE_LOGI("VeApp::run starting. Window=" << m_ve_window.getWidth() << "x" << m_ve_window.getHeight());
+void Sandbox::run() {
+	VE_LOGI("Sandbox::run starting. Window=" << m_ve_window.getWidth() << "x" << m_ve_window.getHeight());
 
 	auto current_time = std::chrono::high_resolution_clock::now();
 	auto total_time = 0.0f;
@@ -98,12 +98,12 @@ void VeApp::run() {
 	// Ensure device is idle before destroying resources
 	m_ve_device.getDevice().waitIdle();
 	// log average fps and frametime over entire run currently these get reset on window resize
-	VE_LOGI("VeApp::run finished. Average FPS: " << (m_fps_frame_count / (m_sum_frame_ms / 1000.0f)));
-	VE_LOGI("VeApp::run finished. Average Frame Time: " << (m_sum_frame_ms / m_fps_frame_count) << " ms");
+	VE_LOGI("Sandbox::run finished. Average FPS: " << (m_fps_frame_count / (m_sum_frame_ms / 1000.0f)));
+	VE_LOGI("Sandbox::run finished. Average Frame Time: " << (m_sum_frame_ms / m_fps_frame_count) << " ms");
 }
 
 // Update particle system based on input actions and UI context
-void VeApp::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
+void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 	// Apply input actions
 	if (actions.set_mode >= 1 && actions.set_mode <= 4) {
 		m_particle_system->setMode(actions.set_mode);
@@ -136,7 +136,7 @@ void VeApp::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 }
 
 // Could be extended to render a vector of systems
-void VeApp::renderScene(VeFrameInfo& frame_info) {
+void Sandbox::renderScene(VeFrameInfo& frame_info) {
 	auto& command_buffer = frame_info.command_buffer;
 	m_ve_renderer.beginSceneRender(command_buffer);
 
@@ -150,7 +150,7 @@ void VeApp::renderScene(VeFrameInfo& frame_info) {
 	m_ve_renderer.endSceneRender(command_buffer);
 }
 
-void VeApp::loadGameObjects() {
+void Sandbox::loadGameObjects() {
 	// Create some lights with ranging colors
 	constexpr uint32_t num_lights = 17; // max 100 see config
 	constexpr float intensity = 0.3f;
@@ -174,8 +174,8 @@ void VeApp::loadGameObjects() {
 	for (uint32_t i = 0; i < num_lights; i += 1) {
 		auto point_light = VeGameObject::createPointLight(intensity, radius, colors[i % 10]);
 		glm::vec3 pos = {
-			pos_radius * cos(glm::two_pi<float>() / num_lights * i),
-			pos_radius * sin(glm::two_pi<float>() / num_lights * i),
+			pos_radius * cos(glm::two_pi<float>() / num_lights * (float)i),
+			pos_radius * sin(glm::two_pi<float>() / num_lights * (float)i),
 			height
 		};
 		point_light.transform.translation = pos;
@@ -207,7 +207,7 @@ void VeApp::loadGameObjects() {
 		for (int i = 0; i < 10; i++) {
 			VeGameObject obj = VeGameObject::createGameObject();
 			obj.ve_model = model;
-			obj.transform.translation = {i * 4.0f, j * 4.0f, 0.f};
+			obj.transform.translation = {(float)i * 4.0f, (float)j * 4.0f, 0.f};
 			obj.has_texture = 1.0f;
 			m_game_objects.emplace(obj.getId(), std::move(obj));
 		}
@@ -219,7 +219,7 @@ void VeApp::loadGameObjects() {
 		for (int i = 0; i < 10; i++) {
 			VeGameObject obj = VeGameObject::createGameObject();
 			obj.ve_model = model2;
-			obj.transform.translation = {-1.0 * i * 4.0f - 4.0f, j * 4.0f, 1.0f};
+			obj.transform.translation = {-1.0 * (float)i * 4.0f - 4.0f, (float)j * 4.0f, 1.0f};
 			obj.transform.scale = {1.0f, 1.0f, 1.0f};
 			m_game_objects.emplace(obj.getId(), std::move(obj));
 		}
@@ -231,7 +231,7 @@ void VeApp::loadGameObjects() {
 			VeGameObject obj = VeGameObject::createGameObject();
 			obj.ve_model = model3;
 			obj.transform = {
-				.translation = {-1.0 * i * 4.0f - 4.0f, j * -4.0f - 4.0f, 0.f},
+				.translation = {-1.0 * (float)i * 4.0f - 4.0f, (float)j * -4.0f - 4.0f, 0.f},
 				.rotation = {glm::radians(-90.0f), 0.0f, 0.0f},
 				.scale = {6.0f, 3.0f, 6.0f}
 			};
@@ -245,7 +245,7 @@ void VeApp::loadGameObjects() {
 			VeGameObject obj = VeGameObject::createGameObject();
 			obj.ve_model = model4;
 			obj.transform = {
-				.translation = {i * 4.0f , j * -4.0f - 4.0f, 0.f},
+				.translation = {i * 4.0f , (float)j * -4.0f - 4.0f, 0.f},
 				.rotation = {glm::radians(-90.0f), 0.0f, 0.0f},
 				.scale = {6.0f, 3.0f, 6.0f}
 			};
@@ -255,7 +255,7 @@ void VeApp::loadGameObjects() {
 
 }
 
-void VeApp::createUniformBuffers() {
+void Sandbox::createUniformBuffers() {
 	vk::DeviceSize buffer_size = sizeof(UniformBufferObject);
 	assert(buffer_size > 0 && "Uniform buffer size is zero");
 	assert(buffer_size % 16 == 0 && "Uniform buffer size must be a multiple of 16 bytes");
@@ -276,7 +276,7 @@ void VeApp::createUniformBuffers() {
 	}
 }
 
-void VeApp::createDescriptors() {
+void Sandbox::createDescriptors() {
 	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
 		// Global sets (per-frame) + compute sets (per-frame) + material set (2) + slack
 		.setMaxSets(2 * MAX_FRAMES_IN_FLIGHT + 4)
@@ -324,8 +324,8 @@ void VeApp::createDescriptors() {
 		.build(m_cubemap_descriptor_set);
 }
 
-void VeApp::initSystems() {
-	VE_LOGD("VeApp::initSystems");
+void Sandbox::initSystems() {
+	VE_LOGD("Sandbox::initSystems");
 	VE_LOGD("Working directory: " << working_directory);
 
 	VE_LOGD("simple system: " << working_directory / "shaders" / "simple_shader.spv");
@@ -372,7 +372,7 @@ void VeApp::initSystems() {
 	);
 }
 
-void VeApp::initUI() {
+void Sandbox::initUI() {
 	imgui_layer = std::make_unique<ImGuiLayer>(m_ve_window, m_ve_device, m_ve_renderer);
 	ui_context = {
 		.visible = false,
@@ -385,56 +385,6 @@ void VeApp::initUI() {
 	};
 }
 
-// Updates the camera view and projection matrices if state changed
-void VeApp::updateCamera() {
-	// Recompute camera view once per frame if needed
-	m_camera.updateIfDirty();
-	// If swapchain aspect changed (window resize), refresh camera projection
-	float aspect = m_ve_renderer.getExtentAspectRatio();
-	if (aspect > 0.0f && std::abs(aspect - m_last_aspect) > std::numeric_limits<float>::epsilon()) {
-		m_last_aspect = aspect;
-		m_camera.setPerspective(m_fov, m_last_aspect, m_near_plane, m_far_plane);
-	}
-}
 
-// Updates the camera and uniform buffer object once per frame
-void VeApp::updateUniformBuffer(uint32_t current_frame, UniformBufferObject& ubo) {
-	ubo.view = m_camera.getView();
-	ubo.proj = m_camera.getProj();
-	m_uniform_buffers[current_frame]->writeToBuffer(&ubo);
-	// No flush required with MEMORY_PROPERTY_HOST_COHERENT
-}
-
-// Print FPS and frame time to window title every 100 ms
-void VeApp::updateWindowTitle() {
-	// Per-frame delta using steady clock
-	auto now = clock::now();
-	m_last_frame_ms = std::chrono::duration<double, std::milli>(now - m_last_frame_time).count();
-	m_last_frame_time = now;
-
-	// Accumulate
-	m_sum_frame_ms += m_last_frame_ms;
-	m_fps_frame_count++;
-	auto window_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_fps_window_start).count();
-	if (window_ms >= 100) { // update every 100 ms
-		double fps = (window_ms > 0) ? (1000.0 * static_cast<double>(m_fps_frame_count) / static_cast<double>(window_ms)) : 0.0;
-		double avg_ms = (m_fps_frame_count > 0) ? (m_sum_frame_ms / static_cast<double>(m_fps_frame_count)) : 0.0;
-		char buf[128];
-		// add release/debug mode with ifdef
-#ifdef NDEBUG
-		const char* mode_str = "Release";
-#else
-		const char* mode_str = "Debug";
-#endif
-		snprintf(buf, sizeof(buf), "Vulkan Engine! -- %s mode          FPS %d   %.2f ms",
-					mode_str, static_cast<int>(fps), avg_ms
-		);
-		glfwSetWindowTitle(m_ve_window.getGLFWwindow(), buf);
-		// Reset window counters
-		m_fps_frame_count = 0;
-		m_sum_frame_ms = 0.0;
-		m_fps_window_start = now;
-	}
-}
 }
 

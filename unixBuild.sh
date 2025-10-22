@@ -49,17 +49,20 @@ if [[ "$OSTYPE" == "msys" ]]; then
 	EXTRA_WINDOWS_ARGS="-G 'MinGW Makefiles'"
 fi
 
+# build dir is ./build/{BUILD_TYPE}
+BUILD_DIR="./build/$BUILD_TYPE"
+
 # Configure and build into ./build
-cmake -S . -B build -DCMAKE_BUILD_TYPE="$BUILD_TYPE" $EXTRA_CMAKE_ARGS $EXTRA_WINDOWS_ARGS
-cmake --build build -j
+cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$BUILD_TYPE" $EXTRA_CMAKE_ARGS $EXTRA_WINDOWS_ARGS
+cmake --build "$BUILD_DIR" -j
 
 if [[ "$MODE" == 'test' ]]; then
 	# Run all tests via CTest; each test file builds its own executable
-	ctest --test-dir build --output-on-failure || exit 2
+	ctest --test-dir "$BUILD_DIR" --output-on-failure || exit 2
 	exit 0
 elif [[ "$MODE" == 'leaks' ]]; then
 	if [[ "$(uname)" == "Darwin" ]]; then
-		./build/VeApp &
+		./"$BUILD_DIR"/VeApp &
 		PID=$!
 		sleep 5 # Give the app a moment to run
 
@@ -69,5 +72,5 @@ elif [[ "$MODE" == 'leaks' ]]; then
 		echo "'leaks' mode is only supported on macOS."
 	fi
 else
-	./build/VeApp
+	./"$BUILD_DIR"/VeApp
 fi

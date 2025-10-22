@@ -1,11 +1,15 @@
+// This is the entry point for the application using the VEngine framework.
+// It sets up the working directory and starts a Sandbox::VeApplication instance.
+#include "ve_application.hpp"
+#include "utils/ve_log.hpp"
+
 #include <iostream>
 #include <stdexcept>
 #include <cstdlib>
-#include "ve_app.hpp"
 #include <filesystem>
 #include <string>
 
-#ifdef _WIN32
+#if _MSC_VER && !__INTEL_COMPILER
 #include <windows.h>
 #include <vector>
 
@@ -34,29 +38,31 @@ static std::filesystem::path GetPathToRunningExe()
 }
 #endif
 
+extern ve::VeApplication* createApp(std::filesystem::path working_directory);
+
 int main(int argc, char** argv) {
-	// argv[0] is path to executable on posix
-	int ignore_warning = argc++;
+	(void)argc; // unused
+
 
 #if _MSC_VER && !__INTEL_COMPILER
 	std::filesystem::path exe_path = GetPathToRunningExe();
-	exe_path = exe_path.parent_path().parent_path().parent_path(); // go up four levels to project root
 #else
+	// argv[0] is path to executable on posix
 	std::filesystem::path exe_path = argv[0];
-    exe_path = exe_path.parent_path().parent_path(); // go up two levels to project root
 #endif
+	// reduce something like root/build/Debug/VeApp to root
+	exe_path = exe_path.parent_path().parent_path().parent_path(); // executable is in build/Debug|Release/
 
+	// Simple checks for expected subfolders
+	assert(std::filesystem::exists(exe_path) && "Working directory does not exist");
+	assert(std::filesystem::exists(exe_path / "models") && "Working directory 'models' subfolder does not exist");
+	assert(std::filesystem::exists(exe_path / "textures") && "Working directory 'textures' subfolder does not exist");
 
-	VE_LOGI("VeApp::VeApp working_directory=" << exe_path.string());
+	VE_LOGD("VeApp::VeApp working_directory=" << exe_path.string());
 
-	ve::VeApp app(exe_path);
-	try {
-		app.run();
-	} catch (const std::exception& e) {
-		std::cerr << e.what() << std::endl;
-		return EXIT_FAILURE;
-	}
-	return 0;
+	auto app = createApp(exe_path);
+	app->run();
+	delete app;
 }
 
 
