@@ -36,15 +36,16 @@ static std::filesystem::path GetPathToRunningExe()
 
 int main(int argc, char** argv) {
 	// argv[0] is path to executable on posix
+	int ignore_warning = argc++;
 
-#ifdef _WIN32
+#if _MSC_VER && !__INTEL_COMPILER
 	std::filesystem::path exe_path = GetPathToRunningExe();
 	exe_path = exe_path.parent_path().parent_path().parent_path(); // go up four levels to project root
 #else
 	std::filesystem::path exe_path = argv[0];
     exe_path = exe_path.parent_path().parent_path(); // go up two levels to project root
 #endif
-	
+
 
 	VE_LOGI("VeApp::VeApp working_directory=" << exe_path.string());
 

@@ -43,8 +43,14 @@ if [[ "$MODE" == 'test' ]]; then
 	EXTRA_CMAKE_ARGS="-DVE_BUILD_TESTS=ON"
 fi
 
+# if windows
+EXTRA_WINDOWS_ARGS=""
+if [[ "$OSTYPE" == "msys" ]]; then
+	EXTRA_WINDOWS_ARGS="-G 'MinGW Makefiles'"
+fi
+
 # Configure and build into ./build
-cmake -S . -B build -DCMAKE_BUILD_TYPE="$BUILD_TYPE" $EXTRA_CMAKE_ARGS
+cmake -S . -B build -DCMAKE_BUILD_TYPE="$BUILD_TYPE" $EXTRA_CMAKE_ARGS $EXTRA_WINDOWS_ARGS
 cmake --build build -j
 
 if [[ "$MODE" == 'test' ]]; then
