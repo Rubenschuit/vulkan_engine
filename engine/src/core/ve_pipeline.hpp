@@ -1,17 +1,18 @@
 /* This class manages the creation and configuration of Vulkan pipelines.
 It also creates the necessary shader modules. */
 #pragma once
-
+#include "ve_export.hpp"
 #include <vulkan/vulkan_raii.hpp>
-
-namespace ve { class VeDevice; }
-
 #include <string>
 #include <vector>
+#include <filesystem>
+namespace ve { class VeDevice; }
+
+
 
 namespace ve {
 
-struct PipelineConfigInfo {
+struct VENGINE_API PipelineConfigInfo {
 	PipelineConfigInfo(const PipelineConfigInfo&) = delete;
 	PipelineConfigInfo& operator=(const PipelineConfigInfo&) = delete;
 	PipelineConfigInfo() = default;
@@ -34,7 +35,7 @@ struct PipelineConfigInfo {
 	//vk::Format depth_format = vk::Format::eUndefined;
 };
 
-class VePipeline {
+class VENGINE_API VePipeline {
 public:
 	VePipeline(
 		VeDevice& ve_device,

@@ -1,13 +1,13 @@
 /* VeImage is an encapsulation of a Vulkan image and its associated resources. */
 #pragma once
-
+#include "ve_export.hpp"
 #include "ve_device.hpp"
 
 // Hardcoded:
 // imageType, extent depth, mip, arraylayers, initlayout, sharingmode, samples, flags
 namespace ve {
 
-class VeImage {
+class VENGINE_API VeImage {
 public:
 	VeImage(
 		VeDevice& ve_device,

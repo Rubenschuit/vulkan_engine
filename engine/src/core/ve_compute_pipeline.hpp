@@ -1,16 +1,18 @@
 /* VeComputePipeline wraps a compute pipeline creation using Vulkan-Hpp RAII.
 It mirrors VePipeline but for compute stage only. */
 #pragma once
-
+#include "ve_export.hpp"
 #include <vulkan/vulkan_raii.hpp>
+#include <vector>
 
 namespace ve { class VeDevice; }
 
-#include <vector>
+
+
 
 namespace ve {
 
-class VeComputePipeline {
+class VENGINE_API VeComputePipeline {
 public:
 	VeComputePipeline(VeDevice& device, const std::filesystem::path& comp_spv_path, const vk::raii::PipelineLayout& pipeline_layout);
 	~VeComputePipeline() = default;

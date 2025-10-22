@@ -1,4 +1,5 @@
 #pragma once
+#include "ve_export.hpp"
 #include "core/ve_device.hpp"
 #include "core/ve_pipeline.hpp"
 #include "ve_config.hpp"
@@ -10,7 +11,7 @@
 
 namespace ve {
 
-class SimpleRenderSystem {
+class VENGINE_API SimpleRenderSystem {
 public:
 	SimpleRenderSystem( VeDevice& device,
 						const vk::raii::DescriptorSetLayout& global_set_layout,

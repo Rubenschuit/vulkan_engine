@@ -144,7 +144,7 @@ void VeApp::renderScene(VeFrameInfo& frame_info) {
 	m_skybox_render_system->render(frame_info);
 	m_simple_render_system->renderObjects(frame_info);
 	m_axes_render_system->render(frame_info);
-	m_point_light_system->render(frame_info);
+	//m_point_light_system->render(frame_info);
 	m_particle_system->render(frame_info);
 
 	m_ve_renderer.endSceneRender(command_buffer);
@@ -214,7 +214,6 @@ void VeApp::loadGameObjects() {
 	}
 
 	// Cubes in a grid
-	VE_LOGE("Loading cube model with path: " << m_cube_model_path);
 	std::shared_ptr<VeModel> model2 = std::make_shared<VeModel>(m_ve_device, m_cube_model_path);
 	for (int j = 0; j < 10; j++) {
 		for (int i = 0; i < 10; i++) {
@@ -326,6 +325,10 @@ void VeApp::createDescriptors() {
 }
 
 void VeApp::initSystems() {
+	VE_LOGD("VeApp::initSystems");
+	VE_LOGD("Working directory: " << working_directory);
+
+	VE_LOGD("simple system: " << working_directory / "shaders" / "simple_shader.spv");
 	m_simple_render_system = std::make_unique<SimpleRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
@@ -333,12 +336,14 @@ void VeApp::initSystems() {
 		m_ve_renderer.getSwapChainImageFormat(),
 		working_directory / "shaders" / "simple_shader.spv"
 	);
+	VE_LOGD("axes system: " << working_directory / "shaders" / "axes_shader.spv");
 	m_axes_render_system = std::make_unique<AxesRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
 		working_directory / "shaders" / "axes_shader.spv"
 	);
+	VE_LOGD("pl system: " << working_directory / "shaders" / "point_light_shader.spv");
 	m_point_light_system = std::make_unique<PointLightSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
@@ -346,6 +351,7 @@ void VeApp::initSystems() {
 		m_ve_renderer.getSwapChainImageFormat(),
 		working_directory / "shaders" / "point_light_shader.spv"
 	);
+	VE_LOGD("particle system: " << working_directory / "shaders" / "particle_compute.spv");
 	m_particle_system = std::make_unique<ParticleSystem>(
 		m_ve_device,
 		m_global_pool,
@@ -355,6 +361,7 @@ void VeApp::initSystems() {
 		glm::vec3{0.0f, -200.0f, 10.0f},
 		working_directory / "shaders" / "particle_compute.spv"
 	);
+	VE_LOGD("skybox system: " << working_directory / "shaders" / "skybox_shader.spv");
 	m_skybox_render_system = std::make_unique<SkyboxRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),

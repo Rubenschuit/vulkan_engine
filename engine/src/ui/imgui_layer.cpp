@@ -128,7 +128,7 @@ void ImGuiLayer::renderUI(UIContext& context) {
 			int count = static_cast<int>(context.pending_particle_count);
 			ImGui::Text("Particle Controls");
 			ImGui::Separator();
-			ImGui::SliderInt("Count", &count, 1000, 1000000);
+			ImGui::SliderInt("Count", &count, 1000, 50000000);
 			ImGui::Separator();
 			ImGui::SliderFloat("Velocity mean", &context.particle_velocity_mean, -60, 60);
 			ImGui::Separator();

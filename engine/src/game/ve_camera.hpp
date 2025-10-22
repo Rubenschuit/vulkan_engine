@@ -5,12 +5,12 @@ improvements: - callbacks
 				- pass events to event system
 */
 #pragma once
-
+#include "ve_export.hpp"
 #include <glm/glm.hpp>
 
 namespace ve {
 
-class VeCamera {
+class VENGINE_API VeCamera {
 public:
 	// World up defaults to +Z, position defaults to (2,2,2)
 	// Looking down -X axis, yaw=0, pitch=0

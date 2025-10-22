@@ -1,6 +1,7 @@
 /* VeRenderer provides methods to to render the current frame.
 It manages the swap chain and command buffers. */
 #pragma once
+#include "ve_export.hpp"
 #include "ve_device.hpp"
 #include "ve_window.hpp"
 #include "ve_swap_chain.hpp"
@@ -10,7 +11,7 @@ It manages the swap chain and command buffers. */
 
 namespace ve {
 
-class VeRenderer {
+class VENGINE_API VeRenderer {
 public:
 	VeRenderer(VeDevice& device, VeWindow& window);
 	~VeRenderer();

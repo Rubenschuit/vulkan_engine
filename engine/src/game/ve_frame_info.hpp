@@ -1,23 +1,24 @@
 /* This file contains definitions of data structures needed
 for each frame in the rendering process. */
 #pragma once
+#include "ve_export.hpp"
+#include "ve_model.hpp"
+#include "ve_game_object.hpp"
+#include "ve_config.hpp"
+
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
 #include <glm/glm.hpp>
 #include <map>
 
-#include "ve_model.hpp"
-#include "ve_game_object.hpp"
-#include "ve_config.hpp"
-
 namespace ve {
 
-struct PointLight {
+struct VENGINE_API PointLight {
 	glm::vec4 position;
 	glm::vec4 color; // w indicates light intensity
 };
 
-struct UniformBufferObject {
+struct VENGINE_API UniformBufferObject {
 	glm::mat4 view;
 	glm::mat4 proj;
 	glm::vec4 ambient_light_color = DEFAULT_AMBIENT_LIGHT_COLOR;
@@ -26,7 +27,7 @@ struct UniformBufferObject {
 	// reminder: alignment
 };
 
-struct VeFrameInfo {
+struct VENGINE_API VeFrameInfo {
 	vk::raii::DescriptorSet& global_descriptor_set;
 	vk::raii::DescriptorSet& material_descriptor_set;
 	vk::raii::DescriptorSet& cubemap_descriptor_set; // For skybox rendering

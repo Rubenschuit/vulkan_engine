@@ -2,7 +2,7 @@
 for a model. It provides methods to bind these buffers and issue
 draw commands. */
 #pragma once
-
+#include "ve_export.hpp"
 #include "core/ve_device.hpp"
 #include "core/ve_buffer.hpp"
 
@@ -11,12 +11,11 @@ draw commands. */
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtx/hash.hpp>
-
-
+#include <filesystem>
 
 namespace ve {
 
-class VeModel {
+class VENGINE_API VeModel {
 public:
 	struct Vertex {
 		glm::vec3 pos;
@@ -64,12 +63,12 @@ private:
 // Provide a hash function for Vertex so we can use it in unordered_map
 // Needs to be outside the ve namespace because std is not allowed to be extended inside another namespace
 template<> struct std::hash<ve::VeModel::Vertex> {
-size_t operator()(ve::VeModel::Vertex const& v) const noexcept {
-	size_t seed = 0u;
-	seed ^= std::hash<glm::vec3>()(v.pos) + 0x9e3779b9 + (seed<<6) + (seed>>2);
-	seed ^= std::hash<glm::vec3>()(v.color) + 0x9e3779b9 + (seed<<6) + (seed>>2);
-	seed ^= std::hash<glm::vec3>()(v.normal) + 0x9e3779b9 + (seed<<6) + (seed>>2);
-	seed ^= std::hash<glm::vec2>()(v.tex_coord) + 0x9e3779b9 + (seed<<6) + (seed>>2);
-	return seed;
-}
+	size_t operator()(ve::VeModel::Vertex const& v) const noexcept {
+		size_t seed = 0u;
+		seed ^= std::hash<glm::vec3>()(v.pos) + 0x9e3779b9 + (seed<<6) + (seed>>2);
+		seed ^= std::hash<glm::vec3>()(v.color) + 0x9e3779b9 + (seed<<6) + (seed>>2);
+		seed ^= std::hash<glm::vec3>()(v.normal) + 0x9e3779b9 + (seed<<6) + (seed>>2);
+		seed ^= std::hash<glm::vec2>()(v.tex_coord) + 0x9e3779b9 + (seed<<6) + (seed>>2);
+		return seed;
+	}
 };

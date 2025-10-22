@@ -1,6 +1,6 @@
 /* VeWindow is responsible for creating and managing a GLFW window. */
 #pragma once
-
+#include "ve_export.hpp"
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #define VULKAN_HPP_ENABLE_RAII
@@ -10,7 +10,7 @@
 
 namespace ve {
 
-class VeWindow {
+class VENGINE_API VeWindow {
 public:
 	VeWindow(int width, int height, std::string name);
 	~VeWindow();

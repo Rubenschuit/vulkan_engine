@@ -1,25 +1,25 @@
 /* This file defines the VeGameObject class, it requires a unique ID for each instance.
 The user manually sets the object's properties (position, rotation, scale, etc.) after creation. */
 #pragma once
-
+#include "ve_export.hpp"
 #include "game/ve_model.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace ve {
 
-struct TransformComponent {
+struct VENGINE_API TransformComponent {
 	glm::vec3 translation{0.0f};
 	glm::vec3 rotation{0.0f, 0.0f, 0.0f}; // in radians
 	glm::vec3 scale{1.0f};
 };
 
-struct PointLightComponent {
+struct VENGINE_API PointLightComponent {
 	float intensity{1.0f};
 	bool rotates{ true };
 };
 
-class VeGameObject {
+class VENGINE_API VeGameObject {
 public:
 	static VeGameObject createGameObject() {
 		static uint32_t current_id = 0;

@@ -19,14 +19,13 @@ static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	vk::DebugUtilsMessageTypeFlagsEXT type,
 	const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData,
 	void*) {
-	// Basic ANSI color mapping (can be disabled by exporting NO_COLOR or if terminal does not support it)
-	const bool enableColor = (std::getenv("NO_COLOR") == nullptr);
-	const char* reset   = enableColor ? "\033[0m"  : "";
-	const char* red     = enableColor ? "\033[31m" : "";
-	const char* yellow  = enableColor ? "\033[33m" : "";
-	const char* blue    = enableColor ? "\033[34m" : "";
-	const char* magenta = enableColor ? "\033[35m" : "";
-	const char* gray    = enableColor ? "\033[90m" : "";
+	// Basic ANSI color mapping 
+	const char* reset   =  "\033[0m";  // reset color
+	const char* red     = "\033[31m";  // red
+	const char* yellow  = "\033[33m";  // yellow
+	const char* blue    = "\033[34m";  // blue
+	const char* magenta = "\033[35m";  // magenta
+	const char* gray    = "\033[90m";  // gray
 
 	const char* sevColor = gray;
 	const char* sevLabel = "VERBOSE";

@@ -1,10 +1,11 @@
 #pragma once
 
+#include "ve_export.hpp"
 #include "ve_device.hpp"
 
 namespace ve {
 
-class VeBuffer {
+class VENGINE_API VeBuffer {
 public:
 	static vk::DeviceSize getAlignment(vk::DeviceSize instance_size, vk::DeviceSize min_offset_alignment);
 	VeBuffer(

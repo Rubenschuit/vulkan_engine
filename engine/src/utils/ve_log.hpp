@@ -45,7 +45,6 @@ inline const char* level_to_str(int lvl) {
 inline const char* level_to_color(int lvl) {
 
 #if VE_LOG_ENABLE_COLOR
-	if (std::getenv("NO_COLOR")) return "";
 	switch (lvl) {
 		case log::Error: return "\033[31m"; // red
 		case log::Warn:  return "\033[33m"; // yellow
@@ -61,7 +60,6 @@ inline const char* level_to_color(int lvl) {
 
 inline const char* reset_color() {
 #if VE_LOG_ENABLE_COLOR
-	if (std::getenv("NO_COLOR")) return "";
 	return "\033[0m";
 #else
 	return "";
@@ -70,21 +68,15 @@ inline const char* reset_color() {
 
 inline void log_line(int lvl, const char* file, int line, const std::string& msg) {
 	if (lvl > VE_LOG_LEVEL) return;
-	// Optional timestamp
-	std::time_t now = std::time(nullptr);
-	std::tm* local_tm = std::localtime(&now);
-	char timestamp[32] = {0};
-	if (local_tm) {
-		std::strftime(timestamp, sizeof(timestamp), "%H:%M:%S", local_tm);
-	}
-	std::fprintf(stderr, "%s[%s]%s %s %s:%d: %s\n",
-			level_to_color(lvl), level_to_str(lvl), reset_color(), timestamp, file, line, msg.c_str());
+
+	std::fprintf(stderr, "%s[%s]%s %s:%d: %s\n",
+			level_to_color(lvl), level_to_str(lvl), reset_color(), file, line, msg.c_str());
 }
 
 }} // namespace ve { namespace detail {
 
 #define VE_LOG_IMPL(LVL, EXPR) do { \
-    if ((LVL) <= VE_LOG_LEVEL) { \
+    if constexpr ((LVL) <= VE_LOG_LEVEL) { \
         std::ostringstream _ve_log_oss; \
         _ve_log_oss << EXPR; \
 		std::filesystem::path p = std::filesystem::path(__FILE__).filename(); \

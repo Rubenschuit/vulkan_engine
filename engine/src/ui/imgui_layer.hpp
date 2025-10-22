@@ -1,4 +1,5 @@
 #pragma once
+#include "ve_export.hpp"
 
 // Minimal Dear ImGui integration header. Implementation in imgui_layer.cpp
 // This uses glfw + Vulkan backends. Assumes VkInstance/Device/Queue/Swapchain are managed elsewhere.
@@ -9,7 +10,7 @@ class VeWindow;
 class VeDevice;
 class VeRenderer;
 
-struct UIContext {
+struct VENGINE_API UIContext {
 	// general
 	bool visible;
 
@@ -25,7 +26,7 @@ struct UIContext {
 
 };
 
-class ImGuiLayer {
+class VENGINE_API ImGuiLayer {
 public:
 
     ImGuiLayer(VeWindow& window, VeDevice& device, VeRenderer& renderer);

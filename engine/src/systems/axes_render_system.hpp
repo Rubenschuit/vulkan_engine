@@ -1,5 +1,6 @@
 /* Class for rendering simple 3D coordinate axes */
 #pragma once
+#include "ve_export.hpp"
 #include "core/ve_device.hpp"
 #include "core/ve_pipeline.hpp"
 #include "ve_config.hpp"
@@ -11,7 +12,7 @@
 
 namespace ve {
 
-class AxesRenderSystem {
+class VENGINE_API AxesRenderSystem {
 public:
 	AxesRenderSystem( VeDevice& device,
 					  const vk::raii::DescriptorSetLayout& descriptor_set_layout,

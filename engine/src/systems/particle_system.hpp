@@ -1,4 +1,5 @@
 #pragma once
+#include "ve_export.hpp"
 #include "ve_config.hpp"
 #include "core/ve_buffer.hpp"
 #include "core/ve_descriptors.hpp"
@@ -13,7 +14,7 @@
 
 namespace ve {
 
-struct ParticleParams {
+struct VENGINE_API ParticleParams {
 	float delta_time;
 	float total_time = 0.0f;
 	uint32_t particle_count;
@@ -26,7 +27,7 @@ struct ParticleParams {
 	alignas(16) glm::vec3 origin;
 };
 
-struct Particle {
+struct VENGINE_API Particle {
 	glm::vec4 position; // w is scale
 	glm::vec4 velocity; // w component unused
 	glm::vec4 color;
@@ -45,7 +46,7 @@ struct Particle {
 	}
 };
 
-class ParticleSystem {
+class VENGINE_API ParticleSystem {
 public:
 	ParticleSystem(VeDevice& device,
 					std::shared_ptr<VeDescriptorPool> descriptor_pool,

@@ -4,8 +4,8 @@ setlocal EnableExtensions
 :: windowsBuild.bat
 :: Usage:
 ::   windowsBuild.bat [mode] [generator]
-::     mode: debug (default) | release | test | clean
-::     generator: mingw (default) | msvc
+::     mode: debug | release (default) | test | clean
+::     generator: mingw | msvc (default)
 ::
 :: Examples:
 ::   windowsBuild.bat
@@ -14,7 +14,7 @@ setlocal EnableExtensions
 ::   windowsBuild.bat clean
 
 set MODE=%~1
-if "%MODE%"=="" set MODE=debug
+if "%MODE%"=="" set MODE=release
 set GEN=%~2
 if "%GEN%"=="" set GEN=msvc
 
@@ -33,7 +33,7 @@ set BUILD_TYPE=Debug
 if /I "%MODE%"=="release" set BUILD_TYPE=Release
 
 :: Extra CMake args
-set EXTRA_CMAKE_ARGS=-DVE_BUILD_TESTS=OFF
+set EXTRA_CMAKE_ARGS=-DVE_BUILD_TESTS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 if /I "%MODE%"=="test" set EXTRA_CMAKE_ARGS=-DVE_BUILD_TESTS=ON
 
 :: Choose generator and build dir
@@ -48,7 +48,7 @@ if /I "%GEN%"=="msvc" (
 echo [INFO] Configuring for %GEN% ("%CMAKE_GEN%"), %BUILD_TYPE%
 
 :: Configure
-set CONFIGURE_CMD=cmake -S . -B "%BUILD_DIR%" -G "%CMAKE_GEN%" %EXTRA_CMAKE_ARGS%
+set CONFIGURE_CMD=cmake -S . -B "%BUILD_DIR%" -G "%CMAKE_GEN%" %EXTRA_CMAKE_ARGS% 
 if /I not "%GEN%"=="msvc" set CONFIGURE_CMD=%CONFIGURE_CMD% -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
 echo [CMD ] %CONFIGURE_CMD%
@@ -69,13 +69,6 @@ if /I "%GEN%"=="msvc" (
 if errorlevel 1 (
 	echo [ERR ] Build failed.
 	exit /b %ERRORLEVEL%
-)
-
-:: Optionally build shaders target
-if /I "%GEN%"=="msvc" (
-	cmake --build "%BUILD_DIR%" --config %BUILD_TYPE% --target Shaders
-) else (
-	cmake --build "%BUILD_DIR%" --target Shaders
 )
 
 :: Tests

@@ -2,10 +2,17 @@
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/engine/src/*.cpp)
 file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/app/src/*.cpp)
 
-add_library(VEngineLib SHARED ${ENGINE_SOURCES})
+add_library(VEngineLib STATIC ${ENGINE_SOURCES})
+if (MSVC)
+	#target_compile_definitions(VEngineLib PRIVATE VENGINE_EXPORTS) # Define export macro for DLL declspec on Windows\
+    target_compile_options(VEngineLib PRIVATE /wd4251) # Suppress DLL interface warnings
+endif()
 add_library(VEngine::Lib ALIAS VEngineLib)
 
 add_executable(${PROJECT_NAME} ${APP_SOURCES})
+if (MSVC)
+	target_compile_options(${PROJECT_NAME} PRIVATE /wd4251) # Suppress DLL interface warnings
+endif()
 
 # Common include paths for engine (public so tests and exe inherit)
 target_include_directories(VEngineLib
@@ -63,7 +70,6 @@ endif()
 
 # PCH & warnings
 target_precompile_headers(VEngineLib PRIVATE engine/src/pch.hpp)
-target_precompile_headers(${PROJECT_NAME} REUSE_FROM VEngineLib)
 
 if (MSVC)
 	target_compile_options(VEngineLib PRIVATE /W4 $<$<BOOL:${VE_WARNINGS_AS_ERRORS}>:/WX>)
@@ -96,6 +102,9 @@ if (APPLE OR UNIX)
 		INSTALL_RPATH "$ORIGIN"
 	)
 endif()
+
+#set_target_properties(VEngineLib PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+#target_link_options(VEngineLib PRIVATE "-Wl,--export-all-symbols")
 
 if (WIN32)
 	message(STATUS "CREATING BUILD FOR WINDOWS")

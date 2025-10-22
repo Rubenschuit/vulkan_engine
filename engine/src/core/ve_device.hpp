@@ -5,14 +5,13 @@ It also sets up validation layers if enabled. Moreover it provides
 methods for creating and managing Vulkan resources, such as buffers and images.
 There are also methods for submitting single time command buffers to a queue. */
 #pragma once
-
+#include "ve_export.hpp"
 #include "ve_window.hpp"
+#include "ve_config.hpp"
+
 #define VULKAN_HPP_ENABLE_RAII
 #include <vulkan/vulkan_raii.hpp>
 #include <vulkan/vulkan_beta.h> // required for macOS portability subset extension
-#include "ve_config.hpp"
-
-// std lib headers
 #include <string>
 #include <vector>
 
@@ -32,7 +31,7 @@ struct QueueFamilyIndices {
 	bool isComplete() { return graphicsFamilyHasValue && presentFamilyHasValue; }
 };
 
-class VeDevice {
+class VENGINE_API VeDevice {
 public:
 
 	#ifdef NDEBUG

@@ -52,6 +52,7 @@ Mkfile.old
 dkms.conf
 
 .vscode/
+.vs/
 .DS_Store
 *.spv
 build/
@@ -61,3 +62,4 @@ build_msvc/
 .editorconfig
 .env.cmake
 imgui.ini
+CMakeSettings.json

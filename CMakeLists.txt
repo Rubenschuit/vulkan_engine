@@ -2,7 +2,12 @@
 include(./.env.cmake OPTIONAL RESULT_VARIABLE LOCAL_ENV)
 message(STATUS "Local .env.cmake: ${LOCAL_ENV}")
 
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.20)
+
+# windows tinfoil
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL" CACHE STRING "" FORCE)
+set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS 1)
+
 set(NAME VeApp)
 
 # Enforce C++20 uniformly

@@ -2,6 +2,8 @@
 
 // Included by application
 
+#include "ve_export.hpp" // for VENGINE_API
+
 #include "core/ve_window.hpp"
 #include "core/ve_device.hpp"
 #include "core/ve_pipeline.hpp"

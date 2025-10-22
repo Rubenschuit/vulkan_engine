@@ -4,6 +4,7 @@ descriptor pools, and writing descriptor sets.
 #pragma once
 
 #include "ve_device.hpp"
+#include "ve_export.hpp"
 
 // std
 #include <memory>
@@ -12,10 +13,10 @@ descriptor pools, and writing descriptor sets.
 
 namespace ve {
 
-class VeDescriptorSetLayout {
+class VENGINE_API VeDescriptorSetLayout {
 public:
 
-	class Builder {
+	class VENGINE_API Builder {
 	public:
 		Builder(VeDevice &ve_device) : m_ve_device{ve_device} {}
 
@@ -47,10 +48,10 @@ private:
 	friend class VeDescriptorWriter;
 };
 
-class VeDescriptorPool {
+class VENGINE_API VeDescriptorPool {
 public:
 
-	class Builder {
+	class VENGINE_API Builder {
 	public:
 		Builder(VeDevice &ve_device) : m_ve_device{ve_device} {}
 
@@ -86,7 +87,7 @@ private:
 	friend class VeDescriptorWriter;
 };
 
-class VeDescriptorWriter {
+class VENGINE_API VeDescriptorWriter {
 public:
 	VeDescriptorWriter(VeDescriptorSetLayout &set_layout, VeDescriptorPool &pool);
 

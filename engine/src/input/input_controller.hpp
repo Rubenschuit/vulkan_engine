@@ -1,12 +1,12 @@
 #pragma once
-
+#include "ve_export.hpp"
 #include "game/ve_game_object.hpp"
 #include "core/ve_window.hpp"
 #include "game/ve_camera.hpp"
 
 namespace ve {
 
-struct InputActions {
+struct VENGINE_API InputActions {
 	// particles
 	bool reset_particles = false;
 	int set_mode = 0; // 1..4 when pressed, 0 = no change
@@ -17,7 +17,7 @@ struct InputActions {
 	bool ui_visible = false;  // true when mouse-look is disabled
 };
 
-class InputController {
+class VENGINE_API InputController {
 public:
 
 	struct KeyMappings {

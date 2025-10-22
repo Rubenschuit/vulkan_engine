@@ -2,7 +2,7 @@
 its associated resources. This includes image views, depth
 resources and synchronization objects. */
 #pragma once
-
+#include "ve_export.hpp"
 #include "ve_device.hpp"
 #include "ve_image.hpp"
 #define VULKAN_HPP_ENABLE_RAII
@@ -15,7 +15,7 @@ resources and synchronization objects. */
 
 namespace ve {
 
-class VeSwapChain {
+class VENGINE_API VeSwapChain {
 public:
 	VeSwapChain(VeDevice& device, vk::Extent2D window_extent);
 	VeSwapChain(VeDevice& device, vk::Extent2D window_extent, std::shared_ptr<VeSwapChain> old_swap_chain);

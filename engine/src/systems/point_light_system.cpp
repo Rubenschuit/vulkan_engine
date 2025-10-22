@@ -12,6 +12,7 @@ struct SimplePushConstantData {
 	glm::vec4 position;
 	glm::vec4 color;
 	float scale;
+	uint32_t padding[3]; 
 };
 
 PointLightSystem::PointLightSystem( VeDevice& device,

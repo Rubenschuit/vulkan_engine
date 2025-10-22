@@ -1,13 +1,15 @@
 /* The VeTexture class is responsible for loading texture images
    and creating Vulkan image resources.  */
 #pragma once
-
+#include "ve_export.hpp"
 #include "ve_device.hpp"
 #include "ve_image.hpp"
 
+#include <filesystem>
+
 namespace ve {
 
-class VeTexture {
+class VENGINE_API VeTexture {
 public:
 	VeTexture(ve::VeDevice& device, const std::filesystem::path& texture_path);
 	VeTexture(ve::VeDevice& device, const std::vector<std::filesystem::path>& texture_paths);
