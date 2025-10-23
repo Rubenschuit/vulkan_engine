@@ -6,13 +6,14 @@
 
 namespace ve {
 
-ParticleSystem::ParticleSystem( VeDevice& device,
-								std::shared_ptr<VeDescriptorPool> descriptor_pool,
-								const vk::raii::DescriptorSetLayout& global_set_layout,
-								vk::Format color_format,
-								uint32_t particle_count,
-								glm::vec3 origin,
-								std::filesystem::path shader_path)
+ParticleSystem::ParticleSystem( 
+	VeDevice& device,
+	std::shared_ptr<VeDescriptorPool> descriptor_pool,
+	const vk::raii::DescriptorSetLayout& global_set_layout,
+	vk::Format color_format,
+	uint32_t particle_count,
+	glm::vec3 origin,
+	std::filesystem::path shader_path)
 	: m_ve_device(device), m_particle_count(particle_count),
 	  m_origin(origin), m_descriptor_pool(std::move(descriptor_pool)),
 	  m_shader_path(shader_path) {
@@ -231,7 +232,7 @@ void ParticleSystem::render(VeFrameInfo& frame_info) const {
 		vk::PipelineBindPoint::eGraphics,
 		m_pipeline_layout,
 		0,
-		{ *frame_info.global_descriptor_set },
+		{ frame_info.global_descriptor_set },
 		{}
 	);
 	vk::DeviceSize offsets[] = { 0 };

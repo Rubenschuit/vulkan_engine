@@ -44,5 +44,5 @@ enum class QueueKind { Graphics, Transfer };
 // TODO: consider moving the timeline semaphore from VeSwapChain somewhere else
 // TODO: Fix window resize crash on windows
 // TODO: Centralise frame time measurement code (e.g. in Sandbox/imgui_layer)
-// TODO: fix dynamic lib for msvc
-// TODO: fix vulkan validation layer warnings from skybox/point light push constants
+// TODO: Move body of the main loop in Sandbox::run() to VeApplication::run()
+// TODO: Fix flashbang upon startup of veapp 

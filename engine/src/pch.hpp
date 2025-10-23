@@ -22,6 +22,8 @@
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
+#include <format>
+#include <chrono>
 
 // Logging
 #include "utils/ve_log.hpp"

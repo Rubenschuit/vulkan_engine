@@ -20,49 +20,44 @@ static std::filesystem::path GetPathToRunningExe()
     std::vector<wchar_t> buf;
     DWORD len = 0;
     // Start with MAX_PATH and grow if truncated.
-    for (size_t size = 260; ; size *= 2) {
+    const size_t MAX_PATH_SIZE = 260;
+    for (size_t size = MAX_PATH_SIZE; ; size *= 2) {
         buf.resize(size);
         len = GetModuleFileNameW(NULL, buf.data(), static_cast<DWORD>(buf.size()));
-        if (len == 0) {
-            throw std::runtime_error("GetModuleFileNameW failed");
-        }
+        assert(len > 0 && "GetModuleFileNameW failed");
         // If len < buf.size() - 1 then the result was not truncated.
         if (len < buf.size() - 1) {
             return std::filesystem::path(std::wstring(buf.data(), len));
         }
         // If extremely large, bail out to avoid infinite loop.
-        if (size > (1 << 20)) {
-            throw std::runtime_error("Executable path too long");
-        }
+        assert(size <= (1 << 20) && "Executable path too long");
     }
 }
 #endif
 
+// Called by the entry point main() to create the application instance
 extern ve::VeApplication* createApp(std::filesystem::path working_directory);
 
 int main(int argc, char** argv) {
 	(void)argc; // unused
 
-
 #if _MSC_VER && !__INTEL_COMPILER
-	std::filesystem::path exe_path = GetPathToRunningExe();
+	std::filesystem::path path = GetPathToRunningExe();
 #else
 	// argv[0] is path to executable on posix
-	std::filesystem::path exe_path = argv[0];
+	std::filesystem::path path = argv[0];
 #endif
 	// reduce something like root/build/Debug/VeApp to root
-	exe_path = exe_path.parent_path().parent_path().parent_path(); // executable is in build/Debug|Release/
+	path = path.parent_path().parent_path().parent_path(); // executable is in build/Debug|Release/
 
 	// Simple checks for expected subfolders
-	assert(std::filesystem::exists(exe_path) && "Working directory does not exist");
-	assert(std::filesystem::exists(exe_path / "models") && "Working directory 'models' subfolder does not exist");
-	assert(std::filesystem::exists(exe_path / "textures") && "Working directory 'textures' subfolder does not exist");
+	assert(std::filesystem::exists(path) && "Working directory does not exist");
+	assert(std::filesystem::exists(path / "models") && "Working directory 'models' subfolder does not exist");
+	assert(std::filesystem::exists(path / "textures") && "Working directory 'textures' subfolder does not exist");
 
-	VE_LOGD("VeApp::VeApp working_directory=" << exe_path.string());
+	VE_LOGD("VeApp::VeApp working_directory=" << path.string());
 
-	auto app = createApp(exe_path);
+	auto app = createApp(path);
 	app->run();
 	delete app;
 }
-
-

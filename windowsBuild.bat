@@ -40,6 +40,7 @@ if /I "%MODE%"=="test" set EXTRA_CMAKE_ARGS=-DVE_BUILD_TESTS=ON
 if /I "%GEN%"=="msvc" (
 	set CMAKE_GEN=Visual Studio 17 2022
 	set BUILD_DIR=build
+	set EXTRA_CMAKE_ARGS=%EXTRA_CMAKE_ARGS% -A x64
 ) else (
 	set CMAKE_GEN=MinGW Makefiles
 	set BUILD_DIR=build

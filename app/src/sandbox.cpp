@@ -1,14 +1,34 @@
+
 #include <glm/glm.hpp>
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "sandbox.hpp"
 
 namespace ve {
 
-Sandbox::Sandbox(const std::filesystem::path& working_dir) : working_directory(working_dir) {
-	// First a window, device and swap chain are initialised
+Sandbox::Sandbox(const std::filesystem::path& working_dir) 
+	: working_directory(working_dir),
+	m_cube_model_path(working_directory / "models" / "cube.obj"),
+	m_viking_room_model_path(working_directory / "models" / "viking_room.obj"),
+	m_quad_model_path(working_directory / "models" / "quad.obj"),
+	m_flat_vase_model_path(working_directory / "models" / "flat_vase.obj"),
+	m_smooth_vase_model_path(working_directory / "models" / "smooth_vase.obj"),
+	m_texture_path(working_directory / "textures" / "viking_room.png"),
+	m_skybox_paths({
+		working_directory / "textures" / "skybox" / "Starfield_And_Haze_left.png",
+		working_directory / "textures" / "skybox" / "Starfield_And_Haze_right.png",
+		working_directory / "textures" / "skybox" / "Starfield_And_Haze_up.png",
+		working_directory / "textures" / "skybox" / "Starfield_And_Haze_down.png",
+		working_directory / "textures" / "skybox" / "Starfield_And_Haze_front.png",
+		working_directory / "textures" / "skybox" / "Starfield_And_Haze_back.png"
+	}),
+	m_skybox(m_ve_device, m_skybox_paths),
+	m_texture(m_ve_device, m_texture_path) {
+	
+	// First a window, device and swap chain are initialised in the base class
 	loadGameObjects();
 	createUniformBuffers();
 	createDescriptors();
@@ -16,7 +36,6 @@ Sandbox::Sandbox(const std::filesystem::path& working_dir) : working_directory(w
 	initUI();
 
 	// Initialise camera
-	m_last_aspect = m_ve_renderer.getExtentAspectRatio();
 	m_camera.setPerspective(m_fov, m_last_aspect, m_near_plane, m_far_plane);
 }
 
@@ -25,33 +44,22 @@ Sandbox::~Sandbox() {}
 void Sandbox::run() {
 	VE_LOGI("Sandbox::run starting. Window=" << m_ve_window.getWidth() << "x" << m_ve_window.getHeight());
 
-	auto current_time = std::chrono::high_resolution_clock::now();
-	auto total_time = 0.0f;
+	float total_time = 0.0f;
 
 	// ------------- Main loop -------------
-	while (!glfwWindowShouldClose(m_ve_window.getGLFWwindow())) {
-		glfwPollEvents();
+	while (!m_ve_window.shouldClose()) {
+		m_ve_window.pollEvents();
 
-		// Compute time delta for a frame
-		auto new_time = std::chrono::high_resolution_clock::now();
-		float dt = std::chrono::duration<float, std::chrono::seconds::period>(new_time - current_time).count();
-		total_time += dt;
-		// Clamp to avoid large physics steps after stalls (e.g., window resize)
-		const float max_dt = 1.0f / 30.0f; // ~33ms
-		if (dt < 0.0f)
-			dt = 0.0f;
-		if (dt > max_dt)
-			dt = max_dt;
+		// Update frame time using base class method
+		updateFrameTime();
+		
+		total_time += m_frame_time;
 
 		// --------------- Begin frame ---------------
 
-		if (!m_ve_renderer.beginFrame()) {
-			current_time = new_time;
+		if (!m_ve_renderer.beginFrame()) 
 			continue;
-		}
 		// Next image acquired successfully
-		m_frame_time = dt;
-		current_time = new_time;
 
 		// Setup frame info
 		auto& command_buffer = m_ve_renderer.getCurrentCommandBuffer();
@@ -144,7 +152,7 @@ void Sandbox::renderScene(VeFrameInfo& frame_info) {
 	m_skybox_render_system->render(frame_info);
 	m_simple_render_system->renderObjects(frame_info);
 	m_axes_render_system->render(frame_info);
-	//m_point_light_system->render(frame_info);
+	m_point_light_system->render(frame_info);
 	m_particle_system->render(frame_info);
 
 	m_ve_renderer.endSceneRender(command_buffer);
@@ -197,7 +205,7 @@ void Sandbox::loadGameObjects() {
 	floor.has_texture = 0.0f;
 	floor.transform = {
 		.translation = {0.0f, 0.0f, -0.1f},
-		.scale = {80.0f, 80.0f, 800.0f}
+		.scale = {80.0f, 80.0f, 8.0f}
 	};
 	m_game_objects.emplace(floor.getId(), std::move(floor));
 

@@ -1,13 +1,21 @@
+/* SkyboxRenderSystem is responsible for rendering a skybox.
+It creates a pipeline, loads a cube model and renders it. 
+Size is hardcoded in .cpp for now.*/
+
 #pragma once
 #include "ve_export.hpp"
-#include "core/ve_device.hpp"
-#include "core/ve_pipeline.hpp"
 #include "ve_config.hpp"
 #include "game/ve_frame_info.hpp"
 
 #include <memory>
 #include <vector>
+#include <filesystem>
 
+namespace ve {
+    // Forward declarations
+    class VeDevice;
+    class VePipeline;
+}
 
 namespace ve {
 
@@ -34,7 +42,6 @@ private:
 	void createPipeline(vk::Format color_format);
 
 	VeDevice& m_ve_device;
-
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_ve_pipeline;
 	VeGameObject m_cube_object = VeGameObject::createGameObject();

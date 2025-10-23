@@ -78,15 +78,15 @@ void VeDevice::createInstance() {
 	//none_of returns true if no elements in the range satisfy the predicate
 	// Here we check if any of the required layers are in none of the available layers
 	// If so, we throw an error
-			if (std::ranges::any_of(required_layers, [&layer_properties](auto const& required_layer) {
+	if (std::ranges::any_of(required_layers, [&layer_properties](auto const& required_layer) {
 		return std::ranges::none_of(layer_properties,
 									[required_layer](auto const& layer_property)
 									{ return strcmp(layer_property.layerName, required_layer) == 0; });})
-		) {
+	) {
 		throw std::runtime_error("One or more required validation layers are not supported!");
 	}
 
-			std::vector<vk::ExtensionProperties> available_extensions = m_context.enumerateInstanceExtensionProperties();
+	std::vector<vk::ExtensionProperties> available_extensions = m_context.enumerateInstanceExtensionProperties();
 	VE_LOGD(available_extensions.size() << " available extensions:");
 	for (const auto& extension : available_extensions) {
 		VE_LOGD("\t" << extension.extensionName);

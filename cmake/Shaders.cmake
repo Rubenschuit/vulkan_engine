@@ -1,10 +1,3 @@
-#[[
-Unified Slang -> SPIR-V target helper.
-
-Usage examples:
-	add_slang_spirv_target(ShadersSimple TYPE GRAPHICS SOURCES file.slang VERT_ENTRY vertMain FRAG_ENTRY fragMain OUT_FILE path/to/output.spv)
-	add_slang_spirv_target(ShadersParticles TYPE COMPUTE SOURCES file.slang ENTRY compMain OUT_FILE path/to/output.spv)
-]]
 function(add_slang_spirv_target TARGET)
 	set(options "")
 	set(oneValueArgs TYPE OUT_DIR OUT_FILE VERT_ENTRY FRAG_ENTRY ENTRY PROFILE)

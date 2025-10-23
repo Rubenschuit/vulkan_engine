@@ -4,14 +4,14 @@ file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/app/src/*.
 
 add_library(VEngineLib SHARED ${ENGINE_SOURCES})
 if (MSVC)
-	target_compile_definitions(VEngineLib PRIVATE VENGINE_EXPORTS) # Define export macro for DLL declspec on Windows\
-    #target_compile_options(VEngineLib PRIVATE /wd4251) # Suppress DLL interface warnings
+	target_compile_definitions(VEngineLib PRIVATE VENGINE_EXPORTS) # Define export macro for DLL declspec on Windows
+	target_compile_options(VEngineLib PRIVATE /wd4251) # Suppress DLL interface warnings
 endif()
 add_library(VEngine::Lib ALIAS VEngineLib)
 
 add_executable(${PROJECT_NAME} ${APP_SOURCES})
 if (MSVC)
-	#target_compile_options(${PROJECT_NAME} PRIVATE /wd4251) # Suppress DLL interface warnings
+	target_compile_options(${PROJECT_NAME} PRIVATE /wd4251) # Suppress DLL interface warnings
 endif()
 
 # Common include paths for engine (public so tests and exe inherit)
@@ -34,7 +34,7 @@ endif()
 target_link_libraries(VEngineLib PUBLIC ${GLFW_LIB} ${Vulkan_LIBRARIES})
 target_link_libraries(${PROJECT_NAME} PRIVATE VEngine::Lib)
 
-# Add Dear ImGui sources to VEngineLib
+#Add Dear ImGui sources to VEngineLib
 if (IMGUI_DIR)
 	set(IMGUI_SOURCES
 		${IMGUI_DIR}/imgui.cpp
@@ -59,7 +59,7 @@ if (IMGUI_DIR)
 			list(APPEND _IMGUI_FLAGS -Wno-implicit-int-conversion -Wno-implicit-int-float-conversion -Wno-shorten-64-to-32)
 		endif()
 		set_source_files_properties(${IMGUI_SOURCES} PROPERTIES COMPILE_OPTIONS "${_IMGUI_FLAGS}")
-	endif()
+ 	endif()
 endif()
 
 if (APPLE)
@@ -74,6 +74,9 @@ target_precompile_headers(VEngineLib PRIVATE engine/src/pch.hpp)
 if (MSVC)
 	target_compile_options(VEngineLib PRIVATE /W4 $<$<BOOL:${VE_WARNINGS_AS_ERRORS}>:/WX>)
 	target_compile_options(${PROJECT_NAME} PRIVATE /W4 $<$<BOOL:${VE_WARNINGS_AS_ERRORS}>:/WX>)
+	# Add MSVC debug-specific flags (optional)
+	target_compile_options(VEngineLib PRIVATE $<$<CONFIG:Debug>:/Od /RTC1>)
+	target_compile_options(${PROJECT_NAME} PRIVATE $<$<CONFIG:Debug>:/Od /RTC1>)
 else()
 	foreach(tgt IN ITEMS VEngineLib ${PROJECT_NAME})
 		target_compile_options(${tgt} PRIVATE -Wall -Wextra -Wconversion -Wpedantic $<$<BOOL:${VE_WARNINGS_AS_ERRORS}>:-Werror>)
@@ -101,10 +104,21 @@ if (APPLE OR UNIX)
 		BUILD_RPATH "$ORIGIN"
 		INSTALL_RPATH "$ORIGIN"
 	)
+elseif (WIN32)
+	# Windows: Set DLL output directory and copy DLL to executable directory
+	set_target_properties(VEngineLib PROPERTIES
+		RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+		LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+	)
+	# Copy DLL to executable directory after build
+	add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+		$<TARGET_FILE:VEngineLib>
+		$<TARGET_FILE_DIR:${PROJECT_NAME}>
+	)
 endif()
 
-#set_target_properties(VEngineLib PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-#target_link_options(VEngineLib PRIVATE "-Wl,--export-all-symbols")
 
 if (WIN32)
 	message(STATUS "CREATING BUILD FOR WINDOWS")
@@ -113,29 +127,6 @@ if (WIN32)
 		target_link_directories(VEngineLib PUBLIC ${MINGW_PATH}/lib)
 	endif()
 endif()
-
-target_include_directories(VEngineLib
-	PUBLIC
-		${PROJECT_SOURCE_DIR}/include
-		${PROJECT_SOURCE_DIR}/engine/src
-)
-
-target_include_directories(${PROJECT_NAME}
-	PUBLIC
-		${PROJECT_SOURCE_DIR}/engine/src
-		${PROJECT_SOURCE_DIR}/include
-)
-
-target_include_directories(${PROJECT_NAME}
-	PUBLIC
-		${PROJECT_SOURCE_DIR}/engine/src
-		${PROJECT_SOURCE_DIR}/include
-)
-target_include_directories(${PROJECT_NAME}
-	PUBLIC
-		${PROJECT_SOURCE_DIR}/engine/src
-		${PROJECT_SOURCE_DIR}/include
-)
 
 
 

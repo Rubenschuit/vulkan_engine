@@ -1,6 +1,6 @@
 // VEngineExport.hpp
 #pragma once
-#ifdef _WIN322222222 // disable decl for now 
+#if _MSC_VER && !__INTEL_COMPILER
   #ifdef VENGINE_EXPORTS
     #define VENGINE_API __declspec(dllexport)
   #else

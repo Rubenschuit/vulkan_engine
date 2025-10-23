@@ -1,23 +1,29 @@
 /* Class for rendering simple 3D coordinate axes */
 #pragma once
 #include "ve_export.hpp"
-#include "core/ve_device.hpp"
-#include "core/ve_pipeline.hpp"
 #include "ve_config.hpp"
 #include "game/ve_frame_info.hpp"
-#include "game/ve_model.hpp"
 
 #include <memory>
-#include <string>
+#include <filesystem>
+
+namespace ve {
+    // Forward declarations
+    class VeDevice;
+    class VePipeline;
+    class VeModel;
+}
 
 namespace ve {
 
 class VENGINE_API AxesRenderSystem {
 public:
-	AxesRenderSystem( VeDevice& device,
-					  const vk::raii::DescriptorSetLayout& descriptor_set_layout,
-					  vk::Format color_format,
-					  std::filesystem::path shader_path);
+
+AxesRenderSystem( 
+		VeDevice& device,
+		const vk::raii::DescriptorSetLayout& descriptor_set_layout,
+		vk::Format color_format,
+		std::filesystem::path shader_path);
 	~AxesRenderSystem();
 
 	AxesRenderSystem(const AxesRenderSystem&) = delete;
@@ -36,4 +42,5 @@ private:
 	std::unique_ptr<VeModel> m_axes_model;
 	std::filesystem::path m_shader_path;
 };
+
 }

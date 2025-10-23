@@ -28,7 +28,6 @@ struct VENGINE_API UIContext {
 
 class VENGINE_API ImGuiLayer {
 public:
-
     ImGuiLayer(VeWindow& window, VeDevice& device, VeRenderer& renderer);
     ~ImGuiLayer();
 

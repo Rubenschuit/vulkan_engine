@@ -1,6 +1,16 @@
 #include "game/ve_game_object.hpp"
+#include "game/ve_model.hpp"
+#include <atomic>
 
 namespace ve {
+
+// Thread-safe and DLL-safe ID generation
+static std::atomic<uint32_t> current_id{0};
+
+VeGameObject VeGameObject::createGameObject() {
+	VeGameObject game_object = VeGameObject(current_id.fetch_add(1));
+	return game_object;
+}
 
 glm::mat4 VeGameObject::getTransform() const {
 	const float c3 = glm::cos(transform.rotation.z);

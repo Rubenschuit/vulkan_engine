@@ -63,3 +63,4 @@ build_msvc/
 .env.cmake
 imgui.ini
 CMakeSettings.json
+.clangd

@@ -1,13 +1,18 @@
 #include "pch.hpp"
 #include "systems/axes_render_system.hpp"
+#include "core/ve_device.hpp"
+#include "core/ve_pipeline.hpp"
+#include "game/ve_model.hpp"
+#include "utils/ve_log.hpp"
 #include "glm/gtc/constants.hpp"
 
 namespace ve {
 
-AxesRenderSystem::AxesRenderSystem( VeDevice& device,
-									const vk::raii::DescriptorSetLayout& global_set_layout,
-									vk::Format color_format,
-									std::filesystem::path shader_path)
+AxesRenderSystem::AxesRenderSystem( 
+	VeDevice& device,
+	const vk::raii::DescriptorSetLayout& global_set_layout,
+	vk::Format color_format,
+	std::filesystem::path shader_path)
 	: m_ve_device(device), m_shader_path(shader_path) {
 	createPipelineLayout(global_set_layout);
 	createPipeline(color_format);
@@ -121,7 +126,7 @@ void AxesRenderSystem::render(VeFrameInfo& frame_info) const {
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,
 		0,
-		*frame_info.global_descriptor_set,
+		{frame_info.global_descriptor_set},
 		{}
 	);
 	m_axes_model->bindVertexBuffer(frame_info.command_buffer);

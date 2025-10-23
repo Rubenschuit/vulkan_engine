@@ -27,6 +27,10 @@ public:
 	vk::Extent2D getExtent() const { return {static_cast<uint32_t>(m_width), static_cast<uint32_t>(m_height)}; }
 	bool wasWindowResized() const { return m_framebuffer_resized; }
 	void resetWindowResizedFlag() { m_framebuffer_resized = false; }
+	
+	// GLFW wrapper methods to avoid DLL boundary issues (this fixed msvc dll issues)
+	bool shouldClose() const { return glfwWindowShouldClose(m_window); }
+	void pollEvents() { glfwPollEvents(); }
 
 private:
 	void initWindow();

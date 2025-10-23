@@ -6,7 +6,7 @@
 
 namespace ve {
 
-struct VENGINE_API InputActions {
+struct InputActions {
 	// particles
 	bool reset_particles = false;
 	int set_mode = 0; // 1..4 when pressed, 0 = no change

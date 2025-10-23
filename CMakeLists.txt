@@ -4,9 +4,10 @@ message(STATUS "Local .env.cmake: ${LOCAL_ENV}")
 
 cmake_minimum_required(VERSION 3.20)
 
-# windows tinfoil
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL" CACHE STRING "" FORCE)
-set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS 1)
+# Use consistent runtime library for both Debug and Release to avoid DLL conflicts
+if(MSVC)
+	set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL" CACHE STRING "" FORCE)
+endif()
 
 set(NAME VeApp)
 

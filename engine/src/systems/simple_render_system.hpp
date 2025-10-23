@@ -1,23 +1,28 @@
 #pragma once
 #include "ve_export.hpp"
-#include "core/ve_device.hpp"
-#include "core/ve_pipeline.hpp"
 #include "ve_config.hpp"
 #include "game/ve_frame_info.hpp"
 
 #include <memory>
 #include <vector>
+#include <filesystem>
 
+namespace ve {
+    // Forward declarations
+    class VeDevice;
+    class VePipeline;
+}
 
 namespace ve {
 
 class VENGINE_API SimpleRenderSystem {
 public:
-	SimpleRenderSystem( VeDevice& device,
-						const vk::raii::DescriptorSetLayout& global_set_layout,
-						const vk::raii::DescriptorSetLayout& material_set_layout,
-						vk::Format color_format,
-						std::filesystem::path shader_path);
+	SimpleRenderSystem( 
+		VeDevice& device,
+		const vk::raii::DescriptorSetLayout& global_set_layout,
+		const vk::raii::DescriptorSetLayout& material_set_layout,
+		vk::Format color_format,
+		std::filesystem::path shader_path);
 	~SimpleRenderSystem();
 
 	//destroy copy and move constructors and assignment operators
@@ -27,7 +32,9 @@ public:
 	void renderObjects(VeFrameInfo& frame_info) const;
 
 private:
-	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout);
+	void createPipelineLayout(
+		const vk::raii::DescriptorSetLayout& global_set_layout, 
+		const vk::raii::DescriptorSetLayout& material_set_layout);
 	void createPipeline(vk::Format color_format);
 
 	VeDevice& m_ve_device;

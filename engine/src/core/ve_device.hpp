@@ -113,4 +113,5 @@ private:
 	const std::vector<const char *> m_validation_layers = ve::VALIDATION_LAYERS;
 	std::vector<const char*> m_required_device_extensions = ve::REQUIRED_DEVICE_EXTENSIONS;
 };
+
 }

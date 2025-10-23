@@ -13,12 +13,12 @@ for each frame in the rendering process. */
 
 namespace ve {
 
-struct VENGINE_API PointLight {
+struct PointLight {
 	glm::vec4 position;
 	glm::vec4 color; // w indicates light intensity
 };
 
-struct VENGINE_API UniformBufferObject {
+struct UniformBufferObject {
 	glm::mat4 view;
 	glm::mat4 proj;
 	glm::vec4 ambient_light_color = DEFAULT_AMBIENT_LIGHT_COLOR;
@@ -27,15 +27,17 @@ struct VENGINE_API UniformBufferObject {
 	// reminder: alignment
 };
 
-struct VENGINE_API VeFrameInfo {
+// References provide cleaner syntax and null safety
+struct VeFrameInfo {
 	vk::raii::DescriptorSet& global_descriptor_set;
 	vk::raii::DescriptorSet& material_descriptor_set;
 	vk::raii::DescriptorSet& cubemap_descriptor_set; // For skybox rendering
 	vk::raii::CommandBuffer& command_buffer;
-	vk::raii::CommandBuffer& compute_command_buffer; // For compute shaders
+	vk::raii::CommandBuffer& compute_command_buffer; 
 	std::unordered_map<uint32_t, VeGameObject>& game_objects;
 	float frame_time;
 	float total_time;
 	uint32_t current_frame;
 };
+
 }

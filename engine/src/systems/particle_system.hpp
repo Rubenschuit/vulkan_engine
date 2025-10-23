@@ -14,7 +14,7 @@
 
 namespace ve {
 
-struct VENGINE_API ParticleParams {
+struct ParticleParams {
 	float delta_time;
 	float total_time = 0.0f;
 	uint32_t particle_count;
@@ -27,7 +27,7 @@ struct VENGINE_API ParticleParams {
 	alignas(16) glm::vec3 origin;
 };
 
-struct VENGINE_API Particle {
+struct Particle {
 	glm::vec4 position; // w is scale
 	glm::vec4 velocity; // w component unused
 	glm::vec4 color;
@@ -48,13 +48,14 @@ struct VENGINE_API Particle {
 
 class VENGINE_API ParticleSystem {
 public:
-	ParticleSystem(VeDevice& device,
-					std::shared_ptr<VeDescriptorPool> descriptor_pool,
-					const vk::raii::DescriptorSetLayout& global_set_layout,
-					vk::Format color_format,
-					uint32_t particle_count,
-					glm::vec3 origin,
-					std::filesystem::path shader_path);
+	ParticleSystem(
+		VeDevice& device,
+		std::shared_ptr<VeDescriptorPool> descriptor_pool,
+		const vk::raii::DescriptorSetLayout& global_set_layout,
+		vk::Format color_format,
+		uint32_t particle_count,
+		glm::vec3 origin,
+		std::filesystem::path shader_path);
 	~ParticleSystem();
 
 	ParticleSystem(const ParticleSystem&) = delete;

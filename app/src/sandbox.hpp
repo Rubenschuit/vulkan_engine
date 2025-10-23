@@ -30,20 +30,15 @@ private:
 	const std::filesystem::path working_directory;
 
 	// Object paths
-	std::filesystem::path  m_cube_model_path = working_directory / "models" / "cube.obj";
-	std::filesystem::path  m_viking_room_model_path = working_directory / "models" / "viking_room.obj";
-	std::filesystem::path  m_quad_model_path = working_directory / "models" / "quad.obj";
-	std::filesystem::path  m_flat_vase_model_path = working_directory / "models" / "flat_vase.obj";
-	std::filesystem::path  m_smooth_vase_model_path = working_directory / "models" / "smooth_vase.obj";
+	std::filesystem::path m_cube_model_path;
+	std::filesystem::path m_viking_room_model_path;
+	std::filesystem::path m_quad_model_path;
+	std::filesystem::path m_flat_vase_model_path;
+	std::filesystem::path m_smooth_vase_model_path;
 
 	// Texture paths
-	std::filesystem::path m_texture_path = working_directory / "textures" / "viking_room.png";
-	std::vector<std::filesystem::path>  m_skybox_paths = {working_directory / "textures" / "skybox" / "Starfield_And_Haze_left.png",
-									working_directory / "textures" / "skybox" / "Starfield_And_Haze_right.png",
-									working_directory / "textures" / "skybox" / "Starfield_And_Haze_up.png",
-									working_directory / "textures" / "skybox" / "Starfield_And_Haze_down.png",
-									working_directory / "textures" / "skybox" / "Starfield_And_Haze_front.png",
-									working_directory / "textures" / "skybox" / "Starfield_And_Haze_back.png" };
+	std::filesystem::path m_texture_path;
+	std::vector<std::filesystem::path> m_skybox_paths;
 	/*
 	const char* m_skybox_path[6] = {working_directory + "/textures/mots.png",
 									working_directory + "/textures/mots.png",
@@ -53,9 +48,9 @@ private:
 									working_directory + "/textures/mots.png" };
 	*/
 
-	// Textures
-	VeTexture m_skybox{m_ve_device, m_skybox_paths};
-	VeTexture m_texture{m_ve_device, m_texture_path};
+
+	VeTexture m_skybox;
+	VeTexture m_texture;
 
 	// Game objects
 	std::unordered_map<uint32_t, VeGameObject> m_game_objects;
@@ -63,7 +58,7 @@ private:
 	// UI context captured during renderUI(), consumed in updateParticles() for example.
 	UIContext ui_context;
 
-	// Render systems as members
+	// Render systems 
 	std::unique_ptr<SkyboxRenderSystem> m_skybox_render_system;
 	std::unique_ptr<SimpleRenderSystem> m_simple_render_system;
 	std::unique_ptr<AxesRenderSystem> m_axes_render_system;

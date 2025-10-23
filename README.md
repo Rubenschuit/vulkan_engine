@@ -1,6 +1,6 @@
 # Vulkan Engine
 
-Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. Produces a static library (`VEngineLib`) and an app (`VeApp`).
+Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. Produces a shared library (`VEngineLib`) and an app (`VeApp`).
 
 ## Features
 - Modern Vulkan: dynamic rendering, Vulkan-Hpp RAII
@@ -41,14 +41,8 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 - Tinyobjloader (included in external)
 - stb_image (included in external)
 
-Optional environment file: `.env.cmake` in repository root. Common variables:
-- `MINGW_PATH`
-- `GLFW_PATH`
-- `VULKAN_SDK_PATH`
-- `SLANG_HOME`
-
 #### Downloads:
-Note: CMake will auto-discover Slang (`slangc`) and the Vulkan SDK in common install locations and via standard environment variables. Use `.env.cmake` only when installing to uncommon/custom paths, or to explicitly override detection.
+Note: CMake will auto-discover Slang (`slangc`) and the Vulkan SDK in common install locations and via standard environment variables. Use `.env.cmake` only when installing to uncommon/custom paths, or to explicitly override detection. See `envWindowsExample.cmake` for examples. 
 
 - Slang: https://github.com/shader-slang/slang/releases
 	- Windows: `C:\Program Files\Slang\bin\slangc.exe`

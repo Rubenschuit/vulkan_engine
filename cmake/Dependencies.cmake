@@ -165,18 +165,6 @@ if (EXISTS "${_VE_IMGUI_VENDORED_DIR}/imgui.h")
 	set(IMGUI_DIR "${_VE_IMGUI_VENDORED_DIR}")
 	message(STATUS "Using vendored Dear ImGui at: ${IMGUI_DIR}")
 else()
-	include(FetchContent)
-	FetchContent_Declare(imgui
-		GIT_REPOSITORY https://github.com/ocornut/imgui.git
-		GIT_TAG v1.90.9-docking
-	)
-	FetchContent_MakeAvailable(imgui)
-	set(IMGUI_DIR ${imgui_SOURCE_DIR})
-	message(STATUS "Fetched Dear ImGui from Git (docking): ${IMGUI_DIR}")
-endif()
-
-# Dear ImGui (fetch if not provided)
-if (NOT IMGUI_DIR)
 	message(STATUS "IMGUI_DIR not specified; fetching Dear ImGui via FetchContent")
 	include(FetchContent)
 	FetchContent_Declare(imgui
@@ -184,6 +172,6 @@ if (NOT IMGUI_DIR)
 		GIT_TAG v1.90.9-docking
 	)
 	FetchContent_MakeAvailable(imgui)
-	# Expose IMGUI_DIR for target includes and sources
 	set(IMGUI_DIR ${imgui_SOURCE_DIR} CACHE PATH "Path to Dear ImGui sources")
+	message(STATUS "Fetched Dear ImGui from Git (docking): ${IMGUI_DIR}")
 endif()

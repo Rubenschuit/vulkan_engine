@@ -6,13 +6,13 @@ It also creates the necessary shader modules. */
 #include <string>
 #include <vector>
 #include <filesystem>
-namespace ve { class VeDevice; }
 
+namespace ve { class VeDevice; }
 
 
 namespace ve {
 
-struct VENGINE_API PipelineConfigInfo {
+struct PipelineConfigInfo {
 	PipelineConfigInfo(const PipelineConfigInfo&) = delete;
 	PipelineConfigInfo& operator=(const PipelineConfigInfo&) = delete;
 	PipelineConfigInfo() = default;

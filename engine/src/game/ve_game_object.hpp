@@ -2,30 +2,31 @@
 The user manually sets the object's properties (position, rotation, scale, etc.) after creation. */
 #pragma once
 #include "ve_export.hpp"
-#include "game/ve_model.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <memory>
+
+namespace ve {
+    // Forward declaration
+    class VeModel;
+}
 
 namespace ve {
 
-struct VENGINE_API TransformComponent {
+struct TransformComponent {
 	glm::vec3 translation{0.0f};
 	glm::vec3 rotation{0.0f, 0.0f, 0.0f}; // in radians
 	glm::vec3 scale{1.0f};
 };
 
-struct VENGINE_API PointLightComponent {
+struct PointLightComponent {
 	float intensity{1.0f};
 	bool rotates{ true };
 };
 
 class VENGINE_API VeGameObject {
 public:
-	static VeGameObject createGameObject() {
-		static uint32_t current_id = 0;
-		VeGameObject game_object = VeGameObject(current_id++);
-		return game_object;
-	}
+	static VeGameObject createGameObject();
 	static VeGameObject createPointLight(float intensity = 1.0f, float radius = 1.0f, glm::vec3 color = glm::vec3(1.0f));
 
 	uint32_t getId() const { return m_id; }
