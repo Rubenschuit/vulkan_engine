@@ -14,6 +14,20 @@
 
 namespace ve {
 
+enum ParticleResetKind : uint32_t {
+	POINT = 1,
+	DISC = 2
+};
+
+enum ParticleMode : int32_t {
+	GRAVITY_EARTH = 1,
+	COOL = 2,
+	SUCC = 3,
+	STASIS = 4,
+	GALAXY_MASSIVE = 5,
+};
+
+// Uniform buffer with parameters for compute shader
 struct ParticleParams {
 	float delta_time;
 	float total_time = 0.0f;
@@ -22,8 +36,8 @@ struct ParticleParams {
 	uint32_t seed;  // rng seed for reset
 	float mean;
 	float stddev;
-	uint32_t reset_kind = 1u; // 1 = point, 2 = disc
-	int32_t mode = 4; // default to galaxyMassive
+	uint32_t reset_kind; // see ParticleResetKind enum
+	int32_t mode; // see ParticleMode enum
 	alignas(16) glm::vec3 origin;
 };
 
@@ -105,6 +119,10 @@ private:
 	uint32_t m_pending_particle_count = 0; // UI-staged value
 	float m_total_time = 0.0f;
 	glm::vec3 m_origin{0.0f, 0.0f, 10.0f};
+	std::atomic<bool> m_pending_reset{false}; // atomic not necessary (no multi-threading yet)
+	uint32_t m_reset_seed{0};
+	uint32_t m_reset_kind{ParticleResetKind::POINT}; // see ParticleResetKind enum
+	int32_t m_mode{ParticleMode::COOL}; // see ParticleMode enum
 
 	// Descriptor layouts for this system
 	std::unique_ptr<VeDescriptorSetLayout> m_compute_set_layout;
@@ -114,12 +132,8 @@ private:
 	std::vector<std::unique_ptr<VeBuffer>> m_shader_storage_buffers; // large SSBO per frame
 	std::vector<vk::raii::DescriptorSet> m_compute_descriptor_sets;
 
-	// Reset control
-	// atomic not necessary (no multi-threading yet)
-	std::atomic<bool> m_pending_reset{false};
-	uint32_t m_reset_seed{0};
-	uint32_t m_reset_kind{1u}; // 1=point, 2=disc
-	int32_t m_mode{1}; // 1..4 modes
+
+
 
 	// Shared pool for descriptor allocations (shared to ensure lifetime across systems)
 	std::shared_ptr<VeDescriptorPool> m_descriptor_pool;

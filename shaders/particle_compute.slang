@@ -74,7 +74,7 @@ struct Params {
 	float mean;
 	float stddev;
 	uint32_t reset_kind; // 1 = point, 2 = disc
-	int mode; // 1=weirdOrbiting, 2=gravityFloor, 3=galaxy, 4=galaxyMassive
+	int mode; // 1,2,3,4,5 see particle_system.hpp ParticleMode enum
 	float3 origin;
 };
 [vk::binding(3, 0)]
@@ -119,28 +119,9 @@ float2 rand_normal2(inout uint state) {
 
 // ---------------- Simulation programs ----------------
 
-// 1) Orbiting around a center with simple gravity + angular motion
-// weird but cool behavior
-Particle weirdOrbiting(Particle p) {
-	float3 center = params.origin;
-	float3 to_center = center - p.position.xyz;
-	float dist = length(to_center) + 0.01f; // avoid div by zero
-	float3 dir = to_center / dist;
-	// Gravity towards center
-	const float gravity_strength = 3.0f;
-	p.velocity.xyz += dir * gravity_strength * params.delta_time;
-	// Add some angular momentum
-	float3 up = float3(0.0f, 1.0f, 0.0f);
-	float3 right = normalize(cross(dir, up));
-	float3 forward = normalize(cross(dir, right));
-	const float rotation_strength = 10.0f;
-	p.velocity.xyz += forward * rotation_strength * params.delta_time;
-	// Integrate
-	p.position.xyz += p.velocity.xyz * params.delta_time;
-	return p;
-}
 
-// 2) Earth-like gravity and floor collision
+
+// 1) Earth-like gravity and floor collision
 Particle simulateGravityFloor(Particle p) {
 	const float g = 9.81f;
 	float3 accel = float3(0.0, 0.0, -g);
@@ -159,9 +140,45 @@ Particle simulateGravityFloor(Particle p) {
 	return p;
 }
 
+// 2) Orbiting around a center with simple gravity + angular motion
+// weird but cool behavior
+Particle coolOrbit(Particle p) {
+	float3 center = params.origin;
+	float3 to_center = center - p.position.xyz;
+	float dist = length(to_center) + 0.01f; // avoid div by zero
+	float3 dir = to_center / dist;
+	// Gravity towards center
+	const float gravity_strength = 3.0f;
+	p.velocity.xyz += dir * gravity_strength * params.delta_time;
+	// Add some angular momentum
+	float3 up = float3(0.0f, 1.0f, 0.0f);
+	float3 right = normalize(cross(dir, up));
+	float3 forward = normalize(cross(dir, right));
+	const float rotation_strength = 10.0f;
+	p.velocity.xyz += forward * rotation_strength * params.delta_time;
+	// Integrate
+	p.position.xyz += p.velocity.xyz * params.delta_time;
+	return p;
+}
+
+// 3) Simple gravity towards center
+Particle succ(Particle p) {
+	float3 center = params.origin;
+	float3 to_center = center - p.position.xyz;
+	float dist = length(to_center) + 0.01f; // avoid div by zero
+	float3 dir = to_center / dist;
+	// Gravity towards center
+	const float gravity_strength = 26.0f;
+	p.velocity.xyz += dir * gravity_strength * params.delta_time;
+
+	// update position with velocity
+	p.position.xyz += p.velocity.xyz * params.delta_time;
+	return p;
+}
+
 // chatgpt generated code (terrible):
-// 3) Galaxy spiral: central gravity + tangential drive + spiral arm attraction
-Particle simulateGalaxy(Particle p) {
+// 4) Attempt at a galaxy but puts particle in some kind of stasis
+Particle simulateStasis(Particle p) {
 	// Relative position in galaxy plane (XY), with origin as center
 	float3 rel = p.position.xyz - params.origin;
 	float2 relXY = rel.xy;
@@ -205,12 +222,15 @@ Particle simulateGalaxy(Particle p) {
 }
 
 // chatgpt generated code (not good):
-// ---- Massive galaxy  ----
+// 5) ---- Massive galaxy  ----
+
+// helper
 float v_circ_flat(float r, float v0, float r0) {
 	// Flat rotation curve: approaches v0, smoothed near center by r0
 	return v0 * (1.0f - exp(-r / max(1e-3f, r0)));
 }
 
+// Looks a little bit like a galaxy but is not stable
 Particle simulateGalaxyMassive(Particle p) {
 	const float eps = 1.0f;    // core softening
 	const float v0 = 35.0f;    // asymptotic circular speed
@@ -262,6 +282,7 @@ Particle simulateGalaxyMassive(Particle p) {
 	return p;
 }
 
+// Particles explode in random directions from a point
 void resetPoint(uint i) {
 	uint state = (i + 1u) * 747796405u ^ params.seed;
 
@@ -290,6 +311,7 @@ void resetPoint(uint i) {
 	particles_prev[i] = p0; // keep prev/current in sync
 }
 
+// Particles initialized in a rotating disc
 void resetDisc(uint i) {
 	uint state = (i + 1u) * 747796405u ^ params.seed;
 
@@ -349,15 +371,17 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 	// Choose simulation based on mode
 	switch (params.mode) {
 		case 1:
-			p = weirdOrbiting(p);
-			break;
-		case 2:
 			p = simulateGravityFloor(p);
 			break;
+		case 2:
+			p = coolOrbit(p);
+			break;
 		case 3:
-			p = simulateGalaxy(p);
+			p = succ(p);
 			break;
 		case 4:
+			p = simulateStasis(p);
+			break;
 		default:
 			p = simulateGalaxyMassive(p);
 			break;

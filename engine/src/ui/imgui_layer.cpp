@@ -144,22 +144,36 @@ void ImGuiLayer::renderUI(UIContext& context) {
 		ImGui::End();
 
 		// Ui displaying controls such as wasd movement, c to crouch, space to jump
-		// 1,2,3,4 for particle behavior
+		// 1,2,3,4,5 for particle behavior
 		if (ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			// bottom right
 			ImGui::SetWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 200, ImGui::GetIO().DisplaySize.y - 200), ImGuiCond_Always);
-			ImGui::Text("Other Controls Here");
 			ImGui::Text("WASD: Move");
-			ImGui::Text("C: Crouch");
-			ImGui::Text("Space: Jump");
-
-			ImGui::Text("1: Particle Mode 1");
-			ImGui::Text("2: Particle Mode 2");
-			ImGui::Text("3: Particle Mode 3");
-			ImGui::Text("4: Particle Mode 4");
+			ImGui::Text("C: Down");
+			ImGui::Text("Space: Up");
+			ImGui::Separator();
+			ImGui::Text("1: Earth Gravity");
+			ImGui::Text("2: Cool Gravity");
+			ImGui::Text("3: Succ mode");
+			ImGui::Text("4: Stasis");
+			ImGui::Text("5: Ugly galaxy");
 
 		}
 		ImGui::End();
+
+		/* TODO: need to recreate pipelines when toggling MSAA
+		// Graphics settings window
+		if (ImGui::Begin("Graphics Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+			// bottom left
+			ImGui::SetWindowPos(ImVec2(10, ImGui::GetIO().DisplaySize.y - 200), ImGuiCond_Always);
+			static bool msaa_enabled = false;
+			if (ImGui::Checkbox("Enable MSAA", &msaa_enabled)) {
+				// Restart renderer with/without msaa
+				m_renderer.setMSAAEnabled(msaa_enabled);
+			}
+		}
+		ImGui::End();
+		*/
 
 		// crude performance window
 		static auto s_time_start = std::chrono::high_resolution_clock::now();

@@ -19,7 +19,7 @@ static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	vk::DebugUtilsMessageTypeFlagsEXT type,
 	const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData,
 	void*) {
-	// Basic ANSI color mapping 
+	// Basic ANSI color mapping
 	const char* reset   =  "\033[0m";  // reset color
 	const char* red     = "\033[31m";  // red
 	const char* yellow  = "\033[33m";  // yellow
@@ -93,7 +93,7 @@ void VeDevice::createInstance() {
 	}
 
 	// Get the required instance extensions
-	auto required_extensions = getRequiredInstanceExtensions();
+	const auto required_extensions = getRequiredInstanceExtensions();
 
 	VE_LOGD(required_extensions.size() << " required extensions:");
 	for (const auto& extension : required_extensions) {
@@ -179,7 +179,7 @@ void VeDevice::createSurface() {
 
 // Checks if a physical device supports Vulkan 1.3,
 // a graphics queue and the required extensions defined in ve_device.hpp
-bool VeDevice::isDeviceSuitable(const vk::raii::PhysicalDevice& phyisical_device) {
+bool VeDevice::isDeviceSuitable(const vk::raii::PhysicalDevice& phyisical_device) const {
 
 	// First, the device must support at least Vulkan 1.3
 	if (phyisical_device.getProperties().apiVersion < VK_API_VERSION_1_3) {
@@ -228,7 +228,7 @@ bool VeDevice::isDeviceSuitable(const vk::raii::PhysicalDevice& phyisical_device
 	}
 
 	// Finally, it must support swapchain for the given surface
-	auto swap_chain_support = querySwapChainSupport(phyisical_device);
+	const auto swap_chain_support = querySwapChainSupport(phyisical_device);
 	return !swap_chain_support.formats.empty() && !swap_chain_support.presentModes.empty();
 }
 
@@ -237,22 +237,26 @@ bool VeDevice::isDeviceSuitable(const vk::raii::PhysicalDevice& phyisical_device
 // We require Vulkan 1.3, a graphics queue and the extensions defined in ve_device.hpp
 void VeDevice::pickPhysicalDevice() {
 	assert(*m_surface != VK_NULL_HANDLE && "Surface must be created before picking a physical device");
-	auto devices = m_instance.enumeratePhysicalDevices();
-	assert(devices.size() > 0 && "No GPU with Vulkan support found!");
-	VE_LOGI("Found " << devices.size() << " physical device(s)");
+	auto p_devices = m_instance.enumeratePhysicalDevices();
+	assert(p_devices.size() > 0 && "No GPU with Vulkan support found!");
+	VE_LOGI("Found " << p_devices.size() << " physical device(s)");
 
-	// Find the first suitable device
-	const auto dev_iter = std::ranges::find_if(devices,
+	// Find the first suitable device from 'p_devices'
+	const auto dev_iter = std::ranges::find_if(p_devices,
 		[this](auto const& phyisical_device) {
 			return isDeviceSuitable(phyisical_device);
-		});
-	if (dev_iter == devices.end()) {
-		throw std::runtime_error("failed to find a suitable GPU!");
-	}
+		}
+	);
+	assert(dev_iter != p_devices.end() && "No suitable GPU found");
+
+	// found a suitable physical device
 	m_physical_device = *dev_iter;
 
+	// set the maximum msaa samples
+	m_max_msaa_samples = queryMaxUsableSampleCount();
+
 	// print the name of the selected physical device
-	VkPhysicalDeviceProperties properties = m_physical_device.getProperties();
+	auto properties = m_physical_device.getProperties();
 	VE_LOGI("Using device: " << properties.deviceName);
 }
 
@@ -324,7 +328,7 @@ void VeDevice::createLogicalDevice() {
 
 // Finds a queue family that supports graphics, compute and present
 // TODO: add support for separate graphics/transfer/compute/present queues and timeline semaphores
-uint32_t VeDevice::findQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device) {
+uint32_t VeDevice::findQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device) const {
 assert(*m_surface != VK_NULL_HANDLE && "Surface must be valid when finding queue families");
 	auto qf_properties = phyisical_device.getQueueFamilyProperties();
 	assert(!qf_properties.empty() && "Physical device has no queue families");
@@ -345,7 +349,7 @@ assert(*m_surface != VK_NULL_HANDLE && "Surface must be valid when finding queue
 }
 
 // Not used for now as m1 machines do not have a dedicated transfer queue
-uint32_t VeDevice::findTransferQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device) {
+uint32_t VeDevice::findTransferQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device) const {
 	assert(*m_surface != VK_NULL_HANDLE && "Surface must be valid when finding queue families");
 	auto qf_properties = phyisical_device.getQueueFamilyProperties();
 	assert(!qf_properties.empty() && "Physical device has no queue families");
@@ -368,7 +372,7 @@ uint32_t VeDevice::findTransferQueueFamilies(const vk::raii::PhysicalDevice& phy
 	return _queue_index;
 }
 
-std::vector<const char*> VeDevice::getRequiredInstanceExtensions() {
+const std::vector<const char*> VeDevice::getRequiredInstanceExtensions() const {
 	uint32_t glfw_extensionCount = 0;
 	auto glfw_extensions = glfwGetRequiredInstanceExtensions(&glfw_extensionCount);
 
@@ -385,13 +389,32 @@ std::vector<const char*> VeDevice::getRequiredInstanceExtensions() {
 	return extensions;
 }
 
-SwapChainSupportDetails VeDevice::querySwapChainSupport(const vk::raii::PhysicalDevice& ve_device) {
+// Query the swap chain support details for a given physical device
+SwapChainSupportDetails VeDevice::querySwapChainSupport(const vk::raii::PhysicalDevice& ve_device) const {
 	assert(*m_surface != VK_NULL_HANDLE && "Surface must be valid when querying swap chain support");
 	SwapChainSupportDetails details;
 	details.capabilities = ve_device.getSurfaceCapabilitiesKHR(*m_surface);
 	details.formats = ve_device.getSurfaceFormatsKHR(*m_surface);
 	details.presentModes = ve_device.getSurfacePresentModesKHR(*m_surface);
 	return details;
+}
+
+// Query the maximum usable sample count for MSAA for m_physical_device
+vk::SampleCountFlagBits VeDevice::queryMaxUsableSampleCount() const {
+	if (ve::MSAA_ENABLED == false)
+		return vk::SampleCountFlagBits::e1;
+
+    vk::PhysicalDeviceProperties properties = m_physical_device.getProperties();
+
+    vk::SampleCountFlags counts = properties.limits.framebufferColorSampleCounts & properties.limits.framebufferDepthSampleCounts;
+    if (counts & vk::SampleCountFlagBits::e64) return vk::SampleCountFlagBits::e64;
+    if (counts & vk::SampleCountFlagBits::e32) return vk::SampleCountFlagBits::e32;
+    if (counts & vk::SampleCountFlagBits::e16) return vk::SampleCountFlagBits::e16;
+    if (counts & vk::SampleCountFlagBits::e8) return vk::SampleCountFlagBits::e8;
+    if (counts & vk::SampleCountFlagBits::e4) return vk::SampleCountFlagBits::e4;
+    if (counts & vk::SampleCountFlagBits::e2) return vk::SampleCountFlagBits::e2;
+
+    return vk::SampleCountFlagBits::e1;
 }
 
 // find a memory type index available that satisfies the requested properties

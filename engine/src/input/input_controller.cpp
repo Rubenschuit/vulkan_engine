@@ -117,6 +117,9 @@ namespace ve {
 		int cur_m4 = glfwGetKey(m_window, m_key_mappings.mode4);
 		if (cur_m4 == GLFW_PRESS && m_prev_mode4 == GLFW_RELEASE) actions.set_mode = 4;
 		m_prev_mode4 = cur_m4;
+		int cur_m5 = glfwGetKey(m_window, m_key_mappings.mode5);
+		if (cur_m5 == GLFW_PRESS && m_prev_mode5 == GLFW_RELEASE) actions.set_mode = 5;
+		m_prev_mode5 = cur_m5;
 
 		return actions;
 	}

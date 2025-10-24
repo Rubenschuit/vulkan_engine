@@ -16,7 +16,7 @@ struct SimplePushConstantData {
 static_assert(sizeof(SimplePushConstantData) == 64, "SimplePushConstantData size mismatch");
 static_assert(offsetof(SimplePushConstantData, transform) == 0, "SimplePushConstantData transform offset mismatch");
 
-SkyboxRenderSystem::SkyboxRenderSystem( 
+SkyboxRenderSystem::SkyboxRenderSystem(
 	VeDevice& device,
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	const vk::raii::DescriptorSetLayout& material_set_layout,
@@ -38,9 +38,9 @@ void SkyboxRenderSystem::loadCubeModel(const std::filesystem::path& cube_model_p
 	m_cube_object.transform.scale = 4.0f * glm::vec3(1500.0f, 1500.0f, 1500.0f);
 }
 void SkyboxRenderSystem::createPipelineLayout(
-	const vk::raii::DescriptorSetLayout& global_set_layout, 
+	const vk::raii::DescriptorSetLayout& global_set_layout,
 	const vk::raii::DescriptorSetLayout& material_set_layout) {
-		
+
 	vk::PushConstantRange push_constant_range{
 		.stageFlags = vk::ShaderStageFlagBits::eVertex,
 		.offset = 0, // Used for indexing multiple push constant ranges
@@ -62,7 +62,7 @@ void SkyboxRenderSystem::createPipelineLayout(
 
 void SkyboxRenderSystem::createPipeline(vk::Format color_format) {
 	PipelineConfigInfo pipeline_config{};
-	VePipeline::defaultPipelineConfigInfo(pipeline_config);
+	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
 
 	// set formats for dynamic rendering
 	pipeline_config.color_format = color_format;
@@ -102,7 +102,7 @@ void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 	m_cube_object.transform.rotation += glm::vec3{-speed * frame_info.frame_time, 0.2 * speed * frame_info.frame_time, 0.0f};
 
 	push.transform = m_cube_object.getTransform();
-	
+
 	// push constant provided as raw bytes to avoid MSVC debug mode corruption with push across dll boundaries
 	frame_info.command_buffer.pushConstants(
 		*m_pipeline_layout,

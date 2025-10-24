@@ -70,7 +70,8 @@ public:
 	void copyBuffer(vk::raii::Buffer& src_buffer, vk::raii::Buffer& dst_buffer, vk::DeviceSize size);
 	void copyBufferToImage(vk::raii::Buffer& src_buffer, const vk::raii::Image& dst_image, uint32_t width, uint32_t height, uint32_t array_layers = 1);
 
-	vk::PhysicalDeviceProperties getDeviceProperties() const { return m_physical_device.getProperties(); }
+	const vk::PhysicalDeviceProperties getDeviceProperties() const { return m_physical_device.getProperties(); }
+	vk::SampleCountFlagBits getSampleCount() const { return m_max_msaa_samples; };
 
 	// Single-time command buffer helpers (select queue/pool)
 	std::unique_ptr<vk::raii::CommandBuffer> beginSingleTimeCommands(QueueKind kind = QueueKind::Graphics);
@@ -84,12 +85,15 @@ private:
 	void createLogicalDevice();
 	void createCommandPools();
 
-	bool isDeviceSuitable (const vk::raii::PhysicalDevice& device);
-	std::vector<const char *> getRequiredInstanceExtensions();
-	uint32_t findQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device);
-	uint32_t findTransferQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device);
+	bool isDeviceSuitable (const vk::raii::PhysicalDevice& device) const;
+	const std::vector<const char *> getRequiredInstanceExtensions() const;
+	uint32_t findQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device) const;
+	uint32_t findTransferQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device) const;
 	//TODO: uint32_t findComputeQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device);
-	SwapChainSupportDetails querySwapChainSupport(const vk::raii::PhysicalDevice& device);
+	SwapChainSupportDetails querySwapChainSupport(const vk::raii::PhysicalDevice& device) const;
+	vk::SampleCountFlagBits queryMaxUsableSampleCount() const;
+
+
 
 	VeWindow &m_window;
 	vk::raii::Instance m_instance{nullptr};
@@ -109,6 +113,9 @@ private:
 	uint32_t m_transfer_queue_index = UINT32_MAX;
 	uint32_t m_compute_queue_index = UINT32_MAX;
 	//vk::raii::Queue present_queue{nullptr};
+
+	// MSAA samples
+	vk::SampleCountFlagBits m_max_msaa_samples = vk::SampleCountFlagBits::e1; // set in pickPhysicalDevice
 
 	const std::vector<const char *> m_validation_layers = ve::VALIDATION_LAYERS;
 	std::vector<const char*> m_required_device_extensions = ve::REQUIRED_DEVICE_EXTENSIONS;

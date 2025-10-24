@@ -17,8 +17,8 @@ namespace ve {
 
 class VENGINE_API VeSwapChain {
 public:
-	VeSwapChain(VeDevice& device, vk::Extent2D window_extent);
-	VeSwapChain(VeDevice& device, vk::Extent2D window_extent, std::shared_ptr<VeSwapChain> old_swap_chain);
+	VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples);
+	VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, std::shared_ptr<VeSwapChain> old_swap_chain);
 	~VeSwapChain();
 
 	// Not copyable or movable
@@ -34,14 +34,16 @@ public:
 	vk::Format getSwapChainImageFormat() const { return m_swap_chain_image_format; }
 	vk::Extent2D getSwapChainExtent() const { return m_swap_chain_extent; }
 	const vk::raii::ImageView& getImageView(size_t index) const { return m_swap_chain_image_views[index]; };
+	const vk::raii::ImageView& getColorImageView() const { return m_color_image->getImageView(); }
 	const vk::raii::ImageView& getDepthImageView() const { return m_depth_image->getImageView(); }
-	const vk::raii::Image& getDepthImage() const { return m_depth_image->getImage(); }
+	//const vk::raii::Image& getDepthImage() const { return m_depth_image->getImage(); }
 	const std::vector<vk::Image>& getSwapChainImages() const { return m_swap_chain_images; }
 	const std::vector<vk::raii::ImageView>& getSwapChainImageViews() const { return m_swap_chain_image_views; }
 	float getExtentAspectRatio() const;
 
 	bool compareSwapFormats(const VeSwapChain& other) const;
 	vk::Result acquireNextImage(uint32_t* imageIndex);
+
 	// Todo use raii
 	void submitComputeWork(vk::CommandBuffer commandBuffer);
 	vk::Result submitAndPresent(vk::CommandBuffer commandBuffer, uint32_t* imageIndex);
@@ -49,19 +51,22 @@ public:
 	void resetCurrentFence();
 	void advanceFrame();
 	void updateTimelineValues();
-	void transitionImageLayout( vk::raii::CommandBuffer& command_buffer,
-								uint32_t image_index,
-								vk::ImageLayout old_layout,
-								vk::ImageLayout new_layout,
-								vk::AccessFlags2 src_access_mask,
-								vk::AccessFlags2 dst_access_mask,
-								vk::PipelineStageFlags2 src_stage,
-								vk::PipelineStageFlags2 dst_stage);
+	void transitionImageLayout(
+		vk::raii::CommandBuffer& command_buffer,
+		uint32_t image_index,
+		vk::ImageLayout old_layout,
+		vk::ImageLayout new_layout,
+		vk::AccessFlags2 src_access_mask,
+		vk::AccessFlags2 dst_access_mask,
+		vk::PipelineStageFlags2 src_stage,
+		vk::PipelineStageFlags2 dst_stage
+	);
 
 private:
 	void init();
 	void createSwapChain();
 	void createSwapChainImageViews();
+	void createColorResources();
 	void createDepthResources();
 	void createSyncObjects();
 
@@ -78,8 +83,11 @@ private:
 	std::vector<vk::Image> m_swap_chain_images;
 	std::vector<vk::raii::ImageView> m_swap_chain_image_views;
 
-	//depth resources
+	//depth/color resources
+	std::unique_ptr<VeImage> m_color_image;
 	std::unique_ptr<VeImage> m_depth_image;
+	vk::SampleCountFlagBits m_desired_num_samples;
+
 
 	// Synchronization primitives
 	// TODO: consider moving the timeline semaphore somewhere else

@@ -35,11 +35,11 @@ static std::filesystem::path GetPathToRunningExe()
 }
 #endif
 
-// Called by the entry point main() to create the application instance
-extern ve::VeApplication* createApp(std::filesystem::path working_directory);
-
-int main(int argc, char** argv) {
-	(void)argc; // unused
+// Starts with path to running executable and reduces it from something like root/build/Debug/VeApp to root
+// assumes that either:
+// 1) executable is in root folder named vulkan_engine
+// 2) executable is in build/bin/out in root, possibly in subfolder Debug/Release etc.
+static std::filesystem::path getWorkingDirectory(char** argv) {
 
 #if _MSC_VER && !__INTEL_COMPILER
 	std::filesystem::path path = GetPathToRunningExe();
@@ -47,17 +47,37 @@ int main(int argc, char** argv) {
 	// argv[0] is path to executable on posix
 	std::filesystem::path path = argv[0];
 #endif
-	// reduce something like root/build/Debug/VeApp to root
-	path = path.parent_path().parent_path().parent_path(); // executable is in build/Debug|Release/
 
-	// Simple checks for expected subfolders
+	while (path.has_parent_path()) {
+		if (path.filename() == "vulkan_engine") {
+			break;
+		}
+		path = path.parent_path();
+		if (path.filename() == "build" || path.filename() == "bin" || path.filename() == "out") {
+			path = path.parent_path();
+			break;
+		}
+	}
+	VE_LOGD("VeApp::VeApp working_directory=" << path.string());
+
+	assert(path.has_parent_path() && "Failed to determine working directory");
 	assert(std::filesystem::exists(path) && "Working directory does not exist");
 	assert(std::filesystem::exists(path / "models") && "Working directory 'models' subfolder does not exist");
 	assert(std::filesystem::exists(path / "textures") && "Working directory 'textures' subfolder does not exist");
+	return path;
+}
 
-	VE_LOGD("VeApp::VeApp working_directory=" << path.string());
 
-	auto app = createApp(path);
+// Called by the entry point main() to create the application instance
+extern ve::VeApplication* createApp(std::filesystem::path working_directory);
+
+// Application entry point
+int main(int argc, char** argv) {
+	(void)argc; // unused
+
+	std::filesystem::path working_directory = getWorkingDirectory(argv);
+
+	auto app = createApp(working_directory);
 	app->run();
 	delete app;
 }

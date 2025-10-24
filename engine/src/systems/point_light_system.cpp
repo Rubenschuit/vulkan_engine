@@ -15,7 +15,7 @@ struct SimplePushConstantData {
 	glm::vec4 position;
 	glm::vec4 color;
 	float scale;
-	uint32_t padding[3]; 
+	uint32_t padding[3];
 };
 
 PointLightSystem::PointLightSystem( VeDevice& device,
@@ -51,7 +51,7 @@ void PointLightSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout&
 
 void PointLightSystem::createPipeline(vk::Format color_format) {
 	PipelineConfigInfo pipeline_config{};
-	VePipeline::defaultPipelineConfigInfo(pipeline_config);
+	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
 
 	// set formats for dynamic rendering
 	pipeline_config.color_format = color_format;

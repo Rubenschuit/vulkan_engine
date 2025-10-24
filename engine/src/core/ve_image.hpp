@@ -13,6 +13,7 @@ public:
 		VeDevice& ve_device,
 		uint32_t width,
 		uint32_t height,
+		vk::SampleCountFlagBits num_samples,
 		vk::Format format,
 		vk::ImageTiling tiling,
 		vk::ImageUsageFlags usage,
@@ -48,6 +49,7 @@ private:
 	VeDevice& m_ve_device;
 	uint32_t m_width;
 	uint32_t m_height;
+	vk::SampleCountFlagBits m_num_samples;
 	vk::Format m_format;
 	vk::ImageTiling m_tiling;
 	vk::ImageUsageFlags m_usage;

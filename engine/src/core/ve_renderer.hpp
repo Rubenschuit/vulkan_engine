@@ -44,7 +44,8 @@ public:
 	// and advances the current frame.
 	void endFrame(vk::raii::CommandBuffer& command_buffer);
 
-
+	// only max or none MSAA supported for now
+	void setMSAAEnabled(bool enabled) { m_msaa_enabled = enabled; m_desired_num_samples = enabled ? m_ve_device.getSampleCount() : vk::SampleCountFlagBits::e1; recreateSwapChain(); }
 
 private:
 	void createCommandBuffers();
@@ -59,6 +60,9 @@ private:
 
 	uint32_t m_current_image_index;
 	bool m_is_frame_started = false;
+
+	bool m_msaa_enabled = true;
+	vk::SampleCountFlagBits m_desired_num_samples = m_ve_device.getSampleCount();
 };
 
 }

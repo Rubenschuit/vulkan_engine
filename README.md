@@ -4,7 +4,7 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 
 ## Features
 - Modern Vulkan: dynamic rendering, Vulkan-Hpp RAII
-- Cross-platform builds: Windows (MSVC or MinGW), macOS (MoltenVK), and Linux
+- Cross-platform builds: Windows (MSVC or MinGW), macOS, and Linux
 - Dear ImGui overlay
 - Particle system with compute shaders
 - Simple renderer for textured .obj models and a skybox
@@ -35,14 +35,14 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 - Git
 - CMake ≥ 3.16
 - C++20 toolchain (Clang 14+/MSVC 2019+/GCC 11+)
-- Vulkan SDK ≥ 1.3 (MoltenVK on macOS)
+- Vulkan SDK ≥ 1.3
 - Slang compiler (`slangc`) — required for building shaders
 - GLFW 3.3+ (automatically fetched if missing)
 - Tinyobjloader (included in external)
 - stb_image (included in external)
 
 #### Downloads:
-Note: CMake will auto-discover Slang (`slangc`) and the Vulkan SDK in common install locations and via standard environment variables. Use `.env.cmake` only when installing to uncommon/custom paths, or to explicitly override detection. See `envWindowsExample.cmake` for examples. 
+Note: CMake will auto-discover Slang (`slangc`) and the Vulkan SDK in common install locations and via standard environment variables. Use `.env.cmake` only when installing to uncommon/custom paths, or to explicitly override detection. See `envWindowsExample.cmake` for examples.
 
 - Slang: https://github.com/shader-slang/slang/releases
 	- Windows: `C:\Program Files\Slang\bin\slangc.exe`
@@ -78,7 +78,7 @@ To install required packages:
 ## Quick start with scripts
 Build and run with one script
 
-##### macOS, Linux and Windows (MinGW64 shell):
+- ##### macOS, Linux and Windows (MinGW64 shell):
 
 ```bash
 ./unixBuild.sh
@@ -87,7 +87,7 @@ usage:
 
 	./unixBuild.sh [debug|release|test|leaks|clean]
 
-##### Windows (cmd or PowerShell):
+- ##### Windows (cmd or PowerShell):
 
 ```cmd
 .\windowsBuild.bat

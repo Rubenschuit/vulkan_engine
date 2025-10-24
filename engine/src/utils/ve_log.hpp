@@ -9,14 +9,14 @@
 
 namespace ve { namespace log {
 
-enum Level {
-	Error = 0,
-	Warn  = 1,
-	Info  = 2,
-	Debug = 3,
-};
+	enum Level : int {
+		Error = 0,
+		Warn  = 1,
+		Info  = 2,
+		Debug = 3,
+	};
 
-}} // namespace ve { namespace log {
+}}
 
 #ifndef VE_LOG_LEVEL
 #  ifndef NDEBUG
@@ -75,6 +75,7 @@ inline void log_line(int lvl, const char* file, int line, const std::string& msg
 
 }} // namespace ve { namespace detail {
 
+// Logs level, file, line, and message if level is less than or equal to VE_LOG_LEVEL
 #define VE_LOG_IMPL(LVL, EXPR) do { \
     if constexpr ((LVL) <= VE_LOG_LEVEL) { \
         std::ostringstream _ve_log_oss; \

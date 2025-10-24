@@ -11,14 +11,14 @@
 namespace ve {
 
 struct SimplePushConstantData {
-	alignas(16) glm::mat4 transform;            
-	alignas(16) glm::mat3x4 normal_transform;   
-	alignas(4)  float has_texture;  
-	alignas(4)  float padding[3];	       
+	alignas(16) glm::mat4 transform;
+	alignas(16) glm::mat3x4 normal_transform;
+	alignas(4)  float has_texture;
+	alignas(4)  float padding[3];
 };
 static_assert(sizeof(SimplePushConstantData) <= 128, "Push constants must be 128 bytes for stable layout");
 
-SimpleRenderSystem::SimpleRenderSystem( 
+SimpleRenderSystem::SimpleRenderSystem(
 	VeDevice& device,
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	const vk::raii::DescriptorSetLayout& material_set_layout,
@@ -53,7 +53,7 @@ void SimpleRenderSystem::createPipelineLayout(const vk::raii::DescriptorSetLayou
 
 void SimpleRenderSystem::createPipeline(vk::Format color_format) {
 	PipelineConfigInfo pipeline_config{};
-	VePipeline::defaultPipelineConfigInfo(pipeline_config);
+	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
 	pipeline_config.color_format = color_format;
 
 	assert(m_pipeline_layout != VK_NULL_HANDLE && "Pipeline layout is null");
@@ -80,7 +80,7 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 
 	for (auto& [id, obj] : frame_info.game_objects) {
 		// Skip non-mesh objects (e.g., point lights) or missing models
-		if (!obj.ve_model) 
+		if (!obj.ve_model)
 			continue;
 		SimplePushConstantData push{};
 		// Pack glm::mat3 into 3 vec4 columns (last component is padding)

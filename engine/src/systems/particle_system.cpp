@@ -6,7 +6,7 @@
 
 namespace ve {
 
-ParticleSystem::ParticleSystem( 
+ParticleSystem::ParticleSystem(
 	VeDevice& device,
 	std::shared_ptr<VeDescriptorPool> descriptor_pool,
 	const vk::raii::DescriptorSetLayout& global_set_layout,
@@ -157,7 +157,7 @@ void ParticleSystem::createPipelineLayout(
 
 void ParticleSystem::createPipeline(vk::Format color_format) {
 	PipelineConfigInfo config{};
-	VePipeline::defaultPipelineConfigInfo(config);
+	VePipeline::defaultPipelineConfigInfo(config, m_ve_device);
 	// Use instanced attributes for particles; static unit quad provided by fixed pipeline state
 	config.attribute_descriptions = Particle::getAttributeDescriptions();
 	config.binding_descriptions = Particle::getBindingDescription();

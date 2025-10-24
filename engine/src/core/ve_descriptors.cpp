@@ -34,7 +34,7 @@ VeDescriptorSetLayout::VeDescriptorSetLayout(
 	VeDevice &device, std::unordered_map<uint32_t, vk::DescriptorSetLayoutBinding> bindings_map)
 	: m_ve_device{device}, m_bindings{bindings_map} {
 	std::vector<vk::DescriptorSetLayoutBinding> set_layout_bindings{};
-	for (auto kv : bindings_map) {
+	for (const auto& kv : bindings_map) {
 		set_layout_bindings.push_back(kv.second);
 	}
 

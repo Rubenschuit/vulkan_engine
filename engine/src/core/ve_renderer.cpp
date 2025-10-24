@@ -5,8 +5,9 @@
 
 
 namespace ve {
+	// Constructor, initializes swap chain (with no msaa) and command buffers
 	VeRenderer::VeRenderer(VeDevice& device, VeWindow& window) : m_ve_device(device), m_ve_window(window) {
-		m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, m_ve_window.getExtent());
+		m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, m_ve_window.getExtent(), m_desired_num_samples);
 		createCommandBuffers();
 	}
 
@@ -60,12 +61,12 @@ namespace ve {
 		m_ve_device.getDevice().waitIdle();
 		extent = m_ve_window.getExtent();
 		if (m_ve_swap_chain == nullptr) {
-			m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent);
+			m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent, m_desired_num_samples);
 		} else {
 			// Transfer ownership of the existing swap chain to a shared_ptr so the new one
 			// can safely reference it during recreation.
 			std::shared_ptr<VeSwapChain> old_swap_chain{ std::move(m_ve_swap_chain) };
-			m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent, old_swap_chain);
+			m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent, m_desired_num_samples, old_swap_chain);
 			if (!old_swap_chain->compareSwapFormats(*m_ve_swap_chain)) {
 				throw std::runtime_error("Swap chain image (or depth) format has changed!");
 				// Todo: Handle swap chain format changes (e.g. recreate pipelines)
@@ -129,8 +130,8 @@ namespace ve {
 		m_is_frame_started = false;
 	}
 
-	// Starts command buffer recording, transitions the swap chain image to a color attachment
-	// and begins a dynamic rendering pass.
+	// Transitions the swap chain image and multi sampled color image
+	// to color_attachment_optimal. Begins dynamic rendering.
 	void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer) {
 		assert(m_is_frame_started && "Can't call beginRender while frame is not in progress");
 		assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin render on command buffer from a different frame");
@@ -150,15 +151,35 @@ namespace ve {
 			vk::PipelineStageFlagBits2::eTopOfPipe,
 			vk::PipelineStageFlagBits2::eColorAttachmentOutput
 		);
+		//
 
 		// Setup dynamic rendering attachments
-		vk::RenderingAttachmentInfo attachment_info = {
-			.imageView = m_ve_swap_chain->getSwapChainImageViews()[m_current_image_index],
-			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-			.loadOp = vk::AttachmentLoadOp::eClear,
-			.storeOp = vk::AttachmentStoreOp::eStore,
-			.clearValue = vk::ClearColorValue(0.01f, 0.01f, 0.01f, 1.0f)
-		};
+
+
+		vk::RenderingAttachmentInfo color_attachment_info;
+		if (m_msaa_enabled) {
+			color_attachment_info = {
+				.sType = vk::StructureType::eRenderingAttachmentInfo,
+				.imageView = m_ve_swap_chain->getColorImageView(),
+				.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+				.resolveMode = vk::ResolveModeFlagBits::eAverage,
+				.resolveImageView = m_ve_swap_chain->getSwapChainImageViews()[m_current_image_index],
+				.resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+				.loadOp = vk::AttachmentLoadOp::eClear,
+				.storeOp = vk::AttachmentStoreOp::eDontCare,
+				.clearValue = vk::ClearColorValue(0.01f, 0.01f, 0.01f, 1.0f)
+			};
+		} else {
+			color_attachment_info = {
+				.sType = vk::StructureType::eRenderingAttachmentInfo,
+				.imageView = m_ve_swap_chain->getSwapChainImageViews()[m_current_image_index],
+				.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+				.loadOp = vk::AttachmentLoadOp::eClear,
+				.storeOp = vk::AttachmentStoreOp::eStore,
+				.clearValue = vk::ClearColorValue(0.01f, 0.01f, 0.01f, 1.0f)
+			};
+		}
+
 		vk::RenderingAttachmentInfo depth_attachment_info = {
 			.imageView = m_ve_swap_chain->getDepthImageView(),
 			.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
@@ -170,7 +191,7 @@ namespace ve {
 			.renderArea = { .offset = { 0, 0 }, .extent = extent },
 			.layerCount = 1,
 			.colorAttachmentCount = 1,
-			.pColorAttachments = &attachment_info,
+			.pColorAttachments = &color_attachment_info,
 			.pDepthAttachment = &depth_attachment_info
 		};
 

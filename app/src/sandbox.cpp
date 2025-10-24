@@ -9,7 +9,7 @@
 
 namespace ve {
 
-Sandbox::Sandbox(const std::filesystem::path& working_dir) 
+Sandbox::Sandbox(const std::filesystem::path& working_dir)
 	: working_directory(working_dir),
 	m_cube_model_path(working_directory / "models" / "cube.obj"),
 	m_viking_room_model_path(working_directory / "models" / "viking_room.obj"),
@@ -27,7 +27,7 @@ Sandbox::Sandbox(const std::filesystem::path& working_dir)
 	}),
 	m_skybox(m_ve_device, m_skybox_paths),
 	m_texture(m_ve_device, m_texture_path) {
-	
+
 	// First a window, device and swap chain are initialised in the base class
 	loadGameObjects();
 	createUniformBuffers();
@@ -52,12 +52,12 @@ void Sandbox::run() {
 
 		// Update frame time using base class method
 		updateFrameTime();
-		
+
 		total_time += m_frame_time;
 
 		// --------------- Begin frame ---------------
 
-		if (!m_ve_renderer.beginFrame()) 
+		if (!m_ve_renderer.beginFrame())
 			continue;
 		// Next image acquired successfully
 
@@ -113,7 +113,7 @@ void Sandbox::run() {
 // Update particle system based on input actions and UI context
 void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 	// Apply input actions
-	if (actions.set_mode >= 1 && actions.set_mode <= 4) {
+	if (actions.set_mode >= 1 && actions.set_mode <= 5) {
 		m_particle_system->setMode(actions.set_mode);
 	}
 	if (actions.reset_particles) {

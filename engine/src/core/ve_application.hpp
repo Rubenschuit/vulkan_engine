@@ -70,7 +70,7 @@ protected:
 	uint32_t m_fps_frame_count{0};
 	double m_sum_frame_ms{0.0};
 	float m_frame_time{0.0f};
-	
+
 	// Window title update settings
 	static constexpr std::chrono::milliseconds WINDOW_TITLE_UPDATE_INTERVAL{100};
 

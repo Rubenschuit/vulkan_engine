@@ -2,10 +2,13 @@
 // nothing of note here yet
 #include <catch2/catch_test_macros.hpp>
 #include <core/ve_pipeline.hpp>
+#include <core/ve_device.hpp>
+#include <core/ve_window.hpp>
 
 TEST_CASE("defaultPipelineConfigInfo sets sane Vulkan defaults", "[pipeline][config]") {
     ve::PipelineConfigInfo cfg{};
-	ve::VePipeline::defaultPipelineConfigInfo(cfg);
+	ve::VeDevice dummy_device{*(new ve::VeWindow(800, 600, "Dummy"))}; // Dummy device for testing
+	ve::VePipeline::defaultPipelineConfigInfo(cfg, dummy_device);
 
     // Dynamic state: viewport & scissor expected
     REQUIRE(cfg.dynamic_state_enables.size() == 2);
@@ -25,7 +28,7 @@ TEST_CASE("defaultPipelineConfigInfo sets sane Vulkan defaults", "[pipeline][con
     REQUIRE(cfg.rasterization_info.lineWidth == 1.0f);
 
     // Multisample
-    REQUIRE(cfg.multisample_info.rasterizationSamples == vk::SampleCountFlagBits::e1);
+    REQUIRE(cfg.multisample_info.rasterizationSamples == dummy_device.getSampleCount());
     REQUIRE(cfg.multisample_info.sampleShadingEnable == VK_FALSE);
 
     // Color blend attachment: blending disabled, write all components
@@ -44,8 +47,6 @@ TEST_CASE("defaultPipelineConfigInfo sets sane Vulkan defaults", "[pipeline][con
 
     // Pipeline layout & render pass must be supplied by caller later
     REQUIRE(cfg.pipeline_layout == VK_NULL_HANDLE);
-    REQUIRE(cfg.render_pass == VK_NULL_HANDLE);
-    REQUIRE(cfg.subpass == 0);
 
     // Color format left undefined until swapchain format chosen
     REQUIRE(cfg.color_format == vk::Format::eUndefined);

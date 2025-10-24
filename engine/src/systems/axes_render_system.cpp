@@ -8,7 +8,7 @@
 
 namespace ve {
 
-AxesRenderSystem::AxesRenderSystem( 
+AxesRenderSystem::AxesRenderSystem(
 	VeDevice& device,
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	vk::Format color_format,
@@ -31,21 +31,21 @@ m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), pipeline_l
 }
 
 void AxesRenderSystem::createPipeline(vk::Format color_format) {
-	PipelineConfigInfo cfg{};
-	VePipeline::defaultPipelineConfigInfo(cfg);
-	cfg.input_assembly_info.topology = vk::PrimitiveTopology::eTriangleList;
-	cfg.depth_stencil_info.depthTestEnable = VK_TRUE;
-	cfg.depth_stencil_info.depthWriteEnable = VK_FALSE;
-	cfg.rasterization_info.cullMode = vk::CullModeFlagBits::eNone;
-	cfg.rasterization_info.depthBiasEnable = VK_TRUE;
-	cfg.rasterization_info.depthBiasConstantFactor = 8192.0f;
-	cfg.rasterization_info.depthBiasClamp = 0.0f;
-	cfg.color_format = color_format;
-	cfg.pipeline_layout = m_pipeline_layout;
+	PipelineConfigInfo config{};
+	VePipeline::defaultPipelineConfigInfo(config, m_ve_device);
+	config.input_assembly_info.topology = vk::PrimitiveTopology::eTriangleList;
+	config.depth_stencil_info.depthTestEnable = VK_TRUE;
+	config.depth_stencil_info.depthWriteEnable = VK_FALSE;
+	config.rasterization_info.cullMode = vk::CullModeFlagBits::eNone;
+	config.rasterization_info.depthBiasEnable = VK_TRUE;
+	config.rasterization_info.depthBiasConstantFactor = 8192.0f;
+	config.rasterization_info.depthBiasClamp = 0.0f;
+	config.color_format = color_format;
+	config.pipeline_layout = m_pipeline_layout;
 	m_ve_pipeline = std::make_unique<VePipeline>(
 		m_ve_device,
 		m_shader_path,
-		cfg
+		config
 	);
 	assert(m_ve_pipeline && "Failed to create axes pipeline");
 }

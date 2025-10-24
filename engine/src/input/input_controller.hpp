@@ -41,6 +41,7 @@ public:
 		int mode2 = GLFW_KEY_2;
 		int mode3 = GLFW_KEY_3;
 		int mode4 = GLFW_KEY_4;
+		int mode5 = GLFW_KEY_5;
 	};
 
 	InputController(VeWindow& window);
@@ -78,6 +79,7 @@ private:
 	int m_prev_mode2 = GLFW_RELEASE;
 	int m_prev_mode3 = GLFW_RELEASE;
 	int m_prev_mode4 = GLFW_RELEASE;
+	int m_prev_mode5 = GLFW_RELEASE;
 };
 
 } // ve

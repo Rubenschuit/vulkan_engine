@@ -7,14 +7,15 @@ VeImage::VeImage(
 	VeDevice& ve_device,
 	uint32_t width,
 	uint32_t height,
+	vk::SampleCountFlagBits num_samples,
 	vk::Format format,
 	vk::ImageTiling tiling,
 	vk::ImageUsageFlags usage,
 	vk::MemoryPropertyFlags properties,
 	vk::ImageAspectFlags aspect_flags,
 	bool is_cubemap)
-	: m_ve_device(ve_device), m_width(width), m_height(height), m_format(format),
-		m_tiling(tiling), m_usage(usage), m_properties(properties),
+	: m_ve_device(ve_device), m_width(width), m_height(height), m_num_samples(num_samples),
+		m_format(format), m_tiling(tiling), m_usage(usage), m_properties(properties),
 		m_aspect_flags(aspect_flags),
 		m_array_layers(is_cubemap ? 6 : 1) {
 
@@ -30,7 +31,7 @@ VeImage::VeImage(
 VeImage::~VeImage() {}
 
 // Hardcoded:
-// imageType, extent depth, mip, arraylayers, initlayout, sharingmode, samples, flags
+// imageType=2D, extent.z=1, mip=1, initlayout, sharingmode=excl
 void VeImage::createImage() {
 	assert(m_width > 0 && m_height > 0 && "Image width and height must be greater than zero");
 	assert(m_usage != static_cast<vk::ImageUsageFlags>(0) && "Image usage flags must not be empty");
@@ -44,7 +45,7 @@ void VeImage::createImage() {
 		.extent = vk::Extent3D{ m_width, m_height, 1 },
 		.mipLevels = 1,
 		.arrayLayers = m_array_layers,
-		.samples = vk::SampleCountFlagBits::e1,
+		.samples = m_num_samples,
 		.tiling = m_tiling,
 		.usage = m_usage,
 		.sharingMode = vk::SharingMode::eExclusive,
@@ -90,8 +91,7 @@ void VeImage::createImageView() {
 	assert(*m_image_view != VK_NULL_HANDLE && "Failed to create image view");
 }
 
-// Hardcoded: src and dst queue family indices to ignored,
-// subresource range
+// Hardcoded: src and dst queue family indices to ignored, mip levels = 1
 void VeImage::transitionImageLayout(
 	vk::ImageLayout old_layout,
 	vk::ImageLayout new_layout,

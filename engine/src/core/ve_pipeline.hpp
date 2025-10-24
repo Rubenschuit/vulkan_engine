@@ -27,8 +27,6 @@ struct PipelineConfigInfo {
 	vk::PipelineColorBlendAttachmentState color_blend_attachment{};
 	vk::PipelineColorBlendStateCreateInfo color_blend_info{};
 	vk::PipelineLayout pipeline_layout = nullptr;
-	vk::RenderPass render_pass = nullptr;
-	uint32_t subpass = 0;
 	vk::Format color_format = vk::Format::eUndefined;
 	std::vector<vk::VertexInputAttributeDescription> attribute_descriptions{};
 	std::vector<vk::VertexInputBindingDescription> binding_descriptions{};
@@ -49,7 +47,8 @@ public:
 	VePipeline& operator=(const VePipeline&) = delete;
 
 	vk::Pipeline getPipeline() const { return *m_graphics_pipeline; }
-	static void defaultPipelineConfigInfo(PipelineConfigInfo& config_info);
+
+	static void defaultPipelineConfigInfo(PipelineConfigInfo& config_info, VeDevice& device);
 
 private:
 	void createGraphicsPipeline(

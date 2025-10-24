@@ -15,7 +15,7 @@ VePipeline::VePipeline(
 
 VePipeline::~VePipeline() {}
 
-void VePipeline::defaultPipelineConfigInfo(PipelineConfigInfo& config_info) {
+void VePipeline::defaultPipelineConfigInfo(PipelineConfigInfo& config_info, VeDevice& ve_device) {
 
 	// Tell the pipeline to expect dynamic viewport and scissor states
 	config_info.dynamic_state_enables = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
@@ -54,7 +54,7 @@ void VePipeline::defaultPipelineConfigInfo(PipelineConfigInfo& config_info) {
 		.sType = vk::StructureType::ePipelineMultisampleStateCreateInfo,
 		.pNext = nullptr,
 		.flags = {},
-		.rasterizationSamples = vk::SampleCountFlagBits::e1,
+		.rasterizationSamples = ve_device.getSampleCount(),
 		.sampleShadingEnable = VK_FALSE,
 		.minSampleShading = 1.0f,
 		.pSampleMask = nullptr,
@@ -162,8 +162,8 @@ void VePipeline::createGraphicsPipeline(
 		.pColorBlendState = &config_info.color_blend_info,
 		.pDynamicState = &config_info.dynamic_state_info,
 		.layout = config_info.pipeline_layout,
-		.renderPass = nullptr,
-		.subpass = config_info.subpass,
+		.renderPass = nullptr, // Using dynamic rendering
+		.subpass = 0,
 		.basePipelineHandle = VK_NULL_HANDLE,
 		.basePipelineIndex = -1
 	};

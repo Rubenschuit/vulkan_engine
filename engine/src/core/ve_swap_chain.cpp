@@ -12,13 +12,17 @@
 
 namespace ve {
 
-VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent)
+VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples)
 	: m_ve_device(device), m_window_extent(window_extent) {
+	// Clamp desired samples to device max
+	m_desired_num_samples = desired_num_samples > m_ve_device.getSampleCount() ? m_ve_device.getSampleCount() : desired_num_samples;
 	init();
 }
 
-VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent, std::shared_ptr<VeSwapChain> old_swap_chain)
-	: m_ve_device(device), m_window_extent(window_extent), m_old_swap_chain(old_swap_chain) {
+VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, std::shared_ptr<VeSwapChain> old_swap_chain)
+	: m_ve_device(device), m_window_extent(window_extent), m_desired_num_samples(desired_num_samples), m_old_swap_chain(old_swap_chain) {
+
+	m_desired_num_samples = desired_num_samples > m_ve_device.getSampleCount() ? m_ve_device.getSampleCount() : desired_num_samples;
 	init();
 	// destroy old swap chain AFTER the new one is ready
 	m_old_swap_chain = nullptr;
@@ -32,6 +36,7 @@ VeSwapChain::~VeSwapChain() {
 void VeSwapChain::init() {
 	createSwapChain();
 	createSwapChainImageViews();
+	createColorResources();
 	createDepthResources();
 	createSyncObjects();
 }
@@ -83,7 +88,6 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer command_buffer, uint3
 	// signalSemaphoreValueCount must equal signalSemaphoreCount when any signaled semaphore is a timeline.
 	// Provide a dummy 0 for the binary semaphore; it will be ignored.
 	std::array<uint64_t, 2> signal_values{ graphics_signal_value, uint64_t{0} };
-	// For waits, include 0 for the binary and the expected value for the timeline.
 	std::array<uint64_t, 2> wait_values{ uint64_t{0}, graphics_wait_value };
 	vk::TimelineSemaphoreSubmitInfo timeline_info{
 		.sType = vk::StructureType::eTimelineSemaphoreSubmitInfo,
@@ -194,27 +198,52 @@ void VeSwapChain::createSwapChainImageViews() {
 	}
 }
 
-// TODO: create a depth image for each swap chain image
+void VeSwapChain::createColorResources() {
+	m_color_image = std::make_unique<VeImage>(
+		m_ve_device,
+		m_swap_chain_extent.width,
+		m_swap_chain_extent.height,
+		m_desired_num_samples,
+		m_swap_chain_image_format,
+		vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransientAttachment,
+		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		vk::ImageAspectFlagBits::eColor);
+
+	m_color_image->transitionImageLayout(
+		vk::ImageLayout::eUndefined,
+		vk::ImageLayout::eColorAttachmentOptimal,
+		{},
+		vk::AccessFlagBits2::eColorAttachmentRead | vk::AccessFlagBits2::eColorAttachmentWrite,
+		vk::PipelineStageFlagBits2::eTopOfPipe, // src stage
+		vk::PipelineStageFlagBits2::eColorAttachmentOutput // dst stage
+	);
+	VE_LOGD("Color resource created");
+}
+
 void VeSwapChain::createDepthResources() {
 	vk::Format depth_format = m_ve_device.findDepthFormat();
 	m_depth_image = std::make_unique<VeImage>(
 		m_ve_device,
 		m_swap_chain_extent.width,
 		m_swap_chain_extent.height,
+		m_desired_num_samples,
 		depth_format,
 		vk::ImageTiling::eOptimal,
 		vk::ImageUsageFlagBits::eDepthStencilAttachment,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		vk::ImageAspectFlagBits::eDepth);
 
-	// transition the depth image to be optimal for a depth attachment using a single-time command buffer
+	// transition the depth image once
 	m_depth_image->transitionImageLayout(
 		vk::ImageLayout::eUndefined,
 		vk::ImageLayout::eDepthStencilAttachmentOptimal,
 		{},
 		vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-		vk::PipelineStageFlagBits2::eTopOfPipe,
-		vk::PipelineStageFlagBits2::eEarlyFragmentTests);
+		vk::PipelineStageFlagBits2::eTopOfPipe, // src stage
+		vk::PipelineStageFlagBits2::eEarlyFragmentTests // dst stage
+	);
+	VE_LOGD("Depth resource created");
 }
 
 // Create 2 semaphores and 1 fence per frame in flight
