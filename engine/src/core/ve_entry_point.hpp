@@ -47,7 +47,7 @@ static std::filesystem::path getWorkingDirectory(char** argv) {
 #endif
 
 	while (path.has_parent_path()) {
-		if (path.filename() == "vulkan_engine")
+		if (path.filename() == "vulkan_engine" || path.filename() == ".")
 			break;
 		path = path.parent_path();
 	}
