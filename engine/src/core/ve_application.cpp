@@ -13,7 +13,7 @@
 
 namespace ve {
 
-VeApplication::VeApplication() 
+VeApplication::VeApplication()
 	: m_ve_window(WIDTH, HEIGHT, APP_NAME),
 	  m_ve_device(m_ve_window),
 	  m_ve_renderer(m_ve_device, m_ve_window),
@@ -33,15 +33,15 @@ void VeApplication::run() {
 			VE_LOGD("Window resize detected in main loop, recreating swap chain.");
 			m_ve_window.resetWindowResizedFlag();
 			m_ve_renderer.recreateSwapChain();
-			continue; 
+			continue;
 		}
 
 		if (!m_ve_renderer.beginFrame())
 			continue;
-		
+
 
 		VeFrameInfo frame_info = update();
-		render(frame_info);		
+		render(frame_info);
 
 		m_ve_renderer.endFrame(frame_info.command_buffer);
 	}
@@ -76,17 +76,17 @@ void VeApplication::updateUniformBuffer(uint32_t current_frame, UniformBufferObj
 // Print FPS and frame time to window title every 100 ms
 void VeApplication::updateWindowTitle() {
 	updateFPSStats();
-	
+
 	if (shouldUpdateWindowTitle()) {
 		auto now = clock::now();
 		auto window_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_fps_window_start).count();
-		
+
 		double fps = (window_ms > 0) ? (1000.0 * static_cast<double>(m_fps_frame_count) / static_cast<double>(window_ms)) : 0.0;
 		double avg_ms = (m_fps_frame_count > 0) ? (m_sum_frame_ms / static_cast<double>(m_fps_frame_count)) : 0.0;
-		
+
 		std::string title = formatWindowTitle(fps, avg_ms);
 		glfwSetWindowTitle(m_ve_window.getGLFWwindow(), title.c_str());
-		
+
 		// Reset window counters
 		m_fps_frame_count = 0;
 		m_sum_frame_ms = 0.0;
@@ -98,14 +98,13 @@ void VeApplication::updateFrameTime() {
 	auto now = clock::now();
 	m_frame_time = std::chrono::duration<float, std::chrono::seconds::period>(now - m_last_frame_time).count();
 	m_last_frame_time = now;
-	
+
 	// Clamp to avoid large physics steps after stalls (e.g., window resize)
 	const float max_dt = 1.0f / 30.0f; // ~33ms
 	if (m_frame_time < 0.0f)
 		m_frame_time = 0.0f;
 	if (m_frame_time > max_dt)
 		m_frame_time = max_dt;
-	m_frame_time *= 2; // speed up time
 }
 
 void VeApplication::updateFPSStats() {
@@ -120,14 +119,14 @@ bool VeApplication::shouldUpdateWindowTitle() const {
 }
 
 std::string VeApplication::formatWindowTitle(double fps, double avg_ms) const {
-	
+
 #ifdef NDEBUG
 	const char* mode_str = "Release";
 #else
 	const char* mode_str = "Debug";
 #endif
 
-	return std::format("Vulkan Engine! -- {} mode          FPS {}   {:.2f} ms", 
+	return std::format("Vulkan Engine! -- {} mode          FPS {}   {:.2f} ms",
 		mode_str, static_cast<int>(fps), avg_ms);
 }
 

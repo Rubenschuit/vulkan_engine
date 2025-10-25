@@ -66,7 +66,7 @@ private:
 	const float SPRINT_SPEED = 60.0f;
 	float m_movement_speed = NORMAL_SPEED;
 	float m_look_speed = 2.0f;
-	float m_mouse_sensitivity = 40.0f;
+	float m_mouse_sensitivity = 0.4f;
 	float m_yaw_delta = 0.0f;
 	float m_pitch_delta = 0.0f;
 

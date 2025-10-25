@@ -48,13 +48,13 @@ namespace ve {
 		m_yaw_delta = 0.0f;
 		m_pitch_delta = 0.0f;
 		if (glfwGetKey(m_window, m_key_mappings.look_left) == GLFW_PRESS)
-			m_yaw_delta   -= m_look_speed;
+			m_yaw_delta   -= m_look_speed * delta_time;
 		if (glfwGetKey(m_window, m_key_mappings.look_right) == GLFW_PRESS)
-			m_yaw_delta   += m_look_speed;
+			m_yaw_delta   += m_look_speed * delta_time;
 		if (glfwGetKey(m_window, m_key_mappings.look_up) == GLFW_PRESS)
-			m_pitch_delta += m_look_speed;
+			m_pitch_delta += m_look_speed * delta_time;
 		if (glfwGetKey(m_window, m_key_mappings.look_down) == GLFW_PRESS)
-			m_pitch_delta -= m_look_speed;
+			m_pitch_delta -= m_look_speed * delta_time;
 
 		// Mouse look (only when enabled)
 		if (m_mouse_look_enabled) {
@@ -63,8 +63,8 @@ namespace ve {
 			processMouseMovement(xpos, ypos);
 		}
 		// Apply look deltas
-		camera.yawBy(m_yaw_delta * delta_time);
-		camera.pitchBy(m_pitch_delta * delta_time);
+		camera.yawBy(m_yaw_delta);
+		camera.pitchBy(m_pitch_delta);
 		camera.updateIfDirty();
 
 		// WASD movement input in the updated camera basis

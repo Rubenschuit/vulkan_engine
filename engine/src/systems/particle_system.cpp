@@ -168,6 +168,16 @@ void ParticleSystem::createPipeline(vk::Format color_format) {
 	config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	config.depth_stencil_info.depthWriteEnable = VK_FALSE;
 	config.rasterization_info.depthBiasEnable = VK_FALSE;
+
+	//enable additve blending
+	config.color_blend_attachment.blendEnable = VK_TRUE;
+	config.color_blend_attachment.srcColorBlendFactor = vk::BlendFactor::eOne; //
+	config.color_blend_attachment.dstColorBlendFactor = vk::BlendFactor::eOne; //
+	config.color_blend_attachment.colorBlendOp = vk::BlendOp::eAdd;
+	config.color_blend_attachment.srcAlphaBlendFactor = vk::BlendFactor::eOne; //
+	config.color_blend_attachment.dstAlphaBlendFactor = vk::BlendFactor::eOne; //
+	config.color_blend_attachment.alphaBlendOp = vk::BlendOp::eAdd;
+
 	m_pipeline = std::make_unique<VePipeline>(m_ve_device, m_shader_path, config);
 }
 
