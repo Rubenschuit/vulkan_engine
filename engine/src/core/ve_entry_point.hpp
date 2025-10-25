@@ -47,14 +47,9 @@ static std::filesystem::path getWorkingDirectory(char** argv) {
 #endif
 
 	while (path.has_parent_path()) {
-		if (path.filename() == "vulkan_engine") {
+		if (path.filename() == "vulkan_engine")
 			break;
-		}
 		path = path.parent_path();
-		if (path.filename() == "build" || path.filename() == "bin" || path.filename() == "out") {
-			path = path.parent_path();
-			break;
-		}
 	}
 	VE_LOGD("VeApp::VeApp working_directory=" << path.string());
 

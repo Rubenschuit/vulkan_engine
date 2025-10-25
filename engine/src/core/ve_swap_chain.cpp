@@ -76,6 +76,7 @@ void VeSwapChain::submitComputeWork(vk::CommandBuffer command_buffer) {
 	m_ve_device.getComputeQueue().submit(submit_info, nullptr);
 }
 
+// Returns result of queue.presentKHR()
 vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer command_buffer, uint32_t* image_index) {
 	// Wait on image-available (binary) and compute timeline before starting graphics work.
 	vk::PipelineStageFlags wait_stages[2] = {

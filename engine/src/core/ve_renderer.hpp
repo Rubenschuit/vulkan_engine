@@ -46,10 +46,11 @@ public:
 
 	// only max or none MSAA supported for now
 	void setMSAAEnabled(bool enabled) { m_msaa_enabled = enabled; m_desired_num_samples = enabled ? m_ve_device.getSampleCount() : vk::SampleCountFlagBits::e1; recreateSwapChain(); }
+	
+	void recreateSwapChain();
 
 private:
 	void createCommandBuffers();
-	void recreateSwapChain();
 	void transitionToPresent(vk::raii::CommandBuffer& command_buffer);
 
 	VeDevice& m_ve_device;

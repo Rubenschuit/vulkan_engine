@@ -28,8 +28,17 @@ void VeApplication::run() {
 	while (!m_ve_window.shouldClose()) {
 		m_ve_window.pollEvents();
 
+		// Check for window resize BEFORE starting frame
+		if (m_ve_window.wasWindowResized()) {
+			VE_LOGD("Window resize detected in main loop, recreating swap chain.");
+			m_ve_window.resetWindowResizedFlag();
+			m_ve_renderer.recreateSwapChain();
+			continue; 
+		}
+
 		if (!m_ve_renderer.beginFrame())
 			continue;
+		
 
 		VeFrameInfo frame_info = update();
 		render(frame_info);		
