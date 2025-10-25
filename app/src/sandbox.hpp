@@ -15,7 +15,8 @@ public:
 	Sandbox(const Sandbox&) = delete;
 	Sandbox& operator=(const Sandbox&) = delete;
 
-	void run() override;
+	virtual VeFrameInfo update() override;
+	virtual void render(VeFrameInfo& frame_info) override;
 
 private:
 	void loadGameObjects();
@@ -25,7 +26,6 @@ private:
 	void initUI();
 
 	void updateParticles(VeFrameInfo& frame_info, InputActions& actions);
-	void renderScene(VeFrameInfo& frame_info);
 
 	const std::filesystem::path working_directory;
 

@@ -2,7 +2,6 @@
 
 // std
 #include <cassert>
-#include <stdexcept>
 
 namespace ve {
 

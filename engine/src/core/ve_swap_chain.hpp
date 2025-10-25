@@ -10,7 +10,6 @@ resources and synchronization objects. */
 #include <ve_config.hpp>
 
 #include <vector>
-#include <string>
 #include <memory>
 
 namespace ve {

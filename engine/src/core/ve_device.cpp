@@ -1,14 +1,5 @@
-#include "pch.hpp"
+#include "pch.hpp" // IWYU pragma: keep
 #include "ve_device.hpp"
-
-// std headers
-#include <cstring>
-#include <ranges>
-#include <algorithm>
-#include <iostream>
-#include <stdexcept>
-#include <cstdlib>
-#include <cassert>
 
 
 namespace ve {
@@ -401,7 +392,7 @@ SwapChainSupportDetails VeDevice::querySwapChainSupport(const vk::raii::Physical
 
 // Query the maximum usable sample count for MSAA for m_physical_device
 vk::SampleCountFlagBits VeDevice::queryMaxUsableSampleCount() const {
-	if (ve::MSAA_ENABLED == false)
+	if constexpr (ve::MSAA_ENABLED == false)
 		return vk::SampleCountFlagBits::e1;
 
     vk::PhysicalDeviceProperties properties = m_physical_device.getProperties();

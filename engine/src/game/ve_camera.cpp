@@ -108,7 +108,7 @@ void VeCamera::updateIfDirty() {
 }
 
 void VeCamera::clampPitch() {
-	const float lim = glm::radians(89.0f);
+	constexpr float lim = glm::radians(89.0f);
 	if (m_pitch > lim) m_pitch = lim;
 	else if (m_pitch < -lim) m_pitch = -lim;
 }

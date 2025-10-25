@@ -1,9 +1,7 @@
 #include "pch.hpp"
 #include "ve_swap_chain.hpp"
 
-#include <stdexcept>
 #include <array>
-#include <set>
 #include <limits>
 #include <algorithm>
 #include <cstdlib>

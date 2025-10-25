@@ -3,9 +3,9 @@
 #include "core/ve_device.hpp"
 #include "ui/imgui_layer.hpp"
 #include "core/ve_buffer.hpp"
-#include "core/ve_descriptors.hpp"
 #include "input/input_controller.hpp"
 #include "game/ve_camera.hpp"
+#include "utils/ve_log.hpp"
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -19,6 +19,29 @@ VeApplication::VeApplication()
 	  m_ve_renderer(m_ve_device, m_ve_window),
 	  m_input_controller(m_ve_window),
 	  m_camera(glm::vec3{20.0f, 20.0f, 20.0f}, glm::vec3{0.0f, 0.0f, 1.0f}) {
+}
+
+void VeApplication::run() {
+	VE_LOGI("VeApplication::run starting. Window=" + std::to_string(m_ve_window.getWidth()) + "x" + std::to_string(m_ve_window.getHeight()));
+
+	// Main loop
+	while (!m_ve_window.shouldClose()) {
+		m_ve_window.pollEvents();
+
+		if (!m_ve_renderer.beginFrame())
+			continue;
+
+		VeFrameInfo frame_info = update();
+		render(frame_info);		
+
+		m_ve_renderer.endFrame(frame_info.command_buffer);
+	}
+
+	// Ensure device is idle before destroying resources
+	m_ve_device.getDevice().waitIdle();
+	// log average fps and frametime over entire run currently these get reset on window resize
+	VE_LOGI("VeApplication::run finished. Average FPS: " << (m_fps_frame_count / (m_sum_frame_ms / 1000.0f)));
+	VE_LOGI("VeApplication::run finished. Average Frame Time: " << (m_sum_frame_ms / m_fps_frame_count) << " ms");
 }
 
 // Updates the camera view and projection matrices if state changed
@@ -73,6 +96,7 @@ void VeApplication::updateFrameTime() {
 		m_frame_time = 0.0f;
 	if (m_frame_time > max_dt)
 		m_frame_time = max_dt;
+	m_frame_time *= 2; // speed up time
 }
 
 void VeApplication::updateFPSStats() {

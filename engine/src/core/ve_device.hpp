@@ -12,7 +12,6 @@ There are also methods for submitting single time command buffers to a queue. */
 #define VULKAN_HPP_ENABLE_RAII
 #include <vulkan/vulkan_raii.hpp>
 #include <vulkan/vulkan_beta.h> // required for macOS portability subset extension
-#include <string>
 #include <vector>
 
 namespace ve {

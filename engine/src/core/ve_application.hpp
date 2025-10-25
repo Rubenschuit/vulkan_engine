@@ -9,11 +9,11 @@
 #include "input/input_controller.hpp"
 #include "game/ve_camera.hpp"
 #include "game/ve_frame_info.hpp"
-
-#include <filesystem>
+#include "game/ve_game_object.hpp"
 #include <memory>
 #include <vector>
 #include <chrono>
+#include <unordered_map>
 
 namespace ve {
 
@@ -27,9 +27,13 @@ public:
 
 	VeApplication();
     virtual ~VeApplication() = default;
+    
+    void run();
 
-    // Pure virtual method to be implemented by derived classes
-    virtual void run() = 0;
+	// Pure virtual methods to be implemented by derived classes
+	virtual VeFrameInfo update() = 0;
+	virtual void render(VeFrameInfo& frame_info) = 0;
+
 
 protected:
 	void updateCamera();
@@ -56,6 +60,11 @@ protected:
 	// Input handling
 	InputController m_input_controller;
 
+	
+
+	// Game objects
+	std::unordered_map<uint32_t, VeGameObject> m_game_objects;
+
 	// Camera settings
 	VeCamera m_camera;
 	float m_fov = glm::radians(80.0f);
@@ -67,6 +76,7 @@ protected:
 	using clock = std::chrono::steady_clock;
 	clock::time_point m_last_frame_time{clock::now()};
 	clock::time_point m_fps_window_start{clock::now()};
+	float m_total_time{0.0f};
 	uint32_t m_fps_frame_count{0};
 	double m_sum_frame_ms{0.0};
 	float m_frame_time{0.0f};

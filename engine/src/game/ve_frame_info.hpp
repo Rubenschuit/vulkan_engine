@@ -9,7 +9,7 @@ for each frame in the rendering process. */
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
 #include <glm/glm.hpp>
-#include <map>
+#include <unordered_map>
 
 namespace ve {
 
@@ -27,13 +27,12 @@ struct UniformBufferObject {
 	// reminder: alignment
 };
 
-// References provide cleaner syntax and null safety
 struct VeFrameInfo {
 	vk::raii::DescriptorSet& global_descriptor_set;
 	vk::raii::DescriptorSet& material_descriptor_set;
-	vk::raii::DescriptorSet& cubemap_descriptor_set; // For skybox rendering
+	vk::raii::DescriptorSet& cubemap_descriptor_set;
 	vk::raii::CommandBuffer& command_buffer;
-	vk::raii::CommandBuffer& compute_command_buffer; 
+	vk::raii::CommandBuffer& compute_command_buffer;
 	std::unordered_map<uint32_t, VeGameObject>& game_objects;
 	float frame_time;
 	float total_time;

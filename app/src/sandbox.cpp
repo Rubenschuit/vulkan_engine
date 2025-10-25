@@ -41,73 +41,42 @@ Sandbox::Sandbox(const std::filesystem::path& working_dir)
 
 Sandbox::~Sandbox() {}
 
-void Sandbox::run() {
-	VE_LOGI("Sandbox::run starting. Window=" << m_ve_window.getWidth() << "x" << m_ve_window.getHeight());
+VeFrameInfo Sandbox::update() {
+	// Get frame time
+	updateFrameTime();
+	m_total_time += m_frame_time;
 
-	float total_time = 0.0f;
+	// Setup frame info
+	auto& command_buffer = m_ve_renderer.getCurrentCommandBuffer();
+	auto& compute_command_buffer = m_ve_renderer.getCurrentComputeCommandBuffer();
+	auto current_frame = m_ve_renderer.getCurrentFrame();
+	VeFrameInfo frame_info = {
+		.global_descriptor_set = m_global_descriptor_sets[current_frame],
+		.material_descriptor_set = m_material_descriptor_set,
+		.cubemap_descriptor_set = m_cubemap_descriptor_set,
+		.command_buffer = command_buffer,
+		.compute_command_buffer = compute_command_buffer,
+		.game_objects = m_game_objects,
+		.frame_time = m_frame_time,
+		.total_time = m_total_time,
+		.current_frame = current_frame
+	};
 
-	// ------------- Main loop -------------
-	while (!m_ve_window.shouldClose()) {
-		m_ve_window.pollEvents();
+	// Updates camera state based on input and frame time. Returns actions for systems.
+	auto actions = m_input_controller.processInput(m_frame_time, m_camera);
 
-		// Update frame time using base class method
-		updateFrameTime();
+	// Update state based on actions and ui_context updated in previous renderUI
+	ui_context.visible = actions.ui_visible; // Tab toggles UI visibility
+	updateCamera();
+	updateParticles(frame_info, actions);
+	updateWindowTitle();
 
-		total_time += m_frame_time;
+	// update global ubo
+	UniformBufferObject ubo{};
+	m_point_light_system->update(frame_info, ubo);
+	updateUniformBuffer(current_frame, ubo);
 
-		// --------------- Begin frame ---------------
-
-		if (!m_ve_renderer.beginFrame())
-			continue;
-		// Next image acquired successfully
-
-		// Setup frame info
-		auto& command_buffer = m_ve_renderer.getCurrentCommandBuffer();
-		auto& compute_command_buffer = m_ve_renderer.getCurrentComputeCommandBuffer();
-		auto current_frame = m_ve_renderer.getCurrentFrame();
-		VeFrameInfo frame_info{
-			.global_descriptor_set = m_global_descriptor_sets[current_frame],
-			.material_descriptor_set = m_material_descriptor_set,
-			.cubemap_descriptor_set = m_cubemap_descriptor_set,
-			.command_buffer = command_buffer,
-			.compute_command_buffer = compute_command_buffer,
-			.game_objects = m_game_objects,
-			.frame_time = m_frame_time,
-			.total_time = total_time,
-			.current_frame = current_frame
-		};
-
-		// --------------- Update ---------------
-		// Updates camera state based on input and frame time. Returns actions for systems.
-		auto actions = m_input_controller.processInput(m_frame_time, m_camera);
-
-		// Update state based on actions and ui_context updated in previous renderUI
-		ui_context.visible = actions.ui_visible; // Tab toggles UI visibility
-		updateCamera();
-		updateParticles(frame_info, actions);
-		updateWindowTitle();
-
-		// update global ubo
-		UniformBufferObject ubo{};
-		m_point_light_system->update(frame_info, ubo);
-		updateUniformBuffer(current_frame, ubo);
-
-		// --------------- Render ---------------
-
-		renderScene(frame_info);
-
-		// Draw UI and update ui_context for next frame intents
-		imgui_layer->renderUI(ui_context);
-
-		// Now transition the current swapchain image to PresentSrcKHR and present the frame
-		m_ve_renderer.endFrame(command_buffer);
-
-	}
-	// Ensure device is idle before destroying resources
-	m_ve_device.getDevice().waitIdle();
-	// log average fps and frametime over entire run currently these get reset on window resize
-	VE_LOGI("Sandbox::run finished. Average FPS: " << (m_fps_frame_count / (m_sum_frame_ms / 1000.0f)));
-	VE_LOGI("Sandbox::run finished. Average Frame Time: " << (m_sum_frame_ms / m_fps_frame_count) << " ms");
+	return frame_info;
 }
 
 // Update particle system based on input actions and UI context
@@ -143,8 +112,8 @@ void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 	m_ve_renderer.submitCompute(frame_info.compute_command_buffer);
 }
 
-// Could be extended to render a vector of systems
-void Sandbox::renderScene(VeFrameInfo& frame_info) {
+// Renders the scene and draws the UI
+void Sandbox::render(VeFrameInfo& frame_info) {	
 	auto& command_buffer = frame_info.command_buffer;
 	m_ve_renderer.beginSceneRender(command_buffer);
 
@@ -156,6 +125,9 @@ void Sandbox::renderScene(VeFrameInfo& frame_info) {
 	m_particle_system->render(frame_info);
 
 	m_ve_renderer.endSceneRender(command_buffer);
+
+	// Draw UI and update ui_context for next frame intents
+	imgui_layer->renderUI(ui_context);
 }
 
 void Sandbox::loadGameObjects() {

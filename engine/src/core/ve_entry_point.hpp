@@ -40,12 +40,10 @@ static std::filesystem::path GetPathToRunningExe()
 // 1) executable is in root folder named vulkan_engine
 // 2) executable is in build/bin/out in root, possibly in subfolder Debug/Release etc.
 static std::filesystem::path getWorkingDirectory(char** argv) {
-
-#if _MSC_VER && !__INTEL_COMPILER
-	std::filesystem::path path = GetPathToRunningExe();
-#else
 	// argv[0] is path to executable on posix
 	std::filesystem::path path = argv[0];
+#if _MSC_VER && !__INTEL_COMPILER
+	path = GetPathToRunningExe();
 #endif
 
 	while (path.has_parent_path()) {

@@ -179,10 +179,6 @@ void VePipeline::createShaderModule(const std::vector<char>& code, vk::raii::Sha
 		.pCode = reinterpret_cast<const uint32_t*>(code.data()) // leverage that vector already aligns data to worst-case alignment
 	};
 
-	try {
-		*_shader_module = vk::raii::ShaderModule(m_ve_device.getDevice(), create_info);
-	} catch (const std::exception& e) {
-		throw std::runtime_error("failed to create shader module: " + std::string(e.what()));
-	}
+	*_shader_module = vk::raii::ShaderModule(m_ve_device.getDevice(), create_info);
 }
 }

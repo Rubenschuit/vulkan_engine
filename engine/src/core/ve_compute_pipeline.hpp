@@ -3,11 +3,9 @@ It mirrors VePipeline but for compute stage only. */
 #pragma once
 #include "ve_export.hpp"
 #include <vulkan/vulkan_raii.hpp>
-#include <vector>
+#include <filesystem>
 
 namespace ve { class VeDevice; }
-
-
 
 
 namespace ve {

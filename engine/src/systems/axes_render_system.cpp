@@ -64,7 +64,7 @@ void AxesRenderSystem::createAxesModel() {
 		vertices.push_back({c, color, glm::vec3{1.0f}, {0.f, 0.f}});
 	};
 
-	const float two_pi = glm::two_pi<float>();
+	constexpr float two_pi = glm::two_pi<float>();
 
 	// X-axis cylinder (red), rings in the YZ plane
 	{

@@ -64,3 +64,5 @@ build_msvc/
 imgui.ini
 CMakeSettings.json
 .clangd
+.cache/
+compile_commands.json
