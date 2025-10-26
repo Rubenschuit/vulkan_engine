@@ -7,9 +7,10 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 - Cross-platform builds: Windows (MSVC or MinGW), macOS, and Linux
 - Dear ImGui overlay
 - Particle system with compute shaders
-- Simple renderer for textured .obj models and a skybox
+- Simple renderer for textured .gltf models and a skybox
 - Point lights
 - FPS-style camera
+- MSAA
 
 ## Table of Contents
 
@@ -38,7 +39,7 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 - Vulkan SDK ≥ 1.3
 - Slang compiler (`slangc`) — required for building shaders
 - GLFW 3.3+ (automatically fetched if missing)
-- Tinyobjloader (included in external)
+- TinyGLTF (included in external)
 - stb_image (included in external)
 
 #### Downloads:

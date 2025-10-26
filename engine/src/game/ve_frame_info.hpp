@@ -21,6 +21,9 @@ struct PointLight {
 struct UniformBufferObject {
 	glm::mat4 view;
 	glm::mat4 proj;
+	glm::vec3 camera_position;
+	// Padding to align to 16 bytes
+	float padding = 0.0f;
 	glm::vec4 ambient_light_color = DEFAULT_AMBIENT_LIGHT_COLOR;
 	PointLight point_lights[ve::MAX_LIGHTS];
 	alignas(16) uint32_t num_lights = 0;

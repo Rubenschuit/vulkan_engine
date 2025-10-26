@@ -1,5 +1,5 @@
 /* VeModel is responsible for managing the vertex and index buffers
-for a model. It provides methods to bind these buffers and issue
+for a model. It provides methods to create and bind these buffers and issue
 draw commands. */
 #pragma once
 #include "ve_export.hpp"

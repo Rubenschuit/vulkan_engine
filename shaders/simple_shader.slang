@@ -13,6 +13,8 @@ struct PointLight {
 struct UniformBuffer {
     float4x4 view;
     float4x4 proj;
+	float3 camera_position;
+	float padding; // Padding to align to 16 bytes
 	float4 ambient_light_color;
 	PointLight point_lights[100]; // MAX_LIGHTS TODO use specialization constant
 	uint32_t num_lights;

@@ -3,6 +3,7 @@
 struct UniformBuffer {
 	float4x4 view;
 	float4x4 proj;
+	float3 camera_position;
 };
 [vk::binding(0, 0)]
 ConstantBuffer<UniformBuffer> g_ubo;
@@ -40,7 +41,16 @@ VertexOutput vertMain(VertexInput input, uint id : SV_VertexID) {
 	// Billboard in camera space by offsetting XY around the particle center
 	float4 pos_cam_space = mul(g_ubo.view, pos);
 
-	float2 offset = quad[corner] * input.pos.w; // size in input.pos.w
+	// Calculate scale based on camera distance to keep size consistent
+	float scale = input.pos.w; // base size
+	float distance = length(pos.xyz - g_ubo.camera_position);
+	float distance_scale = 1.0f; // scale factor
+	// scale smoothly after 100 units
+	if (distance > 100.0f) {
+		distance_scale = distance * 0.005f + 0.5f;
+	}
+
+	float2 offset = quad[corner] * scale * distance_scale;
 	pos_cam_space.xy += offset;
 
 	VertexOutput out;
@@ -281,6 +291,15 @@ Particle simulateGalaxyMassive(Particle p) {
 	p.position.xyz += p.velocity.xyz * params.delta_time;
 	return p;
 }
+
+
+
+
+// ----------- Particle reset functions ------------
+
+
+
+
 
 // Particles explode in random directions from a point
 void resetPoint(uint i) {

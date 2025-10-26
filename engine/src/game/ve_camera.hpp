@@ -50,7 +50,7 @@ private:
 	void updateView();
 	void updateProjection();
 
-	glm::vec3 m_pos;
+	glm::vec3 m_pos; // Camera position in world space
 	glm::vec3 m_world_up;
 	float m_yaw{0.0f};   // radians
 	float m_pitch{0.0f}; // radians

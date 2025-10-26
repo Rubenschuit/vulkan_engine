@@ -17,7 +17,7 @@ namespace ve {
 
 class VENGINE_API PointLightSystem {
 public:
-	PointLightSystem( 
+	PointLightSystem(
 		VeDevice& device,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		const vk::raii::DescriptorSetLayout& material_set_layout,
@@ -29,7 +29,7 @@ public:
 	PointLightSystem(const PointLightSystem&) = delete;
 	PointLightSystem& operator=(const PointLightSystem&) = delete;
 
-	void update(VeFrameInfo& frame_info, UniformBufferObject& ubo);
+	void updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObject& ubo);
 	void render(VeFrameInfo& frame_info) const;
 
 private:

@@ -11,11 +11,11 @@ namespace ve {
 
 Sandbox::Sandbox(const std::filesystem::path& working_dir)
 	: working_directory(working_dir),
-	m_cube_model_path(working_directory / "models" / "cube.obj"),
-	m_viking_room_model_path(working_directory / "models" / "viking_room.obj"),
-	m_quad_model_path(working_directory / "models" / "quad.obj"),
-	m_flat_vase_model_path(working_directory / "models" / "flat_vase.obj"),
-	m_smooth_vase_model_path(working_directory / "models" / "smooth_vase.obj"),
+	m_cube_model_path(working_directory / "models" / "cube.gltf"),
+	m_viking_room_model_path(working_directory / "models" / "viking_room.gltf"),
+	m_quad_model_path(working_directory / "models" / "quad.gltf"),
+	m_flat_vase_model_path(working_directory / "models" / "flat_vase.gltf"),
+	m_smooth_vase_model_path(working_directory / "models" / "smooth_vase.gltf"),
 	m_texture_path(working_directory / "textures" / "viking_room.png"),
 	m_skybox_paths({
 		working_directory / "textures" / "skybox" / "Starfield_And_Haze_left.png",
@@ -73,8 +73,8 @@ VeFrameInfo Sandbox::update() {
 
 	// update global ubo
 	UniformBufferObject ubo{};
-	m_point_light_system->update(frame_info, ubo);
-	updateUniformBuffer(current_frame, ubo);
+	m_point_light_system->updateUniformBuffer(frame_info, ubo); // update UBO with point light data
+	this->updateUniformBuffer(current_frame, ubo); // view/proj/camera location
 
 	return frame_info;
 }
@@ -113,7 +113,7 @@ void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 }
 
 // Renders the scene and draws the UI
-void Sandbox::render(VeFrameInfo& frame_info) {	
+void Sandbox::render(VeFrameInfo& frame_info) {
 	auto& command_buffer = frame_info.command_buffer;
 	m_ve_renderer.beginSceneRender(command_buffer);
 
@@ -348,7 +348,7 @@ void Sandbox::initSystems() {
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
 		working_directory / "shaders" / "skybox_shader.spv",
-		working_directory / "models" / "cube.obj"
+		working_directory / "models" / "cube.gltf"
 	);
 }
 

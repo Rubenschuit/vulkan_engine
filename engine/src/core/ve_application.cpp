@@ -65,10 +65,11 @@ void VeApplication::updateCamera() {
 	}
 }
 
-// Updates the camera and uniform buffer object once per frame
+// Updates uniform buffer object once per frame with view and projection matrices
 void VeApplication::updateUniformBuffer(uint32_t current_frame, UniformBufferObject& ubo) {
 	ubo.view = m_camera.getView();
 	ubo.proj = m_camera.getProj();
+	ubo.camera_position = m_camera.getPosition();
 	m_uniform_buffers[current_frame]->writeToBuffer(&ubo);
 	// No flush required with MEMORY_PROPERTY_HOST_COHERENT
 }

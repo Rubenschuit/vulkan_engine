@@ -100,7 +100,7 @@ void PointLightSystem::render(VeFrameInfo& frame_info) const {
 }
 
 // Update UBO with point light data for global access in shaders
-void PointLightSystem::update(VeFrameInfo& frame_info, UniformBufferObject& ubo) {
+void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObject& ubo) {
 	uint32_t num_lights = 0;
 	for (auto& [id, obj] : frame_info.game_objects) {
 		if (obj.point_light_component == nullptr)

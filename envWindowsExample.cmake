@@ -7,7 +7,7 @@
 # GLFW path (if not using FetchContent)
 # set(GLFW_PATH "X:/dev/Libraries/glfw-3.3.4.bin.WIN64")
 
-# GLM path (if not using FetchContent)  
+# GLM path (if not using FetchContent)
 # set(GLM_PATH "X:/dev/Libraries/glm")
 
 # MinGW path (for Windows MinGW builds)
@@ -17,7 +17,7 @@
 # set(SLANG_HOME "C:/Tools/slang")
 
 # Custom paths for external libraries
-# set(TINYOBJ_PATH "X:/dev/Libraries/tinyobjloader")
+# set(TINYOBJ_PATH "X:/dev/Libraries/tinygltf")
 # set(STB_PATH "X:/dev/Libraries/stb")
 
 # ImGui path (if not using vendored version)

@@ -147,10 +147,10 @@ else()
 	endif()
 endif()
 
-# TinyObj
-if (NOT TINYOBJ_PATH)
-	message(STATUS "TINYOBJ_PATH not specified in .env.cmake, using external/tinyobjloader")
-	set(TINYOBJ_PATH external/tinyobjloader)
+# TinyGltf (header-only)
+if (NOT TINYGLTF_PATH)
+	message(STATUS "TINYGLTF_PATH not specified in .env.cmake, using external/tinygltf")
+	set(TINYGLTF_PATH external/tinygltf)
 endif()
 
 # stb_image (header-only)
