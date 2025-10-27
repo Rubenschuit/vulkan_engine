@@ -27,6 +27,7 @@ Sandbox::Sandbox(const std::filesystem::path& working_dir)
 	loadGameObjects();
 	createUniformBuffers();
 	createDescriptors();
+
 	initSystems();
 	initUI();
 

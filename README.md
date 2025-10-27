@@ -51,7 +51,9 @@ Note: CMake will auto-discover Slang (`slangc`) and the Vulkan SDK in common ins
 
 - Vulkan SDK (LunarG): https://vulkan.lunarg.com/sdk/home
 
+
 - Optional (will be fetched if no path is set):
+	- KTX: https://github.com/KhronosGroup/KTX-Software/releases
 	- GLFW: https://www.glfw.org/download.html
 	- GLM: https://github.com/g-truc/glm/releases
 

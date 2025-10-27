@@ -25,41 +25,11 @@ if /I "%MODE%"=="clean" (
 GOTO :build
 
 :clean
-	:: Remove everything in build directory except _deps
-	if exist build (
-		echo [INFO] Cleaning build directory (preserving _deps)
-		cd build
-		:: Remove all directories except _deps
-		for /d %%d in (*) do (
-			if not "%%d"=="_deps" (
-				echo [INFO] Removing %%d
-				rmdir /S /Q "%%d"
-			)
-		)
-		:: Remove all files
-		for %%f in (*.*) do (
-			echo [INFO] Removing %%f
-			del /Q /F "%%f"
-		)
-		:: Clean up FetchContent build directories but keep source
-		if exist "_deps" (
-			cd _deps
-			for /d %%d in (*-build,*-subbuild) do (
-				echo [INFO] Removing %%d
-				rmdir /S /Q "%%d"
-			)
-			cd ..
-		)
-		cd ..
-		echo [INFO] Cleaned build directory (preserved _deps source)
-	)
-	:: Clean other build directories
+	if exist build rmdir /S /Q build
 	if exist build_mingw rmdir /S /Q build_mingw
 	if exist build_msvc rmdir /S /Q build_msvc
-
-	:: Remove compiled shader files
 	for %%f in (shaders\*.spv) do if exist "%%~ff" del /Q /F "%%~ff"
-	echo [INFO] Cleaned build directories and shaders/*.spv
+	echo [INFO] Cleaned build directories and shaders
 	exit /b 0
 
 :build
@@ -90,7 +60,7 @@ if exist "%BUILD_DIR%\CMakeCache.txt" (
 	:: Configure
 	set CONFIGURE_CMD=cmake -S . -B "%BUILD_DIR%" -G "%CMAKE_GEN%" %EXTRA_CMAKE_ARGS%
 	if /I not "%GEN%"=="msvc" set CONFIGURE_CMD=%CONFIGURE_CMD% -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
-	
+
 	echo [CMD ] %CONFIGURE_CMD%
 	%CONFIGURE_CMD%
 	if errorlevel 1 (
@@ -110,6 +80,14 @@ if /I "%GEN%"=="msvc" (
 if errorlevel 1 (
 	echo [ERR ] Build failed.
 	exit /b %ERRORLEVEL%
+)
+
+:: Create symlink for IntelliSense if in Debug mode
+if /I "%BUILD_TYPE%"=="Debug" (
+	:: Create symlink from build/compile_commands.json to build/Debug/compile_commands.json
+	if not exist "%BUILD_DIR%\compile_commands.json" (
+		mklink "%BUILD_DIR%\compile_commands.json" "Debug\compile_commands.json" >nul 2>&1
+	)
 )
 
 :: Tests

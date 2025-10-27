@@ -1,7 +1,10 @@
 # Locate and configure third-party dependencies
 # - Vulkan SDK
 # - GLFW (optionally via FetchContent)
-# - TinyObjLoader
+# - tinygltf
+# - KTX-Software
+# - Dear ImGui
+# - GLM
 
 # Auto-detect common MSYS2/MinGW prefixes on Windows (if not provided)
 if (WIN32 AND NOT DEFINED MINGW_PATH AND CMAKE_GENERATOR STREQUAL "MinGW Makefiles")
@@ -152,38 +155,65 @@ if (NOT TINYGLTF_PATH)
 	set(TINYGLTF_PATH external/tinygltf)
 endif()
 
-# stb_image (header-only)
-if (NOT STB_PATH)
-	message(STATUS "STB_PATH not specified in .env.cmake, using external/stb")
-	set(STB_PATH external/stb)
-endif()
-
 # KTX (Khronos Texture)
-# Prefer KTX_PATH from .env.cmake, otherwise fetch from GitHub
 if (KTX_PATH)
+	# Use explicit path from .env.cmake
 	message(STATUS "Using KTX from KTX_PATH: ${KTX_PATH}")
-	find_library(KTX_LIBRARIES NAMES ktx libktx HINTS ${KTX_PATH}/lib ${KTX_PATH})
+	set(KTX_INCLUDE_DIRS "${KTX_PATH}/include")
+	find_library(KTX_LIBRARIES NAMES ktx HINTS ${KTX_PATH}/lib)
 	if (NOT KTX_LIBRARIES)
-		message(WARNING "KTX library not found at ${KTX_PATH}")
+		message(FATAL_ERROR "KTX_PATH set but library not found at ${KTX_PATH}/lib")
 	endif()
 else()
-	# Fetch from GitHub via FetchContent
-	message(STATUS "Fetching KTX-Software from GitHub")
-	include(FetchContent)
-	FetchContent_Declare(
-		KTX-Software
-		GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
-		GIT_TAG v4.3.2
+	# Try to find KTX in system
+	find_library(KTX_LIBRARIES NAMES ktx HINTS
+		/usr/local/lib /opt/homebrew/lib
+		"C:/Program Files/KTX-Software/lib"
+		"C:/msys64/mingw64/lib"
+		"C:/msys64/ucrt64/lib"
+		"C:/msys64/clang64/lib"
+		"C:/VulkanSDK/${VULKAN_SDK_VERSION}/Third-Party/Bin"
 	)
-	# Disable building tools - we only need the library
-	set(KTX_FEATURE_TOOLS OFF CACHE BOOL "Enable KTX tools" FORCE)
-	set(KTX_FEATURE_TESTS OFF CACHE BOOL "Enable KTX tests" FORCE)
-	FetchContent_MakeAvailable(KTX-Software)
-	set(KTX_LIBRARIES ktx)
-	# FetchContent provides include paths via the KTX-Software target
-	set(KTX_INCLUDE_DIRS "${KTX-Software_SOURCE_DIR}/include")
-	message(STATUS "Using KTX-Software from FetchContent (tools disabled)")
+	if (NOT KTX_LIBRARIES)
+		message(STATUS "KTX not found on system, fetching KTX-Software from GitHub to external/ktx-software ()")
+		set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/external")
+		include(FetchContent)
+		FetchContent_Declare(
+			ktx-software
+			GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
+			GIT_TAG v4.3.2
+			SOURCE_DIR "${CMAKE_SOURCE_DIR}/external/ktx-software"
+			BINARY_DIR "${CMAKE_BINARY_DIR}/_ktx-build"
+		)
+		set(KTX_FEATURE_TOOLS OFF CACHE BOOL "" FORCE)
+		set(KTX_FEATURE_TESTS OFF CACHE BOOL "" FORCE)
+		set(KTX_FEATURE_DOC OFF CACHE BOOL "" FORCE)
+		FetchContent_MakeAvailable(ktx-software)
+		set(KTX_LIBRARIES ktx)
+		set(KTX_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/external/ktx-software/include")
+	else()
+		# Try to find include directory near the library
+		get_filename_component(KTX_LIB_DIR ${KTX_LIBRARIES} DIRECTORY)
+		find_path(KTX_INCLUDE_DIRS "ktx.h" PATHS
+			${KTX_LIB_DIR}/../include
+			${KTX_LIB_DIR}/../../include
+			/usr/local/include
+			/opt/homebrew/include
+			"C:/Program Files/KTX-Software/include"
+		)
+		if (NOT KTX_INCLUDE_DIRS)
+			# Fallback to common locations
+			if (UNIX OR APPLE)
+				set(KTX_INCLUDE_DIRS "/usr/local/include")
+			elseif (WIN32)
+				set(KTX_INCLUDE_DIRS "${KTX_LIB_DIR}/../include")
+			endif()
+		endif()
+		message(STATUS "Found KTX in system: ${KTX_LIBRARIES} | ${KTX_INCLUDE_DIRS}")
+	endif()
 endif()
+
+message(STATUS "KTX configured: ${KTX_LIBRARIES} | ${KTX_INCLUDE_DIRS}")
 
 # Dear ImGui: prefer vendored source under external/imgui, otherwise fetch
 set(_VE_IMGUI_VENDORED_DIR "${CMAKE_SOURCE_DIR}/external/imgui")

@@ -66,3 +66,7 @@ CMakeSettings.json
 .clangd
 .cache/
 compile_commands.json
+
+# FetchContent dependencies (source only in external, builds go to build/)
+external/ktx-software/
+external/*-subbuild/

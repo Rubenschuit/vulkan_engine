@@ -24,22 +24,13 @@ target_include_directories(VEngineLib
 		$<BUILD_INTERFACE:${GLM_INCLUDE_DIRS}>
 )
 
-# Treat third-party headers as system includes to suppress their warnings
-if (STB_PATH)
-	target_include_directories(VEngineLib SYSTEM PUBLIC ${STB_PATH})
-endif()
-
 if(TINYGLTF_PATH)
 	target_include_directories(VEngineLib SYSTEM PUBLIC ${TINYGLTF_PATH})
 endif()
 
 # Add KTX include directories
-if(KTX_PATH)
-	target_include_directories(VEngineLib SYSTEM PUBLIC ${KTX_PATH}/include)
-	target_include_directories(VEngineLib SYSTEM PUBLIC ${KTX_PATH}/include/KHR)
-elseif(KTX_INCLUDE_DIRS)
+if(KTX_INCLUDE_DIRS)
 	target_include_directories(VEngineLib SYSTEM PUBLIC ${KTX_INCLUDE_DIRS})
-	target_include_directories(VEngineLib SYSTEM PUBLIC ${KTX_INCLUDE_DIRS}/KHR)
 endif()
 
 # Link dependencies
@@ -139,13 +130,22 @@ elseif (WIN32)
 		ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 	)
 	# Copy DLL to executable directory after build
-	add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different
-		$<TARGET_FILE:VEngineLib>
-		$<TARGET_FILE_DIR:${PROJECT_NAME}>
-	)
+	# For MSVC multi-config generators, we need to handle config-specific paths
+	if(MSVC)
+		add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			$<TARGET_FILE:VEngineLib>
+			$<TARGET_FILE_DIR:${PROJECT_NAME}>
+			COMMENT "Copying VEngineLib DLL to executable directory"
+		)
+	else()
+		add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			$<TARGET_FILE:VEngineLib>
+			$<TARGET_FILE_DIR:${PROJECT_NAME}>
+		)
+	endif()
 endif()
-
 
 if (WIN32)
 	message(STATUS "CREATING BUILD FOR WINDOWS")
@@ -154,7 +154,4 @@ if (WIN32)
 		target_link_directories(VEngineLib PUBLIC ${MINGW_PATH}/lib)
 	endif()
 endif()
-
-
-
 
