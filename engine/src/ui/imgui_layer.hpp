@@ -14,12 +14,15 @@ struct VENGINE_API UIContext {
 	// general
 	bool visible;
 
+	// particle system
+	float speed;
+
 	// particle count
 	uint32_t pending_particle_count;
 	bool apply_particle_count;
 	bool reset_particle_count;
 
-	// particle velocity normal dist
+	// particle explosion normal dist
 	float particle_velocity_mean;
 	float particle_velocity_stddev;
 	bool apply_velocity_params;

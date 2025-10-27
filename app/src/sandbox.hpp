@@ -38,16 +38,7 @@ private:
 
 	// Texture paths
 	std::filesystem::path m_texture_path;
-	std::vector<std::filesystem::path> m_skybox_paths;
-	/*
-	const char* m_skybox_path[6] = {working_directory + "/textures/mots.png",
-									working_directory + "/textures/mots.png",
-									working_directory + "/textures/mots.png",
-									working_directory + "/textures/mots.png",
-									working_directory + "/textures/mots.png",
-									working_directory + "/textures/mots.png" };
-	*/
-
+	std::filesystem::path m_skybox_path;
 
 	VeTexture m_skybox;
 	VeTexture m_texture;
@@ -58,7 +49,7 @@ private:
 	// UI context captured during renderUI(), consumed in updateParticles() for example.
 	UIContext ui_context;
 
-	// Render systems 
+	// Render systems
 	std::unique_ptr<SkyboxRenderSystem> m_skybox_render_system;
 	std::unique_ptr<SimpleRenderSystem> m_simple_render_system;
 	std::unique_ptr<AxesRenderSystem> m_axes_render_system;

@@ -1,8 +1,9 @@
 #include "pch.hpp"
 #include "game/ve_model.hpp"
 
-#define TINYGLTF_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#define TINYGLTF_IMPLEMENTATION
 #include <tiny_gltf.h>
 
 namespace ve {
@@ -34,12 +35,13 @@ VeModel::VeModel(VeDevice& device, const std::filesystem::path& model_path) : m_
 	assert(ret && "Failed to load glTF model");
 	(void)ret; // no fallback handling for now
 
-
-	std::vector<Vertex> vertices;
-	std::unordered_map<Vertex, uint32_t> unique_vertices{};
-	std::vector<uint32_t> indices;
+	std::vector<Vertex> vertices; // Global vertices vector, only unique vertices are stored here
+	std::unordered_map<Vertex, uint32_t> unique_vertices{}; // Used to track unique vertices
+	std::vector<uint32_t> indices; // Contains all indices into the global vertices vector of the model
 	for (const auto& mesh : model.meshes) {
 		for (const auto& primitive : mesh.primitives) {
+			// Local tracking for this primitive
+			std::vector<uint32_t> primitive_vertex_map; // Maps accessor index to unique vertex index
 
 			// Get vertex positions
             const tinygltf::Accessor& pos_accessor = model.accessors[static_cast<size_t>(primitive.attributes.at("POSITION"))];
@@ -74,12 +76,17 @@ VeModel::VeModel(VeDevice& device, const std::filesystem::path& model_path) : m_
 
 				// Get position (3*4 bytes)
                 const float* pos = reinterpret_cast<const float*>(&pos_buffer.data[pos_buffer_view.byteOffset + pos_accessor.byteOffset + i * 12]);
-                vertex.pos = {pos[0], pos[1], pos[2]};
+				// gltf is right-handed, y-up, we go to z-up
+                vertex.pos = {pos[0], pos[2], pos[1]};
+				//VE_LOGD("model: " << model_path.string());
+				//VE_LOGD("Pos: " << vertex.pos.x << ", " << vertex.pos.y << ", " << vertex.pos.z);
 
 				// Get texture coordinates if available (2*4 bytes)
                 if (has_tex_coords) {
                     const float* tex_coord = reinterpret_cast<const float*>(&tex_coord_buffer->data[tex_coord_buffer_view->byteOffset + tex_coord_accessor->byteOffset + i * 8]);
-                    vertex.tex_coord = {1.0 - tex_coord[0], tex_coord[1]};
+                    vertex.tex_coord = {tex_coord[0], tex_coord[1]};
+					if (model_path.string() == "././models/quad.gltf")
+						VE_LOGD("Tex coord: " << vertex.tex_coord.x << ", " << vertex.tex_coord.y);
                 } else {
                     vertex.tex_coord = {0.0f, 0.0f};
                 }
@@ -89,47 +96,44 @@ VeModel::VeModel(VeDevice& device, const std::filesystem::path& model_path) : m_
 
 				// Get normal (3*4 bytes)
 				const float* normal = reinterpret_cast<const float*>(&normal_buffer.data[normal_buffer_view.byteOffset + normal_accessor.byteOffset + i * 12]);
-				vertex.normal = {normal[0], normal[1], normal[2]};
+				vertex.normal = glm::vec3{normal[0], normal[2], normal[1]};
 
 				if (!unique_vertices.contains(vertex)) {
 					unique_vertices[vertex] = static_cast<uint32_t>(vertices.size());
 					vertices.push_back(vertex);
 				}
+				primitive_vertex_map.push_back(unique_vertices[vertex]);
 			}
 
 			// Handle index data
 			const unsigned char* index_data = &index_buffer.data[index_buffer_view.byteOffset + index_accessor.byteOffset];
+			indices.reserve(indices.size() + index_accessor.count);
 
-			switch (index_accessor.componentType) {
-				case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: {
-					const uint8_t* indices8 = reinterpret_cast<const uint8_t*>(index_data);
-					for (size_t i = 0; i < index_accessor.count; i++) {
-						Vertex vertex = vertices[indices8[i]];
-						indices.push_back(unique_vertices[vertex]);
+			// Loop through index_data and add all indices to the indices vector depending on the component type
+			// These indices refer to the indices of the global vertices vector WITH duplicates
+			for (size_t i = 0; i < index_accessor.count; i++) {
+				uint32_t accessor_index = 0;
+				switch (index_accessor.componentType) {
+					case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: {
+						accessor_index = *reinterpret_cast<const uint8_t*>(index_data + i * sizeof(uint8_t));
+						break;
 					}
-					break;
-				}
-				case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
-					const uint16_t* indices16 = reinterpret_cast<const uint16_t*>(index_data);
-					for (size_t i = 0; i < index_accessor.count; i++) {
-						Vertex vertex = vertices[indices16[i]];
-						indices.push_back(unique_vertices[vertex]);
-
+					case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
+						accessor_index = *reinterpret_cast<const uint16_t*>(index_data + i * sizeof(uint16_t));
+						break;
 					}
-					break;
-				}
-				case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT: {
-					const uint32_t* indices32 = reinterpret_cast<const uint32_t*>(index_data);
-					for (size_t i = 0; i < index_accessor.count; i++) {
-						Vertex vertex = vertices[indices32[i]];
-						indices.push_back(unique_vertices[vertex]);
+					case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT: {
+						accessor_index = *reinterpret_cast<const uint32_t*>(index_data + i * sizeof(uint32_t));
+						break;
 					}
-					break;
+					default: {
+						VE_LOGE("Unsupported index component type in model " << model_path);
+						assert(false);
+					}
 				}
-				default:
-					VE_LOGE("Unsupported index component type in model " << model_path);
-					assert(false);
-			} // switch
+				// Map accessor index to deduplicated vertex index
+				indices.push_back(primitive_vertex_map[accessor_index]);
+			}
 		} // for primitive
 	} // for mesh
 

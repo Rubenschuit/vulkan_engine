@@ -10,7 +10,20 @@
 set -e
 
 if [[ "$1" == 'clean' ]]; then
-	rm -rf build/
+	# Remove everything in build directory except _deps source folders
+	if [ -d "build" ]; then
+		cd build
+		# Remove all files and folders except _deps
+		find . -mindepth 1 -maxdepth 1 ! -name "_deps" -exec rm -rf {} \;
+		# Clean up FetchContent build directories but keep source
+		if [ -d "_deps" ]; then
+			cd _deps
+			rm -rf *-build *-subbuild
+			cd ..
+		fi
+		cd ..
+		echo "Cleaned build directory (preserved _deps source)"
+	fi
 	rm -rf shaders/*.spv
 	echo "Cleaned build directory"
 	exit 0
@@ -50,7 +63,7 @@ if [[ "$OSTYPE" == "msys" ]]; then
 fi
 
 # build dir is ./build/{BUILD_TYPE}
-BUILD_DIR="./build/$BUILD_TYPE"
+BUILD_DIR="./build"
 
 # Configure and build into ./build
 cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$BUILD_TYPE" $EXTRA_CMAKE_ARGS $EXTRA_WINDOWS_ARGS

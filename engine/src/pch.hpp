@@ -1,4 +1,5 @@
 #pragma once
+// clangd: disable-unused-includes
 
 #ifndef VULKAN_HPP_ENABLE_RAII
 #define VULKAN_HPP_ENABLE_RAII

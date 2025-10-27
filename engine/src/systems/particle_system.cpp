@@ -170,6 +170,7 @@ void ParticleSystem::createPipeline(vk::Format color_format) {
 	config.rasterization_info.depthBiasEnable = VK_FALSE;
 
 	//enable additve blending
+	/*
 	config.color_blend_attachment.blendEnable = VK_TRUE;
 	config.color_blend_attachment.srcColorBlendFactor = vk::BlendFactor::eOne; //
 	config.color_blend_attachment.dstColorBlendFactor = vk::BlendFactor::eOne; //
@@ -177,7 +178,7 @@ void ParticleSystem::createPipeline(vk::Format color_format) {
 	config.color_blend_attachment.srcAlphaBlendFactor = vk::BlendFactor::eOne; //
 	config.color_blend_attachment.dstAlphaBlendFactor = vk::BlendFactor::eOne; //
 	config.color_blend_attachment.alphaBlendOp = vk::BlendOp::eAdd;
-
+	*/
 	m_pipeline = std::make_unique<VePipeline>(m_ve_device, m_shader_path, config);
 }
 
@@ -192,7 +193,7 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 	m_total_time += frame_info.frame_time;
 
 	ParticleParams params{};
-	params.delta_time = frame_info.frame_time;
+	params.delta_time = frame_info.frame_time * m_speed;
 	params.total_time = m_total_time;
 	params.particle_count = m_particle_count;
 	params.origin = m_origin;

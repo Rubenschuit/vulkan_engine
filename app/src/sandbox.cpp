@@ -1,4 +1,3 @@
-
 #include <glm/glm.hpp>
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -9,26 +8,22 @@
 
 namespace ve {
 
+// First a window, device and swap chain are initialised in the base class
 Sandbox::Sandbox(const std::filesystem::path& working_dir)
 	: working_directory(working_dir),
+	// model paths
 	m_cube_model_path(working_directory / "models" / "cube.gltf"),
 	m_viking_room_model_path(working_directory / "models" / "viking_room.gltf"),
 	m_quad_model_path(working_directory / "models" / "quad.gltf"),
 	m_flat_vase_model_path(working_directory / "models" / "flat_vase.gltf"),
 	m_smooth_vase_model_path(working_directory / "models" / "smooth_vase.gltf"),
-	m_texture_path(working_directory / "textures" / "viking_room.png"),
-	m_skybox_paths({
-		working_directory / "textures" / "skybox" / "Starfield_And_Haze_left.png",
-		working_directory / "textures" / "skybox" / "Starfield_And_Haze_right.png",
-		working_directory / "textures" / "skybox" / "Starfield_And_Haze_up.png",
-		working_directory / "textures" / "skybox" / "Starfield_And_Haze_down.png",
-		working_directory / "textures" / "skybox" / "Starfield_And_Haze_front.png",
-		working_directory / "textures" / "skybox" / "Starfield_And_Haze_back.png"
-	}),
-	m_skybox(m_ve_device, m_skybox_paths),
+	// texture paths
+	m_texture_path(working_directory / "textures" / "viking_room.ktx"),
+	m_skybox_path(working_directory / "textures" / "skybox" / "starfield_haze.ktx"),
+	// Textures
+	m_skybox(m_ve_device, m_skybox_path),
 	m_texture(m_ve_device, m_texture_path) {
 
-	// First a window, device and swap chain are initialised in the base class
 	loadGameObjects();
 	createUniformBuffers();
 	createDescriptors();
@@ -91,7 +86,7 @@ void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 		m_particle_system->resetDisc();
 	}
 
-	// Apply UI intents
+	// Apply UI inputs
 	m_particle_system->stageParticleCount(ui_context.pending_particle_count);
 	if (ui_context.apply_particle_count) {
 		m_particle_system->applyStagedParticleCount();
@@ -101,6 +96,8 @@ void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 		m_particle_system->scheduleRestart();
 		ui_context.reset_particle_count = false;
 	}
+
+	m_particle_system->setSpeed(ui_context.speed);
 
 	m_particle_system->setMean(ui_context.particle_velocity_mean);
 	m_particle_system->setStddev(ui_context.particle_velocity_stddev);
@@ -131,8 +128,27 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 }
 
 void Sandbox::loadGameObjects() {
+	// load sponza
+	VeGameObject sponza = VeGameObject::createGameObject();
+	std::filesystem::path sponza_model_path = working_directory / "models" / "sponza" / "glTF" / "Sponza.gltf";
+	auto sponza_model = std::make_shared<VeModel>(m_ve_device, sponza_model_path);
+	sponza.ve_model = sponza_model;
+	//sponza.transform.rotation = {glm::radians(90.0f), 0.0f, 0.0f},
+	sponza.transform.translation = {0.0f, 0.0f, -200.0f};
+	sponza.transform.scale = {0.1f, 0.1f, 0.1f};
+	sponza.has_texture = 0.0f;
+	m_game_objects.emplace(sponza.getId(), std::move(sponza));
+
+	// sponza sun light
+	VeGameObject sun = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(1.0f, 1.0f, 1.0f));
+	sun.transform.translation = {0.0f, 0.0f, -150.0f};
+	sun.point_light_component->intensity = 2.0f;
+	sun.point_light_component->rotates = true;
+	m_game_objects.emplace(sun.getId(), std::move(sun));
+
+
 	// Create some lights with ranging colors
-	constexpr uint32_t num_lights = 17; // max 100 see config
+	constexpr uint32_t num_lights = 13; // max 100 see config
 	constexpr float intensity = 0.3f;
 	constexpr float radius = 1.0f;
 	const glm::vec3 colors[10] = {
@@ -176,8 +192,9 @@ void Sandbox::loadGameObjects() {
 	floor.ve_model = quad;
 	floor.has_texture = 0.0f;
 	floor.transform = {
+		.rotation = {glm::radians(90.0f), 0.0f, 0.0f},
 		.translation = {0.0f, 0.0f, -0.1f},
-		.scale = {80.0f, 80.0f, 8.0f}
+		.scale = {80.0f, 1.0f, 80.0f}
 	};
 	m_game_objects.emplace(floor.getId(), std::move(floor));
 
@@ -187,6 +204,7 @@ void Sandbox::loadGameObjects() {
 		for (int i = 0; i < 10; i++) {
 			VeGameObject obj = VeGameObject::createGameObject();
 			obj.ve_model = model;
+			obj.transform.rotation = {glm::radians(90.0f), 0.0f, 0.0f};
 			obj.transform.translation = {(float)i * 4.0f, (float)j * 4.0f, 0.f};
 			obj.has_texture = 1.0f;
 			m_game_objects.emplace(obj.getId(), std::move(obj));
@@ -212,8 +230,8 @@ void Sandbox::loadGameObjects() {
 			obj.ve_model = model3;
 			obj.transform = {
 				.translation = {-1.0 * (float)i * 4.0f - 4.0f, (float)j * -4.0f - 4.0f, 0.f},
-				.rotation = {glm::radians(-90.0f), 0.0f, 0.0f},
-				.scale = {6.0f, 3.0f, 6.0f}
+				.rotation = {glm::radians(-180.0f), 0.0f, 0.0f},
+				.scale = {6.0f, 6.0f, 3.0f}
 			};
 			m_game_objects.emplace(obj.getId(), std::move(obj));
 		}
@@ -226,8 +244,8 @@ void Sandbox::loadGameObjects() {
 			obj.ve_model = model4;
 			obj.transform = {
 				.translation = {i * 4.0f , (float)j * -4.0f - 4.0f, 0.f},
-				.rotation = {glm::radians(-90.0f), 0.0f, 0.0f},
-				.scale = {6.0f, 3.0f, 6.0f}
+				.rotation = {glm::radians(-180.0f), 0.0f, 0.0f},
+				.scale = {6.0f, 6.0f, 3.0f}
 			};
 			m_game_objects.emplace(obj.getId(), std::move(obj));
 		}
@@ -337,7 +355,7 @@ void Sandbox::initSystems() {
 		m_global_pool,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
-		434567, // number of particles
+		500000, // number of particles
 		glm::vec3{0.0f, -200.0f, 10.0f},
 		working_directory / "shaders" / "particle_compute.spv"
 	);
@@ -357,6 +375,7 @@ void Sandbox::initUI() {
 	ui_context = {
 		.visible = false,
 		.pending_particle_count = m_particle_system->getPendingParticleCount(),
+		.speed = m_particle_system->getSpeed(),
 		.apply_particle_count = false,
 		.reset_particle_count = false,
 		.particle_velocity_mean = m_particle_system->getMean(),

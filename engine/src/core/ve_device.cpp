@@ -488,6 +488,7 @@ void VeDevice::copyBufferToImage(vk::raii::Buffer& src_buffer, const vk::raii::I
 	assert(width > 0 && height > 0 && "Image width and height must be greater than zero");
 	assert(*src_buffer != VK_NULL_HANDLE && "Source buffer must be valid");
 	assert(*dst_image  != VK_NULL_HANDLE && "Destination image must be valid");
+	VE_LOGD("Copying buffer to image, width: " << width << ", height: " << height << ", array layers: " << array_layers);
 	auto cmd = beginSingleTimeCommands(QueueKind::Transfer);
 	vk::BufferImageCopy copy_region{
 		.bufferOffset = 0,

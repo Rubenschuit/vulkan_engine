@@ -2,7 +2,6 @@
 # - Vulkan SDK
 # - GLFW (optionally via FetchContent)
 # - TinyObjLoader
-# - stb_image
 
 # Auto-detect common MSYS2/MinGW prefixes on Windows (if not provided)
 if (WIN32 AND NOT DEFINED MINGW_PATH AND CMAKE_GENERATOR STREQUAL "MinGW Makefiles")
@@ -157,6 +156,33 @@ endif()
 if (NOT STB_PATH)
 	message(STATUS "STB_PATH not specified in .env.cmake, using external/stb")
 	set(STB_PATH external/stb)
+endif()
+
+# KTX (Khronos Texture)
+# Prefer KTX_PATH from .env.cmake, otherwise fetch from GitHub
+if (KTX_PATH)
+	message(STATUS "Using KTX from KTX_PATH: ${KTX_PATH}")
+	find_library(KTX_LIBRARIES NAMES ktx libktx HINTS ${KTX_PATH}/lib ${KTX_PATH})
+	if (NOT KTX_LIBRARIES)
+		message(WARNING "KTX library not found at ${KTX_PATH}")
+	endif()
+else()
+	# Fetch from GitHub via FetchContent
+	message(STATUS "Fetching KTX-Software from GitHub")
+	include(FetchContent)
+	FetchContent_Declare(
+		KTX-Software
+		GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
+		GIT_TAG v4.3.2
+	)
+	# Disable building tools - we only need the library
+	set(KTX_FEATURE_TOOLS OFF CACHE BOOL "Enable KTX tools" FORCE)
+	set(KTX_FEATURE_TESTS OFF CACHE BOOL "Enable KTX tests" FORCE)
+	FetchContent_MakeAvailable(KTX-Software)
+	set(KTX_LIBRARIES ktx)
+	# FetchContent provides include paths via the KTX-Software target
+	set(KTX_INCLUDE_DIRS "${KTX-Software_SOURCE_DIR}/include")
+	message(STATUS "Using KTX-Software from FetchContent (tools disabled)")
 endif()
 
 # Dear ImGui: prefer vendored source under external/imgui, otherwise fetch

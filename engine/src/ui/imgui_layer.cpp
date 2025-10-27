@@ -118,28 +118,37 @@ void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd) {
     cmd.endRendering();
 }
 
+// TODO: move window creation outside engine
 void ImGuiLayer::renderUI(UIContext& context) {
 	beginFrame();
 	if (context.visible) {
 		ImGui::ShowDemoWindow(nullptr);
 		ImGui::SetNextWindowBgAlpha(0.9f);
-		// popup window for particle controls
+		// popup window for particle settings
 		if (ImGui::Begin("Particles", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			int count = static_cast<int>(context.pending_particle_count);
-			ImGui::Text("Particle Controls");
+			ImGui::Text("Particle settings");
 			ImGui::Separator();
 			ImGui::SliderInt("Count", &count, 1000, 50000000);
+			ImGui::SameLine();
+			if (ImGui::Button("400k"))
+				count = 400000;
+			ImGui::SliderFloat("Speed", &context.speed, 0, 10);
+			ImGui::SameLine();
+			if (ImGui::Button("1.0x"))
+				context.speed = 1.0f;
 			ImGui::Separator();
-			ImGui::SliderFloat("Velocity mean", &context.particle_velocity_mean, -60, 60);
-			ImGui::Separator();
-			ImGui::SliderFloat("Velocity stddev", &context.particle_velocity_stddev, 0, 60);
+			ImGui::SliderFloat("Explosion mean", &context.particle_velocity_mean, -60, 60);
+			ImGui::SliderFloat("Explosion stddev", &context.particle_velocity_stddev, 0, 60);
 
 
 			if (count < 1) count = 1;
-			context.pending_particle_count = static_cast<uint32_t>(count);
-			if (ImGui::Button("Apply")) context.apply_particle_count = true;
+				context.pending_particle_count = static_cast<uint32_t>(count);
+			if (ImGui::Button("Apply count"))
+				context.apply_particle_count = true;
 			ImGui::SameLine();
-			if (ImGui::Button("Reset")) context.reset_particle_count = true;
+			if (ImGui::Button("Reset"))
+				context.reset_particle_count = true;
 		}
 		ImGui::End();
 
@@ -156,7 +165,7 @@ void ImGuiLayer::renderUI(UIContext& context) {
 			ImGui::Text("2: Cool Gravity");
 			ImGui::Text("3: Succ mode");
 			ImGui::Text("4: Stasis");
-			ImGui::Text("5: Ugly galaxy");
+			ImGui::Text("5: Galaxy (mid)");
 
 		}
 		ImGui::End();

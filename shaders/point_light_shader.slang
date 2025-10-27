@@ -1,11 +1,11 @@
 // Render a simple camera-facing quad for each point light in the scene
 static const float2 vertices[6] = float2[](
-	float2(-0.5f, -0.5f),
-	float2( 0.5f, -0.5f),
-	float2( 0.5f,  0.5f),
-	float2( 0.5f,  0.5f),
-	float2(-0.5f,  0.5f),
-	float2(-0.5f, -0.5f)
+	float2( 0.5, -0.5),
+	float2(-0.5, -0.5),
+	float2( 0.5,  0.5),
+	float2( 0.5,  0.5),
+	float2(-0.5, -0.5),
+	float2(-0.5,  0.5)
 );
 
 struct UniformBuffer {

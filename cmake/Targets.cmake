@@ -19,7 +19,6 @@ target_include_directories(VEngineLib
 	PUBLIC
 		${PROJECT_SOURCE_DIR}/engine/src
 		${PROJECT_SOURCE_DIR}/include
-		${TINYOBJ_PATH}
 		$<BUILD_INTERFACE:${GLFW_INCLUDE_DIRS}>
 		$<BUILD_INTERFACE:${Vulkan_INCLUDE_DIRS}>
 		$<BUILD_INTERFACE:${GLM_INCLUDE_DIRS}>
@@ -34,8 +33,27 @@ if(TINYGLTF_PATH)
 	target_include_directories(VEngineLib SYSTEM PUBLIC ${TINYGLTF_PATH})
 endif()
 
+# Add KTX include directories
+if(KTX_PATH)
+	target_include_directories(VEngineLib SYSTEM PUBLIC ${KTX_PATH}/include)
+	target_include_directories(VEngineLib SYSTEM PUBLIC ${KTX_PATH}/include/KHR)
+elseif(KTX_INCLUDE_DIRS)
+	target_include_directories(VEngineLib SYSTEM PUBLIC ${KTX_INCLUDE_DIRS})
+	target_include_directories(VEngineLib SYSTEM PUBLIC ${KTX_INCLUDE_DIRS}/KHR)
+endif()
+
 # Link dependencies
 target_link_libraries(VEngineLib PUBLIC ${GLFW_LIB} ${Vulkan_LIBRARIES})
+
+# Link KTX library
+if(TARGET ktx)
+	target_link_libraries(VEngineLib PUBLIC ktx)
+	message(STATUS "Linking with ktx library target")
+elseif(KTX_LIBRARIES)
+	target_link_libraries(VEngineLib PUBLIC ${KTX_LIBRARIES})
+	message(STATUS "Linking with system KTX library: ${KTX_LIBRARIES}")
+endif()
+
 target_link_libraries(${PROJECT_NAME} PRIVATE VEngine::Lib)
 
 #Add Dear ImGui sources to VEngineLib

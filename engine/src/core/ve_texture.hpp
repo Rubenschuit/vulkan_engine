@@ -12,7 +12,6 @@ namespace ve {
 class VENGINE_API VeTexture {
 public:
 	VeTexture(ve::VeDevice& device, const std::filesystem::path& texture_path);
-	VeTexture(ve::VeDevice& device, const std::vector<std::filesystem::path>& texture_paths);
 	~VeTexture();
 
 	VeTexture(const VeTexture&) = delete;
@@ -25,12 +24,10 @@ public:
 private:
 	void createTextureImage(const std::filesystem::path& texture_path);
 	void createTextureSampler();
-	void createCubeTextureImage(const std::vector<std::filesystem::path>& texture_paths);
 
 	ve::VeDevice& m_ve_device;
-	int m_width;
-	int m_height;
-	int m_channels;
+	uint32_t m_width;
+	uint32_t m_height;
 	std::unique_ptr<ve::VeImage> m_texture_image;
 
 	// Todo:: move sampler outside of texture class if we want to sample multiple images

@@ -79,6 +79,7 @@ public:
 	void render(VeFrameInfo& frame_info) const;
 	void scheduleRestart(); // schedule GPU reset of particle positions
 	void setMode(int32_t mode) { m_mode = mode; }
+	void setSpeed(float speed) { m_speed = speed; }
 	void resetPoint() { m_reset_kind = 1u; scheduleRestart(); }
 	void resetDisc() { m_reset_kind = 2u; scheduleRestart(); }
 
@@ -90,6 +91,7 @@ public:
 	uint32_t getCapacity() const { return m_capacity; }
 	float getMean() const { return m_mean; }
 	float getStddev() const { return m_stddev; }
+	float getSpeed() const { return m_speed; }
 
 	// Pending/staged particle count UI helpers
 	void stageParticleCount(uint32_t count);
@@ -123,6 +125,7 @@ private:
 	uint32_t m_reset_seed{0};
 	uint32_t m_reset_kind{ParticleResetKind::POINT}; // see ParticleResetKind enum
 	int32_t m_mode{ParticleMode::COOL}; // see ParticleMode enum
+	float m_speed{1.0f};
 
 	// Descriptor layouts for this system
 	std::unique_ptr<VeDescriptorSetLayout> m_compute_set_layout;

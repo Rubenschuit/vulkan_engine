@@ -35,7 +35,7 @@ SkyboxRenderSystem::~SkyboxRenderSystem() {}
 void SkyboxRenderSystem::loadCubeModel(const std::filesystem::path& cube_model_path) {
 	std::shared_ptr<VeModel> model = std::make_shared<VeModel>(m_ve_device, cube_model_path);
 	m_cube_object.ve_model = model;
-	m_cube_object.transform.scale = 4.0f * glm::vec3(1500.0f, 1500.0f, 1500.0f);
+	m_cube_object.transform.scale = 1.0f * glm::vec3(1500.0f, 1500.0f, 1500.0f);
 }
 void SkyboxRenderSystem::createPipelineLayout(
 	const vk::raii::DescriptorSetLayout& global_set_layout,
@@ -68,7 +68,6 @@ void SkyboxRenderSystem::createPipeline(vk::Format color_format) {
 	pipeline_config.color_format = color_format;
 	// Alter culling for skybox: only inside faces should be visible
 	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eFront;
-	pipeline_config.rasterization_info.frontFace = vk::FrontFace::eCounterClockwise;
 	// Skybox should not write to depth buffer (rendered at far plane)
 	pipeline_config.depth_stencil_info.depthWriteEnable = VK_FALSE;
 	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLessOrEqual;

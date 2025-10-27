@@ -1,5 +1,8 @@
 # Example .env.cmake file for customizing build environment
-# Copy this file to .env.cmake and modify as needed: cp envWindowsExample.cmake .env.cmake
+# Copy this file to .env.cmake and modify as needed: cp enExample.cmake .env.cmake
+
+# KTX path (if not using FetchContent)
+# set(KTX_PATH "/path/to/your/ktx/installation")
 
 # Vulkan SDK path (if not in system PATH)
 # set(VULKAN_SDK_PATH "C:/VulkanSDK/1.4.328.1")

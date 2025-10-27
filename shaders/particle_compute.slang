@@ -20,11 +20,13 @@ struct VertexOutput {
 };
 
 static const float2 quad[6] = {
-	float2(-0.5, -0.5),
+
 	float2( 0.5, -0.5),
-	float2( 0.5,  0.5),
 	float2(-0.5, -0.5),
 	float2( 0.5,  0.5),
+
+	float2( 0.5,  0.5),
+	float2(-0.5, -0.5),
 	float2(-0.5,  0.5)
 };
 
@@ -138,7 +140,7 @@ Particle simulateGravityFloor(Particle p) {
 	p.velocity.xyz += accel * params.delta_time;
 	p.position.xyz += p.velocity.xyz * params.delta_time;
 
-	float floor_z = 0.1f;
+	float floor_z = -200.0f;
 	if (p.position.z < floor_z) {
 		p.position.z = floor_z;
 		if (p.velocity.z < 0.0f) {

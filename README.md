@@ -40,7 +40,7 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 - Slang compiler (`slangc`) — required for building shaders
 - GLFW 3.3+ (automatically fetched if missing)
 - TinyGLTF (included in external)
-- stb_image (included in external)
+- KTX library (automatically fetched if missing)
 
 #### Downloads:
 Note: CMake will auto-discover Slang (`slangc`) and the Vulkan SDK in common install locations and via standard environment variables. Use `.env.cmake` only when installing to uncommon/custom paths, or to explicitly override detection. See `envWindowsExample.cmake` for examples.
