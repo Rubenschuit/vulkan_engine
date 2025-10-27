@@ -1,5 +1,9 @@
 #pragma once
 #include "ve_export.hpp"
+#include <cstdint>
+#include <vulkan/vulkan.hpp>
+#define VULKAN_HPP_ENABLE_RAII
+#include <vulkan/vulkan_raii.hpp>
 
 // Minimal Dear ImGui integration header. Implementation in imgui_layer.cpp
 // This uses glfw + Vulkan backends. Assumes VkInstance/Device/Queue/Swapchain are managed elsewhere.

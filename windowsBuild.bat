@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 :: windowsBuild.bat
 :: Usage:
@@ -20,6 +20,11 @@ if "%GEN%"=="" set GEN=msvc
 
 :: Clean mode
 if /I "%MODE%"=="clean" (
+	GOTO :clean
+)
+GOTO :build
+
+:clean
 	:: Remove everything in build directory except _deps
 	if exist build (
 		echo [INFO] Cleaning build directory (preserving _deps)
@@ -56,8 +61,8 @@ if /I "%MODE%"=="clean" (
 	for %%f in (shaders\*.spv) do if exist "%%~ff" del /Q /F "%%~ff"
 	echo [INFO] Cleaned build directories and shaders/*.spv
 	exit /b 0
-)
 
+:build
 :: Determine build type
 set BUILD_TYPE=Debug
 if /I "%MODE%"=="release" set BUILD_TYPE=Release
@@ -78,15 +83,20 @@ if /I "%GEN%"=="msvc" (
 
 echo [INFO] Configuring for %GEN% ("%CMAKE_GEN%"), %BUILD_TYPE%
 
-:: Configure
-set CONFIGURE_CMD=cmake -S . -B "%BUILD_DIR%" -G "%CMAKE_GEN%" %EXTRA_CMAKE_ARGS%
-if /I not "%GEN%"=="msvc" set CONFIGURE_CMD=%CONFIGURE_CMD% -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
-
-echo [CMD ] %CONFIGURE_CMD%
-%CONFIGURE_CMD%
-if errorlevel 1 (
-	echo [ERR ] CMake configure failed.
-	exit /b %ERRORLEVEL%
+:: Check if CMakeCache.txt exists (already configured)
+if exist "%BUILD_DIR%\CMakeCache.txt" (
+	echo [INFO] Build directory already configured, skipping configuration
+) else (
+	:: Configure
+	set CONFIGURE_CMD=cmake -S . -B "%BUILD_DIR%" -G "%CMAKE_GEN%" %EXTRA_CMAKE_ARGS%
+	if /I not "%GEN%"=="msvc" set CONFIGURE_CMD=%CONFIGURE_CMD% -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
+	
+	echo [CMD ] %CONFIGURE_CMD%
+	%CONFIGURE_CMD%
+	if errorlevel 1 (
+		echo [ERR ] CMake configure failed.
+		exit /b %ERRORLEVEL%
+	)
 )
 
 :: Build
@@ -114,8 +124,7 @@ if /I "%MODE%"=="test" (
 )
 
 :: Run the app
-set APP_PATH=%BUILD_DIR%\VeApp.exe
-if /I "%GEN%"=="msvc" set APP_PATH=%BUILD_DIR%\VeApp.exe
+set APP_PATH=%BUILD_DIR%\%BUILD_TYPE%\VeApp.exe
 
 if exist "%APP_PATH%" (
 	echo [INFO] Running %APP_PATH%

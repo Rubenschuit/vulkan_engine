@@ -3,7 +3,6 @@
 #include "core/ve_window.hpp"
 #include "core/ve_device.hpp"
 #include "core/ve_renderer.hpp"
-#include "core/ve_swap_chain.hpp"
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>

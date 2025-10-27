@@ -192,8 +192,8 @@ void Sandbox::loadGameObjects() {
 	floor.ve_model = quad;
 	floor.has_texture = 0.0f;
 	floor.transform = {
-		.rotation = {glm::radians(90.0f), 0.0f, 0.0f},
 		.translation = {0.0f, 0.0f, -0.1f},
+		.rotation = {glm::radians(90.0f), 0.0f, 0.0f},
 		.scale = {80.0f, 1.0f, 80.0f}
 	};
 	m_game_objects.emplace(floor.getId(), std::move(floor));
@@ -243,7 +243,7 @@ void Sandbox::loadGameObjects() {
 			VeGameObject obj = VeGameObject::createGameObject();
 			obj.ve_model = model4;
 			obj.transform = {
-				.translation = {i * 4.0f , (float)j * -4.0f - 4.0f, 0.f},
+				.translation = {(float)i * 4.0f , (float)j * -4.0f - 4.0f, 0.f},
 				.rotation = {glm::radians(-180.0f), 0.0f, 0.0f},
 				.scale = {6.0f, 6.0f, 3.0f}
 			};
@@ -374,8 +374,8 @@ void Sandbox::initUI() {
 	imgui_layer = std::make_unique<ImGuiLayer>(m_ve_window, m_ve_device, m_ve_renderer);
 	ui_context = {
 		.visible = false,
-		.pending_particle_count = m_particle_system->getPendingParticleCount(),
 		.speed = m_particle_system->getSpeed(),
+		.pending_particle_count = m_particle_system->getPendingParticleCount(),
 		.apply_particle_count = false,
 		.reset_particle_count = false,
 		.particle_velocity_mean = m_particle_system->getMean(),
