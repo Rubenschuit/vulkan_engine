@@ -56,6 +56,11 @@ endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE VEngine::Lib)
 
+# For MinGW, prevent exception symbol conflicts when linking against DLL
+if(USE_MINGW OR (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
+	target_link_options(${PROJECT_NAME} PRIVATE -Wl,--allow-multiple-definition)
+endif()
+
 #Add Dear ImGui sources to VEngineLib
 if (IMGUI_DIR)
 	set(IMGUI_SOURCES

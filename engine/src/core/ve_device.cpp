@@ -307,6 +307,8 @@ void VeDevice::createLogicalDevice() {
 		.pNext = &feature_chain.get<vk::PhysicalDeviceFeatures2>(),
 		.queueCreateInfoCount = static_cast<uint32_t>(queue_create_infos.size()),
 		.pQueueCreateInfos = queue_create_infos.data(),
+		.enabledLayerCount = 0,
+		.ppEnabledLayerNames = nullptr,
 		.enabledExtensionCount = static_cast<uint32_t>(m_required_device_extensions.size()),
 		.ppEnabledExtensionNames = m_required_device_extensions.data()
 	};
