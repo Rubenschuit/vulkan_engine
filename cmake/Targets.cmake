@@ -145,6 +145,23 @@ elseif (WIN32)
 			$<TARGET_FILE_DIR:${PROJECT_NAME}>
 		)
 	endif()
+
+	# Copy KTX DLL if it's a system library (common logic for both MSVC and MinGW)
+	if(KTX_DLL_PATH)
+		if(EXISTS "${KTX_DLL_PATH}" AND NOT TARGET ktx)
+			add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+				COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				"${KTX_DLL_PATH}"
+				$<TARGET_FILE_DIR:${PROJECT_NAME}>
+				COMMENT "Copying KTX DLL to executable directory"
+			)
+			message(STATUS "Added KTX DLL copy command: ${KTX_DLL_PATH}")
+		elseif(NOT EXISTS "${KTX_DLL_PATH}")
+			message(WARNING "KTX_DLL_PATH set but file does not exist: ${KTX_DLL_PATH}")
+		endif()
+	else()
+		message(STATUS "KTX_DLL_PATH not set, skipping DLL copy")
+	endif()
 endif()
 
 if (WIN32)
