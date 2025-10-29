@@ -12,53 +12,62 @@
 #if _MSC_VER && !__INTEL_COMPILER
 #include <windows.h>
 #include <vector>
-
-// Return the path to the running executable as a filesystem::path.
-// Uses a growing wchar_t buffer to handle long paths and avoids manual malloc/free.
-static std::filesystem::path GetPathToRunningExe()
-{
-    std::vector<wchar_t> buf;
-    DWORD len = 0;
-    // Start with MAX_PATH and grow if truncated.
-    const size_t MAX_PATH_SIZE = 260;
-    for (size_t size = MAX_PATH_SIZE; ; size *= 2) {
-        buf.resize(size);
-        len = GetModuleFileNameW(NULL, buf.data(), static_cast<DWORD>(buf.size()));
-        assert(len > 0 && "GetModuleFileNameW failed");
-        // If len < buf.size() - 1 then the result was not truncated.
-        if (len < buf.size() - 1) {
-            return std::filesystem::path(std::wstring(buf.data(), len));
-        }
-        // If extremely large, bail out to avoid infinite loop.
-        assert(size <= (1 << 20) && "Executable path too long");
+static std::filesystem::path GetPathToRunningExe() {
+    std::vector<wchar_t> buf(MAX_PATH);
+    DWORD len = GetModuleFileNameW(NULL, buf.data(), static_cast<DWORD>(buf.size()));
+	assert(len > 0 && "GetModuleFileNameW failed");
+    if (len < buf.size()) {
+        return std::filesystem::path(std::wstring(buf.data(), len));
     }
+    // Path too long, grow buffer
+    buf.resize(len + 1);
+    len = GetModuleFileNameW(NULL, buf.data(), static_cast<DWORD>(buf.size()));
+    return std::filesystem::path(std::wstring(buf.data(), len));
 }
 #endif
 
-// Starts with path to running executable and reduces it from something like root/build/Debug/VeApp to root
-// assumes that either:
-// 1) executable is in root folder named vulkan_engine
-// 2) executable is in build/bin/out in root, possibly in subfolder Debug/Release etc.
+// Finds project root by walking up from executable or current directory looking for models/textures folders
+// not perfectly robust, but works for most cases
 static std::filesystem::path getWorkingDirectory(char** argv) {
-	// argv[0] is path to executable on posix
-	std::filesystem::path path = argv[0];
+	// Get executable path
+	std::filesystem::path exe_path = argv[0];
 #if _MSC_VER && !__INTEL_COMPILER
-	path = GetPathToRunningExe();
+	exe_path = GetPathToRunningExe();
+#else
+	// Resolve relative paths to absolute
+	if (!exe_path.is_absolute()) {
+		exe_path = std::filesystem::current_path() / exe_path;
+	}
+	try {
+		if (std::filesystem::exists(exe_path)) {
+			exe_path = std::filesystem::canonical(exe_path);
+		}
+	} catch (...) {}
 #endif
 
-	while (path.has_parent_path()) {
-		if (path.filename() == "vulkan_engine" || path.filename() == ".")
-			break;
-		path = path.parent_path();
+	// Walk up from executable directory looking for models/textures
+	assert(exe_path.has_parent_path() && "Executable path has no parent path");
+	std::filesystem::path search = exe_path.parent_path();
+	while (search.has_parent_path() && search != search.root_path()) {
+		if (std::filesystem::exists(search / "models") &&
+		    std::filesystem::exists(search / "textures")) {
+			return search;
+		}
+		search = search.parent_path();
 	}
-	VE_LOGD("VeApp::VeApp working_directory=" << path.string());
 
-	assert(path.has_parent_path() && "Failed to determine working directory");
-	assert(std::filesystem::exists(path) && "Working directory does not exist");
-	assert(std::filesystem::exists(path / "models") && "Working directory 'models' subfolder does not exist");
-	assert(std::filesystem::exists(path / "textures") && "Working directory 'textures' subfolder does not exist");
-	return path;
+	// Fallback: check current directory
+	std::filesystem::path cwd = std::filesystem::current_path();
+	if (std::filesystem::exists(cwd / "models") && std::filesystem::exists(cwd / "textures")) {
+		return cwd;
+	}
+
+	// Fail with assertion
+	assert(false && "Failed to find project root (models/textures folders not found)");
+	return search;
 }
+
+
 
 
 // Called by the entry point main() to create the application instance

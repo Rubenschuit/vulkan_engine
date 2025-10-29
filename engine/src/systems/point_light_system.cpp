@@ -109,7 +109,7 @@ void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBuffe
 
 		// rotate point lights in circle
 		if (obj.point_light_component->rotates) {
-			auto speed = 0.2f;
+			auto speed = 0.4f;
 			auto rotate_matrix = glm::rotate(glm::mat4(1.0f), speed * frame_info.frame_time, glm::vec3(0.0f, 0.0f, 1.0f));
 			auto pos = glm::vec4{obj.transform.translation, 1.0f};
 			pos = rotate_matrix * pos;

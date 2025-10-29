@@ -13,19 +13,25 @@ VeImage::VeImage(
 	vk::ImageUsageFlags usage,
 	vk::MemoryPropertyFlags properties,
 	vk::ImageAspectFlags aspect_flags,
-	bool is_cubemap)
+	bool is_cubemap,
+	uint32_t array_layers)
 	: m_ve_device(ve_device), m_width(width), m_height(height), m_num_samples(num_samples),
 		m_format(format), m_tiling(tiling), m_usage(usage), m_properties(properties),
-		m_aspect_flags(aspect_flags),
-		m_array_layers(is_cubemap ? 6 : 1) {
+		m_aspect_flags(aspect_flags), m_array_layers(array_layers) {
 
 	if (is_cubemap) {
 		m_image_create_flags |= vk::ImageCreateFlagBits::eCubeCompatible;
 		m_image_view_type = vk::ImageViewType::eCube;
 	}
+	else if (array_layers > 1) {
+		m_image_view_type = vk::ImageViewType::e2DArray;
+	}
+	else {
+		assert(array_layers == 1 && "Array layers must be positve non zero integer");
+		m_image_view_type = vk::ImageViewType::e2D;
+	}
 	createImage();
 	createImageView();
-
 }
 
 VeImage::~VeImage() {}

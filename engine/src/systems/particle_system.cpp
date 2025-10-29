@@ -167,10 +167,15 @@ void ParticleSystem::createPipeline(vk::Format color_format) {
 	// Enable depth testing but disable depth writes for alpha-blended particles
 	config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	config.depth_stencil_info.depthWriteEnable = VK_FALSE;
-	config.rasterization_info.depthBiasEnable = VK_FALSE;
+	// Use LessOrEqual to reduce flickering when particles have similar depths
+	config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLessOrEqual;
+	// Enable depth bias to reduce z-fighting between particles at similar depths
+	config.rasterization_info.depthBiasEnable = VK_TRUE;
+	config.rasterization_info.depthBiasConstantFactor = 0.0f;
+	config.rasterization_info.depthBiasClamp = 0.0f;
+	config.rasterization_info.depthBiasSlopeFactor = -1.0f; // Negative pulls particles slightly forward
 
 	//enable additve blending
-	/*
 	config.color_blend_attachment.blendEnable = VK_TRUE;
 	config.color_blend_attachment.srcColorBlendFactor = vk::BlendFactor::eOne; //
 	config.color_blend_attachment.dstColorBlendFactor = vk::BlendFactor::eOne; //
@@ -178,7 +183,7 @@ void ParticleSystem::createPipeline(vk::Format color_format) {
 	config.color_blend_attachment.srcAlphaBlendFactor = vk::BlendFactor::eOne; //
 	config.color_blend_attachment.dstAlphaBlendFactor = vk::BlendFactor::eOne; //
 	config.color_blend_attachment.alphaBlendOp = vk::BlendOp::eAdd;
-	*/
+
 	m_pipeline = std::make_unique<VePipeline>(m_ve_device, m_shader_path, config);
 }
 

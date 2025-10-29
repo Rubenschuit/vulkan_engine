@@ -5,9 +5,10 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 ## Features
 - Modern Vulkan: dynamic rendering, Vulkan-Hpp RAII
 - Cross-platform builds: Windows (MSVC or MinGW), macOS, and Linux
-- Dear ImGui overlay
 - Particle system with compute shaders
-- Simple renderer for textured .gltf models and a skybox
+- Simple physically based renderer for textured .gltf models
+- Dear ImGui overlay with settings for particle system and render modes
+- Skybox
 - Point lights
 - FPS-style camera
 - MSAA
@@ -39,8 +40,11 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 - Vulkan SDK ≥ 1.3
 - Slang compiler (`slangc`) — required for building shaders
 - GLFW 3.3+ (automatically fetched if missing)
+- GLM (automatically fetched if missing)
+- KTX library (automatically fetched if missing but is quite big)
 - TinyGLTF (included in external)
-- KTX library (automatically fetched if missing)
+- Dear ImGui (included in external)
+
 
 #### Downloads:
 Note: CMake will auto-discover Slang (`slangc`) and the Vulkan SDK in common install locations and via standard environment variables. Use `.env.cmake` only when installing to uncommon/custom paths, or to explicitly override detection. See `envWindowsExample.cmake` for examples.
@@ -97,11 +101,7 @@ usage:
 ```
 Usage:
 
-	windowsBuild.bat [mode] [generator]
-
-	mode: debug | release (default) | test | clean
-
-	generator: mingw | msvc (default)
+	windowsBuild.bat [debug|release|test|leaks|clean]
 
 
 ## Manual build
@@ -115,13 +115,26 @@ cmake --build build
 ./build/VeApp
 ```
 
-##### Windows with Visual Studio:
+##### Windows with MSVC:
+
+From command prompt:
 
 ```bat
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build
 build\release\VeApp.exe
 ```
+
+Or generate VeApp.sln to open with Visual Studio:
+
+```bat
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+```
+
+Then, in VS, right-click the VeApp target, set as startup project, build and then run (f5)
+
+Open the
+
 
 ##### Linux
 
@@ -131,8 +144,9 @@ TODO
 
 - Camera: WASD/C/Space to move, arrow keys or mouse to look
 - UI toggle: Tab
-- Particle modes: 1 / 2 / 3 / 4
+- Particle modes: 1 / 2 / 3 / 4 / 5
 - Reset particles: F (explosion) or G (rotating disk)
+- Escape to exit the application
 
 ## Credits
 
@@ -140,3 +154,5 @@ Huge thanks to:
 
 - Brendan Galea for his excellent Vulkan video series: https://www.youtube.com/@BrendanGalea
 - The Khronos Vulkan Tutorial: https://docs.vulkan.org/tutorial/latest/00_Introduction.html
+- Physically Based Rendering in Filament: https://google.github.io/filament/Filament.md.html
+- Vulkan samples by Sascha Willems: https://github.com/SaschaWillems/Vulkan

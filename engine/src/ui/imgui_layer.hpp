@@ -1,5 +1,6 @@
 #pragma once
 #include "ve_export.hpp"
+#include "game/ve_frame_info.hpp"
 #include <cstdint>
 #include <vulkan/vulkan.hpp>
 #define VULKAN_HPP_ENABLE_RAII
@@ -16,10 +17,12 @@ class VeRenderer;
 
 struct VENGINE_API UIContext {
 	// general
-	bool visible;
+	bool visible = false;
+	int current_scene = 2;
+	RenderMode render_mode = RenderMode::BRDF_MICROFACET;
 
 	// particle system
-	float speed;
+	float speed = 1.0f;
 
 	// particle count
 	uint32_t pending_particle_count;

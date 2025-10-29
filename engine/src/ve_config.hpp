@@ -7,14 +7,16 @@
 namespace ve {
 
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
-constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.02f); // w indicates light intensity
+constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.005f); // w indicates light intensity
 constexpr uint32_t MAX_LIGHTS = 100; // requirded for UBO alignment
 
 //graphics settings
 constexpr bool MSAA_ENABLED = true;
 
+// clang-format off
 //constexpr vk::PresentModeKHR PRESENT_MODE = vk::PresentModeKHR::eMailbox;
 constexpr vk::PresentModeKHR PRESENT_MODE = vk::PresentModeKHR::eImmediate;
+// clang-format on
 
 // Central list of required Vulkan device extensions
 inline const std::vector<const char*> REQUIRED_DEVICE_EXTENSIONS = {

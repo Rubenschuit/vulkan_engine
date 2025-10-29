@@ -101,7 +101,7 @@ void VeApplication::updateFrameTime() {
 	m_last_frame_time = now;
 
 	// Clamp to avoid large physics steps after stalls (e.g., window resize)
-	const float max_dt = 1.0f / 30.0f; // ~33ms
+	const float max_dt = 1.0f / 10.0f; // 100ms
 	if (m_frame_time < 0.0f)
 		m_frame_time = 0.0f;
 	if (m_frame_time > max_dt)
@@ -127,8 +127,11 @@ std::string VeApplication::formatWindowTitle(double fps, double avg_ms) const {
 	const char* mode_str = "Debug";
 #endif
 
-	return std::format("Vulkan Engine! -- {} mode          FPS {}   {:.2f} ms",
-		mode_str, static_cast<int>(fps), avg_ms);
+	// add current camera position to window title
+	std::string camera_position = std::format("Camera: {:.2f}, {:.2f}, {:.2f}",
+		m_camera.getPosition().x, m_camera.getPosition().y, m_camera.getPosition().z);
+	return std::format("Vulkan Engine! -- {} mode          FPS {}   {:.2f} ms      {}",
+		mode_str, static_cast<int>(fps), avg_ms, camera_position);
 }
 
 } // namespace ve

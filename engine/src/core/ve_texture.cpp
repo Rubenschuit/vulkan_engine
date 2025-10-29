@@ -4,17 +4,27 @@
 
 #include <ktx.h>
 
+
 namespace ve {
 
 VeTexture::VeTexture(VeDevice& ve_device, const std::filesystem::path& texture_path) : m_ve_device(ve_device) {
-	createTextureImage(texture_path);
+	if (texture_path.extension() == ".ktx" || texture_path.extension() == ".ktx2")
+		createTextureImage(texture_path);
+	else
+		createTextureImageSTB(texture_path);
+	createTextureSampler();
+}
+
+// no ktx yet
+VeTexture::VeTexture(VeDevice& ve_device, const std::vector<std::filesystem::path>& texture_paths, vk::Format format) : m_ve_device(ve_device) {
+	createTextureImageArraySTB(texture_paths, format);
 	createTextureSampler();
 }
 
 VeTexture::~VeTexture(){}
 
 // TODO: mip levels
-// Loads a texture from a file and creates a Vulkan image resources.
+// Loads a texture from a .ktx or .ktx2 file and creates a Vulkan image resources.
 // Also works for cubemaps.
 void VeTexture::createTextureImage(const std::filesystem::path& texture_path) {
 	VE_LOGD("Loading texture from " << texture_path);
@@ -88,7 +98,6 @@ void VeTexture::createTextureImage(const std::filesystem::path& texture_path) {
 		VE_LOGD("Texture format: eR8G8B8A8Unorm (fallback)");
 	}
 
-
 	// Create image
 	m_texture_image = std::make_unique<ve::VeImage>(
 		m_ve_device,
@@ -100,8 +109,8 @@ void VeTexture::createTextureImage(const std::filesystem::path& texture_path) {
 		vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		vk::ImageAspectFlagBits::eColor,
-		is_cubemap
-
+		is_cubemap,
+		is_cubemap ? 6 : 1
 	);
 	// Next we execute synchronously 3 single-time command buffers:
 	// TODO: consider combining these into one command buffer
@@ -137,6 +146,178 @@ void VeTexture::createTextureImage(const std::filesystem::path& texture_path) {
 	ktxTexture_Destroy(k_texture);
 }
 
+// Loads a texture from a file using stb_image.
+void VeTexture::createTextureImageSTB(const std::filesystem::path& texture_path) {
+	// Load image from file using stb_image
+	VE_LOGD("Loading texture from " << texture_path);
+	int channels, width, height;
+	stbi_uc* pixels = stbi_load(texture_path.string().c_str(), &width, &height, &channels, STBI_rgb_alpha);
+
+	assert(pixels != nullptr && "Failed to load image");
+
+	(void)channels;
+
+	// Create a local scope staging buffer
+	ve::VeBuffer staging_buffer(
+		m_ve_device,
+		4,                                        // instance size
+		static_cast<uint32_t>(width * height),    // instance count
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+	);
+
+	// Copy image data to staging buffer
+	staging_buffer.map();
+	staging_buffer.writeToBuffer((void*)pixels);
+	// unmap is called in the destructor of VeBuffer
+	stbi_image_free(pixels);
+
+	// Create image
+	m_texture_image = std::make_unique<ve::VeImage>(
+		m_ve_device,
+		static_cast<uint32_t>(width),
+		static_cast<uint32_t>(height),
+		vk::SampleCountFlagBits::e1,
+		vk::Format::eR8G8B8A8Srgb,
+		vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		vk::ImageAspectFlagBits::eColor,
+		false,
+		1
+	);
+	// Next we execute synchronously 3 single-time command buffers:
+	// TODO: consider combining these into one command buffer
+
+	//transition image to be optimal for receiving data from buffer
+	m_texture_image->transitionImageLayout(
+		vk::ImageLayout::eUndefined,
+		vk::ImageLayout::eTransferDstOptimal,
+		{},
+		vk::AccessFlagBits2::eTransferWrite,
+		vk::PipelineStageFlagBits2::eTopOfPipe,
+		vk::PipelineStageFlagBits2::eTransfer);
+
+	// Copy data from staging buffer to texture image
+	m_ve_device.copyBufferToImage(
+		staging_buffer.getBuffer(),
+		m_texture_image->getImage(),
+		static_cast<uint32_t>(width),
+		static_cast<uint32_t>(height));
+
+	// Transition image to be optimal for shader read access
+	m_texture_image->transitionImageLayout(
+		vk::ImageLayout::eTransferDstOptimal,
+		vk::ImageLayout::eShaderReadOnlyOptimal,
+		vk::AccessFlagBits2::eTransferWrite,
+		vk::AccessFlagBits2::eShaderRead,
+		vk::PipelineStageFlagBits2::eTransfer,
+		vk::PipelineStageFlagBits2::eFragmentShader);
+}
+
+// Loads a array of textures from a file using stb_image.
+void VeTexture::createTextureImageArraySTB(const std::vector<std::filesystem::path>& texture_paths, vk::Format format) {
+
+	uint32_t layer_count = static_cast<uint32_t>(texture_paths.size());
+	VE_LOGD("Loading texture array of " << layer_count << " textures");
+
+	std::vector<stbi_uc*> pixels(layer_count);
+
+	int channels, width, height;
+	int current_width;
+	int current_height;
+	for (size_t i = 0; i < layer_count; i++) {
+		if (texture_paths[i].filename() == "default_albedo.png")
+			pixels[i] = generateDefaultTexture(width, height, TextureType::ALBEDO);
+		else if (texture_paths[i].filename() == "default_normal.png")
+			pixels[i] = generateDefaultTexture(width, height, TextureType::NORMAL);
+		else if (texture_paths[i].filename() == "default_metallic_roughness.png")
+			pixels[i] = generateDefaultTexture(width, height, TextureType::METALLIC_ROUGHNESS);
+		else
+			pixels[i] = stbi_load(texture_paths[i].string().c_str(), &width, &height, &channels, STBI_rgb_alpha);
+		current_width = width;
+		current_height = height;
+		assert(pixels[i] != nullptr && "Failed to load image");
+		assert(width == current_width && height == current_height && "All images in Texture Array must have the same width and height");
+	}
+	(void)channels;
+
+	uint32_t instance_size = static_cast<uint32_t>(width * height * 4); // 4 bytes per pixel (RGBA)
+	uint32_t total_size = instance_size * layer_count;
+	VE_LOGD("Texture paths read successfully");
+
+	// Create a local scope staging buffer
+	ve::VeBuffer staging_buffer(
+		m_ve_device,
+		4,                                        // instance size
+		total_size,    // instance count
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+	);
+
+	// Copy all image data to staging buffer
+	staging_buffer.map();
+	for (size_t i = 0; i < layer_count; i++) {
+		uint32_t offset = static_cast<uint32_t>(i * instance_size);
+		staging_buffer.writeToBuffer((void*)pixels[i], instance_size, offset);
+	}
+
+	// Create image
+	m_texture_image = std::make_unique<ve::VeImage>(
+		m_ve_device,
+		static_cast<uint32_t>(width),
+		static_cast<uint32_t>(height),
+		vk::SampleCountFlagBits::e1,
+		format,
+		vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		vk::ImageAspectFlagBits::eColor,
+		false,
+		layer_count
+	);
+	// Next we execute synchronously 3 single-time command buffers:
+	// TODO: consider combining these into one command buffer
+
+	//transition image to be optimal for receiving data from buffer
+	m_texture_image->transitionImageLayout(
+		vk::ImageLayout::eUndefined,
+		vk::ImageLayout::eTransferDstOptimal,
+		{},
+		vk::AccessFlagBits2::eTransferWrite,
+		vk::PipelineStageFlagBits2::eTopOfPipe,
+		vk::PipelineStageFlagBits2::eTransfer);
+
+	// Copy data from staging buffer to texture image
+	m_ve_device.copyBufferToImage(
+		staging_buffer.getBuffer(),
+		m_texture_image->getImage(),
+		static_cast<uint32_t>(width),
+		static_cast<uint32_t>(height),
+		layer_count
+	);
+
+	// Transition image to be optimal for shader read access
+	m_texture_image->transitionImageLayout(
+		vk::ImageLayout::eTransferDstOptimal,
+		vk::ImageLayout::eShaderReadOnlyOptimal,
+		vk::AccessFlagBits2::eTransferWrite,
+		vk::AccessFlagBits2::eShaderRead,
+		vk::PipelineStageFlagBits2::eTransfer,
+		vk::PipelineStageFlagBits2::eFragmentShader);
+
+	// Free pixel data
+	for (size_t i = 0; i < layer_count; i++) {
+		if (texture_paths[i].filename() == "default_albedo.png" ||
+		    texture_paths[i].filename() == "default_normal.png" ||
+		    texture_paths[i].filename() == "default_metallic_roughness.png") {
+			free(pixels[i]);
+		} else {
+			stbi_image_free(pixels[i]);
+		}
+	}
+}
+
 
 // Sets max anisotropy to the maximum value supported by the device or 16, whichever is lower
 void VeTexture::createTextureSampler() {
@@ -160,6 +341,43 @@ void VeTexture::createTextureSampler() {
 	};
 	m_texture_sampler = vk::raii::Sampler(m_ve_device.getDevice(), sampler_info);
 }
+
+stbi_uc* VeTexture::generateDefaultTexture(int width, int height, TextureType type) {
+	assert(width > 0 && height > 0 && "Width and height must be greater than 0");
+    stbi_uc* pixels = (stbi_uc*)malloc(static_cast<size_t>(width * height * 4));
+
+	size_t dimension = static_cast<size_t>(width * height);
+    for (size_t i = 0; i < dimension; i++) {
+        switch (type) {
+            case TextureType::ALBEDO:
+                // White (1, 1, 1, 1)
+                pixels[i * 4 + 0] = 255;
+                pixels[i * 4 + 1] = 255;
+                pixels[i * 4 + 2] = 255;
+                pixels[i * 4 + 3] = 255;
+                break;
+
+            case TextureType::NORMAL:
+                // Flat normal (0.5, 0.5, 1.0) → (128, 128, 255) in RGB
+                pixels[i * 4 + 0] = 128;
+                pixels[i * 4 + 1] = 128;
+                pixels[i * 4 + 2] = 255;
+                pixels[i * 4 + 3] = 255;
+                break;
+
+            case TextureType::METALLIC_ROUGHNESS:
+                // Non-metallic (0), rough (1) → (0, 255, 0, 255)
+                // Metallic in B, Roughness in G (glTF convention)
+                pixels[i * 4 + 0] = 0;
+                pixels[i * 4 + 1] = 255;  // Roughness = 1
+                pixels[i * 4 + 2] = 0;    // Metallic = 0
+                pixels[i * 4 + 3] = 255;
+                break;
+        }
+    }
+    return pixels;
+}
+
 
 vk::DescriptorImageInfo VeTexture::getDescriptorInfo() const {
 	vk::DescriptorImageInfo image_info{

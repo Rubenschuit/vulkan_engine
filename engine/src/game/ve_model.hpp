@@ -2,9 +2,16 @@
 for a model. It provides methods to create and bind these buffers and issue
 draw commands. */
 #pragma once
+#include "core/ve_descriptors.hpp"
 #include "ve_export.hpp"
 #include "core/ve_device.hpp"
+#include "core/ve_texture.hpp"
 #include "core/ve_buffer.hpp"
+
+namespace ve {
+	class VeDescriptorSetLayout;
+	class VeDescriptorPool;
+}
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -21,15 +28,32 @@ public:
 		glm::vec3 pos;
 		glm::vec3 color;
 		glm::vec3 normal;
-		glm::vec2 tex_coord;
+		glm::vec2 tex_coord{0.0f, 0.0f};
+		glm::vec4 tangent{0.0f, 0.0f, 0.0f, 0.0f};
+		uint32_t material_index{0}; // default to 0 for simple models
 
 		static std::vector<vk::VertexInputBindingDescription> getBindingDescriptions();
+		// for models with material index
 		static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptions();
+		// for simple models with no material index
+		static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptionsSimple();
 		bool operator==(const Vertex& other) const {
-			return pos == other.pos && color == other.color &&
-					normal == other.normal && tex_coord == other.tex_coord;
+			return pos == other.pos &&
+			       color == other.color &&
+				   normal == other.normal &&
+				   tangent == other.tangent &&
+				   tex_coord == other.tex_coord &&
+				   material_index == other.material_index;
 		}
 	};
+
+	// Do these need to be shared ptr?
+	struct MaterialTextures {
+		std::shared_ptr<VeTexture> albedo_texture{nullptr};
+		std::shared_ptr<VeTexture> normal_texture{nullptr};
+		std::shared_ptr<VeTexture> metallic_roughness_texture{nullptr};
+	};
+
 
 	VeModel(VeDevice& device, const std::vector<Vertex>& vertices);
 	VeModel(VeDevice& device, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
@@ -44,18 +68,33 @@ public:
 	void draw(vk::raii::CommandBuffer& commandBuffer);
 	void drawIndexed(vk::raii::CommandBuffer& commandBuffer);
 
+	void createDescriptorSet(VeDescriptorPool& pool, VeDescriptorSetLayout& set_layout);
+	// not safe yet
+	vk::raii::DescriptorSet& getMaterialDescriptorSet() { return m_material_descriptor_set; }
+	bool hasTexturedMaterials() const { return m_has_textured_materials; }
+
 private:
 	void createVertexBuffers(const std::vector<Vertex>& vertices);
 	void createIndexBuffers(const std::vector<uint32_t>& indices);
+	void createMaterialTextures(
+		const std::vector<std::filesystem::path>& albedo_paths,
+		const std::vector<std::filesystem::path>& normal_paths,
+		const std::vector<std::filesystem::path>& metallic_roughness_paths
+	);
+
 
 	VeDevice& m_ve_device; // not owned, must outlive model
 
+	// TODO: Consdider consolidating index and vertex buffer into single buffer and use offsets
 	std::unique_ptr<ve::VeBuffer> m_vertex_buffer;
 	uint32_t m_vertex_count;
-
-	// TODO: Consdider consolidating index and vertex buffer into single buffer and use offsets
 	std::unique_ptr<ve::VeBuffer> m_index_buffer;
 	uint32_t m_index_count;
+
+	// Material information
+	MaterialTextures m_material_textures;
+	vk::raii::DescriptorSet m_material_descriptor_set{nullptr};
+	bool m_has_textured_materials{false};
 };
 
 } // namespace ve

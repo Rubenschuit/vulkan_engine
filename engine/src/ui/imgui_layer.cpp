@@ -1,9 +1,11 @@
+#include "game/ve_frame_info.hpp"
 #include "pch.hpp"
 #include "ui/imgui_layer.hpp"
 #include "core/ve_window.hpp"
 #include "core/ve_device.hpp"
 #include "core/ve_renderer.hpp"
 
+#include <cmath>
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_vulkan.h>
@@ -121,10 +123,8 @@ void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd) {
 void ImGuiLayer::renderUI(UIContext& context) {
 	beginFrame();
 	if (context.visible) {
-		ImGui::ShowDemoWindow(nullptr);
-		ImGui::SetNextWindowBgAlpha(0.9f);
-		// popup window for particle settings
-		if (ImGui::Begin("Particles", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+
+		if (ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			int count = static_cast<int>(context.pending_particle_count);
 			ImGui::Text("Particle settings");
 			ImGui::Separator();
@@ -148,6 +148,37 @@ void ImGuiLayer::renderUI(UIContext& context) {
 			ImGui::SameLine();
 			if (ImGui::Button("Reset"))
 				context.reset_particle_count = true;
+
+
+			// --------------------------------------------------------------
+
+
+			ImGui::Separator();
+			ImGui::Text("Scene selection");
+			ImGui::Separator();
+			// Select exactly 1 scene
+			static int current_scene = context.current_scene;
+			if (ImGui::RadioButton("Simple", &current_scene, 1))
+				context.current_scene = 1;
+			if (ImGui::RadioButton("Sponza", &current_scene, 2))
+				context.current_scene = 2;
+			ImGui::Separator();
+			ImGui::Text("Render mode");
+			ImGui::Separator();
+			static int render_mode = static_cast<int>(context.render_mode);
+			if (ImGui::RadioButton("BRDF Microfacets", &render_mode, 5))
+				context.render_mode = RenderMode::BRDF_MICROFACET;
+			ImGui::SameLine();
+			if (ImGui::RadioButton("BRDF Smooth", &render_mode, 0))
+				context.render_mode = RenderMode::BRDF;
+			if (ImGui::RadioButton("Normal vector", &render_mode, 1))
+				context.render_mode = RenderMode::NORMAL_VECTOR;
+			if (ImGui::RadioButton("Tangent vector", &render_mode, 2))
+				context.render_mode = RenderMode::TANGENT_VECTOR;
+			if (ImGui::RadioButton("Bitangent vector", &render_mode, 3))
+				context.render_mode = RenderMode::BITANGENT_VECTOR;
+			if (ImGui::RadioButton("Normal map", &render_mode, 4))
+				context.render_mode = RenderMode::NORMAL_MAP;
 		}
 		ImGui::End();
 

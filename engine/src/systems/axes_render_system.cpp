@@ -59,9 +59,9 @@ void AxesRenderSystem::createAxesModel() {
 	vertices.reserve(3 * SEGMENTS * 6); // 2 tris per quad, 3 axes
 
 	auto push_tri = [&](const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, const glm::vec3& color){
-		vertices.push_back({a, color, glm::vec3{1.0f}, {0.f, 0.f}});
-		vertices.push_back({b, color, glm::vec3{1.0f}, {0.f, 0.f}});
-		vertices.push_back({c, color, glm::vec3{1.0f}, {0.f, 0.f}});
+		vertices.push_back({a, color, glm::vec3{1.0f}});
+		vertices.push_back({b, color, glm::vec3{1.0f}});
+		vertices.push_back({c, color, glm::vec3{1.0f}});
 	};
 
 	constexpr float two_pi = glm::two_pi<float>();

@@ -97,7 +97,7 @@ void VePipeline::defaultPipelineConfigInfo(PipelineConfigInfo& config_info, VeDe
 		.attachmentCount = 1,
 		.pAttachments = &config_info.color_blend_attachment
 	};
-	config_info.attribute_descriptions = VeModel::Vertex::getAttributeDescriptions();
+	config_info.attribute_descriptions = VeModel::Vertex::getAttributeDescriptionsSimple();
 	config_info.binding_descriptions = VeModel::Vertex::getBindingDescriptions();
 }
 

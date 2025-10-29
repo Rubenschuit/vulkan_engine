@@ -14,6 +14,7 @@
 
 namespace ve {
 
+// not enum class because we pass to shader
 enum ParticleResetKind : uint32_t {
 	POINT = 1,
 	DISC = 2
@@ -115,7 +116,7 @@ private:
 	VeDevice& m_ve_device;
 
 	float m_mean = 0.0f;
-	float m_stddev = 6.0f;
+	float m_stddev = 20.0f;
 	uint32_t m_particle_count = 0;   // active count
 	uint32_t m_capacity = 0;         // allocated particle capacity for buffers
 	uint32_t m_pending_particle_count = 0; // UI-staged value

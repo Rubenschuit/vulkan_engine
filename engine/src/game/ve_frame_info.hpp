@@ -18,6 +18,15 @@ struct PointLight {
 	glm::vec4 color; // w indicates light intensity
 };
 
+enum RenderMode {
+	BRDF = 0,
+	NORMAL_VECTOR = 1,
+	TANGENT_VECTOR = 2,
+	BITANGENT_VECTOR = 3,
+	NORMAL_MAP = 4,
+	BRDF_MICROFACET = 5,
+};
+
 struct UniformBufferObject {
 	glm::mat4 view;
 	glm::mat4 proj;
@@ -27,8 +36,10 @@ struct UniformBufferObject {
 	glm::vec4 ambient_light_color = DEFAULT_AMBIENT_LIGHT_COLOR;
 	PointLight point_lights[ve::MAX_LIGHTS];
 	alignas(16) uint32_t num_lights = 0;
+	uint32_t render_mode = RenderMode::BRDF;
 	// reminder: alignment
 };
+
 
 struct VeFrameInfo {
 	vk::raii::DescriptorSet& global_descriptor_set;

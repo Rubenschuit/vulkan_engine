@@ -40,14 +40,16 @@ private:
 	std::filesystem::path m_texture_path;
 	std::filesystem::path m_skybox_path;
 
+	// Textures. TODO: move to skybox model class
 	VeTexture m_skybox;
-	VeTexture m_texture;
 
-	// Game objects
-	std::unordered_map<uint32_t, VeGameObject> m_game_objects;
+	// Scenes consist of a collection of game objects
+	std::unordered_map<uint32_t, VeGameObject> m_simple_scene;
+	std::unordered_map<uint32_t, VeGameObject> m_sponza_scene;
+	uint32_t sponza_id;
 
 	// UI context captured during renderUI(), consumed in updateParticles() for example.
-	UIContext ui_context;
+	UIContext ui_actions;
 
 	// Render systems
 	std::unique_ptr<SkyboxRenderSystem> m_skybox_render_system;
@@ -57,8 +59,7 @@ private:
 	std::unique_ptr<ParticleSystem> m_particle_system;
 };
 
-} // namespace ve
-
+}
 
 // Called by the entry point to create the application instance
 ve::VeApplication* createApp(std::filesystem::path working_directory) {

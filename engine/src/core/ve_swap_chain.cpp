@@ -207,7 +207,9 @@ void VeSwapChain::createColorResources() {
 		vk::ImageTiling::eOptimal,
 		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransientAttachment,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
-		vk::ImageAspectFlagBits::eColor);
+		vk::ImageAspectFlagBits::eColor,
+		false,
+		1);
 
 	m_color_image->transitionImageLayout(
 		vk::ImageLayout::eUndefined,
@@ -231,7 +233,10 @@ void VeSwapChain::createDepthResources() {
 		vk::ImageTiling::eOptimal,
 		vk::ImageUsageFlagBits::eDepthStencilAttachment,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
-		vk::ImageAspectFlagBits::eDepth);
+		vk::ImageAspectFlagBits::eDepth,
+		false,
+		1
+	);
 
 	// transition the depth image once
 	m_depth_image->transitionImageLayout(

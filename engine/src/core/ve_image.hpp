@@ -2,6 +2,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "ve_device.hpp"
+#include "utils/ve_log.hpp"
 
 // Hardcoded:
 // imageType, extent depth, mip, arraylayers, initlayout, sharingmode, samples, flags
@@ -19,7 +20,9 @@ public:
 		vk::ImageUsageFlags usage,
 		vk::MemoryPropertyFlags properties,
 		vk::ImageAspectFlags aspect_flags,
-		bool is_cubemap = false);
+		bool is_cubemap,
+		uint32_t array_layers
+	);
 	~VeImage();
 
 	VeImage(const VeImage&) = delete;
@@ -34,13 +37,27 @@ public:
 	vk::ImageAspectFlags getAspectFlags() const { return m_aspect_flags; }
 	vk::Extent2D getExtent2D() const { return vk::Extent2D{ m_width, m_height }; }
 
+	//debug
+	void printDebugInfo() const {
+		if (m_image_view_type == vk::ImageViewType::e2D)
+			VE_LOGD("Image view type: 2D");
+		else if (m_image_view_type == vk::ImageViewType::e2DArray)
+			VE_LOGD("Image view type: 2DArray");
+		else if (m_image_view_type == vk::ImageViewType::eCube)
+			VE_LOGD("Image view type: Cube");
+		else
+			VE_LOGD("Image view type: Unknown");
+	}
+
+
 	void transitionImageLayout(
 		vk::ImageLayout old_layout,
 		vk::ImageLayout new_layout,
 		vk::AccessFlags2 src_access_mask,
 		vk::AccessFlags2 dst_access_mask,
 		vk::PipelineStageFlags2 src_stage,
-		vk::PipelineStageFlags2 dst_stage);
+		vk::PipelineStageFlags2 dst_stage
+	);
 
 private:
 	void createImage();

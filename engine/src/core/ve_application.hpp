@@ -27,7 +27,8 @@ public:
 
 	VeApplication();
     virtual ~VeApplication() = default;
-    
+
+	// called by main.cpp to start the application loop
     void run();
 
 	// Pure virtual methods to be implemented by derived classes
@@ -50,20 +51,16 @@ protected:
 	// Descriptor pool, layouts, sets
 	std::shared_ptr<VeDescriptorPool> m_global_pool{};
 
+	 // Layout for 1 global ubo
 	std::unique_ptr<VeDescriptorSetLayout> m_global_set_layout{};
+	// Layout for 3 material 2D texture array samplers. Should this be in the base class?
 	std::unique_ptr<VeDescriptorSetLayout> m_material_set_layout{};
 
 	std::vector<vk::raii::DescriptorSet> m_global_descriptor_sets{};
-	vk::raii::DescriptorSet m_material_descriptor_set{nullptr};
 	vk::raii::DescriptorSet m_cubemap_descriptor_set{nullptr};
 
 	// Input handling
 	InputController m_input_controller;
-
-	
-
-	// Game objects
-	std::unordered_map<uint32_t, VeGameObject> m_game_objects;
 
 	// Camera settings
 	VeCamera m_camera;

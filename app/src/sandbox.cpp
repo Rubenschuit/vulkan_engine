@@ -18,18 +18,19 @@ Sandbox::Sandbox(const std::filesystem::path& working_dir)
 	m_flat_vase_model_path(working_directory / "models" / "flat_vase.gltf"),
 	m_smooth_vase_model_path(working_directory / "models" / "smooth_vase.gltf"),
 	// texture paths
-	m_texture_path(working_directory / "textures" / "viking_room.ktx"),
+	m_texture_path(working_directory / "textures" / "viking_room.png"),
 	m_skybox_path(working_directory / "textures" / "skybox" / "starfield_haze.ktx"),
 	// Textures
-	m_skybox(m_ve_device, m_skybox_path),
-	m_texture(m_ve_device, m_texture_path) {
+	m_skybox(m_ve_device, m_skybox_path) {
 
-	loadGameObjects();
+
 	createUniformBuffers();
 	createDescriptors();
 
 	initSystems();
 	initUI();
+
+	loadGameObjects();
 
 	// Initialise camera
 	m_camera.setPerspective(m_fov, m_last_aspect, m_near_plane, m_far_plane);
@@ -42,35 +43,37 @@ VeFrameInfo Sandbox::update() {
 	updateFrameTime();
 	m_total_time += m_frame_time;
 
+
 	// Setup frame info
 	auto& command_buffer = m_ve_renderer.getCurrentCommandBuffer();
 	auto& compute_command_buffer = m_ve_renderer.getCurrentComputeCommandBuffer();
 	auto current_frame = m_ve_renderer.getCurrentFrame();
 	VeFrameInfo frame_info = {
 		.global_descriptor_set = m_global_descriptor_sets[current_frame],
-		.material_descriptor_set = m_material_descriptor_set,
+		.material_descriptor_set =  m_sponza_scene.at(sponza_id).ve_model->getMaterialDescriptorSet(), // temporary only sponza uses material descriptor set
 		.cubemap_descriptor_set = m_cubemap_descriptor_set,
 		.command_buffer = command_buffer,
 		.compute_command_buffer = compute_command_buffer,
-		.game_objects = m_game_objects,
+		.game_objects = ui_actions.current_scene == 1 ? m_simple_scene : m_sponza_scene,
 		.frame_time = m_frame_time,
 		.total_time = m_total_time,
 		.current_frame = current_frame
 	};
 
 	// Updates camera state based on input and frame time. Returns actions for systems.
-	auto actions = m_input_controller.processInput(m_frame_time, m_camera);
+	auto input_actions = m_input_controller.processInput(m_frame_time, m_camera);
 
-	// Update state based on actions and ui_context updated in previous renderUI
-	ui_context.visible = actions.ui_visible; // Tab toggles UI visibility
+	// Update state based on actions and ui_actions updated in previous renderUI
+	ui_actions.visible = input_actions.ui_visible; // Tab toggles UI visibility
 	updateCamera();
-	updateParticles(frame_info, actions);
+	updateParticles(frame_info, input_actions);
 	updateWindowTitle();
 
 	// update global ubo
 	UniformBufferObject ubo{};
+	ubo.render_mode = static_cast<uint32_t>(ui_actions.render_mode);
 	m_point_light_system->updateUniformBuffer(frame_info, ubo); // update UBO with point light data
-	this->updateUniformBuffer(current_frame, ubo); // view/proj/camera location
+	this->updateUniformBuffer(current_frame, ubo); // view/proj/camera location in application base class
 
 	return frame_info;
 }
@@ -88,21 +91,21 @@ void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 	}
 
 	// Apply UI inputs
-	m_particle_system->stageParticleCount(ui_context.pending_particle_count);
-	if (ui_context.apply_particle_count) {
+	m_particle_system->stageParticleCount(ui_actions.pending_particle_count);
+	if (ui_actions.apply_particle_count) {
 		m_particle_system->applyStagedParticleCount();
-		ui_context.apply_particle_count = false;
+		ui_actions.apply_particle_count = false;
 	}
-	if (ui_context.reset_particle_count) {
+	if (ui_actions.reset_particle_count) {
 		m_particle_system->scheduleRestart();
-		ui_context.reset_particle_count = false;
+		ui_actions.reset_particle_count = false;
 	}
 
-	m_particle_system->setSpeed(ui_context.speed);
+	m_particle_system->setSpeed(ui_actions.speed);
 
-	m_particle_system->setMean(ui_context.particle_velocity_mean);
-	m_particle_system->setStddev(ui_context.particle_velocity_stddev);
-	ui_context.apply_velocity_params = false; // not used currently
+	m_particle_system->setMean(ui_actions.particle_velocity_mean);
+	m_particle_system->setStddev(ui_actions.particle_velocity_stddev);
+	ui_actions.apply_velocity_params = false; // not used currently
 
 
 	// Record and submit particle compute work
@@ -118,39 +121,105 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	// systems
 	m_skybox_render_system->render(frame_info);
 	m_simple_render_system->renderObjects(frame_info);
-	m_axes_render_system->render(frame_info);
+	if (ui_actions.current_scene == 1)
+		m_axes_render_system->render(frame_info);
 	m_point_light_system->render(frame_info);
 	m_particle_system->render(frame_info);
 
 	m_ve_renderer.endSceneRender(command_buffer);
 
 	// Draw UI and update ui_context for next frame intents
-	imgui_layer->renderUI(ui_context);
+	imgui_layer->renderUI(ui_actions);
 }
 
+// Loads the game objects for the scene
+// dont be scared of all the numbers
+// Loads 2 scenes:
+// 	1) A floor with simple objects in a grid and some rotating colored lights
+// 	2) The sponza palace with materials and textures
 void Sandbox::loadGameObjects() {
-	// load sponza
+
+	// --------------------------------------------------------------- //
+	// ----------------- Sponza scene -------------------------------- //
+	// --------------------------------------------------------------- //
+
+	glm::vec3 sponza_translation = {0.0f, 0.0f, 300.0f};
+
 	VeGameObject sponza = VeGameObject::createGameObject();
 	std::filesystem::path sponza_model_path = working_directory / "models" / "sponza" / "glTF" / "Sponza.gltf";
 	auto sponza_model = std::make_shared<VeModel>(m_ve_device, sponza_model_path);
+	sponza_model->createDescriptorSet(*m_global_pool, *m_material_set_layout);
 	sponza.ve_model = sponza_model;
+	sponza_id = sponza.getId();
 	//sponza.transform.rotation = {glm::radians(90.0f), 0.0f, 0.0f},
-	sponza.transform.translation = {0.0f, 0.0f, -200.0f};
+	sponza.transform.translation = glm::vec3{0.0f, 0.0f, -350.0f} + sponza_translation;
 	sponza.transform.scale = {0.1f, 0.1f, 0.1f};
-	sponza.has_texture = 0.0f;
-	m_game_objects.emplace(sponza.getId(), std::move(sponza));
+	sponza.has_texture = 1.0f;
+	m_sponza_scene.emplace(sponza.getId(), std::move(sponza));
 
 	// sponza sun light
-	VeGameObject sun = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(1.0f, 1.0f, 1.0f));
-	sun.transform.translation = {0.0f, 0.0f, -150.0f};
-	sun.point_light_component->intensity = 2.0f;
+	VeGameObject sun = VeGameObject::createPointLight(1.0f, 4.0f, glm::vec3(1.0f, 1.0f, 1.0f));
+	sun.transform.translation = glm::vec3{0.0f, 50.0f, -140.0f} + sponza_translation;
+	sun.point_light_component->intensity = 100.0f;
 	sun.point_light_component->rotates = true;
-	m_game_objects.emplace(sun.getId(), std::move(sun));
+	m_sponza_scene.emplace(sun.getId(), std::move(sun));
 
+	// sponza fire lights
+	{
+		VeGameObject fire = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
+		fire.transform.translation = glm::vec3{-62.0f, -22.0f, -336.0f} + sponza_translation;
+		fire.point_light_component->intensity = 1.5f;
+		fire.point_light_component->rotates = false;
+		m_sponza_scene.emplace(fire.getId(), std::move(fire));
+	}
+	{
+		VeGameObject fire2 = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
+		fire2.transform.translation = glm::vec3{-62.0f, 14.0f, -336.0f} + sponza_translation;
+		fire2.point_light_component->intensity = 1.5f;
+		fire2.point_light_component->rotates = false;
+		m_sponza_scene.emplace(fire2.getId(), std::move(fire2));
+	}
+	{
+		VeGameObject fire3 = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
+		fire3.transform.translation = glm::vec3{49.0f, 14.0f, -336.0f} + sponza_translation;
+		fire3.point_light_component->intensity = 1.5f;
+		fire3.point_light_component->rotates = false;
+		m_sponza_scene.emplace(fire3.getId(), std::move(fire3));
+	}
+	{
+		VeGameObject fire4 = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
+		fire4.transform.translation = glm::vec3{49.0f, -22.0f, -336.0f} + sponza_translation;
+		fire4.point_light_component->intensity = 1.5f;
+		fire4.point_light_component->rotates = false;
+		m_sponza_scene.emplace(fire4.getId(), std::move(fire4));
+	}
+
+	// lion eyes
+	{
+		VeGameObject green_eye = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+		green_eye.transform.translation = glm::vec3{126.7f, -5.87f, -331.2f} + sponza_translation;
+		green_eye.transform.scale = {.3f, .3f, .3f};
+		green_eye.point_light_component->intensity = .1f;
+		green_eye.point_light_component->rotates = false;
+		m_sponza_scene.emplace(green_eye.getId(), std::move(green_eye));
+	}
+	{
+		VeGameObject green_eye = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+		green_eye.transform.translation = glm::vec3{126.7f, -1.24f, -331.2f} + sponza_translation;
+		green_eye.transform.scale = {.3f, .3f, .3f};
+		green_eye.point_light_component->intensity = .1f;
+		green_eye.point_light_component->rotates = false;
+		m_sponza_scene.emplace(green_eye.getId(), std::move(green_eye));
+	}
+
+
+	// -------------------------------------------------------------- //
+	// ----------------- Simple scene ------------------------------- //
+	// -------------------------------------------------------------- //
 
 	// Create some lights with ranging colors
-	constexpr uint32_t num_lights = 13; // max 100 see config
-	constexpr float intensity = 0.3f;
+	constexpr uint32_t num_lights = 7; // max 100 see config
+	constexpr float intensity = 0.7f;
 	constexpr float radius = 1.0f;
 	const glm::vec3 colors[10] = {
 		{1.0f, 1.0f, 1.0f}, //white
@@ -176,18 +245,33 @@ void Sandbox::loadGameObjects() {
 			height
 		};
 		point_light.transform.translation = pos;
-		m_game_objects.emplace(point_light.getId(), std::move(point_light));
+		m_simple_scene.emplace(point_light.getId(), std::move(point_light));
 	}
 	// 'black hole' light
 	{
 		auto black_hole = VeGameObject::createPointLight(1.0f, 4.0f, glm::vec3(0.0f, 0.0f, 0.0f));
-		glm::vec3 pos = {0.0f, -200.0f, 10.0f};
+		glm::vec3 pos = {0.0f, -300.0f, 10.0f};
 		black_hole.transform.translation = pos;
 		black_hole.point_light_component->rotates = false;
-		m_game_objects.emplace(black_hole.getId(), std::move(black_hole));
+		m_simple_scene.emplace(black_hole.getId(), std::move(black_hole));
+		m_sponza_scene.emplace(black_hole.getId(), std::move(black_hole));
+	}
+	// stationary light
+	{
+		auto l = VeGameObject::createPointLight(1.0f, 2.0f, glm::vec3(1.0f, 1.0f, 1.0f));
+		glm::vec3 pos = {0.0f, 0.0f, 20.0f};
+		l.transform.translation = pos;
+		l.point_light_component->rotates = false;
+		m_simple_scene.emplace(l.getId(), std::move(l));
 	}
 
-	// Floor
+
+
+
+	// --------------------------------------------------------------
+	// floor
+	// --------------------------------------------------------------
+
 	VeGameObject floor = VeGameObject::createGameObject();
 	auto quad = std::make_shared<VeModel>(m_ve_device, m_quad_model_path);
 	floor.ve_model = quad;
@@ -197,7 +281,11 @@ void Sandbox::loadGameObjects() {
 		.rotation = {glm::radians(90.0f), 0.0f, 0.0f},
 		.scale = {80.0f, 1.0f, 80.0f}
 	};
-	m_game_objects.emplace(floor.getId(), std::move(floor));
+	m_simple_scene.emplace(floor.getId(), std::move(floor));
+
+	// --------------------------------------------------------------
+	// viking rooms
+	// --------------------------------------------------------------
 
 	// Textured viking rooms in a grid
 	std::shared_ptr<VeModel> model = std::make_shared<VeModel>(m_ve_device, m_viking_room_model_path);
@@ -207,10 +295,14 @@ void Sandbox::loadGameObjects() {
 			obj.ve_model = model;
 			obj.transform.rotation = {glm::radians(90.0f), 0.0f, 0.0f};
 			obj.transform.translation = {(float)i * 4.0f, (float)j * 4.0f, 0.f};
-			obj.has_texture = 1.0f;
-			m_game_objects.emplace(obj.getId(), std::move(obj));
+			obj.has_texture = 0.0f;
+			m_simple_scene.emplace(obj.getId(), std::move(obj));
 		}
 	}
+
+	// --------------------------------------------------------------
+	// cubes
+	// --------------------------------------------------------------
 
 	// Cubes in a grid
 	std::shared_ptr<VeModel> model2 = std::make_shared<VeModel>(m_ve_device, m_cube_model_path);
@@ -220,10 +312,16 @@ void Sandbox::loadGameObjects() {
 			obj.ve_model = model2;
 			obj.transform.translation = {-1.0 * (float)i * 4.0f - 4.0f, (float)j * 4.0f, 1.0f};
 			obj.transform.scale = {1.0f, 1.0f, 1.0f};
-			m_game_objects.emplace(obj.getId(), std::move(obj));
+			obj.has_texture = 0.0f;
+			m_simple_scene.emplace(obj.getId(), std::move(obj));
 		}
 	}
-	// Flat vases in a grid
+
+	// --------------------------------------------------------------
+	// Vases
+	// --------------------------------------------------------------
+
+	// Flat vases (bad normals) in a grid
 	std::shared_ptr<VeModel> model3 = std::make_shared<VeModel>(m_ve_device, m_flat_vase_model_path);
 	for (int j = 0; j < 10; j++) {
 		for (int i = 0; i < 10; i++) {
@@ -234,10 +332,11 @@ void Sandbox::loadGameObjects() {
 				.rotation = {glm::radians(-180.0f), 0.0f, 0.0f},
 				.scale = {6.0f, 6.0f, 3.0f}
 			};
-			m_game_objects.emplace(obj.getId(), std::move(obj));
+			obj.has_texture = 0.0f;
+			m_simple_scene.emplace(obj.getId(), std::move(obj));
 		}
 	}
-	// Smooth vases in a grid
+	// Smooth vases (interpolated normals) in a grid
 	std::shared_ptr<VeModel> model4 = std::make_shared<VeModel>(m_ve_device, m_smooth_vase_model_path);
 	for (int j = 0; j < 10; j++) {
 		for (int i = 0; i < 10; i++) {
@@ -248,7 +347,7 @@ void Sandbox::loadGameObjects() {
 				.rotation = {glm::radians(-180.0f), 0.0f, 0.0f},
 				.scale = {6.0f, 6.0f, 3.0f}
 			};
-			m_game_objects.emplace(obj.getId(), std::move(obj));
+			m_simple_scene.emplace(obj.getId(), std::move(obj));
 		}
 	}
 
@@ -277,12 +376,12 @@ void Sandbox::createUniformBuffers() {
 
 void Sandbox::createDescriptors() {
 	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
-		// Global sets (per-frame) + compute sets (per-frame) + material set (2) + slack
-		.setMaxSets(2 * MAX_FRAMES_IN_FLIGHT + 4)
+		// Global sets (per-frame) + compute sets (per-frame) + material set (3) + slack (7)
+		.setMaxSets(2 * MAX_FRAMES_IN_FLIGHT + 10)
 		// Uniform buffers: global (per frame) + compute (per frame)
 		.addPoolSize(vk::DescriptorType::eUniformBuffer, 2 * MAX_FRAMES_IN_FLIGHT)
-		// Sampler for material sets
-		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 2)
+		// Sampler for material sets (5) + slack (7)
+		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 12)
 		// Compute storage buffers: 2 per frame (prev + current)
 		.addPoolSize(vk::DescriptorType::eStorageBuffer, 2 * MAX_FRAMES_IN_FLIGHT)
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
@@ -294,6 +393,8 @@ void Sandbox::createDescriptors() {
 
 	m_material_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
+		.addBinding(1, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
+		.addBinding(2, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
 		.build();
 
 	// create descriptor sets from global pool with global layout
@@ -308,12 +409,7 @@ void Sandbox::createDescriptors() {
 		m_global_descriptor_sets.push_back(std::move(set));
 	}
 
-	// Create one material descriptor set for current texture
-	auto image_info = m_texture.getDescriptorInfo();
-	m_material_descriptor_set = vk::raii::DescriptorSet{nullptr};
-	VeDescriptorWriter(*m_material_set_layout, *m_global_pool)
-		.writeImage(0, &image_info)
-		.build(m_material_descriptor_set);
+	// TODO: maybe the models should own these descriptor sets?
 
 	// Create one cubemap descriptor set for skybox
 	auto cubemap_image_info = m_skybox.getDescriptorInfo();
@@ -357,7 +453,7 @@ void Sandbox::initSystems() {
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
 		500000, // number of particles
-		glm::vec3{0.0f, -200.0f, 10.0f},
+		glm::vec3{0.0f, -300.0f, 10.0f},
 		working_directory / "shaders" / "particle_compute.spv"
 	);
 	VE_LOGD("skybox system: " << working_directory / "shaders" / "skybox_shader.spv");
@@ -373,7 +469,7 @@ void Sandbox::initSystems() {
 
 void Sandbox::initUI() {
 	imgui_layer = std::make_unique<ImGuiLayer>(m_ve_window, m_ve_device, m_ve_renderer);
-	ui_context = {
+	ui_actions = {
 		.visible = false,
 		.speed = m_particle_system->getSpeed(),
 		.pending_particle_count = m_particle_system->getPendingParticleCount(),
