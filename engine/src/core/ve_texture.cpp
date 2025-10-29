@@ -223,22 +223,40 @@ void VeTexture::createTextureImageArraySTB(const std::vector<std::filesystem::pa
 
 	std::vector<stbi_uc*> pixels(layer_count);
 
-	int channels, width, height;
-	int current_width;
-	int current_height;
+	int channels, width = 0, height = 0;
+	
+	// First pass: find first real texture to get dimensions
 	for (size_t i = 0; i < layer_count; i++) {
-		if (texture_paths[i].filename() == "default_albedo.png")
+		if (texture_paths[i].filename() != "default_albedo.png" &&
+		    texture_paths[i].filename() != "default_normal.png" &&
+		    texture_paths[i].filename() != "default_metallic_roughness.png" &&
+		    texture_paths[i].filename() != "white.png" &&
+		    texture_paths[i].filename() != "black.png"
+		) {
+			stbi_uc* test_pixels = stbi_load(texture_paths[i].string().c_str(), &width, &height, &channels, STBI_rgb_alpha);
+			assert(test_pixels != nullptr && "Failed to load image to determine dimensions");
+			stbi_image_free(test_pixels);
+			VE_LOGD("Determined texture dimensions from first real texture: " << width << "x" << height);
+			break;
+		}
+	}
+	assert(width > 0 && height > 0 && "Could not determine texture dimensions - no real textures found");
+
+	// load all textures (real or generate defaults)
+	int current_width = width;
+	int current_height = height;
+	for (size_t i = 0; i < layer_count; i++) {
+		if (texture_paths[i].filename() == "default_albedo.png" || texture_paths[i].filename() == "white.png") 
 			pixels[i] = generateDefaultTexture(width, height, TextureType::ALBEDO);
-		else if (texture_paths[i].filename() == "default_normal.png")
+		else if (texture_paths[i].filename() == "default_normal.png") 
 			pixels[i] = generateDefaultTexture(width, height, TextureType::NORMAL);
 		else if (texture_paths[i].filename() == "default_metallic_roughness.png")
 			pixels[i] = generateDefaultTexture(width, height, TextureType::METALLIC_ROUGHNESS);
-		else
+		else 
 			pixels[i] = stbi_load(texture_paths[i].string().c_str(), &width, &height, &channels, STBI_rgb_alpha);
-		current_width = width;
-		current_height = height;
-		assert(pixels[i] != nullptr && "Failed to load image");
+		VE_LOGD("Loaded texture " << texture_paths[i].filename() << " with dimensions " << width << "x" << height);
 		assert(width == current_width && height == current_height && "All images in Texture Array must have the same width and height");
+		assert(pixels[i] != nullptr && "Failed to load or generate image");
 	}
 	(void)channels;
 
@@ -246,21 +264,30 @@ void VeTexture::createTextureImageArraySTB(const std::vector<std::filesystem::pa
 	uint32_t total_size = instance_size * layer_count;
 	VE_LOGD("Texture paths read successfully");
 
-	// Create a local scope staging buffer
+	// Concatenate all texture data into a single contiguous buffer in CPU memory
+	std::vector<uint8_t> combined_data(total_size);
+	uint8_t* dest_ptr = combined_data.data();
+	for (size_t i = 0; i < layer_count; i++) {
+		std::memcpy(dest_ptr, pixels[i], instance_size);
+		dest_ptr += instance_size;
+	}
+	VE_LOGD("Combined data size: " << combined_data.size() << ", expected: " << total_size);
+
+	// Create a local scope staging buffer as a single instance buffer
+	// Using total_size as instance_size with count=1 avoids alignment calculation issues
 	ve::VeBuffer staging_buffer(
 		m_ve_device,
-		4,                                        // instance size
-		total_size,    // instance count
+		total_size,                               // instance size (total buffer size)
+		1,                                        // instance count (single buffer)
 		vk::BufferUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 	);
 
-	// Copy all image data to staging buffer
+	// Write all data to staging buffer in one operation
+	// Write exactly total_size bytes (the buffer may be slightly larger due to alignment, but we only write our data)
+	VE_LOGD("Buffer size: " << staging_buffer.getBufferSize() << ", expected: " << total_size);
 	staging_buffer.map();
-	for (size_t i = 0; i < layer_count; i++) {
-		uint32_t offset = static_cast<uint32_t>(i * instance_size);
-		staging_buffer.writeToBuffer((void*)pixels[i], instance_size, offset);
-	}
+	staging_buffer.writeToBuffer(combined_data.data(), total_size, 0);
 
 	// Create image
 	m_texture_image = std::make_unique<ve::VeImage>(
