@@ -33,7 +33,7 @@ std::filesystem::path getWorkingDirectory(char** argv) {
 	// Get executable path
 	std::filesystem::path exe_path = argv[0];
 #if _MSC_VER && !__INTEL_COMPILER
-	exe_path = getPathToRunningExe();
+	exe_path = getPathToRunningExeWindows();
 #else
 	// Resolve relative paths to absolute
 	if (!exe_path.is_absolute()) {
