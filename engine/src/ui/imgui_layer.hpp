@@ -55,6 +55,10 @@ public:
     // - out_apply/out_reset: set to true when the user presses the corresponding buttons.
     void renderUI(UIContext& context);
 
+    // Render engine-specific windows (Settings, Performance).
+    // Should be called between beginFrame() and endFrame().
+    void renderEngineWindows();
+
 private:
     void uploadFonts();
 

@@ -10,15 +10,15 @@
 
 namespace ve {
 
-VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples)
-	: m_ve_device(device), m_window_extent(window_extent) {
+VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, vk::PresentModeKHR present_mode)
+	: m_ve_device(device), m_window_extent(window_extent), m_present_mode(present_mode) {
 	// Clamp desired samples to device max
 	m_desired_num_samples = desired_num_samples > m_ve_device.getSampleCount() ? m_ve_device.getSampleCount() : desired_num_samples;
 	init();
 }
 
-VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, std::shared_ptr<VeSwapChain> old_swap_chain)
-	: m_ve_device(device), m_window_extent(window_extent), m_desired_num_samples(desired_num_samples), m_old_swap_chain(old_swap_chain) {
+VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, vk::PresentModeKHR present_mode, std::shared_ptr<VeSwapChain> old_swap_chain)
+	: m_ve_device(device), m_window_extent(window_extent), m_desired_num_samples(desired_num_samples), m_present_mode(present_mode), m_old_swap_chain(old_swap_chain) {
 
 	m_desired_num_samples = desired_num_samples > m_ve_device.getSampleCount() ? m_ve_device.getSampleCount() : desired_num_samples;
 	init();
@@ -303,7 +303,7 @@ vk::SurfaceFormatKHR VeSwapChain::chooseSwapSurfaceFormat(const std::vector<vk::
 // Immediate may be available, and is lowest latency, but may have tearing.
 vk::PresentModeKHR VeSwapChain::chooseSwapPresentMode(const std::vector<vk::PresentModeKHR>& available_present_modes) {
 	for (const auto& available_present_mode : available_present_modes) {
-		if (available_present_mode == ve::PRESENT_MODE) {
+		if (available_present_mode == m_present_mode) {
 			return available_present_mode;
 		}
 	}

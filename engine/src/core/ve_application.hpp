@@ -28,7 +28,7 @@ public:
 	VeApplication();
     virtual ~VeApplication() = default;
 
-	// called by main.cpp to start the application loop
+	// called by main in entry point to start the application loop
     void run();
 
 	// Pure virtual methods to be implemented by derived classes
@@ -45,7 +45,7 @@ protected:
 	VeWindow m_ve_window;
 	VeDevice m_ve_device;
 	VeRenderer m_ve_renderer;
-	std::unique_ptr<ImGuiLayer> imgui_layer{}; // created in cpp
+	std::unique_ptr<ImGuiLayer> m_imgui_layer{}; // created in cpp
 	std::vector<std::unique_ptr<VeBuffer>> m_uniform_buffers{};
 
 	// Descriptor pool, layouts, sets

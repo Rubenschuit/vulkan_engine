@@ -6,6 +6,7 @@
 #include "core/ve_renderer.hpp"
 
 #include <cmath>
+#include <chrono>
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_vulkan.h>
@@ -14,6 +15,7 @@
 namespace ve {
 
 static VkDescriptorPool createImguiDescriptorPool(vk::raii::Device& device) {
+	// complete overkill for our use case but whats the harm
     std::array<VkDescriptorPoolSize, 11> pool_sizes = {
         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
@@ -46,7 +48,11 @@ ImGuiLayer::ImGuiLayer(VeWindow& window, VeDevice& device, VeRenderer& renderer)
     // Create ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGui::StyleColorsDark();
+	// Set style
+	//ImGui::StyleColorsLight();
+    //ImGui::StyleColorsDark();
+	ImGui::StyleColorsClassic();
+
 
     // Init GLFW backend
     ImGui_ImplGlfw_InitForVulkan(window.getGLFWwindow(), true);
@@ -119,127 +125,40 @@ void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd) {
     cmd.endRendering();
 }
 
-// TODO: move window creation outside engine
+void ImGuiLayer::renderEngineWindows() {
+
+	// crude performance window
+	static auto s_time_start = std::chrono::high_resolution_clock::now();
+	auto now = std::chrono::high_resolution_clock::now();
+	auto time_elapsed = std::chrono::duration<float, std::chrono::seconds::period>(now - s_time_start).count();
+	static int frame_count = 0;
+	static float fps = 0.0f;
+	static float frame_time_ms = 0.0f;
+	frame_count++;
+	if (frame_count >= 60) {
+		frame_count = 0;
+		fps = 1.0f / time_elapsed;
+		frame_time_ms = time_elapsed * 1000.0f;
+	}
+
+	if (ImGui::Begin("Performance", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		//set location to top right
+		ImGui::SetWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 200, 10), ImGuiCond_Always);
+		ImGui::Separator();
+		ImGui::Text("FPS: %.1f", fps);
+		ImGui::Text("Frame Time: %.2f ms", frame_time_ms);
+		//resolution
+		auto extent = m_renderer.getExtent();
+		ImGui::Text("Resolution: %d x %d", extent.width, extent.height);
+	}
+	ImGui::End();
+	s_time_start = now;
+}
+
 void ImGuiLayer::renderUI(UIContext& context) {
 	beginFrame();
 	if (context.visible) {
-
-		if (ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-			int count = static_cast<int>(context.pending_particle_count);
-			ImGui::Text("Particle settings");
-			ImGui::Separator();
-			ImGui::SliderInt("Count", &count, 1000, 50000000);
-			ImGui::SameLine();
-			if (ImGui::Button("400k"))
-				count = 400000;
-			ImGui::SliderFloat("Speed", &context.speed, 0, 10);
-			ImGui::SameLine();
-			if (ImGui::Button("1.0x"))
-				context.speed = 1.0f;
-			ImGui::Separator();
-			ImGui::SliderFloat("Explosion mean", &context.particle_velocity_mean, -60, 60);
-			ImGui::SliderFloat("Explosion stddev", &context.particle_velocity_stddev, 0, 60);
-
-
-			if (count < 1) count = 1;
-				context.pending_particle_count = static_cast<uint32_t>(count);
-			if (ImGui::Button("Apply count"))
-				context.apply_particle_count = true;
-			ImGui::SameLine();
-			if (ImGui::Button("Reset"))
-				context.reset_particle_count = true;
-
-
-			// --------------------------------------------------------------
-
-
-			ImGui::Separator();
-			ImGui::Text("Scene selection");
-			ImGui::Separator();
-			// Select exactly 1 scene
-			static int current_scene = context.current_scene;
-			if (ImGui::RadioButton("Simple", &current_scene, 1))
-				context.current_scene = 1;
-			if (ImGui::RadioButton("Sponza", &current_scene, 2))
-				context.current_scene = 2;
-			ImGui::Separator();
-			ImGui::Text("Render mode");
-			ImGui::Separator();
-			static int render_mode = static_cast<int>(context.render_mode);
-			if (ImGui::RadioButton("BRDF Microfacets", &render_mode, 5))
-				context.render_mode = RenderMode::BRDF_MICROFACET;
-			ImGui::SameLine();
-			if (ImGui::RadioButton("BRDF Smooth", &render_mode, 0))
-				context.render_mode = RenderMode::BRDF;
-			if (ImGui::RadioButton("Normal vector", &render_mode, 1))
-				context.render_mode = RenderMode::NORMAL_VECTOR;
-			if (ImGui::RadioButton("Tangent vector", &render_mode, 2))
-				context.render_mode = RenderMode::TANGENT_VECTOR;
-			if (ImGui::RadioButton("Bitangent vector", &render_mode, 3))
-				context.render_mode = RenderMode::BITANGENT_VECTOR;
-			if (ImGui::RadioButton("Normal map", &render_mode, 4))
-				context.render_mode = RenderMode::NORMAL_MAP;
-		}
-		ImGui::End();
-
-		// Ui displaying controls such as wasd movement, c to crouch, space to jump
-		// 1,2,3,4,5 for particle behavior
-		if (ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-			// bottom right
-			ImGui::SetWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 200, ImGui::GetIO().DisplaySize.y - 200), ImGuiCond_Always);
-			ImGui::Text("WASD: Move");
-			ImGui::Text("C: Down");
-			ImGui::Text("Space: Up");
-			ImGui::Separator();
-			ImGui::Text("1: Earth Gravity");
-			ImGui::Text("2: Cool Gravity");
-			ImGui::Text("3: Succ mode");
-			ImGui::Text("4: Stasis");
-			ImGui::Text("5: Galaxy (mid)");
-
-		}
-		ImGui::End();
-
-		/* TODO: need to recreate pipelines when toggling MSAA
-		// Graphics settings window
-		if (ImGui::Begin("Graphics Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-			// bottom left
-			ImGui::SetWindowPos(ImVec2(10, ImGui::GetIO().DisplaySize.y - 200), ImGuiCond_Always);
-			static bool msaa_enabled = false;
-			if (ImGui::Checkbox("Enable MSAA", &msaa_enabled)) {
-				// Restart renderer with/without msaa
-				m_renderer.setMSAAEnabled(msaa_enabled);
-			}
-		}
-		ImGui::End();
-		*/
-
-		// crude performance window
-		static auto s_time_start = std::chrono::high_resolution_clock::now();
-		auto now = std::chrono::high_resolution_clock::now();
-		auto time_elapsed = std::chrono::duration<float, std::chrono::seconds::period>(now - s_time_start).count();
-		static int frame_count = 0;
-		static float fps = 0.0f;
-		static float frame_time_ms = 0.0f;
-		frame_count++;
-		if (frame_count >= 60) {
-			frame_count = 0;
-			fps = 1.0f / time_elapsed;
-			frame_time_ms = time_elapsed * 1000.0f;
-		}
-
-		if (ImGui::Begin("Performance", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-			//set location to top right
-			ImGui::SetWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 200, 10), ImGuiCond_Always);
-			ImGui::Separator();
-			ImGui::Text("FPS: %.1f", fps);
-			ImGui::Text("Frame Time: %.2f ms", frame_time_ms);
-			//resolution
-			auto extent = m_renderer.getExtent();
-			ImGui::Text("Resolution: %d x %d", extent.width, extent.height);
-		}
-		ImGui::End();
-		s_time_start = now;
+		renderEngineWindows();
 	}
 	endFrame(m_renderer.getCurrentCommandBuffer());
 }

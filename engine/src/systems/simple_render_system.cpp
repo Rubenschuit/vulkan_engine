@@ -56,7 +56,6 @@ void SimpleRenderSystem::createPipeline(vk::Format color_format) {
 	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
 	pipeline_config.color_format = color_format;
 	pipeline_config.attribute_descriptions = VeModel::Vertex::getAttributeDescriptions();
-	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eNone;
 
 	assert(m_pipeline_layout != VK_NULL_HANDLE && "Pipeline layout is null");
 	pipeline_config.pipeline_layout = m_pipeline_layout;

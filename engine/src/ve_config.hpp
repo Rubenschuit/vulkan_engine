@@ -13,11 +13,6 @@ constexpr uint32_t MAX_LIGHTS = 100; // requirded for UBO alignment
 //graphics settings
 constexpr bool MSAA_ENABLED = true;
 
-// clang-format off
-//constexpr vk::PresentModeKHR PRESENT_MODE = vk::PresentModeKHR::eMailbox;
-constexpr vk::PresentModeKHR PRESENT_MODE = vk::PresentModeKHR::eImmediate;
-// clang-format on
-
 // Central list of required Vulkan device extensions
 inline const std::vector<const char*> REQUIRED_DEVICE_EXTENSIONS = {
 	VK_KHR_SWAPCHAIN_EXTENSION_NAME,
@@ -39,7 +34,6 @@ inline const std::vector<const char*> REQUIRED_INSTANCE_EXTENSIONS = {
 inline const std::vector<const char*> VALIDATION_LAYERS = {
 	"VK_LAYER_KHRONOS_validation"
 };
-enum class QueueKind { Graphics, Transfer };
 
 }// namespace ve
 

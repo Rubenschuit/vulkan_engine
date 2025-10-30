@@ -5,6 +5,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "sandbox.hpp"
+#include <imgui.h>
 
 namespace ve {
 
@@ -128,8 +129,115 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 
 	m_ve_renderer.endSceneRender(command_buffer);
 
-	// Draw UI and update ui_context for next frame intents
-	imgui_layer->renderUI(ui_actions);
+	// Draw UI: begin frame, render app-specific windows, render engine windows, end frame
+	m_imgui_layer->beginFrame();
+	if (ui_actions.visible) {
+		renderAppWindows();
+		m_imgui_layer->renderEngineWindows();
+	}
+	m_imgui_layer->endFrame(m_ve_renderer.getCurrentCommandBuffer());
+}
+
+// Should be called between beginFrame() and endFrame() of imgui_layer
+void Sandbox::renderAppWindows() {
+	// Settings window with tabs
+	if (ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		if (ImGui::BeginTabBar("SettingsTabs")) {
+			if (ImGui::BeginTabItem("Scene")) {
+				ImGui::Text("Scene selection");
+				ImGui::Separator();
+				// Select exactly 1 scene
+				static int s_current_scene = ui_actions.current_scene;
+				if (ImGui::RadioButton("Simple", &s_current_scene, 1))
+					ui_actions.current_scene = 1;
+				if (ImGui::RadioButton("Sponza", &s_current_scene, 2))
+					ui_actions.current_scene = 2;
+
+
+				ImGui::EndTabItem();
+			}
+			if (ImGui::BeginTabItem("Particle")) {
+				int count = static_cast<int>(ui_actions.pending_particle_count);
+				ImGui::Text("Particle settings");
+				ImGui::Separator();
+				ImGui::SliderInt("Count", &count, 1000, 50000000);
+				ImGui::SameLine();
+				if (ImGui::Button("400k"))
+					count = 400000;
+				ImGui::SliderFloat("Speed", &ui_actions.speed, 0, 10);
+				ImGui::SameLine();
+				if (ImGui::Button("1.0x"))
+					ui_actions.speed = 1.0f;
+				ImGui::Separator();
+				ImGui::SliderFloat("Explosion mean", &ui_actions.particle_velocity_mean, -60, 60);
+				ImGui::SliderFloat("Explosion stddev", &ui_actions.particle_velocity_stddev, 0, 60);
+
+				if (count < 1) count = 1;
+				ui_actions.pending_particle_count = static_cast<uint32_t>(count);
+				if (ImGui::Button("Apply count"))
+					ui_actions.apply_particle_count = true;
+				ImGui::SameLine();
+				if (ImGui::Button("Reset"))
+					ui_actions.reset_particle_count = true;
+				ImGui::EndTabItem();
+			}
+			if (ImGui::BeginTabItem("Graphics")) {
+				ImGui::Text("Graphics Settings");
+				ImGui::Separator();
+
+				// MSAA toggle
+				static bool s_msaa_enabled = true;
+				if (ImGui::Checkbox("Enable MSAA", &s_msaa_enabled)) {
+					// TODO: recreate all pipelines
+					m_ve_renderer.setMSAAEnabled(s_msaa_enabled);
+				}
+
+				// VSync toggle (eMailbox instead of eImmediate)
+				static bool s_vsync_enabled = false;
+				if (ImGui::Checkbox("Enable VSync", &s_vsync_enabled)) {
+					m_ve_renderer.setPresentMode(s_vsync_enabled ? vk::PresentModeKHR::eMailbox : vk::PresentModeKHR::eImmediate);
+				}
+
+				ImGui::Separator();
+				ImGui::Text("Render mode");
+				ImGui::Separator();
+				static int s_render_mode = static_cast<int>(ui_actions.render_mode);
+				if (ImGui::RadioButton("BRDF Microfacets", &s_render_mode, 5))
+					ui_actions.render_mode = RenderMode::BRDF_MICROFACET;
+				ImGui::SameLine();
+				if (ImGui::RadioButton("BRDF Smooth", &s_render_mode, 0))
+					ui_actions.render_mode = RenderMode::BRDF;
+				if (ImGui::RadioButton("Normal vector", &s_render_mode, 1))
+					ui_actions.render_mode = RenderMode::NORMAL_VECTOR;
+				if (ImGui::RadioButton("Tangent vector", &s_render_mode, 2))
+					ui_actions.render_mode = RenderMode::TANGENT_VECTOR;
+				if (ImGui::RadioButton("Bitangent vector", &s_render_mode, 3))
+					ui_actions.render_mode = RenderMode::BITANGENT_VECTOR;
+				if (ImGui::RadioButton("Normal map", &s_render_mode, 4))
+					ui_actions.render_mode = RenderMode::NORMAL_MAP;
+
+				ImGui::EndTabItem();
+			}
+			ImGui::EndTabBar();
+		}
+		ImGui::End();
+	}
+
+	// Controls window
+	if (ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		// bottom right
+		ImGui::SetWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 200, ImGui::GetIO().DisplaySize.y - 200), ImGuiCond_Always);
+		ImGui::Text("WASD: Move");
+		ImGui::Text("C: Down");
+		ImGui::Text("Space: Up");
+		ImGui::Separator();
+		ImGui::Text("1: Earth Gravity");
+		ImGui::Text("2: Cool Gravity");
+		ImGui::Text("3: Succ mode");
+		ImGui::Text("4: Stasis");
+		ImGui::Text("5: Galaxy (mid)");
+	}
+	ImGui::End();
 }
 
 // Loads the game objects for the scene
@@ -468,7 +576,8 @@ void Sandbox::initSystems() {
 }
 
 void Sandbox::initUI() {
-	imgui_layer = std::make_unique<ImGuiLayer>(m_ve_window, m_ve_device, m_ve_renderer);
+	m_imgui_layer = std::make_unique<ImGuiLayer>(m_ve_window, m_ve_device, m_ve_renderer);
+
 	ui_actions = {
 		.visible = false,
 		.speed = m_particle_system->getSpeed(),
@@ -482,5 +591,10 @@ void Sandbox::initUI() {
 }
 
 
+}
+
+// Called by the entry point to create the application instance
+ve::VeApplication* createApp(std::filesystem::path working_directory) {
+	return new ve::Sandbox(working_directory);
 }
 

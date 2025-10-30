@@ -16,6 +16,8 @@ There are also methods for submitting single time command buffers to a queue. */
 
 namespace ve {
 
+enum class QueueKind { Graphics, Transfer };
+
 struct SwapChainSupportDetails {
 	vk::SurfaceCapabilitiesKHR capabilities;
 	std::vector<vk::SurfaceFormatKHR> formats;

@@ -2,7 +2,7 @@
 #include "VEngine/VEngine.hpp"
 #include <filesystem>
 
-//TODO move over more to base class
+//TODO: move over more to base class?
 
 namespace ve {
 
@@ -26,6 +26,7 @@ private:
 	void initUI();
 
 	void updateParticles(VeFrameInfo& frame_info, InputActions& actions);
+	void renderAppWindows();
 
 	const std::filesystem::path working_directory;
 
@@ -43,7 +44,7 @@ private:
 	// Textures. TODO: move to skybox model class
 	VeTexture m_skybox;
 
-	// Scenes consist of a collection of game objects
+	// Scenes currently are just a collection of game objects
 	std::unordered_map<uint32_t, VeGameObject> m_simple_scene;
 	std::unordered_map<uint32_t, VeGameObject> m_sponza_scene;
 	uint32_t sponza_id;
@@ -62,6 +63,4 @@ private:
 }
 
 // Called by the entry point to create the application instance
-ve::VeApplication* createApp(std::filesystem::path working_directory) {
-	return new ve::Sandbox(working_directory);
-}
+ve::VeApplication* createApp(std::filesystem::path working_directory);

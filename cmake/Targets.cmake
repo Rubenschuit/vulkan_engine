@@ -66,6 +66,8 @@ if (IMGUI_DIR)
 	target_sources(VEngineLib PRIVATE ${IMGUI_SOURCES})
 	# Mark ImGui headers as system to silence warnings coming from third-party headers
 	target_include_directories(VEngineLib SYSTEM PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+	# Also add ImGui headers to app target so app code can use ImGui API
+	target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 
 	# Suppress noisy conversion/sign warnings for ImGui sources only
 	if (MSVC)

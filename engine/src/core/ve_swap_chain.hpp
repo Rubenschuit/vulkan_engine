@@ -1,6 +1,6 @@
-/* VeSwapChain is responsible for managing the swap chain and
-its associated resources. This includes image views, depth
-resources and synchronization objects. */
+/* VeSwapChain is owned by VeRenderer and is responsible for managing the swap chain
+ and its associated resources. This includes image views, depth resources and
+synchronization objects. Also sets the number of samples for MSAA. */
 #pragma once
 #include "ve_export.hpp"
 #include "ve_device.hpp"
@@ -16,8 +16,8 @@ namespace ve {
 
 class VENGINE_API VeSwapChain {
 public:
-	VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples);
-	VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, std::shared_ptr<VeSwapChain> old_swap_chain);
+	VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, vk::PresentModeKHR present_mode);
+	VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, vk::PresentModeKHR present_mode, std::shared_ptr<VeSwapChain> old_swap_chain);
 	~VeSwapChain();
 
 	// Not copyable or movable
@@ -32,18 +32,16 @@ public:
 	vk::raii::SwapchainKHR& getSwapChain() { return m_swap_chain; }
 	vk::Format getSwapChainImageFormat() const { return m_swap_chain_image_format; }
 	vk::Extent2D getSwapChainExtent() const { return m_swap_chain_extent; }
+	vk::PresentModeKHR getPresentMode() const { return m_present_mode; }
 	const vk::raii::ImageView& getImageView(size_t index) const { return m_swap_chain_image_views[index]; };
 	const vk::raii::ImageView& getColorImageView() const { return m_color_image->getImageView(); }
 	const vk::raii::ImageView& getDepthImageView() const { return m_depth_image->getImageView(); }
-	//const vk::raii::Image& getDepthImage() const { return m_depth_image->getImage(); }
 	const std::vector<vk::Image>& getSwapChainImages() const { return m_swap_chain_images; }
 	const std::vector<vk::raii::ImageView>& getSwapChainImageViews() const { return m_swap_chain_image_views; }
 	float getExtentAspectRatio() const;
 
 	bool compareSwapFormats(const VeSwapChain& other) const;
 	vk::Result acquireNextImage(uint32_t* imageIndex);
-
-	// Todo use raii
 	void submitComputeWork(vk::CommandBuffer commandBuffer);
 	vk::Result submitAndPresent(vk::CommandBuffer commandBuffer, uint32_t* imageIndex);
 	void waitForCurrentFence();
@@ -87,7 +85,6 @@ private:
 	std::unique_ptr<VeImage> m_depth_image;
 	vk::SampleCountFlagBits m_desired_num_samples;
 
-
 	// Synchronization primitives
 	// TODO: consider moving the timeline semaphore somewhere else
 	vk::raii::Semaphore semaphore{nullptr};
@@ -102,9 +99,9 @@ private:
 	// Per-frame binary semaphores signaled by acquire and waited by graphics submit
 	std::vector<vk::raii::Semaphore> m_image_available_semaphores;
 
+	vk::PresentModeKHR m_present_mode;
 	SwapChainSupportDetails m_swap_chain_support;
 	vk::SurfaceFormatKHR m_surface_format;
-	vk::PresentModeKHR m_present_mode;
 	vk::Extent2D m_swap_chain_extent;
 	vk::Format m_swap_chain_image_format;
 

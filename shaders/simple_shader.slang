@@ -14,6 +14,15 @@ struct PointLight {
 	float4 color; // .w = intensity
 };
 
+enum RenderMode {
+	BRDF = 0,
+	NORMAL_VECTOR = 1,
+	TANGENT_VECTOR = 2,
+	BITANGENT_VECTOR = 3,
+	NORMAL_MAP = 4,
+	BRDF_MICROFACET = 5,
+};
+
 struct UniformBuffer {
     float4x4 view;
     float4x4 proj;
@@ -22,7 +31,7 @@ struct UniformBuffer {
 	float4 ambient_light_color;
 	PointLight point_lights[100]; // MAX_LIGHTS TODO use specialization constant
 	uint32_t num_lights;
-	uint32_t render_mode; // 0: default, 1: normal vector, 2: tangent vector, 3: bitangent vector, 4: normal map
+	uint32_t render_mode; // see RenderMode enum
 };
 [vk::binding(0, 0)] // binding 0, set 0
 ConstantBuffer<UniformBuffer> ubo;
@@ -166,20 +175,20 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		float3 T = normalize(in_vert.frag_tangent_world);
 		float3 B = normalize(in_vert.frag_bitangent_world);
 		float3 world_normal = N;
-		if (ubo.render_mode == 5) { // BRDF Microfacet (use normal map)
+		if (ubo.render_mode == RenderMode::BRDF_MICROFACET || ubo.render_mode == RenderMode::NORMAL_MAP) { // BRDF Microfacet (use normal map)
 			// Transform sampled normal from tangent space to world space
 			float3 tangent_space_normal = normalize(normal_map.xyz * 2.0 - float3(1.0, 1.0, 1.0)); // Convert from [0,1] to [-1,1]
 			float3x3 TBN = transpose(float3x3(T, B, N));
 			world_normal = normalize(mul(TBN, tangent_space_normal));
 		}
 
-		if (ubo.render_mode == 1) // normal vector
+		if (ubo.render_mode == RenderMode::NORMAL_VECTOR) // normal vector
 			return float4(0.5 * N + 0.5, 1.0f);
-		else if (ubo.render_mode == 2) // tangent vector
+		else if (ubo.render_mode == RenderMode::TANGENT_VECTOR) // tangent vector
 			return float4(0.5 * T + 0.5, 1.0f);
-		else if (ubo.render_mode == 3) // bitangent vector
+		else if (ubo.render_mode == RenderMode::BITANGENT_VECTOR) // bitangent vector
 			return float4(0.5 * B + 0.5, 1.0f);
-		else if (ubo.render_mode == 4) // sampled normal
+		else if (ubo.render_mode == RenderMode::NORMAL_MAP) // sampled normal
 			return float4(0.5 * world_normal + 0.5, 1.0f);
 
 		// View direction

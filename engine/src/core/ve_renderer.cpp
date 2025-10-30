@@ -5,9 +5,9 @@
 
 
 namespace ve {
-// Constructor, initializes swap chain (with no msaa) and command buffers
+// Constructor, initializes swap chain with present mode immediate and command buffers
 VeRenderer::VeRenderer(VeDevice& device, VeWindow& window) : m_ve_device(device), m_ve_window(window) {
-	m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, m_ve_window.getExtent(), m_desired_num_samples);
+	m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, m_ve_window.getExtent(), m_desired_num_samples, m_present_mode);
 	createCommandBuffers();
 }
 
@@ -61,17 +61,18 @@ void VeRenderer::recreateSwapChain() {
 	m_ve_device.getDevice().waitIdle();
 	extent = m_ve_window.getExtent();
 	if (m_ve_swap_chain == nullptr) {
-		m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent, m_desired_num_samples);
+		m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent, m_desired_num_samples, m_present_mode);
 	} else {
 		// Transfer ownership of the existing swap chain to a shared_ptr so the new one
 		// can safely reference it during recreation.
 		std::shared_ptr<VeSwapChain> old_swap_chain{ std::move(m_ve_swap_chain) };
-		m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent, m_desired_num_samples, old_swap_chain);
+		m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent, m_desired_num_samples, m_present_mode, old_swap_chain);
 		if (!old_swap_chain->compareSwapFormats(*m_ve_swap_chain)) {
 			throw std::runtime_error("Swap chain image (or depth) format has changed!");
 			// Todo: Handle swap chain format changes (e.g. recreate pipelines)
 		}
 	}
+	m_swap_chain_needs_recreation = false;
 	VE_LOGI("Swap chain recreated: " << extent.width << "x" << extent.height);
 }
 
@@ -93,6 +94,9 @@ bool VeRenderer::beginFrame() {
 	}
 	if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) {
 		throw std::runtime_error("failed to acquire swap chain image!");
+	}
+	if (result == vk::Result::eSuboptimalKHR) {
+		VE_LOGD("Result of acquireNextImage is eSuboptimalKHR");
 	}
 
 	// frame acquired
@@ -130,7 +134,7 @@ void VeRenderer::endFrame(vk::raii::CommandBuffer& command_buffer) {
 		throw std::runtime_error("failed to present swap chain image!");
 	}
 	// Advance to the next frame
-	if (result == vk::Result::eSuccess) 
+	if (result == vk::Result::eSuccess)
 		m_ve_swap_chain->advanceFrame();
 	m_is_frame_started = false;
 }
@@ -159,7 +163,6 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer) {
 	//
 
 	// Setup dynamic rendering attachments
-
 
 	vk::RenderingAttachmentInfo color_attachment_info;
 	if (m_msaa_enabled) {
