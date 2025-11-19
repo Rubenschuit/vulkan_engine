@@ -13,6 +13,10 @@ namespace ve {
 // First a window, device and swap chain are initialised in the base class
 Sandbox::Sandbox(const std::filesystem::path& working_dir) : working_directory(working_dir) {
 
+	// Initialize scenes
+	m_simple_scene = std::make_unique<VeScene>("Simple Scene");
+	m_sponza_scene = std::make_unique<VeScene>("Sponza Scene");
+
 	createUniformBuffers();
 	createDescriptors();
 
@@ -31,14 +35,13 @@ VeFrameInfo Sandbox::update() {
 	updateFrameTime();
 	m_total_time += m_frame_time;
 
-
 	// Setup frame info
 	auto& command_buffer = m_ve_renderer.getCurrentCommandBuffer();
 	auto& compute_command_buffer = m_ve_renderer.getCurrentComputeCommandBuffer();
 	auto current_frame = m_ve_renderer.getCurrentFrame();
 	vk::raii::DescriptorSet& material_descriptor_set =
 		(ui_actions.current_scene == 2)
-			? m_sponza_scene.at(sponza_id).ve_model->getMaterialDescriptorSet()
+			? m_sponza_scene->getGameObjects().at(sponza_id).ve_model->getMaterialDescriptorSet()
 			: m_simple_material_descriptor_set;
 
 	vk::raii::DescriptorSet& shadow_desc_set = m_shadow_render_system->getShadowDescriptorSet(current_frame);
@@ -50,7 +53,7 @@ VeFrameInfo Sandbox::update() {
 		.shadow_descriptor_set = shadow_desc_set,
 		.command_buffer = command_buffer,
 		.compute_command_buffer = compute_command_buffer,
-		.game_objects = ui_actions.current_scene == 1 ? m_simple_scene : m_sponza_scene,
+		.game_objects = ui_actions.current_scene == 1 ? m_simple_scene->getGameObjects() : m_sponza_scene->getGameObjects(),
 		.frame_time = m_frame_time,
 		.total_time = m_total_time,
 		.current_frame = current_frame
@@ -65,12 +68,12 @@ VeFrameInfo Sandbox::update() {
 	updateParticles(frame_info, input_actions);
 	updateWindowTitle();
 
-	// update global ubo
+	// update ubos
 	UniformBufferObject ubo{};
 	ubo.render_mode = static_cast<uint32_t>(ui_actions.render_mode);
 	ubo.shadow_mode = static_cast<uint32_t>(ui_actions.shadow_mode);
 	m_point_light_system->updateUniformBuffer(frame_info, ubo); // update UBO with point light data
-	m_shadow_render_system->updateUniformBuffer(current_frame, ubo);
+	m_shadow_render_system->updateUniformBuffer(current_frame, ubo); // update internal shadow UBO with light data from main UBO
 	this->updateUniformBuffer(current_frame, ubo); // view/proj/camera location in application base class
 
 	return frame_info;
@@ -284,11 +287,6 @@ void Sandbox::createDescriptors() {
 #endif
 		.build();
 
-	// Shadow global descriptor set layout (for shadow pass UBO)
-	m_shadow_global_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
-		.addBinding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eAllGraphics)
-		.build();
-
 	m_material_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
 		.addBinding(1, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
@@ -351,7 +349,6 @@ void Sandbox::initSystems() {
 	m_shadow_render_system = std::make_unique<ShadowRenderSystem>(
 		m_ve_device,
 		*m_global_pool,
-		m_shadow_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		working_directory / "shaders" / "shadow_shader.spv"
 	);
@@ -449,7 +446,7 @@ void Sandbox::loadGameObjects() {
 	sponza.transform.translation = glm::vec3{0.0f, 0.0f, -350.0f} + sponza_translation;
 	sponza.transform.scale = {0.1f, 0.1f, 0.1f};
 	sponza.has_texture = 1.0f;
-	m_sponza_scene.emplace(sponza.getId(), std::move(sponza));
+	m_sponza_scene->getGameObjects().emplace(sponza.getId(), std::move(sponza));
 
 
 	// sponza sun light
@@ -457,8 +454,7 @@ void Sandbox::loadGameObjects() {
 	sun.transform.translation = glm::vec3{0.0f, 50.0f, -140.0f} + sponza_translation;
 	sun.point_light_component->intensity = 100.0f;
 	sun.point_light_component->rotates = true;
-	m_sponza_scene.emplace(sun.getId(), std::move(sun));
-
+	m_sponza_scene->getGameObjects().emplace(sun.getId(), std::move(sun));
 
 	// sponza fire lights
 	{
@@ -468,7 +464,7 @@ void Sandbox::loadGameObjects() {
 		fire.point_light_component->rotates = false;
 		fire.point_light_component->casts_shadow = false;
 		fire.has_shadow = false;
-		m_sponza_scene.emplace(fire.getId(), std::move(fire));
+		m_sponza_scene->getGameObjects().emplace(fire.getId(), std::move(fire));
 	}
 	{
 		VeGameObject fire = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
@@ -477,7 +473,7 @@ void Sandbox::loadGameObjects() {
 		fire.point_light_component->rotates = false;
 		fire.point_light_component->casts_shadow = false;
 		fire.has_shadow = false;
-		m_sponza_scene.emplace(fire.getId(), std::move(fire));
+		m_sponza_scene->getGameObjects().emplace(fire.getId(), std::move(fire));
 	}
 	{
 		VeGameObject fire = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
@@ -486,7 +482,7 @@ void Sandbox::loadGameObjects() {
 		fire.point_light_component->rotates = false;
 		fire.point_light_component->casts_shadow = false;
 		fire.has_shadow = false;
-		m_sponza_scene.emplace(fire.getId(), std::move(fire));
+		m_sponza_scene->getGameObjects().emplace(fire.getId(), std::move(fire));
 	}
 	{
 		VeGameObject fire = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
@@ -495,7 +491,7 @@ void Sandbox::loadGameObjects() {
 		fire.point_light_component->rotates = false;
 		fire.point_light_component->casts_shadow = false;
 		fire.has_shadow = false;
-		m_sponza_scene.emplace(fire.getId(), std::move(fire));
+		m_sponza_scene->getGameObjects().emplace(fire.getId(), std::move(fire));
 	}
 
 	// lion eyes
@@ -507,7 +503,7 @@ void Sandbox::loadGameObjects() {
 		green_eye.point_light_component->rotates = false;
 		green_eye.point_light_component->casts_shadow = false;
 		green_eye.has_shadow = false;
-		m_sponza_scene.emplace(green_eye.getId(), std::move(green_eye));
+		m_sponza_scene->getGameObjects().emplace(green_eye.getId(), std::move(green_eye));
 	}
 	{
 		VeGameObject green_eye = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
@@ -517,7 +513,7 @@ void Sandbox::loadGameObjects() {
 		green_eye.point_light_component->rotates = false;
 		green_eye.point_light_component->casts_shadow = false;
 		green_eye.has_shadow = false;
-		m_sponza_scene.emplace(green_eye.getId(), std::move(green_eye));
+		m_sponza_scene->getGameObjects().emplace(green_eye.getId(), std::move(green_eye));
 	}
 
 	// -------------------------------------------------------------- //
@@ -530,7 +526,7 @@ void Sandbox::loadGameObjects() {
 		glm::vec3 pos = {0.0f, 0.0f, 20.0f};
 		l.transform.translation = pos;
 		l.point_light_component->rotates = false;
-		m_simple_scene.emplace(l.getId(), std::move(l));
+		m_simple_scene->getGameObjects().emplace(l.getId(), std::move(l));
 	}
 
 	// Create some lights with ranging colors
@@ -562,7 +558,7 @@ void Sandbox::loadGameObjects() {
 		};
 		point_light.has_shadow = false;
 		point_light.transform.translation = pos;
-		m_simple_scene.emplace(point_light.getId(), std::move(point_light));
+		m_simple_scene->getGameObjects().emplace(point_light.getId(), std::move(point_light));
 	}
 	/*
 	// 'black hole' light
@@ -592,7 +588,7 @@ void Sandbox::loadGameObjects() {
 		.scale = {80.0f, 1.0f, 80.0f}
 	};
 	floor.has_shadow = false;
-	m_simple_scene.emplace(floor.getId(), std::move(floor));
+	m_simple_scene->getGameObjects().emplace(floor.getId(), std::move(floor));
 
 
 	// --------------------------------------------------------------
@@ -608,7 +604,7 @@ void Sandbox::loadGameObjects() {
 		.rotation = {0.0f, 0.0f, glm::radians(-45.0f)},
 		.scale = {20.0f, 1.0f, 20.0f}
 	};
-	m_simple_scene.emplace(textured_quad.getId(), std::move(textured_quad));
+	m_simple_scene->getGameObjects().emplace(textured_quad.getId(), std::move(textured_quad));
 	// --------------------------------------------------------------
 	// viking rooms
 	// --------------------------------------------------------------
@@ -623,7 +619,7 @@ void Sandbox::loadGameObjects() {
 			obj.transform.translation = {(float)i * 4.0f, (float)j * 4.0f, 1.0f};
 			obj.transform.scale = {1.0f, 1.0f, 1.0f};
 			obj.has_texture = 0.0f;
-			m_simple_scene.emplace(obj.getId(), std::move(obj));
+			m_simple_scene->getGameObjects().emplace(obj.getId(), std::move(obj));
 		}
 	}
 
@@ -640,7 +636,7 @@ void Sandbox::loadGameObjects() {
 			obj.transform.translation = {-1.0 * (float)i * 4.0f - 4.0f, (float)j * 4.0f, 1.0f};
 			obj.transform.scale = {1.0f, 1.0f, 1.0f};
 			obj.has_texture = 0.0f;
-			m_simple_scene.emplace(obj.getId(), std::move(obj));
+			m_simple_scene->getGameObjects().emplace(obj.getId(), std::move(obj));
 		}
 	}
 
@@ -660,7 +656,7 @@ void Sandbox::loadGameObjects() {
 				.scale = {6.0f, 6.0f, 3.0f}
 			};
 			obj.has_texture = 0.0f;
-			m_simple_scene.emplace(obj.getId(), std::move(obj));
+			m_simple_scene->getGameObjects().emplace(obj.getId(), std::move(obj));
 		}
 	}
 	// Smooth vases (interpolated normals) in a grid
@@ -674,7 +670,7 @@ void Sandbox::loadGameObjects() {
 				.rotation = {glm::radians(-180.0f), 0.0f, 0.0f},
 				.scale = {6.0f, 6.0f, 3.0f}
 			};
-			m_simple_scene.emplace(obj.getId(), std::move(obj));
+			m_simple_scene->getGameObjects().emplace(obj.getId(), std::move(obj));
 		}
 	}
 

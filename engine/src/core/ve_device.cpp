@@ -271,7 +271,7 @@ void VeDevice::createLogicalDevice() {
 					vk::PhysicalDeviceVulkan13Features,
 					vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
 					vk::PhysicalDeviceTimelineSemaphoreFeatures> feature_chain = {
-		{.features = {.samplerAnisotropy = true, .depthClamp = true}},
+		{.features = {.depthClamp = true, .samplerAnisotropy = true}},
 		{.shaderDrawParameters = true},
 		{.synchronization2 = true, .dynamicRendering = true},
 		{.extendedDynamicState = true },

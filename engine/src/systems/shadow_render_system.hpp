@@ -23,7 +23,6 @@ public:
 	ShadowRenderSystem(
 		VeDevice& device,
 		VeDescriptorPool& descriptor_pool,
-		const vk::raii::DescriptorSetLayout& shadow_global_set_layout,
 		const vk::raii::DescriptorSetLayout& material_set_layout,
 		std::filesystem::path shader_path);
 	~ShadowRenderSystem();
@@ -50,17 +49,19 @@ public:
 private:
 	void createShadowResources();
 	void createPipelineLayout(
-		const vk::raii::DescriptorSetLayout& shadow_global_set_layout,
 		const vk::raii::DescriptorSetLayout& material_set_layout);
 	void createPipeline(vk::Format depth_format);
 	void createShadowUBOs();
-	void createShadowPassDescriptorSets(VeDescriptorPool& descriptor_pool, const vk::raii::DescriptorSetLayout& shadow_global_set_layout);
+	void createShadowPassDescriptorSets(VeDescriptorPool& descriptor_pool);
 	void createShadowTextureDescriptorSets(VeDescriptorPool& descriptor_pool);
 	void renderShadowMap(VeFrameInfo& frame_info, uint32_t light_index) const;
 
 	VeDevice& m_ve_device;
 
 	std::filesystem::path m_shader_path;
+
+	// Shadow global descriptor set layout (for shadow pass UBO)
+	std::unique_ptr<VeDescriptorSetLayout> m_shadow_global_set_layout;
 
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_ve_pipeline;

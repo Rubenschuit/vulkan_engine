@@ -26,7 +26,6 @@ static_assert(sizeof(SimplePushConstantData) <= 128, "Push constants must be 128
 ShadowRenderSystem::ShadowRenderSystem(
 	VeDevice& device,
 	VeDescriptorPool& descriptor_pool,
-	const vk::raii::DescriptorSetLayout& shadow_global_set_layout,
 	const vk::raii::DescriptorSetLayout& material_set_layout,
 	std::filesystem::path shader_path)
 	: m_ve_device(device), m_shader_path(shader_path) {
@@ -38,36 +37,41 @@ ShadowRenderSystem::ShadowRenderSystem(
 	m_light_projs.resize(MAX_FRAMES_IN_FLIGHT);
 
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-		m_shadow_ubos[i].resize(MAX_LIGHTS);
-		m_shadow_global_descriptor_sets[i].reserve(MAX_LIGHTS);
+		m_shadow_ubos[i].resize(MAX_SHADOW_LIGHTS);
+		m_shadow_global_descriptor_sets[i].reserve(MAX_SHADOW_LIGHTS);
 	}
 
 	// Create shadow resources (images, sampler, descriptor sets)
 	createShadowResources();
 
-	// Create shadow descriptor set layout
+	// Create shadow global descriptor set layout (for shadow pass UBO)
+	m_shadow_global_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
+		.addBinding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eAllGraphics)
+		.build();
+
+	// Create shadow descriptor set layout (for sampling shadow maps)
 	m_shadow_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eSampler, vk::ShaderStageFlagBits::eFragment)
 		.addBinding(1, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eFragment)
 		.build();
 
 	createShadowUBOs();
-	createShadowPassDescriptorSets(descriptor_pool, shadow_global_set_layout);
+	createShadowPassDescriptorSets(descriptor_pool);
 	createShadowTextureDescriptorSets(descriptor_pool);
-	createPipelineLayout(shadow_global_set_layout, material_set_layout);
+	createPipelineLayout(material_set_layout);
 	createPipeline(m_shadow_depth_format);
 }
 
 ShadowRenderSystem::~ShadowRenderSystem() {
 }
 
-void ShadowRenderSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& shadow_global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout) {
+void ShadowRenderSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& material_set_layout) {
 	vk::PushConstantRange push_constant_range{
 		.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 		.offset = 0,
 		.size = sizeof(SimplePushConstantData)
 	};
-	vk::DescriptorSetLayout layouts[2] = {*shadow_global_set_layout, *material_set_layout};
+	vk::DescriptorSetLayout layouts[2] = {*m_shadow_global_set_layout->getDescriptorSetLayout(), *material_set_layout};
 	vk::PipelineLayoutCreateInfo pipeline_layout_info{
 		.sType = vk::StructureType::ePipelineLayoutCreateInfo,
 		.setLayoutCount = 2,
@@ -111,9 +115,9 @@ void ShadowRenderSystem::createShadowUBOs() {
 	//assert(buffer_size % 16 == 0 && "Shadow uniform buffer size must be a multiple of 16 bytes");
 	assert(buffer_size <= m_ve_device.getDeviceProperties().limits.maxUniformBufferRange && "Shadow uniform buffer size exceeds maximum limit");
 
-	// Create one buffer for each frame and each light
+	// Create one buffer for each frame and each shadow-casting light
 	for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
-		for (size_t light = 0; light < MAX_LIGHTS; light++) {
+		for (size_t light = 0; light < MAX_SHADOW_LIGHTS; light++) {
 			m_shadow_ubos[frame][light] = std::make_unique<VeBuffer>(
 				m_ve_device,
 				buffer_size,
@@ -127,30 +131,23 @@ void ShadowRenderSystem::createShadowUBOs() {
 	}
 }
 
-void ShadowRenderSystem::createShadowPassDescriptorSets(VeDescriptorPool& descriptor_pool, const vk::raii::DescriptorSetLayout& shadow_global_set_layout) {
-	// Create descriptor sets for shadow pass (per-frame, per-light) - contains view/proj matrices
+void ShadowRenderSystem::createShadowPassDescriptorSets(VeDescriptorPool& descriptor_pool) {
+	// Create descriptor sets for shadow pass (per-frame, per-shadow-light) - contains view/proj matrices
 	for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
 		m_shadow_global_descriptor_sets[frame].clear();
 
-		for (size_t light = 0; light < MAX_LIGHTS; light++) {
-			vk::raii::DescriptorSet descriptor_set{nullptr};
-			descriptor_pool.allocateDescriptor(shadow_global_set_layout, descriptor_set);
-
-			// Update descriptor set with shadow UBO for this specific light
+		for (size_t light = 0; light < MAX_SHADOW_LIGHTS; light++) {
+			// Update descriptor set with shadow UBO for this specific shadow-casting light
 			vk::DescriptorBufferInfo buffer_info{
 				.buffer = *m_shadow_ubos[frame][light]->getBuffer(),
 				.offset = 0,
 				.range = sizeof(UniformBufferObject)
 			};
-			vk::WriteDescriptorSet descriptor_write{
-				.dstSet = *descriptor_set,
-				.dstBinding = 0,
-				.dstArrayElement = 0,
-				.descriptorCount = 1,
-				.descriptorType = vk::DescriptorType::eUniformBuffer,
-				.pBufferInfo = &buffer_info
-			};
-			m_ve_device.getDevice().updateDescriptorSets(descriptor_write, {});
+
+			vk::raii::DescriptorSet descriptor_set{nullptr};
+			VeDescriptorWriter(*m_shadow_global_set_layout, descriptor_pool)
+				.writeBuffer(0, &buffer_info)
+				.build(descriptor_set);
 
 			m_shadow_global_descriptor_sets[frame].push_back(std::move(descriptor_set));
 		}
@@ -167,7 +164,7 @@ void ShadowRenderSystem::createShadowResources() {
 		vk::FormatFeatureFlagBits::eDepthStencilAttachment | vk::FormatFeatureFlagBits::eSampledImage
 	);
 
-	// Create a single 2D array texture for all shadow maps (MAX_LIGHTS layers)
+	// Create a single 2D array texture for all shadow maps (MAX_SHADOW_LIGHTS layers)
 	m_shadow_map_array = std::make_unique<VeImage>(
 		m_ve_device,
 		SHADOW_MAP_RESOLUTION,
@@ -179,13 +176,13 @@ void ShadowRenderSystem::createShadowResources() {
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		vk::ImageAspectFlagBits::eDepth,
 		false,  // not cubemap
-		MAX_LIGHTS  // array layers
+		MAX_SHADOW_LIGHTS  // array layers
 	);
 
 	// Create individual layer views for rendering to specific layers
 	m_shadow_map_layer_views.clear();
-	m_shadow_map_layer_views.reserve(MAX_LIGHTS);
-	for (uint32_t i = 0; i < MAX_LIGHTS; i++) {
+	m_shadow_map_layer_views.reserve(MAX_SHADOW_LIGHTS);
+	for (uint32_t i = 0; i < MAX_SHADOW_LIGHTS; i++) {
 		m_shadow_map_layer_views.push_back(m_shadow_map_array->createLayerImageView(i));
 	}
 
@@ -208,69 +205,51 @@ void ShadowRenderSystem::createShadowTextureDescriptorSets(VeDescriptorPool& des
 	m_shadow_descriptor_sets.clear();
 	m_shadow_descriptor_sets.reserve(MAX_FRAMES_IN_FLIGHT);
 
+	// Prepare descriptor infos (need to persist during the build call)
+	vk::DescriptorImageInfo sampler_info{
+		.sampler = *m_shadow_sampler,
+		.imageView = nullptr,
+		.imageLayout = vk::ImageLayout::eUndefined
+	};
+
+	vk::DescriptorImageInfo image_info{
+		.sampler = nullptr,
+		.imageView = *m_shadow_map_array->getImageView(),
+		.imageLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal
+	};
+
+	// Create and update all per-frame shadow descriptor sets using the builder pattern
 	for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
 		vk::raii::DescriptorSet set{nullptr};
 		VeDescriptorWriter(*m_shadow_set_layout, descriptor_pool)
+			.writeImage(0, &sampler_info)   // binding 0: sampler
+			.writeImage(1, &image_info)      // binding 1: sampled image
 			.build(set);
 		m_shadow_descriptor_sets.push_back(std::move(set));
 	}
-
-	// Update all per-frame shadow descriptor sets (sampler and image)
-	for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
-		// Write sampler (binding 0)
-		vk::DescriptorImageInfo sampler_info{
-			.sampler = *m_shadow_sampler,
-			.imageView = nullptr,
-			.imageLayout = vk::ImageLayout::eUndefined
-		};
-		vk::WriteDescriptorSet sampler_write{
-			.dstSet = *m_shadow_descriptor_sets[frame],
-			.dstBinding = 0,
-			.dstArrayElement = 0,
-			.descriptorCount = 1,
-			.descriptorType = vk::DescriptorType::eSampler,
-			.pImageInfo = &sampler_info
-		};
-
-		// Write texture array (binding 1)
-		vk::DescriptorImageInfo image_info{
-			.sampler = nullptr,
-			.imageView = *m_shadow_map_array->getImageView(),
-			.imageLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal
-		};
-		vk::WriteDescriptorSet image_write{
-			.dstSet = *m_shadow_descriptor_sets[frame],
-			.dstBinding = 1,
-			.dstArrayElement = 0,
-			.descriptorCount = 1,
-			.descriptorType = vk::DescriptorType::eSampledImage,
-			.pImageInfo = &image_info
-		};
-
-		m_ve_device.getDevice().updateDescriptorSets({sampler_write, image_write}, {});
-	}
 }
 
+// Update the shadow UBO with the light data from the main UBO
 void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, const UniformBufferObject& ubo) {
-	if (ubo.num_lights == 0) {
-		VE_LOGW("Shadow system: no lights in UBO!");
+	if (ubo.num_shadow_lights == 0) {
+		VE_LOGW("Shadow system: no shadow-casting lights in UBO!");
 		m_light_views[frame_index].clear();
 		m_light_projs[frame_index].clear();
 		return;
 	}
 
-	m_light_views[frame_index].resize(ubo.num_lights);
-	m_light_projs[frame_index].resize(ubo.num_lights);
+	m_light_views[frame_index].resize(ubo.num_shadow_lights);
+	m_light_projs[frame_index].resize(ubo.num_shadow_lights);
 
-	// Update each light's cached data and write to its dedicated buffer
-	for (uint32_t light_index = 0; light_index < ubo.num_lights && light_index < MAX_LIGHTS; light_index++) {
-		m_light_views[frame_index][light_index] = ubo.point_lights[light_index].light_view;
-		m_light_projs[frame_index][light_index] = ubo.point_lights[light_index].light_proj;
+	// Update each shadow light's cached data and write to its dedicated buffer
+	for (uint32_t shadow_idx = 0; shadow_idx < ubo.num_shadow_lights && shadow_idx < MAX_SHADOW_LIGHTS; shadow_idx++) {
+		m_light_views[frame_index][shadow_idx] = ubo.shadow_lights[shadow_idx].light_view;
+		m_light_projs[frame_index][shadow_idx] = ubo.shadow_lights[shadow_idx].light_proj;
 
 		UniformBufferObject shadow_ubo{};
-		shadow_ubo.view = ubo.point_lights[light_index].light_view;
-		shadow_ubo.proj = ubo.point_lights[light_index].light_proj;
-		m_shadow_ubos[frame_index][light_index]->writeToBuffer(&shadow_ubo);
+		shadow_ubo.view = ubo.shadow_lights[shadow_idx].light_view;
+		shadow_ubo.proj = ubo.shadow_lights[shadow_idx].light_proj;
+		m_shadow_ubos[frame_index][shadow_idx]->writeToBuffer(&shadow_ubo);
 	}
 }
 
@@ -278,19 +257,19 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 	const auto& light_views = m_light_views[frame_info.current_frame];
 	const auto& light_projs = m_light_projs[frame_info.current_frame];
 
-	assert(light_views.size() == light_projs.size() && "Light views and projections must have same size");
+	assert(light_views.size() == light_projs.size() && "Shadow light views and projections must have same size");
 	assert(light_views.size() <= m_shadow_map_layer_views.size() && "Not enough shadow layer views");
 	if (light_views.empty()) {
 		return;
 	}
-	assert(light_views.size() <= MAX_LIGHTS && "Number of lights exceeds MAX_LIGHTS");
+	assert(light_views.size() <= MAX_SHADOW_LIGHTS && "Number of shadow-casting lights exceeds MAX_SHADOW_LIGHTS");
 
 	auto& command_buffer = frame_info.command_buffer;
 	vk::Extent2D shadow_extent{SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION};
 
 	for (size_t light_index = 0; light_index < light_views.size(); light_index++) {
-		assert(light_index < MAX_LIGHTS && "Light index exceeds MAX_LIGHTS");
-		assert(light_index < m_shadow_map_layer_views.size() && "Light index exceeds shadow layer views count");
+		assert(light_index < MAX_SHADOW_LIGHTS && "Shadow light index exceeds MAX_SHADOW_LIGHTS");
+		assert(light_index < m_shadow_map_layer_views.size() && "Shadow light index exceeds shadow layer views count");
 
 		// Begin depth-only rendering to shadow map (render to specific layer of array)
 		vk::RenderingAttachmentInfo depth_attachment{

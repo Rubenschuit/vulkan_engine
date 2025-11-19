@@ -10,9 +10,12 @@ struct VertexInput {
 struct PointLight {
 	float4 position;
 	float4 color; // .w = intensity
-	float4x4 light_view;          // light's view matrix (for shadow pass)
-	float4x4 light_proj;          // light's projection matrix (for shadow pass)
-	//float shadow_bias;
+};
+
+struct ShadowLight {
+	float4x4 light_view;
+	float4x4 light_proj;
+	float4 light_index_padding; // x = light_index, yzw = padding
 };
 
 // Reminder: keep this in sync with the RenderMode enum in ve_frame_info.hpp
@@ -37,7 +40,9 @@ struct UniformBuffer {
 	float4 camera_position;
 	float4 ambient_light_color;
 	PointLight point_lights[20]; // MAX_LIGHTS TODO use specialization constant
+	ShadowLight shadow_lights[3]; // MAX_SHADOW_LIGHTS
 	uint32_t num_lights;
+	uint32_t num_shadow_lights;
 	uint32_t render_mode; // see RenderMode enum
 	uint32_t shadow_mode;
 	float shadow_bias;
@@ -61,7 +66,7 @@ struct VertexOutput {
 	float3 frag_normal_world;
 	float3 frag_color;
 	float2 frag_tex_coord;
-	float4 shadow_coord[6];
+	float4 shadow_coord[3]; // MAX_SHADOW_LIGHTS
 };
 
 static const float4x4 bias_matrix = float4x4(
@@ -92,8 +97,8 @@ VertexOutput vertMain(VertexInput input) {
 
 	 // calculate shadow coordinates only if shadows are enabled
 	if (ubo.shadow_mode != 0) {
-		for (uint32_t i = 0; i < ubo.num_lights; i++) {
-			output.shadow_coord[i] = mul(bias_matrix, mul(ubo.point_lights[i].light_proj, mul(ubo.point_lights[i].light_view, mul(push_constants.transform, float4(input.in_pos, 1.0)))));
+		for (uint32_t i = 0; i < ubo.num_shadow_lights; i++) {
+			output.shadow_coord[i] = mul(bias_matrix, mul(ubo.shadow_lights[i].light_proj, mul(ubo.shadow_lights[i].light_view, mul(push_constants.transform, float4(input.in_pos, 1.0)))));
 		}
 	}
     return output;
@@ -131,7 +136,7 @@ float calculateShadowPCF(uint32_t light_index, float4 shadow_coord) {
 	float shadow = 0.0;
 	int3 texel_size;
 	shadow_maps.GetDimensions(texel_size.x, texel_size.y, texel_size.z);
-	float scale = 1.5f;
+	float scale = 0.5f;
 	float dx = scale / texel_size.x;
 	float dy = scale / texel_size.y;
 
@@ -181,6 +186,29 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	}
 
 	// Simple lighting and shadow for non-textured objects
+	// Create mapping from light index to shadow term (defaults to 1.0 = no shadow)
+	float shadow_terms[20]; // MAX_LIGHTS
+	for (uint32_t i = 0; i < ubo.num_lights; i++) {
+		shadow_terms[i] = 1.0;
+	}
+
+	// Calculate shadows for shadow-casting lights
+	if (ubo.shadow_mode != ShadowMode::DISABLED) {
+		for (uint32_t shadow_idx = 0; shadow_idx < ubo.num_shadow_lights; shadow_idx++) {
+			uint32_t light_idx = uint32_t(ubo.shadow_lights[shadow_idx].light_index_padding.x);
+
+			if (ubo.shadow_mode == ShadowMode::REGULAR) {
+				shadow_terms[light_idx] = calculateShadowTerm(shadow_idx,
+					in_vert.shadow_coord[shadow_idx] / in_vert.shadow_coord[shadow_idx].w, float2(0.0, 0.0));
+			}
+			else if (ubo.shadow_mode == ShadowMode::PCF) {
+				shadow_terms[light_idx] = calculateShadowPCF(shadow_idx,
+					in_vert.shadow_coord[shadow_idx] / in_vert.shadow_coord[shadow_idx].w);
+			}
+		}
+	}
+
+	// Apply lighting with shadows
 	float3 diffuse_light = ubo.ambient_light_color.xyz * ubo.ambient_light_color.w;
 	for (uint32_t i = 0; i < ubo.num_lights; i++) {
 		float3 light_dir = ubo.point_lights[i].position.xyz - in_vert.frag_pos_world;
@@ -190,21 +218,9 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		if (NdotL <= 0.0)
 			continue;
 
-		// Calculate shadow term
-		float shadow = 1.0;
-		if (ubo.shadow_mode == ShadowMode::DISABLED) {
-			shadow = 1.0;
-		}
-		else if (ubo.shadow_mode == ShadowMode::REGULAR) {
-			shadow = calculateShadowTerm(i, in_vert.shadow_coord[i] / in_vert.shadow_coord[i].w, float2(0.0, 0.0));
-		}
-		else if (ubo.shadow_mode == ShadowMode::PCF) {
-			shadow = calculateShadowPCF(i, in_vert.shadow_coord[i] / in_vert.shadow_coord[i].w);
-		}
-
 		float attenuation = 1.0 / (0.01 * dot(light_dir, light_dir) + 0.1);
 		float3 light_color = ubo.point_lights[i].color.xyz * ubo.point_lights[i].color.w * attenuation;
-		diffuse_light += light_color * NdotL * shadow;
+		diffuse_light += light_color * NdotL * shadow_terms[i];
 	}
 
 	float3 final_color = base_color.rgb * diffuse_light;

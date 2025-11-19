@@ -15,15 +15,16 @@ public:
 
     VeScene(const VeScene&) = delete;
     VeScene& operator=(const VeScene&) = delete;
-    
-       
+
     std::unordered_map<uint32_t, VeGameObject>& getGameObjects();
     const std::unordered_map<uint32_t, VeGameObject>& getGameObjects() const;
 
-    
+
 private:
     std::string m_name;
     std::unordered_map<uint32_t, VeGameObject> m_game_objects;
+	uint32_t m_num_lights;
+	uint32_t m_num_shadow_casting_lights;
 
     friend class VeGameObject;
 };

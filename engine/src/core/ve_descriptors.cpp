@@ -15,9 +15,9 @@ VeDescriptorSetLayout::Builder &VeDescriptorSetLayout::Builder::addBinding(
 	vk::DescriptorSetLayoutBinding layout_binding{
 		.binding = binding,
 		.descriptorType = descriptor_type,
-		.pImmutableSamplers = nullptr,
 		.descriptorCount = count,
-		.stageFlags = stage_flags
+		.stageFlags = stage_flags,
+		.pImmutableSamplers = nullptr
 	};
 	m_bindings[binding] = layout_binding;
 	return *this;

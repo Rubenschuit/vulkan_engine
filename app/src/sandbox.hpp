@@ -1,5 +1,6 @@
 #pragma once
 #include "VEngine/VEngine.hpp"
+#include "game/ve_scene.hpp"
 #include <filesystem>
 #include <memory>
 
@@ -46,9 +47,9 @@ private:
 	std::unique_ptr<VeTexture> m_simple_albedo_texture;
 	vk::raii::DescriptorSet m_simple_material_descriptor_set{nullptr};
 
-	// Scenes currently are just a collection of game objects
-	std::unordered_map<uint32_t, VeGameObject> m_simple_scene;
-	std::unordered_map<uint32_t, VeGameObject> m_sponza_scene;
+	// Scenes
+	std::unique_ptr<VeScene> m_simple_scene;
+	std::unique_ptr<VeScene> m_sponza_scene;
 	uint32_t sponza_id;
 
 	// UI context captured during renderUI(), consumed in updateParticles() for example.
@@ -62,9 +63,6 @@ private:
 	std::unique_ptr<PointLightSystem> m_point_light_system;
 	std::unique_ptr<ParticleSystem> m_particle_system;
 	std::unique_ptr<ShadowRenderSystem> m_shadow_render_system;
-
-	// Shadow global descriptor set layout (for shadow pass UBO, stays in Sandbox)
-	std::unique_ptr<VeDescriptorSetLayout> m_shadow_global_set_layout;
 };
 
 }

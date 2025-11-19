@@ -12,8 +12,12 @@ struct VertexInput {
 struct PointLight {
 	float4 position;
 	float4 color; // .w = intensity
+};
+
+struct ShadowLight {
 	float4x4 light_view;
 	float4x4 light_proj;
+	float4 light_index_padding; // x = light_index, yzw = padding
 };
 
 // Reminder: keep this in sync with the RenderMode enum in ve_frame_info.hpp
@@ -38,7 +42,9 @@ struct UniformBuffer {
 	float4 camera_position; // .w unused
 	float4 ambient_light_color;
 	PointLight point_lights[20]; // constant must be equal to ve::MAX_LIGHTS, TODO use specialization constant
+	ShadowLight shadow_lights[3]; // MAX_SHADOW_LIGHTS
 	uint32_t num_lights;
+	uint32_t num_shadow_lights;
 	uint32_t render_mode; // see RenderMode enum
 	uint32_t shadow_mode;
 	float shadow_bias;
@@ -64,7 +70,7 @@ struct VertexOutput {
 	float3 frag_bitangent_world;
 	float3 frag_color;
 	float2 frag_tex_coord;
-	float4 shadow_coord[7]; // TODO use specialization constant
+	float4 shadow_coord[3]; // MAX_SHADOW_LIGHTS
 	uint frag_material_index;
 };
 
@@ -112,8 +118,8 @@ VertexOutput vertMain(VertexInput input) {
     // calculate shadow coordinates only if shadows are enabled
 	// TODO: precompute bias matrix * light_proj * light_view ?
 	if (ubo.shadow_mode != ShadowMode::DISABLED) {
-		for (uint32_t i = 0; i < ubo.num_lights; i++) {
-			output.shadow_coord[i] = mul(bias_matrix, mul(ubo.point_lights[i].light_proj, mul(ubo.point_lights[i].light_view, mul(push_constants.transform, float4(input.in_pos, 1.0)))));
+		for (uint32_t i = 0; i < ubo.num_shadow_lights; i++) {
+			output.shadow_coord[i] = mul(bias_matrix, mul(ubo.shadow_lights[i].light_proj, mul(ubo.shadow_lights[i].light_view, mul(push_constants.transform, float4(input.in_pos, 1.0)))));
 		}
 	}
 
@@ -157,13 +163,12 @@ float calculateShadowPCF(uint32_t light_index, float4 shadow_coord) {
 	float shadow = 0.0;
 	int3 texel_size;
 	shadow_maps.GetDimensions(texel_size.x, texel_size.y, texel_size.z);
-	float scale = 1.5f;
+	float scale = 1.0f;
 	float dx = scale / texel_size.x;
 	float dy = scale / texel_size.y;
 
 	int count = 0;
 	int range = 1; // sample shadow with offsets in [-range, range]
-
 
 	for (int x = -range; x <= range; x++) {
 		for (int y = -range; y <= range; y++) {
@@ -264,6 +269,28 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	// Calculate Fresnel F0
 	float3 F0 = lerp(float3(0.04), albedo.rgb, metallic);
 
+	// Create mapping from light index to shadow term (defaults to 1.0 = no shadow)
+	float shadow_terms[20]; // MAX_LIGHTS
+	for (uint32_t i = 0; i < ubo.num_lights; i++) {
+		shadow_terms[i] = 1.0;
+	}
+
+	// Calculate shadows for shadow-casting lights
+	if (ubo.shadow_mode != ShadowMode::DISABLED) {
+		for (uint32_t shadow_idx = 0; shadow_idx < ubo.num_shadow_lights; shadow_idx++) {
+			uint32_t light_idx = uint32_t(ubo.shadow_lights[shadow_idx].light_index_padding.x);
+
+			if (ubo.shadow_mode == ShadowMode::REGULAR) {
+				shadow_terms[light_idx] = calculateShadowTerm(shadow_idx,
+					in_vert.shadow_coord[shadow_idx] / in_vert.shadow_coord[shadow_idx].w, float2(0.0, 0.0));
+			}
+			else if (ubo.shadow_mode == ShadowMode::PCF) {
+				shadow_terms[light_idx] = calculateShadowPCF(shadow_idx,
+					in_vert.shadow_coord[shadow_idx] / in_vert.shadow_coord[shadow_idx].w);
+			}
+		}
+	}
+
 	// Accumulate light contribution
 	float3 Lo = float3(0.0);
 	// For every light in the current scene
@@ -277,18 +304,6 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		// Early exit if surface is facing away from light
 		if (NdotL <= 0.0)
 			continue;
-
-		// Calculate shadow term using helper function
-		float shadow = 1.0;
-		if (ubo.shadow_mode == ShadowMode::DISABLED) {
-			shadow = 1.0;
-		}
-		else if (ubo.shadow_mode == ShadowMode::REGULAR) {
-			shadow = calculateShadowTerm(i, in_vert.shadow_coord[i] / in_vert.shadow_coord[i].w, float2(0.0, 0.0));
-		}
-		else if (ubo.shadow_mode == ShadowMode::PCF) {
-			shadow = calculateShadowPCF(i, in_vert.shadow_coord[i] / in_vert.shadow_coord[i].w);
-		}
 
 		float NdotV = clamp(dot(world_normal, view_dir), 0.0, 1.0);
 		float3 H = normalize(view_dir + L);
@@ -314,7 +329,7 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		kD *= 1.0 - metallic;
 
 		// Add together the diffuse and specular, multiplied by shadow term
-		Lo += (kD * albedo.rgb / PI + specular) * radiance * NdotL * shadow;
+		Lo += (kD * albedo.rgb / PI + specular) * radiance * NdotL * shadow_terms[i];
 	}
 
 	// Ambient lighting

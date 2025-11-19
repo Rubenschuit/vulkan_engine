@@ -16,8 +16,12 @@ namespace ve {
 struct PointLight {
 	glm::vec4 position;
 	glm::vec4 color; // w indicates light intensity
-	glm::mat4 light_view;          // light's view matrix
-	glm::mat4 light_proj;          // light's projection matrix
+};
+
+struct ShadowLight {
+	glm::mat4 light_view;
+	glm::mat4 light_proj;
+	glm::vec4 light_index_padding;  // x = light_index, yzw = padding (ensures 16-byte alignment)
 };
 
 enum RenderMode {
@@ -41,7 +45,9 @@ struct UniformBufferObject {
 	glm::vec4 camera_position;
 	glm::vec4 ambient_light_color = DEFAULT_AMBIENT_LIGHT_COLOR;
 	PointLight point_lights[ve::MAX_LIGHTS]; // reserved for MAX_LIGHTS point lights
+	ShadowLight shadow_lights[ve::MAX_SHADOW_LIGHTS]; // reserved for MAX_SHADOW_LIGHTS shadow-casting lights
 	uint32_t num_lights = 0; // actual number of point lights ( <= MAX_LIGHTS)
+	uint32_t num_shadow_lights = 0; // actual number of shadow-casting lights ( <= MAX_SHADOW_LIGHTS)
 	uint32_t render_mode = RenderMode::BRDF;
 	uint32_t shadow_mode = ShadowMode::REGULAR;
 	float shadow_bias = ve::SHADOW_BIAS;

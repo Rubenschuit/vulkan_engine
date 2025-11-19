@@ -102,13 +102,16 @@ void PointLightSystem::render(VeFrameInfo& frame_info) const {
 
 // Update UBO with point light data for global access in shaders
 void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObject& ubo) {
+	// Single pass: populate both point_lights and shadow_lights arrays
 	uint32_t num_lights = 0;
+	uint32_t num_shadow_lights = 0;
+
 	for (auto& [id, obj] : frame_info.game_objects) {
 		if (obj.point_light_component == nullptr)
 			continue;
-		assert(num_lights <= MAX_LIGHTS && "Number of point lights exceeds MAX_LIGHTS");
+		assert(num_lights < MAX_LIGHTS && "Number of point lights exceeds MAX_LIGHTS");
 
-		// rotate point lights in circle
+		// Rotate point lights in circle
 		if (obj.point_light_component->rotates) {
 			auto speed = 0.04f;
 			auto rotate_matrix = glm::rotate(glm::mat4(1.0f), speed * frame_info.frame_time, glm::vec3(0.0f, 0.0f, 1.0f));
@@ -117,30 +120,35 @@ void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBuffe
 			obj.transform.translation = glm::vec3{pos};
 		}
 
+		// Populate point light data
 		ubo.point_lights[num_lights].position = glm::vec4{obj.transform.translation, 1.0f};
 		ubo.point_lights[num_lights].color = glm::vec4{obj.color, obj.point_light_component->intensity};
 
-		glm::vec3 light_pos = obj.transform.translation;
-		// temp for testing
-		glm::vec3 scene_center = glm::vec3(0.0f, 0.0f, 0.0f);
-		glm::vec3 view_up = glm::vec3(0.0f, 1.0f, 0.0f);
+		// If this light casts shadows, add it to shadow_lights array
+		if (obj.point_light_component->casts_shadow && num_shadow_lights < MAX_SHADOW_LIGHTS) {
+			glm::vec3 light_pos = obj.transform.translation;
+			glm::vec3 scene_center = glm::vec3(0.0f, 0.0f, 0.0f);
+			glm::vec3 view_up = glm::vec3(0.0f, 1.0f, 0.0f);
+			glm::mat4 light_view = glm::lookAt(light_pos, scene_center, view_up);
+			float near_plane = 1.0f;
+			float far_plane = 400.0f;
+			glm::mat4 light_proj = glm::perspective(glm::radians(100.0f), 1.0f, near_plane, far_plane);
 
-		// Create view matrix: light looks from its position down at the scene center
-		glm::mat4 light_view = glm::lookAt(light_pos, scene_center, view_up);
-
-		//float ortho_size = 50.0f;
-		float near_plane = 1.0f;
-		float far_plane = 400.0f;
-		glm::mat4 light_proj = glm::perspective(glm::radians(100.0f), 1.0f, near_plane, far_plane);
-		//glm::mat4 light_proj = glm::ortho(-ortho_size, ortho_size, -ortho_size, ortho_size, near_plane, far_plane);
-
-		// Store view and projection separately for shadow pass, and combined for main shader
-		ubo.point_lights[num_lights].light_view = light_view;
-		ubo.point_lights[num_lights].light_proj = light_proj;
-		//ubo.point_lights[num_lights].shadow_bias = ve::SHADOW_BIAS;
+			ubo.shadow_lights[num_shadow_lights].light_index_padding.x = static_cast<float>(num_lights);
+			ubo.shadow_lights[num_shadow_lights].light_view = light_view;
+			ubo.shadow_lights[num_shadow_lights].light_proj = light_proj;
+			num_shadow_lights++;
+		}
 
 		num_lights++;
 	}
+
 	ubo.num_lights = num_lights;
+	ubo.num_shadow_lights = num_shadow_lights;
+	static bool first_log = true;
+	if (first_log) {
+		first_log = false;
+		VE_LOGI("Point light system: updated UBO with " << num_lights << " lights, " << num_shadow_lights << " shadow-casting");
+	}
 }
 } // namespace ve
