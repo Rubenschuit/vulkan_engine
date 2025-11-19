@@ -34,3 +34,5 @@
 #include "systems/point_light_system.hpp"
 #include "systems/particle_system.hpp"
 #include "systems/skybox_render_system.hpp"
+#include "systems/shadow_render_system.hpp"
+#include "systems/pbr_render_system.hpp"

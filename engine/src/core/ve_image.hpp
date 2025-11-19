@@ -37,6 +37,9 @@ public:
 	vk::ImageAspectFlags getAspectFlags() const { return m_aspect_flags; }
 	vk::Extent2D getExtent2D() const { return vk::Extent2D{ m_width, m_height }; }
 
+	// Create an image view for a specific layer (for rendering to array layers)
+	vk::raii::ImageView createLayerImageView(uint32_t layer) const;
+
 	//debug
 	void printDebugInfo() const {
 		if (m_image_view_type == vk::ImageViewType::e2D)

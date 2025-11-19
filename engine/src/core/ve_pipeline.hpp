@@ -2,6 +2,7 @@
 It also creates the necessary shader modules. */
 #pragma once
 #include "ve_export.hpp"
+
 #include <vulkan/vulkan_raii.hpp>
 #include <string>
 #include <vector>
@@ -28,9 +29,9 @@ struct PipelineConfigInfo {
 	vk::PipelineColorBlendStateCreateInfo color_blend_info{};
 	vk::PipelineLayout pipeline_layout = nullptr;
 	vk::Format color_format = vk::Format::eUndefined;
+	vk::Format depth_format = vk::Format::eUndefined;
 	std::vector<vk::VertexInputAttributeDescription> attribute_descriptions{};
 	std::vector<vk::VertexInputBindingDescription> binding_descriptions{};
-	//vk::Format depth_format = vk::Format::eUndefined;
 };
 
 class VENGINE_API VePipeline {

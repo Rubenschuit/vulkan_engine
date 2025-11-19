@@ -37,6 +37,8 @@ public:
 		static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptions();
 		// for simple models with no material index
 		static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptionsSimple();
+		// for shadow mapping (only position)
+		static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptionsShadow();
 		bool operator==(const Vertex& other) const {
 			return pos == other.pos &&
 			       color == other.color &&
@@ -108,6 +110,8 @@ template<> struct std::hash<ve::VeModel::Vertex> {
 		seed ^= std::hash<glm::vec3>()(v.color) + 0x9e3779b9 + (seed<<6) + (seed>>2);
 		seed ^= std::hash<glm::vec3>()(v.normal) + 0x9e3779b9 + (seed<<6) + (seed>>2);
 		seed ^= std::hash<glm::vec2>()(v.tex_coord) + 0x9e3779b9 + (seed<<6) + (seed>>2);
+		seed ^= std::hash<glm::vec4>()(v.tangent) + 0x9e3779b9 + (seed<<6) + (seed>>2);
+		seed ^= std::hash<uint32_t>()(v.material_index) + 0x9e3779b9 + (seed<<6) + (seed>>2);
 		return seed;
 	}
 };

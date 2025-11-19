@@ -18,7 +18,7 @@ VeModel::VeModel(VeDevice& device, const std::vector<Vertex>& vertices, const st
 	createIndexBuffers(indices);
 }
 
-// Loads a model from a glTF file and creates a vertex and index buffers.
+// Loads a model from a gltf file and creates vertex and index buffers.
 // If the model has material textures, they are loaded and stored in the MaterialTextures struct.
 VeModel::VeModel(VeDevice& device, const std::filesystem::path& model_path) : m_ve_device(device) {
     tinygltf::Model model;
@@ -314,6 +314,7 @@ void VeModel::createIndexBuffers(const std::vector<uint32_t>& indices) {
 	m_ve_device.copyBuffer(staging_buffer.getBuffer(), m_index_buffer->getBuffer(), buffer_size);
 }
 
+// Creates material textures for a pbr model
 void VeModel::createMaterialTextures(
 		const std::vector<std::filesystem::path>& albedo_paths,
 		const std::vector<std::filesystem::path>& normal_paths,
@@ -326,6 +327,7 @@ void VeModel::createMaterialTextures(
 	m_material_textures.metallic_roughness_texture = std::make_shared<VeTexture>(m_ve_device, metallic_roughness_paths, vk::Format::eR8G8B8A8Unorm);
 }
 
+// Creates a descriptor set for a pbr model with textures
 void VeModel::createDescriptorSet(VeDescriptorPool& pool, VeDescriptorSetLayout& set_layout) {
 	auto albedo_info = m_material_textures.albedo_texture->getDescriptorInfo();
 	auto normal_info = m_material_textures.normal_texture->getDescriptorInfo();
@@ -438,6 +440,17 @@ std::vector<vk::VertexInputAttributeDescription> VeModel::Vertex::getAttributeDe
 		.offset = offsetof(Vertex, material_index)
 	};
 
+	return attribute_descriptions;
+}
+
+std::vector<vk::VertexInputAttributeDescription> VeModel::Vertex::getAttributeDescriptionsShadow() {
+	std::vector<vk::VertexInputAttributeDescription> attribute_descriptions(1);
+	attribute_descriptions[0] = vk::VertexInputAttributeDescription{
+		.location = 0,
+		.binding = 0,
+		.format = vk::Format::eR32G32B32Sfloat,
+		.offset = offsetof(Vertex, pos)
+	};
 	return attribute_descriptions;
 }
 }

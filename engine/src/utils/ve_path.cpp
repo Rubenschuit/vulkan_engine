@@ -10,30 +10,22 @@
 
 namespace ve {
 
-std::filesystem::path getPathToRunningExeWindows() {
-#if _MSC_VER && !__INTEL_COMPILER
-    std::vector<wchar_t> buf(MAX_PATH);
-    DWORD len = GetModuleFileNameW(NULL, buf.data(), static_cast<DWORD>(buf.size()));
-	assert(len > 0 && "GetModuleFileNameW failed");
-    if (len < buf.size()) {
-        return std::filesystem::path(std::wstring(buf.data(), len));
-    }
-    // Path too long, grow buffer
-    buf.resize(len + 1);
-    len = GetModuleFileNameW(NULL, buf.data(), static_cast<DWORD>(buf.size()));
-    return std::filesystem::path(std::wstring(buf.data(), len));
-#else
-    // For non-Windows platforms, this function should not be called
-	VE_LOGE("getPathToRunningExe should not be called on non-Windows platforms");
-    return std::filesystem::path();
-#endif
-}
-
 std::filesystem::path getWorkingDirectory(char** argv) {
 	// Get executable path
 	std::filesystem::path exe_path = argv[0];
 #if _MSC_VER && !__INTEL_COMPILER
-	exe_path = getPathToRunningExeWindows();
+	std::vector<wchar_t> buf(MAX_PATH);
+	DWORD len = GetModuleFileNameW(NULL, buf.data(), static_cast<DWORD>(buf.size()));
+	assert(len > 0 && "GetModuleFileNameW failed");
+	if (len < buf.size()) {
+		exe_path = std::filesystem::path(std::wstring(buf.data(), len));
+	}
+	else {
+		// Path too long, grow buffer
+		buf.resize(len + 1);
+		len = GetModuleFileNameW(NULL, buf.data(), static_cast<DWORD>(buf.size()));
+		exe_path = std::filesystem::path(std::wstring(buf.data(), len));
+	}
 #else
 	// Resolve relative paths to absolute
 	if (!exe_path.is_absolute()) {
@@ -65,7 +57,6 @@ std::filesystem::path getWorkingDirectory(char** argv) {
 
 	// Fail with assertion
 	assert(false && "Failed to find project root (models/textures folders not found)");
-	VE_LOGD("Found working directory: " << search);
 	return search;
 }
 

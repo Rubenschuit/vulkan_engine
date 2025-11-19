@@ -7,6 +7,7 @@
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace ve {
 
@@ -109,7 +110,7 @@ void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBuffe
 
 		// rotate point lights in circle
 		if (obj.point_light_component->rotates) {
-			auto speed = 0.4f;
+			auto speed = 0.04f;
 			auto rotate_matrix = glm::rotate(glm::mat4(1.0f), speed * frame_info.frame_time, glm::vec3(0.0f, 0.0f, 1.0f));
 			auto pos = glm::vec4{obj.transform.translation, 1.0f};
 			pos = rotate_matrix * pos;
@@ -118,9 +119,28 @@ void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBuffe
 
 		ubo.point_lights[num_lights].position = glm::vec4{obj.transform.translation, 1.0f};
 		ubo.point_lights[num_lights].color = glm::vec4{obj.color, obj.point_light_component->intensity};
+
+		glm::vec3 light_pos = obj.transform.translation;
+		// temp for testing
+		glm::vec3 scene_center = glm::vec3(0.0f, 0.0f, 0.0f);
+		glm::vec3 view_up = glm::vec3(0.0f, 1.0f, 0.0f);
+
+		// Create view matrix: light looks from its position down at the scene center
+		glm::mat4 light_view = glm::lookAt(light_pos, scene_center, view_up);
+
+		//float ortho_size = 50.0f;
+		float near_plane = 1.0f;
+		float far_plane = 400.0f;
+		glm::mat4 light_proj = glm::perspective(glm::radians(100.0f), 1.0f, near_plane, far_plane);
+		//glm::mat4 light_proj = glm::ortho(-ortho_size, ortho_size, -ortho_size, ortho_size, near_plane, far_plane);
+
+		// Store view and projection separately for shadow pass, and combined for main shader
+		ubo.point_lights[num_lights].light_view = light_view;
+		ubo.point_lights[num_lights].light_proj = light_proj;
+		//ubo.point_lights[num_lights].shadow_bias = ve::SHADOW_BIAS;
+
 		num_lights++;
 	}
-
 	ubo.num_lights = num_lights;
 }
 } // namespace ve

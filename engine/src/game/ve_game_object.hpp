@@ -22,6 +22,7 @@ struct TransformComponent {
 struct PointLightComponent {
 	float intensity{1.0f};
 	bool rotates{ true };
+	bool casts_shadow{true};
 };
 
 class VENGINE_API VeGameObject {
@@ -38,6 +39,7 @@ public:
 	TransformComponent transform{};
 	glm::vec3 color{1.0f};
 	float has_texture{0.0f};
+	bool has_shadow{true};
 
 	// optional components can be nullptr
 	std::shared_ptr<VeModel> ve_model;

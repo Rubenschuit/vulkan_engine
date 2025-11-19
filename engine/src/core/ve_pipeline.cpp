@@ -132,17 +132,21 @@ void VePipeline::createGraphicsPipeline(
 		.vertexAttributeDescriptionCount = static_cast<uint32_t>(config_info.attribute_descriptions.size()),
 		.pVertexAttributeDescriptions = config_info.attribute_descriptions.data()
 	};
-	vk::Format depth_format = m_ve_device.findSupportedFormat(
-		{vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint},
-		vk::ImageTiling::eOptimal,
-		vk::FormatFeatureFlagBits::eDepthStencilAttachment
-	);
+	// Use provided depth format, or query for one if not specified
+	vk::Format depth_format = (config_info.depth_format != vk::Format::eUndefined)
+		? config_info.depth_format
+		: m_ve_device.findSupportedFormat(
+			{vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint},
+			vk::ImageTiling::eOptimal,
+			vk::FormatFeatureFlagBits::eDepthStencilAttachment
+		);
+	uint32_t color_attachment_count = (config_info.color_format == vk::Format::eUndefined) ? 0U : 1U;
 	vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo{
 		.sType = vk::StructureType::ePipelineRenderingCreateInfo,
 		.pNext = nullptr,
 		.viewMask = 0,
-		.colorAttachmentCount = 1,
-		.pColorAttachmentFormats = &config_info.color_format,
+		.colorAttachmentCount = color_attachment_count,
+		.pColorAttachmentFormats = (config_info.color_format == vk::Format::eUndefined) ? nullptr : &config_info.color_format,
 		.depthAttachmentFormat = depth_format,
 		.stencilAttachmentFormat = vk::Format::eUndefined
 	};

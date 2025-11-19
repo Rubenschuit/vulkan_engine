@@ -50,10 +50,9 @@ protected:
 
 	// Descriptor pool, layouts, sets
 	std::shared_ptr<VeDescriptorPool> m_global_pool{};
-
-	 // Layout for 1 global ubo
+	 // Layout for one global ubo
 	std::unique_ptr<VeDescriptorSetLayout> m_global_set_layout{};
-	// Layout for 3 material 2D texture array samplers. Should this be in the base class?
+	// Layout for three material 2D texture array samplers. Should this be in the base class?
 	std::unique_ptr<VeDescriptorSetLayout> m_material_set_layout{};
 
 	std::vector<vk::raii::DescriptorSet> m_global_descriptor_sets{};
@@ -64,7 +63,7 @@ protected:
 
 	// Camera settings
 	VeCamera m_camera;
-	float m_fov = glm::radians(80.0f);
+	float m_fov = glm::radians(80.0f); // Move to sandbox class
 	float m_near_plane = 0.1f;
 	float m_far_plane = 100000.0f;
 	float m_last_aspect{0.0f};

@@ -1,4 +1,4 @@
-#include "pch.hpp" // IWYU pragma: keep
+#include "pch.hpp"
 #include "ve_device.hpp"
 
 
@@ -271,7 +271,7 @@ void VeDevice::createLogicalDevice() {
 					vk::PhysicalDeviceVulkan13Features,
 					vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
 					vk::PhysicalDeviceTimelineSemaphoreFeatures> feature_chain = {
-		{.features = {.samplerAnisotropy = true}},
+		{.features = {.samplerAnisotropy = true, .depthClamp = true}},
 		{.shaderDrawParameters = true},
 		{.synchronization2 = true, .dynamicRendering = true},
 		{.extendedDynamicState = true },

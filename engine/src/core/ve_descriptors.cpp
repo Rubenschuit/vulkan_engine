@@ -1,6 +1,5 @@
 #include "ve_descriptors.hpp"
 
-// std
 #include <cassert>
 
 namespace ve {
@@ -16,6 +15,7 @@ VeDescriptorSetLayout::Builder &VeDescriptorSetLayout::Builder::addBinding(
 	vk::DescriptorSetLayoutBinding layout_binding{
 		.binding = binding,
 		.descriptorType = descriptor_type,
+		.pImmutableSamplers = nullptr,
 		.descriptorCount = count,
 		.stageFlags = stage_flags
 	};

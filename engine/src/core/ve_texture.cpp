@@ -15,7 +15,7 @@ VeTexture::VeTexture(VeDevice& ve_device, const std::filesystem::path& texture_p
 	createTextureSampler();
 }
 
-// no ktx yet
+// no ktx yet for arrays of textures
 VeTexture::VeTexture(VeDevice& ve_device, const std::vector<std::filesystem::path>& texture_paths, vk::Format format) : m_ve_device(ve_device) {
 	createTextureImageArraySTB(texture_paths, format);
 	createTextureSampler();
@@ -254,7 +254,7 @@ void VeTexture::createTextureImageArraySTB(const std::vector<std::filesystem::pa
 			pixels[i] = generateDefaultTexture(width, height, TextureType::METALLIC_ROUGHNESS);
 		else
 			pixels[i] = stbi_load(texture_paths[i].string().c_str(), &width, &height, &channels, STBI_rgb_alpha);
-		VE_LOGD("Loaded texture " << texture_paths[i].filename() << " with dimensions " << width << "x" << height);
+		//VE_LOGD("Loaded texture " << texture_paths[i].filename() << " with dimensions " << width << "x" << height);
 		assert(width == current_width && height == current_height && "All images in Texture Array must have the same width and height");
 		assert(pixels[i] != nullptr && "Failed to load or generate image");
 	}
@@ -265,6 +265,8 @@ void VeTexture::createTextureImageArraySTB(const std::vector<std::filesystem::pa
 	VE_LOGD("Texture paths read successfully");
 
 	// Concatenate all texture data into a single contiguous buffer in CPU memory
+	// TODO: skip this ?
+	/*
 	std::vector<uint8_t> combined_data(total_size);
 	uint8_t* dest_ptr = combined_data.data();
 	for (size_t i = 0; i < layer_count; i++) {
@@ -272,11 +274,13 @@ void VeTexture::createTextureImageArraySTB(const std::vector<std::filesystem::pa
 		dest_ptr += instance_size;
 	}
 	VE_LOGD("Combined data size: " << combined_data.size() << ", expected: " << total_size);
+	*/
 
+	// Create a local scope staging buffer
 	ve::VeBuffer staging_buffer(
 		m_ve_device,
-		total_size,
-		1,
+		instance_size,
+		layer_count,
 		vk::BufferUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 	);
@@ -284,7 +288,9 @@ void VeTexture::createTextureImageArraySTB(const std::vector<std::filesystem::pa
 	// Write all data to staging buffer in one operation
 	VE_LOGD("Buffer size: " << staging_buffer.getBufferSize() << ", expected: " << total_size);
 	staging_buffer.map();
-	staging_buffer.writeToBuffer(combined_data.data(), total_size, 0);
+	for (size_t i = 0; i < layer_count; i++) {
+		staging_buffer.writeToBuffer(pixels[i], instance_size, i * instance_size);
+	}
 
 	// Create image
 	m_texture_image = std::make_unique<ve::VeImage>(
@@ -343,7 +349,6 @@ void VeTexture::createTextureImageArraySTB(const std::vector<std::filesystem::pa
 	}
 }
 
-
 // Sets max anisotropy to the maximum value supported by the device or 16, whichever is lower
 void VeTexture::createTextureSampler() {
 	auto max_anisotropy = std::min(16.0f, m_ve_device.getDeviceProperties().limits.maxSamplerAnisotropy);
@@ -365,6 +370,31 @@ void VeTexture::createTextureSampler() {
 		.unnormalizedCoordinates = vk::False
 	};
 	m_texture_sampler = vk::raii::Sampler(m_ve_device.getDevice(), sampler_info);
+}
+
+vk::raii::Sampler VeTexture::createDepthCompareSampler(VeDevice& device) {
+	// MoltenVK doesn't support comparison samplers (mutableComparisonSamplers = false)
+	// Disable compare mode on macOS - we'll do comparison in shader instead
+	bool enable_compare = false;
+
+	vk::SamplerCreateInfo sampler_info{
+		.magFilter = vk::Filter::eLinear,
+		.minFilter = vk::Filter::eLinear,
+		.mipmapMode = vk::SamplerMipmapMode::eLinear,
+		.addressModeU = vk::SamplerAddressMode::eClampToBorder,
+		.addressModeV = vk::SamplerAddressMode::eClampToBorder,
+		.addressModeW = vk::SamplerAddressMode::eClampToBorder,
+		.mipLodBias = 0.0f,
+		.anisotropyEnable = vk::False,
+		.maxAnisotropy = 1.0f,
+		.compareEnable = enable_compare,
+		.compareOp = vk::CompareOp::eLess,
+		.minLod = 0.0f,
+		.maxLod = 0.0f,
+		.borderColor = vk::BorderColor::eFloatOpaqueWhite,  // outside shadow map = lit (clamp to border)
+		.unnormalizedCoordinates = vk::False
+	};
+	return vk::raii::Sampler(device.getDevice(), sampler_info);
 }
 
 stbi_uc* VeTexture::generateDefaultTexture(int width, int height, TextureType type) {

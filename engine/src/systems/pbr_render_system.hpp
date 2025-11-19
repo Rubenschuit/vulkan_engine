@@ -4,31 +4,28 @@
 #include "game/ve_frame_info.hpp"
 
 #include <memory>
-#include <vector>
 #include <filesystem>
 
 namespace ve {
-    // Forward declarations
-    class VeDevice;
-    class VePipeline;
+	class VeDevice;
+	class VePipeline;
 }
 
 namespace ve {
 
-class VENGINE_API SimpleRenderSystem {
+class VENGINE_API PbrRenderSystem {
 public:
-	SimpleRenderSystem(
+	PbrRenderSystem(
 		VeDevice& device,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		const vk::raii::DescriptorSetLayout& material_set_layout,
 		const vk::raii::DescriptorSetLayout& shadow_set_layout,
 		vk::Format color_format,
 		std::filesystem::path shader_path);
-	~SimpleRenderSystem();
+	~PbrRenderSystem();
 
-	//destroy copy and move constructors and assignment operators
-	SimpleRenderSystem(const SimpleRenderSystem&) = delete;
-	SimpleRenderSystem& operator=(const SimpleRenderSystem&) = delete;
+	PbrRenderSystem(const PbrRenderSystem&) = delete;
+	PbrRenderSystem& operator=(const PbrRenderSystem&) = delete;
 
 	void renderObjects(VeFrameInfo& frame_info) const;
 
@@ -40,11 +37,11 @@ private:
 	void createPipeline(vk::Format color_format);
 
 	VeDevice& m_ve_device;
-
 	std::filesystem::path m_shader_path;
 
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_ve_pipeline;
 };
-}
+
+} // namespace ve
 

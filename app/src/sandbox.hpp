@@ -1,8 +1,7 @@
 #pragma once
 #include "VEngine/VEngine.hpp"
 #include <filesystem>
-
-//TODO: move over more to base class?
+#include <memory>
 
 namespace ve {
 
@@ -19,30 +18,33 @@ public:
 	virtual void render(VeFrameInfo& frame_info) override;
 
 private:
-	void loadGameObjects();
 	void createUniformBuffers();
 	void createDescriptors();
+
 	void initSystems();
 	void initUI();
+	void loadGameObjects();
 
 	void updateParticles(VeFrameInfo& frame_info, InputActions& actions);
 	void renderAppWindows();
 
+	// model paths
 	const std::filesystem::path working_directory;
+	std::filesystem::path m_cube_model_path = working_directory / "models" / "cube.gltf";
+	std::filesystem::path m_viking_room_model_path = working_directory / "models" / "viking_room.gltf";
+	std::filesystem::path m_quad_model_path = working_directory / "models" / "quad.gltf";
+	std::filesystem::path m_flat_vase_model_path = working_directory / "models" / "flat_vase.gltf";
+	std::filesystem::path m_smooth_vase_model_path = working_directory / "models" / "smooth_vase.gltf";
+	std::filesystem::path m_sphere_model_path = working_directory / "models" / "sphere" / "scene.gltf";
+	// texture paths
+	std::filesystem::path m_texture_path = working_directory / "textures" / "mots.png";
+	std::filesystem::path m_skybox_path = working_directory / "textures" / "skybox" / "starfield_haze.ktx";
+	// Textures
+	VeTexture m_skybox = VeTexture(m_ve_device, m_skybox_path);
 
-	// Object paths
-	std::filesystem::path m_cube_model_path;
-	std::filesystem::path m_viking_room_model_path;
-	std::filesystem::path m_quad_model_path;
-	std::filesystem::path m_flat_vase_model_path;
-	std::filesystem::path m_smooth_vase_model_path;
-
-	// Texture paths
-	std::filesystem::path m_texture_path;
-	std::filesystem::path m_skybox_path;
-
-	// Textures. TODO: move to skybox model class
-	VeTexture m_skybox;
+	// temporary textures for simple scene
+	std::unique_ptr<VeTexture> m_simple_albedo_texture;
+	vk::raii::DescriptorSet m_simple_material_descriptor_set{nullptr};
 
 	// Scenes currently are just a collection of game objects
 	std::unordered_map<uint32_t, VeGameObject> m_simple_scene;
@@ -55,9 +57,14 @@ private:
 	// Render systems
 	std::unique_ptr<SkyboxRenderSystem> m_skybox_render_system;
 	std::unique_ptr<SimpleRenderSystem> m_simple_render_system;
+	std::unique_ptr<PbrRenderSystem> m_pbr_render_system;
 	std::unique_ptr<AxesRenderSystem> m_axes_render_system;
 	std::unique_ptr<PointLightSystem> m_point_light_system;
 	std::unique_ptr<ParticleSystem> m_particle_system;
+	std::unique_ptr<ShadowRenderSystem> m_shadow_render_system;
+
+	// Shadow global descriptor set layout (for shadow pass UBO, stays in Sandbox)
+	std::unique_ptr<VeDescriptorSetLayout> m_shadow_global_set_layout;
 };
 
 }

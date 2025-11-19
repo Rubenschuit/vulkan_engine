@@ -76,7 +76,7 @@ void VeApplication::updateCamera() {
 void VeApplication::updateUniformBuffer(uint32_t current_frame, UniformBufferObject& ubo) {
 	ubo.view = m_camera.getView();
 	ubo.proj = m_camera.getProj();
-	ubo.camera_position = m_camera.getPosition();
+	ubo.camera_position = glm::vec4{m_camera.getPosition(), 1.0f};
 	m_uniform_buffers[current_frame]->writeToBuffer(&ubo);
 	// No flush required with MEMORY_PROPERTY_HOST_COHERENT
 }

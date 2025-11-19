@@ -2,6 +2,7 @@
 // It sets up the working directory and starts a Sandbox::VeApplication instance.
 #include "ve_application.hpp"
 #include "utils/ve_path.hpp"
+#include "utils/ve_log.hpp"
 
 #include <filesystem>
 
@@ -14,6 +15,8 @@ int main(int argc, char** argv) {
 	(void)argc; // unused
 
 	std::filesystem::path working_directory = ve::getWorkingDirectory(argv);
+	VE_LOGD("Found working directory: " << working_directory);
+
 	auto* app = createApp(working_directory);
 	app->run();
 	delete app;

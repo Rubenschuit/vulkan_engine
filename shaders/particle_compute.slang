@@ -3,7 +3,7 @@
 struct UniformBuffer {
 	float4x4 view;
 	float4x4 proj;
-	float3 camera_position;
+	float4 camera_position;
 };
 [vk::binding(0, 0)]
 ConstantBuffer<UniformBuffer> g_ubo;
@@ -45,7 +45,7 @@ VertexOutput vertMain(VertexInput input, uint id : SV_VertexID) {
 
 	// Calculate scale based on camera distance to keep size consistent
 	float scale = input.pos.w; // base size
-	float distance = length(pos.xyz - g_ubo.camera_position);
+	float distance = length(pos.xyz - g_ubo.camera_position.xyz);
 	float distance_scale = 1.0f; // scale factor
 	// scale smoothly after 100 units
 	if (distance > 100.0f) {

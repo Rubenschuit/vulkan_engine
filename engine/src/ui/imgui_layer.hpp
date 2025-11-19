@@ -18,8 +18,11 @@ class VeRenderer;
 struct VENGINE_API UIContext {
 	// general
 	bool visible = false;
-	int current_scene = 2;
+	int current_scene = 1;
 	RenderMode render_mode = RenderMode::BRDF_MICROFACET;
+
+	// graphics settings
+	int shadow_mode = ShadowMode::REGULAR;
 
 	// particle system
 	float speed = 1.0f;

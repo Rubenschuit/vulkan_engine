@@ -33,6 +33,9 @@ public:
 	const vk::raii::ImageView& getImageView() const { return m_texture_image->getImageView(); };
 	vk::DescriptorImageInfo getDescriptorInfo() const;
 
+	// Create a depth compare sampler for shadow maps
+	static vk::raii::Sampler createDepthCompareSampler(VeDevice& device);
+
 	//debug
 	void printDebugInfo() const {
 		m_texture_image->printDebugInfo();

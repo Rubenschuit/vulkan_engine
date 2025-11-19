@@ -97,6 +97,28 @@ void VeImage::createImageView() {
 	assert(*m_image_view != VK_NULL_HANDLE && "Failed to create image view");
 }
 
+vk::raii::ImageView VeImage::createLayerImageView(uint32_t layer) const {
+	assert(*m_image != VK_NULL_HANDLE && "Image must be valid when creating layer image view");
+	assert(layer < m_array_layers && "Layer index out of bounds");
+	vk::ImageViewCreateInfo view_info {
+		.sType = vk::StructureType::eImageViewCreateInfo,
+		.pNext = nullptr,
+		.flags = {},
+		.image = *m_image,
+		.viewType = vk::ImageViewType::e2D,  // Single layer view
+		.format = m_format,
+		.components = {},
+		.subresourceRange = vk::ImageSubresourceRange {
+			.aspectMask = m_aspect_flags,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = layer,
+			.layerCount = 1
+		}
+	};
+	return vk::raii::ImageView(m_ve_device.getDevice(), view_info);
+}
+
 // Hardcoded: src and dst queue family indices to ignored, mip levels = 1
 void VeImage::transitionImageLayout(
 	vk::ImageLayout old_layout,
