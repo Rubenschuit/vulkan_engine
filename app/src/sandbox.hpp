@@ -30,16 +30,16 @@ private:
 	void renderAppWindows();
 
 	// model paths
-	const std::filesystem::path working_directory;
-	std::filesystem::path m_cube_model_path = working_directory / "models" / "cube.gltf";
-	std::filesystem::path m_viking_room_model_path = working_directory / "models" / "viking_room.gltf";
-	std::filesystem::path m_quad_model_path = working_directory / "models" / "quad.gltf";
-	std::filesystem::path m_flat_vase_model_path = working_directory / "models" / "flat_vase.gltf";
-	std::filesystem::path m_smooth_vase_model_path = working_directory / "models" / "smooth_vase.gltf";
-	std::filesystem::path m_sphere_model_path = working_directory / "models" / "sphere" / "scene.gltf";
+	const std::filesystem::path project_root;
+	std::filesystem::path m_cube_model_path = project_root / "models" / "cube.gltf";
+	std::filesystem::path m_viking_room_model_path = project_root / "models" / "viking_room.gltf";
+	std::filesystem::path m_quad_model_path = project_root / "models" / "quad.gltf";
+	std::filesystem::path m_flat_vase_model_path = project_root / "models" / "flat_vase.gltf";
+	std::filesystem::path m_smooth_vase_model_path = project_root / "models" / "smooth_vase.gltf";
+	std::filesystem::path m_sphere_model_path = project_root / "models" / "sphere" / "scene.gltf";
 	// texture paths
-	std::filesystem::path m_texture_path = working_directory / "textures" / "mots.png";
-	std::filesystem::path m_skybox_path = working_directory / "textures" / "skybox" / "starfield_haze.ktx";
+	std::filesystem::path m_texture_path = project_root / "textures" / "mots.png";
+	std::filesystem::path m_skybox_path = project_root / "textures" / "skybox" / "starfield_haze.ktx";
 	// Textures
 	VeTexture m_skybox = VeTexture(m_ve_device, m_skybox_path);
 
@@ -68,4 +68,4 @@ private:
 }
 
 // Called by the entry point to create the application instance
-ve::VeApplication* createApp(std::filesystem::path working_directory);
+ve::VeApplication* createApp(std::filesystem::path project_root);

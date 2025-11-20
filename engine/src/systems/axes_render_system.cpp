@@ -38,7 +38,6 @@ void AxesRenderSystem::createPipeline(vk::Format color_format) {
 	config.depth_stencil_info.depthWriteEnable = VK_FALSE;
 	config.rasterization_info.cullMode = vk::CullModeFlagBits::eNone;
 	config.rasterization_info.depthBiasEnable = VK_TRUE;
-	config.rasterization_info.depthBiasConstantFactor = 8192.0f;
 	config.rasterization_info.depthBiasClamp = 0.0f;
 	config.color_format = color_format;
 	config.pipeline_layout = m_pipeline_layout;

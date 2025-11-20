@@ -6,15 +6,24 @@
 namespace ve {
 
 /**
- * Finds the project root directory by walking up from the executable path
- * or current working directory, looking for models/textures folders.
+ * Finds the project root directory by determining the executable location
+ * and walking up the directory tree looking for models/textures folders.
  *
- * Not perfectly robust, but works for most cases.
+ * Uses platform-specific methods for executable path detection:
+ * - Windows(msvc): GetModuleFileNameW
+ * - macOS: _NSGetExecutablePath
+ * - Linux: /proc/self/exe
+ * - Fallback: argv[0] (less reliable)
  *
- * @param argv Array of command line arguments from main(). First element should
- * be the executable path from main().
+ * This allows the application to find resource folders regardless of the
+ * current working directory from which the executable was launched.
+ *
+ * @param argv Array of command line arguments from main(). Used as fallback
+ * if platform-specific methods fail.
  * @return The project root directory path
+ * @throws std::runtime_error if executable path cannot be determined or
+ * if models/textures folders cannot be found
  */
-VENGINE_API std::filesystem::path getWorkingDirectory(char** argv);
+VENGINE_API std::filesystem::path getProjectRoot(char** argv);
 
 } // namespace ve

@@ -20,7 +20,7 @@ namespace ve {
 class VENGINE_API VeApplication {
 public:
 
-	// Move this these as constructors parameters together with working_directory
+	// Move this these as constructors parameters together with project_root
 	static constexpr int WIDTH = 1920;
 	static constexpr int HEIGHT = 1080;
 	const char* APP_NAME = "Vulkan Engine!";

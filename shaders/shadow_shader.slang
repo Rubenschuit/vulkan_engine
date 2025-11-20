@@ -40,8 +40,6 @@ VertexOutput vertMain(VertexInput input) {
 
 [shader("fragment")]
 void fragMain(VertexOutput in_vert) {
-	// Depth-only pass - depth is written automatically by the pipeline
-	// No output needed - void function for depth-only rendering
-	// The rasterizer writes depth values automatically
+	// Depth-only pass
 }
 

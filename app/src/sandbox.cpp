@@ -11,7 +11,7 @@
 namespace ve {
 
 // First a window, device and swap chain are initialised in the base class
-Sandbox::Sandbox(const std::filesystem::path& working_dir) : working_directory(working_dir) {
+Sandbox::Sandbox(const std::filesystem::path& working_dir) : project_root(working_dir) {
 
 	// Initialize scenes
 	m_simple_scene = std::make_unique<VeScene>("Simple Scene");
@@ -345,48 +345,48 @@ void Sandbox::initSystems() {
 	VE_LOGD("Initialising systems");
 
 	// Create shadow system first (before other render systems that might need shadow descriptor set)
-	VE_LOGD("shadow system: " << working_directory / "shaders" / "shadow_shader.spv");
+	VE_LOGD("shadow system: " << project_root / "shaders" / "shadow_shader.spv");
 	m_shadow_render_system = std::make_unique<ShadowRenderSystem>(
 		m_ve_device,
 		*m_global_pool,
 		m_material_set_layout->getDescriptorSetLayout(),
-		working_directory / "shaders" / "shadow_shader.spv"
+		project_root / "shaders" / "shadow_shader.spv"
 	);
 
-	VE_LOGD("simple system: " << working_directory / "shaders" / "simple_shader.spv");
+	VE_LOGD("simple system: " << project_root / "shaders" / "simple_shader.spv");
 	m_simple_render_system = std::make_unique<SimpleRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_shadow_render_system->getShadowSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
-		working_directory / "shaders" / "simple_shader.spv"
+		project_root / "shaders" / "simple_shader.spv"
 	);
-	VE_LOGD("pbr system: " << working_directory / "shaders" / "pbr_shader.spv");
+	VE_LOGD("pbr system: " << project_root / "shaders" / "pbr_shader.spv");
 	m_pbr_render_system = std::make_unique<PbrRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_shadow_render_system->getShadowSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
-		working_directory / "shaders" / "pbr_shader.spv"
+		project_root / "shaders" / "pbr_shader.spv"
 	);
-	VE_LOGD("axes system: " << working_directory / "shaders" / "axes_shader.spv");
+	VE_LOGD("axes system: " << project_root / "shaders" / "axes_shader.spv");
 	m_axes_render_system = std::make_unique<AxesRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
-		working_directory / "shaders" / "axes_shader.spv"
+		project_root / "shaders" / "axes_shader.spv"
 	);
-	VE_LOGD("pl system: " << working_directory / "shaders" / "point_light_shader.spv");
+	VE_LOGD("pl system: " << project_root / "shaders" / "point_light_shader.spv");
 	m_point_light_system = std::make_unique<PointLightSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
-		working_directory / "shaders" / "point_light_shader.spv"
+		project_root / "shaders" / "point_light_shader.spv"
 	);
-	VE_LOGD("particle system: " << working_directory / "shaders" / "particle_compute.spv");
+	VE_LOGD("particle system: " << project_root / "shaders" / "particle_compute.spv");
 	m_particle_system = std::make_unique<ParticleSystem>(
 		m_ve_device,
 		m_global_pool,
@@ -394,16 +394,16 @@ void Sandbox::initSystems() {
 		m_ve_renderer.getSwapChainImageFormat(),
 		500000, // number of particles
 		glm::vec3{0.0f, -300.0f, 10.0f},
-		working_directory / "shaders" / "particle_compute.spv"
+		project_root / "shaders" / "particle_compute.spv"
 	);
-	VE_LOGD("skybox system: " << working_directory / "shaders" / "skybox_shader.spv");
+	VE_LOGD("skybox system: " << project_root / "shaders" / "skybox_shader.spv");
 	m_skybox_render_system = std::make_unique<SkyboxRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
-		working_directory / "shaders" / "skybox_shader.spv",
-		working_directory / "models" / "cube.gltf"
+		project_root / "shaders" / "skybox_shader.spv",
+		project_root / "models" / "cube.gltf"
 	);
 
 }
@@ -438,7 +438,7 @@ void Sandbox::loadGameObjects() {
 	glm::vec3 sponza_translation = {0.0f, 0.0f, 300.0f};
 
 	VeGameObject sponza = VeGameObject::createGameObject();
-	std::filesystem::path sponza_model_path = working_directory / "models" / "sponza" / "glTF" / "Sponza.gltf";
+	std::filesystem::path sponza_model_path = project_root / "models" / "sponza" / "glTF" / "Sponza.gltf";
 	auto sponza_model = std::make_shared<VeModel>(m_ve_device, sponza_model_path);
 	sponza_model->createDescriptorSet(*m_global_pool, *m_material_set_layout);
 	sponza.ve_model = sponza_model;
@@ -560,17 +560,19 @@ void Sandbox::loadGameObjects() {
 		point_light.transform.translation = pos;
 		m_simple_scene->getGameObjects().emplace(point_light.getId(), std::move(point_light));
 	}
-	/*
+
 	// 'black hole' light
 	{
 		auto black_hole = VeGameObject::createPointLight(1.0f, 4.0f, glm::vec3(0.0f, 0.0f, 0.0f));
 		glm::vec3 pos = {0.0f, -300.0f, 10.0f};
 		black_hole.transform.translation = pos;
 		black_hole.point_light_component->rotates = false;
-		m_simple_scene.emplace(black_hole.getId(), std::move(black_hole));
-		m_sponza_scene.emplace(black_hole.getId(), std::move(black_hole));
+		black_hole.point_light_component->casts_shadow = false;
+		black_hole.has_shadow = false;
+		m_simple_scene->getGameObjects().emplace(black_hole.getId(), std::move(black_hole));
+		m_sponza_scene->getGameObjects().emplace(black_hole.getId(), std::move(black_hole));
 	}
-	*/
+
 
 
 
@@ -595,16 +597,19 @@ void Sandbox::loadGameObjects() {
 	// textured quad
 	// --------------------------------------------------------------
 
+	/*
 	VeGameObject textured_quad = VeGameObject::createGameObject();
 	auto textured_quad_model = std::make_shared<VeModel>(m_ve_device, m_quad_model_path);
 	textured_quad.ve_model = quad;
 	textured_quad.has_texture = 1.0f;
+	textured_quad.has_shadow = false;
 	textured_quad.transform = {
 		.translation = {-30.0f, -30.0f, 40.0f},
 		.rotation = {0.0f, 0.0f, glm::radians(-45.0f)},
 		.scale = {20.0f, 1.0f, 20.0f}
 	};
 	m_simple_scene->getGameObjects().emplace(textured_quad.getId(), std::move(textured_quad));
+	*/
 	// --------------------------------------------------------------
 	// viking rooms
 	// --------------------------------------------------------------
@@ -680,7 +685,7 @@ void Sandbox::loadGameObjects() {
 } // namespace ve
 
 // Called by the entry point to create the application instance
-ve::VeApplication* createApp(std::filesystem::path working_directory) {
-	return new ve::Sandbox(working_directory);
+ve::VeApplication* createApp(std::filesystem::path project_root) {
+	return new ve::Sandbox(project_root);
 }
 

@@ -35,6 +35,10 @@ void VeTexture::createTextureImage(const std::filesystem::path& texture_path) {
         KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
         &k_texture);
 
+	if (result != KTX_SUCCESS) {
+		VE_LOGE("Failed to load ktx texture image!");
+		return;
+	}
 	assert(result == KTX_SUCCESS && "Failed to load ktx texture image!");
 
 	VE_LOGD("Texture loaded successfully");
@@ -240,6 +244,10 @@ void VeTexture::createTextureImageArraySTB(const std::vector<std::filesystem::pa
 			break;
 		}
 	}
+	if (width <= 0 || height <= 0) {
+		VE_LOGE("Could not determine texture dimensions - no real textures found");
+		return;
+	}
 	assert(width > 0 && height > 0 && "Could not determine texture dimensions - no real textures found");
 
 	// load all textures (or generate defaults)
@@ -255,6 +263,10 @@ void VeTexture::createTextureImageArraySTB(const std::vector<std::filesystem::pa
 		else
 			pixels[i] = stbi_load(texture_paths[i].string().c_str(), &width, &height, &channels, STBI_rgb_alpha);
 		//VE_LOGD("Loaded texture " << texture_paths[i].filename() << " with dimensions " << width << "x" << height);
+		if (width != current_width || height != current_height) {
+			VE_LOGE("All images in Texture Array must have the same width and height");
+			return;
+		}
 		assert(width == current_width && height == current_height && "All images in Texture Array must have the same width and height");
 		assert(pixels[i] != nullptr && "Failed to load or generate image");
 	}

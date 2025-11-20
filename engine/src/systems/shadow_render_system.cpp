@@ -255,9 +255,7 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, const Uniform
 
 void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 	const auto& light_views = m_light_views[frame_info.current_frame];
-	const auto& light_projs = m_light_projs[frame_info.current_frame];
 
-	assert(light_views.size() == light_projs.size() && "Shadow light views and projections must have same size");
 	assert(light_views.size() <= m_shadow_map_layer_views.size() && "Not enough shadow layer views");
 	if (light_views.empty()) {
 		return;

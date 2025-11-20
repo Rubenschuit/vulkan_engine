@@ -83,26 +83,19 @@ To install required packages:
 
 
 ## Quick start with scripts
-Build and run with one script
+Build and run with one script. Optional arguments include [debug|release|test|clean] (default is Release).
 
 - ##### macOS, Linux and Windows (MinGW64 shell):
 
 ```bash
 ./unixBuild.sh
 ```
-usage:
-
-	./unixBuild.sh [debug|release|test|leaks|clean]
 
 - ##### Windows (cmd or PowerShell):
 
 ```cmd
 .\windowsBuild.bat
 ```
-Usage:
-
-	windowsBuild.bat [debug|release|test|leaks|clean]
-
 
 ## Manual build
 From repository root:
@@ -132,9 +125,6 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 ```
 
 Then, in VS, right-click the VeApp target, set as startup project, build and then run (f5)
-
-Open the
-
 
 ##### Linux
 
