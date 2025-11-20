@@ -5,7 +5,7 @@
 #include <filesystem>
 #include <stdexcept>
 
-#if _MSC_VER && !__INTEL_COMPILER
+#if defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
 #include <vector>
 #elif defined(__APPLE__)
@@ -24,8 +24,8 @@ std::filesystem::path getProjectRoot(char** argv) {
 	std::filesystem::path exe_path;
 	bool path_found = false;
 
-#if _MSC_VER && !__INTEL_COMPILER
-	// Windows: Use GetModuleFileNameW
+#if defined(_WIN32) || defined(_WIN64)
+	// Windows: Use GetModuleFileNameW (works for MSVC, MinGW, Clang)
 	std::vector<wchar_t> buf(MAX_PATH);
 	DWORD len = GetModuleFileNameW(NULL, buf.data(), static_cast<DWORD>(buf.size()));
 	if (len > 0 && len < buf.size()) {

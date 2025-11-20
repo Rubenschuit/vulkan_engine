@@ -10,7 +10,7 @@ namespace ve {
  * and walking up the directory tree looking for models/textures folders.
  *
  * Uses platform-specific methods for executable path detection:
- * - Windows(msvc): GetModuleFileNameW
+ * - Windows (MSVC/MinGW/Clang): GetModuleFileNameW
  * - macOS: _NSGetExecutablePath
  * - Linux: /proc/self/exe
  * - Fallback: argv[0] (less reliable)
