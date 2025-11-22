@@ -38,10 +38,10 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 - CMake ≥ 3.16
 - C++20 toolchain (Clang 14+/MSVC 2019+/GCC 11+)
 - Vulkan SDK ≥ 1.3
-- Slang compiler (`slangc`) — required for building shaders
+- Slang compiler
+- KTX library
 - GLFW 3.3+ (automatically fetched if missing)
 - GLM (automatically fetched if missing)
-- KTX library (automatically fetched if missing but is quite big)
 - TinyGLTF (included in external)
 - Dear ImGui (included in external)
 
@@ -55,9 +55,11 @@ Note: CMake will auto-discover Slang (`slangc`) and the Vulkan SDK in common ins
 
 - Vulkan SDK (LunarG): https://vulkan.lunarg.com/sdk/home
 
+- KTX: https://github.com/KhronosGroup/KTX-Software/releases
+	- Note: make sure to check the 'Development' package in the installer
+
 
 - Optional (will be fetched if no path is set):
-	- KTX: https://github.com/KhronosGroup/KTX-Software/releases
 	- GLFW: https://www.glfw.org/download.html
 	- GLM: https://github.com/g-truc/glm/releases
 

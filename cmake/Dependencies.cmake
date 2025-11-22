@@ -182,24 +182,7 @@ else()
 		"C:/msys64/clang64/lib"
 		"C:/VulkanSDK/${VULKAN_SDK_VERSION}/Third-Party/Bin"
 	)
-	if (NOT KTX_LIBRARIES)
-		message(STATUS "KTX not found on system, fetching KTX-Software from GitHub to external/ktx-software ()")
-		set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/external")
-		include(FetchContent)
-		FetchContent_Declare(
-			ktx-software
-			GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
-			GIT_TAG v4.3.2
-			SOURCE_DIR "${CMAKE_SOURCE_DIR}/external/ktx-software"
-			BINARY_DIR "${CMAKE_BINARY_DIR}/_ktx-build"
-		)
-		set(KTX_FEATURE_TOOLS OFF CACHE BOOL "" FORCE)
-		set(KTX_FEATURE_TESTS OFF CACHE BOOL "" FORCE)
-		set(KTX_FEATURE_DOC OFF CACHE BOOL "" FORCE)
-		FetchContent_MakeAvailable(ktx-software)
-		set(KTX_LIBRARIES ktx)
-		set(KTX_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/external/ktx-software/include")
-	else()
+	if (KTX_LIBRARIES)
 		# Try to find include directory near the library
 		get_filename_component(KTX_LIB_DIR ${KTX_LIBRARIES} DIRECTORY)
 		find_path(KTX_INCLUDE_DIRS "ktx.h" PATHS
@@ -237,6 +220,9 @@ else()
 				message(WARNING "  - ${KTX_LIB_DIR}/../bin/ktx.dll")
 			endif()
 		endif()
+	else()
+		message(FATAL_ERROR "KTX not found on system, aborting build")
+		return()
 	endif()
 endif()
 
