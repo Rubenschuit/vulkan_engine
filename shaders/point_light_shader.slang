@@ -32,28 +32,27 @@ struct VertexOutput {
 VertexOutput vertMain(uint id : SV_VertexID) {
     VertexOutput out;
 
-	out.offset = vertices[id];
+	out.offset = vertices[id] + 0.5f;
 
 	float4 position_cameraspace = mul(ubo.view, push.position);
-	position_cameraspace += float4(out.offset * push.scale, 0.0f, 0.0f);
+	position_cameraspace += float4(vertices[id] * push.scale, 0.0f, 0.0f);
 
  	out.pos = mul(ubo.proj, position_cameraspace);
 
     return out;
 }
 
+[vk::binding(0, 1)]
+Sampler2D glow_texture;
+[vk::binding(1, 1)]
+Sampler2D fire_texture;
+[vk::binding(2, 1)]
+Sampler2D smoke_texture;
+
 [shader("fragment")]
 float4 fragMain(VertexOutput in) : SV_Target {
-	float distance_squared = dot(in.offset, in.offset);
-	float4 color = float4(push.color.rgb, 1.0f);
-	if (distance_squared >= 0.25f) {
-		discard;
-	}
-	else if (distance_squared >= 0.05f) {
-		// fade out at the edges
-		float alpha = (0.25f - distance_squared) / (0.25f - 0.05f);
-		color.rgba *= sqrt(alpha); // smooth fade
 
-	}
-    return color;
+	// Sample particle texture
+	float4 col = glow_texture.Sample(in.offset);
+	return col * float4(push.color.rgb * push.color.a, 1.0f);
 }

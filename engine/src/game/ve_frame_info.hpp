@@ -56,6 +56,7 @@ struct UniformBufferObject {
 
 struct VeFrameInfo {
 	vk::raii::DescriptorSet& global_descriptor_set;
+	vk::raii::DescriptorSet& texture_descriptor_set;
 	vk::raii::DescriptorSet& material_descriptor_set;
 	vk::raii::DescriptorSet& cubemap_descriptor_set;
 	vk::raii::DescriptorSet& shadow_descriptor_set;

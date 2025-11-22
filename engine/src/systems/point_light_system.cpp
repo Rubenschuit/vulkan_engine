@@ -59,6 +59,23 @@ void PointLightSystem::createPipeline(vk::Format color_format) {
 	pipeline_config.attribute_descriptions.clear();
 	pipeline_config.binding_descriptions.clear();
 
+	pipeline_config	.depth_stencil_info.depthTestEnable = VK_TRUE;
+	pipeline_config.depth_stencil_info.depthWriteEnable = VK_FALSE;
+	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLessOrEqual;
+	pipeline_config.rasterization_info.depthBiasEnable = VK_TRUE;
+	pipeline_config.rasterization_info.depthBiasConstantFactor = 0.0f;
+	pipeline_config.rasterization_info.depthBiasClamp = 0.0f;
+	pipeline_config.rasterization_info.depthBiasSlopeFactor = -1.0f;
+
+	//enable additve blending
+	pipeline_config.color_blend_attachment.blendEnable = VK_TRUE;
+	pipeline_config.color_blend_attachment.srcColorBlendFactor = vk::BlendFactor::eOne; //
+	pipeline_config.color_blend_attachment.dstColorBlendFactor = vk::BlendFactor::eOne; //
+	pipeline_config.color_blend_attachment.colorBlendOp = vk::BlendOp::eAdd;
+	pipeline_config.color_blend_attachment.srcAlphaBlendFactor = vk::BlendFactor::eOne; //
+	pipeline_config.color_blend_attachment.dstAlphaBlendFactor = vk::BlendFactor::eOne; //
+	pipeline_config.color_blend_attachment.alphaBlendOp = vk::BlendOp::eAdd;
+
 	assert(m_pipeline_layout != VK_NULL_HANDLE && "Pipeline layout is null");
 	pipeline_config.pipeline_layout = m_pipeline_layout;
 	m_ve_pipeline = std::make_unique<VePipeline>(
@@ -73,7 +90,7 @@ void PointLightSystem::createPipeline(vk::Format color_format) {
 // Performs a draw call for each game object with a point light component
 void PointLightSystem::render(VeFrameInfo& frame_info) const {
 	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-	std::array<vk::DescriptorSet, 2> sets{frame_info.global_descriptor_set, frame_info.material_descriptor_set};
+	std::array<vk::DescriptorSet, 2> sets{frame_info.global_descriptor_set, frame_info.texture_descriptor_set};
 	frame_info.command_buffer.bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,

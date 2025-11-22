@@ -38,14 +38,18 @@ private:
 	std::filesystem::path m_smooth_vase_model_path = project_root / "models" / "smooth_vase.gltf";
 	std::filesystem::path m_sphere_model_path = project_root / "models" / "sphere" / "scene.gltf";
 	// texture paths
-	std::filesystem::path m_texture_path = project_root / "textures" / "mots.png";
+	std::filesystem::path m_glow_texture_path = project_root / "textures" / "light.png";
+	std::filesystem::path m_fire_texture_path = project_root / "textures" / "fire.png";
+	std::filesystem::path m_smoke_texture_path = project_root / "textures" / "fire_ball.ktx";
 	std::filesystem::path m_skybox_path = project_root / "textures" / "skybox" / "starfield_haze.ktx";
+
 	// Textures
 	VeTexture m_skybox = VeTexture(m_ve_device, m_skybox_path);
+	std::unique_ptr<VeTexture> m_glow_texture;
+	std::unique_ptr<VeTexture> m_fire_texture;
+	std::unique_ptr<VeTexture> m_smoke_texture;
 
-	// temporary textures for simple scene
-	std::unique_ptr<VeTexture> m_simple_albedo_texture;
-	vk::raii::DescriptorSet m_simple_material_descriptor_set{nullptr};
+	vk::raii::DescriptorSet m_texture_descriptor_set{nullptr};
 
 	// Scenes
 	std::unique_ptr<VeScene> m_simple_scene;

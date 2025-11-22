@@ -10,6 +10,7 @@ ParticleSystem::ParticleSystem(
 	VeDevice& device,
 	std::shared_ptr<VeDescriptorPool> descriptor_pool,
 	const vk::raii::DescriptorSetLayout& global_set_layout,
+	const vk::raii::DescriptorSetLayout& texture_set_layout,
 	vk::Format color_format,
 	uint32_t particle_count,
 	glm::vec3 origin,
@@ -26,7 +27,7 @@ ParticleSystem::ParticleSystem(
 	createDescriptorSets();
 	createComputePipelineLayout();
 	createComputePipeline();
-	createPipelineLayout(global_set_layout);
+	createPipelineLayout(global_set_layout, texture_set_layout);
 	createPipeline(color_format);
 }
 
@@ -34,9 +35,8 @@ ParticleSystem::~ParticleSystem() {}
 
 // TODO: make less terrible
 void ParticleSystem::scheduleRestart() {
-	// Schedule a GPU-side reset on next compute dispatch to avoid CPU stalls
 	m_pending_reset.store(true, std::memory_order_relaxed);
-	// Basic seed using time; could be improved or controlled by caller
+	// Basic seed using time
 	auto now = std::chrono::high_resolution_clock::now().time_since_epoch();
 	m_reset_seed = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(now).count());
 }
@@ -45,7 +45,7 @@ void ParticleSystem::scheduleRestart() {
 // schedule init of particles on next compute dispatch
 void ParticleSystem::createShaderStorageBuffers() {
 
-	// Allocate to capacity, which may be larger than current count for amortized growth
+	// Allocate to capacity
 	uint32_t alloc_count = std::max(m_particle_count, m_capacity > 0 ? m_capacity : m_particle_count);
 	m_capacity = alloc_count;
 	std::vector<Particle> particles(m_capacity);
@@ -144,9 +144,10 @@ void ParticleSystem::createComputePipeline() {
 }
 
 void ParticleSystem::createPipelineLayout(
-		const vk::raii::DescriptorSetLayout& global_set_layout) {
+		const vk::raii::DescriptorSetLayout& global_set_layout,
+		const vk::raii::DescriptorSetLayout& texture_set_layout) {
 
-	std::array<vk::DescriptorSetLayout, 1> set_layouts{*global_set_layout};
+	std::array<vk::DescriptorSetLayout, 2> set_layouts{*global_set_layout, *texture_set_layout};
 	vk::PipelineLayoutCreateInfo pipeline_layout_info{
 		.sType = vk::StructureType::ePipelineLayoutCreateInfo,
 		.setLayoutCount = static_cast<uint32_t>(set_layouts.size()),
@@ -158,22 +159,20 @@ void ParticleSystem::createPipelineLayout(
 void ParticleSystem::createPipeline(vk::Format color_format) {
 	PipelineConfigInfo config{};
 	VePipeline::defaultPipelineConfigInfo(config, m_ve_device);
-	// Use instanced attributes for particles; static unit quad provided by fixed pipeline state
 	config.attribute_descriptions = Particle::getAttributeDescriptions();
 	config.binding_descriptions = Particle::getBindingDescription();
 
 	config.color_format = color_format;
 	config.pipeline_layout = m_pipeline_layout;
-	// Enable depth testing but disable depth writes for alpha-blended particles
+
+	// attempt to reduce z-fighting
 	config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	config.depth_stencil_info.depthWriteEnable = VK_FALSE;
-	// Use LessOrEqual to reduce flickering when particles have similar depths
 	config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLessOrEqual;
-	// Enable depth bias to reduce z-fighting between particles at similar depths
 	config.rasterization_info.depthBiasEnable = VK_TRUE;
 	config.rasterization_info.depthBiasConstantFactor = 0.0f;
 	config.rasterization_info.depthBiasClamp = 0.0f;
-	config.rasterization_info.depthBiasSlopeFactor = -1.0f; // Negative pulls particles slightly forward
+	config.rasterization_info.depthBiasSlopeFactor = -1.0f;
 
 	//enable additve blending
 	config.color_blend_attachment.blendEnable = VK_TRUE;
@@ -188,7 +187,7 @@ void ParticleSystem::createPipeline(vk::Format color_format) {
 }
 
 // Updates the particle system by recording compute commands into the compute command buffer.
-// updates the particle parameters UBO
+// updates the particle parameters UBO for compute shader
 void ParticleSystem::update(VeFrameInfo& frame_info) {
 	assert(frame_info.current_frame < MAX_FRAMES_IN_FLIGHT && "current_frame out of bounds");
 	assert(m_compute_uniform_buffers.size() == MAX_FRAMES_IN_FLIGHT && "compute_uniform_buffers size incorrect");
@@ -210,7 +209,6 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 		params.reset = 1u;
 		params.seed = m_reset_seed;
 		m_total_time = 0.0f;
-		// Clear pending flag so it only applies once
 		m_pending_reset.store(false, std::memory_order_relaxed);
 	} else {
 		params.reset = 0u;
@@ -248,7 +246,7 @@ void ParticleSystem::render(VeFrameInfo& frame_info) const {
 		vk::PipelineBindPoint::eGraphics,
 		m_pipeline_layout,
 		0,
-		{ frame_info.global_descriptor_set },
+		{ frame_info.global_descriptor_set, frame_info.material_descriptor_set },
 		{}
 	);
 	vk::DeviceSize offsets[] = { 0 };
@@ -269,7 +267,7 @@ void ParticleSystem::setParticleCount(uint32_t count) {
 	if (count == 0) count = 1; // avoid zero-sized buffers
 	if (count == m_particle_count) return;
 	VE_LOGI("ParticleSystem::setParticleCount from " << m_particle_count << " to " << count);
-	// Grow capacity if needed; shrinking does not free immediately to avoid churn
+	// Grow capacity if needed
 	if (count > m_capacity) {
 		// Ensure GPU is idle before resizing GPU resources
 		m_ve_device.getDevice().waitIdle();

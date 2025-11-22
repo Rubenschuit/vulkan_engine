@@ -39,16 +39,19 @@ VeFrameInfo Sandbox::update() {
 	auto& command_buffer = m_ve_renderer.getCurrentCommandBuffer();
 	auto& compute_command_buffer = m_ve_renderer.getCurrentComputeCommandBuffer();
 	auto current_frame = m_ve_renderer.getCurrentFrame();
+
+	// TODO move to scene class
 	vk::raii::DescriptorSet& material_descriptor_set =
 		(ui_actions.current_scene == 2)
 			? m_sponza_scene->getGameObjects().at(sponza_id).ve_model->getMaterialDescriptorSet()
-			: m_simple_material_descriptor_set;
+			: m_texture_descriptor_set;
 
 	vk::raii::DescriptorSet& shadow_desc_set = m_shadow_render_system->getShadowDescriptorSet(current_frame);
 
 	VeFrameInfo frame_info = {
 		.global_descriptor_set = m_global_descriptor_sets[current_frame],
 		.material_descriptor_set = material_descriptor_set,
+		.texture_descriptor_set = m_texture_descriptor_set,
 		.cubemap_descriptor_set = m_cubemap_descriptor_set,
 		.shadow_descriptor_set = shadow_desc_set,
 		.command_buffer = command_buffer,
@@ -87,8 +90,10 @@ void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 		m_particle_system->setMode(actions.set_mode);
 	}
 	if (actions.reset_particles) {
+		m_particle_system->setOrigin(m_camera.getForward() * 100.0f + m_camera.getPosition());
 		m_particle_system->resetPoint();
 	} else if (actions.reset_disc) {
+		m_particle_system->setOrigin(m_camera.getForward() * 100.0f + m_camera.getPosition());
 		m_particle_system->resetDisc();
 	}
 
@@ -174,8 +179,8 @@ void Sandbox::renderAppWindows() {
 				ImGui::Separator();
 				ImGui::SliderInt("Count", &count, 1000, 50000000);
 				ImGui::SameLine();
-				if (ImGui::Button("400k"))
-					count = 400000;
+				if (ImGui::Button("40k"))
+					count = 40000;
 				ImGui::SliderFloat("Speed", &ui_actions.speed, 0, 10);
 				ImGui::SameLine();
 				if (ImGui::Button("1.0x"))
@@ -280,6 +285,8 @@ void Sandbox::createUniformBuffers() {
 
 void Sandbox::createDescriptors() {
 	VE_LOGD("Creating descriptors");
+
+	// Global set layout for global UBO and optional ray tracing acceleration structure
 	m_global_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eAllGraphics)
 #if ENABLE_RAY_TRACING
@@ -287,6 +294,7 @@ void Sandbox::createDescriptors() {
 #endif
 		.build();
 
+	// Material set layout for three texture samplers (albedo, normal, roughness for example)
 	m_material_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
 		.addBinding(1, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
@@ -324,14 +332,18 @@ void Sandbox::createDescriptors() {
 
 	// Create simple scene material descriptor set for texture
 	// TODO: maybe scene classes should own these descriptor sets?
-	m_simple_albedo_texture = std::make_unique<VeTexture>(m_ve_device, m_texture_path);
-	auto simple_albedo_info = m_simple_albedo_texture->getDescriptorInfo();
-	m_simple_material_descriptor_set = vk::raii::DescriptorSet{nullptr};
+	m_glow_texture = std::make_unique<VeTexture>(m_ve_device, m_glow_texture_path);
+	m_fire_texture = std::make_unique<VeTexture>(m_ve_device, m_fire_texture_path);
+	m_smoke_texture = std::make_unique<VeTexture>(m_ve_device, m_smoke_texture_path);
+	auto glow_texture_info = m_glow_texture->getDescriptorInfo();
+	auto fire_texture_info = m_fire_texture->getDescriptorInfo();
+	auto smoke_texture_info = m_smoke_texture->getDescriptorInfo();
+	m_texture_descriptor_set = vk::raii::DescriptorSet{nullptr};
 	VeDescriptorWriter(*m_material_set_layout, *m_global_pool)
-		.writeImage(0, &simple_albedo_info)
-		.writeImage(1, &simple_albedo_info)
-		.writeImage(2, &simple_albedo_info)
-		.build(m_simple_material_descriptor_set);
+		.writeImage(0, &glow_texture_info)
+		.writeImage(1, &fire_texture_info)
+		.writeImage(2, &smoke_texture_info)
+		.build(m_texture_descriptor_set);
 
 	// Create one cubemap descriptor set for skybox
 	auto cubemap_image_info = m_skybox.getDescriptorInfo();
@@ -391,8 +403,9 @@ void Sandbox::initSystems() {
 		m_ve_device,
 		m_global_pool,
 		m_global_set_layout->getDescriptorSetLayout(),
+		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
-		500000, // number of particles
+		50000, // number of particles
 		glm::vec3{0.0f, -300.0f, 10.0f},
 		project_root / "shaders" / "particle_compute.spv"
 	);
@@ -530,7 +543,7 @@ void Sandbox::loadGameObjects() {
 	}
 
 	// Create some lights with ranging colors
-	constexpr uint32_t num_lights = 2; // max 100 see config
+	constexpr uint32_t num_lights = 7; // max 100 see config
 	constexpr float intensity = 0.7f;
 	constexpr float radius = 1.0f;
 	const glm::vec3 colors[10] = {
@@ -556,6 +569,7 @@ void Sandbox::loadGameObjects() {
 			pos_radius * sin(glm::two_pi<float>() / num_lights * (float)i),
 			height
 		};
+		point_light.point_light_component->casts_shadow = false;
 		point_light.has_shadow = false;
 		point_light.transform.translation = pos;
 		m_simple_scene->getGameObjects().emplace(point_light.getId(), std::move(point_light));
@@ -597,7 +611,7 @@ void Sandbox::loadGameObjects() {
 	// textured quad
 	// --------------------------------------------------------------
 
-	/*
+
 	VeGameObject textured_quad = VeGameObject::createGameObject();
 	auto textured_quad_model = std::make_shared<VeModel>(m_ve_device, m_quad_model_path);
 	textured_quad.ve_model = quad;
@@ -609,7 +623,7 @@ void Sandbox::loadGameObjects() {
 		.scale = {20.0f, 1.0f, 20.0f}
 	};
 	m_simple_scene->getGameObjects().emplace(textured_quad.getId(), std::move(textured_quad));
-	*/
+
 	// --------------------------------------------------------------
 	// viking rooms
 	// --------------------------------------------------------------

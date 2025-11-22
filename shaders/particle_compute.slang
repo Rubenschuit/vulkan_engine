@@ -11,39 +11,38 @@ ConstantBuffer<UniformBuffer> g_ubo;
 struct VertexInput {
 	float4 pos : POSITION; // xyz = center, w = size
 	float4 color : COLOR; // rgba
+	float4 tex_coords : TEXCOORD; // uv1 and uv2
 };
 
 struct VertexOutput {
 	float4 pos : SV_Position;
 	float4 color : COLOR0;
-	float2 uv : TEXCOORD0; // offset within quad, used for round mask
+	float2 uv1 : TEXCOORD0;
+	float2 uv2 : TEXCOORD1;
 };
 
 static const float2 quad[6] = {
+	float2( 0.5,  0.5),
+	float2(-0.5, -0.5),
+	float2(-0.5,  0.5),
 
 	float2( 0.5, -0.5),
 	float2(-0.5, -0.5),
-	float2( 0.5,  0.5),
-
-	float2( 0.5,  0.5),
-	float2(-0.5, -0.5),
-	float2(-0.5,  0.5)
+	float2( 0.5,  0.5)
 };
 
 
 [shader("vertex")]
 VertexOutput vertMain(VertexInput input, uint id : SV_VertexID) {
 
-
 	// Each instance renders 6 vertices (two triangles)
 	uint corner = id % 6;
 
-	float4 pos = float4(input.pos.x, input.pos.y, input.pos.z, 1.0);
-
-	// Billboard in camera space by offsetting XY around the particle center
+	float4 pos = float4(input.pos.xyz, 1.0);
 	float4 pos_cam_space = mul(g_ubo.view, pos);
 
-	// Calculate scale based on camera distance to keep size consistent
+	// Calculate scale based on camera distance to keep size consistent,
+	// prevents from disappearing too quickly when far away
 	float scale = input.pos.w; // base size
 	float distance = length(pos.xyz - g_ubo.camera_position.xyz);
 	float distance_scale = 1.0f; // scale factor
@@ -52,29 +51,46 @@ VertexOutput vertMain(VertexInput input, uint id : SV_VertexID) {
 		distance_scale = distance * 0.005f + 0.5f;
 	}
 
+	// Billboard in camera space by offsetting XY around the particle center
 	float2 offset = quad[corner] * scale * distance_scale;
 	pos_cam_space.xy += offset;
 
 	VertexOutput out;
 	out.pos = mul(g_ubo.proj, pos_cam_space);
 	out.color = input.color;
-	out.uv = quad[corner]; // pass for round mask and potential texture mapping
+	// pass through tex_coords for each corner
+	float2 uv = quad[corner] + 0.5f;
+	//uv.x = 1.0f - uv.x;
+	uv.y = 1.0f - uv.y;
+
+	uv /= 8.0f;
+
+	out.uv1 = uv + input.tex_coords.xy;
+	out.uv2 = uv + input.tex_coords.zw;
 	return out;
 }
 
+[vk::binding(0, 1)]
+Sampler2D glow_texture;
+[vk::binding(1, 1)]
+Sampler2D fire_texture;
+[vk::binding(2, 1)]
+Sampler2D smoke_texture;
+
 [shader("fragment")]
 float4 fragMain(VertexOutput in_vert) : SV_Target {
-	// Round particle (discard outside circle)
-	if (dot(in_vert.uv, in_vert.uv) > 0.25f)
-		discard;
-	return in_vert.color;
 
+	// Sample particle texture
+	float4 col1 = smoke_texture.Sample(in_vert.uv1);
+	float4 col2 = smoke_texture.Sample(in_vert.uv2);
+	float4 col = lerp(col1, col2, in_vert.color.a);
+	if (col.a <= 0.01f)
+		discard;
+	return col * float4(in_vert.color.rgb, 1.0f);
 }
 
 
-
-// --------------- Compute ------------------
-
+// --------------- Compute shader------------------
 
 
 struct Params {
@@ -96,13 +112,14 @@ struct Particle {
 	float4 position; // w is size
 	float4 velocity; // w unused
 	float4 color;    // rgba
+	float4 tex_coords; // uv1 and uv2
 };
 [vk::binding(1, 0)]
 RWStructuredBuffer<Particle> particles_prev;
 [vk::binding(2, 0)]
 RWStructuredBuffer<Particle> particles_out;
 
-// --------- RNG helpers ----------
+// RNG helpers
 uint wang_hash(uint seed) {
 	seed = (seed ^ 61u) ^ (seed >> 16);
 	seed *= 9u;
@@ -129,9 +146,7 @@ float2 rand_normal2(inout uint state) {
 	return float2(r * cos(theta), r * sin(theta)) * stddev + mean;
 }
 
-// ---------------- Simulation programs ----------------
-
-
+// ---------------- Simulation functions ----------------
 
 // 1) Earth-like gravity and floor collision
 Particle simulateGravityFloor(Particle p) {
@@ -140,7 +155,7 @@ Particle simulateGravityFloor(Particle p) {
 	p.velocity.xyz += accel * params.delta_time;
 	p.position.xyz += p.velocity.xyz * params.delta_time;
 
-	float floor_z = -200.0f;
+	float floor_z = 0.5f;
 	if (p.position.z < floor_z) {
 		p.position.z = floor_z;
 		if (p.velocity.z < 0.0f) {
@@ -168,7 +183,6 @@ Particle coolOrbit(Particle p) {
 	float3 forward = normalize(cross(dir, right));
 	const float rotation_strength = 10.0f;
 	p.velocity.xyz += forward * rotation_strength * params.delta_time;
-	// Integrate
 	p.position.xyz += p.velocity.xyz * params.delta_time;
 	return p;
 }
@@ -183,7 +197,6 @@ Particle succ(Particle p) {
 	const float gravity_strength = 26.0f;
 	p.velocity.xyz += dir * gravity_strength * params.delta_time;
 
-	// update position with velocity
 	p.position.xyz += p.velocity.xyz * params.delta_time;
 	return p;
 }
@@ -234,7 +247,7 @@ Particle simulateStasis(Particle p) {
 }
 
 // chatgpt generated code (not good):
-// 5) ---- Massive galaxy  ----
+// 5) Massive galaxy
 
 // helper
 float v_circ_flat(float r, float v0, float r0) {
@@ -296,10 +309,7 @@ Particle simulateGalaxyMassive(Particle p) {
 
 
 
-
 // ----------- Particle reset functions ------------
-
-
 
 
 
@@ -312,8 +322,8 @@ void resetPoint(uint i) {
 
 	// Position around (0,0,10) with small normal noise
 
-	float3 pos = params.origin + float3(0.0f, 0.0f, 10.0f);
-	pos += 0.1* rand_normal2(state).xyy; // small normal noise
+	float3 pos = params.origin ;//+ float3(0.0f, 0.0f, 10.0f);
+	pos += 0.1 * rand_normal2(state).xyy; // small normal noise
 
 	// Velocity random normal
 	float2 vxy = rand_normal2(state);
@@ -327,9 +337,10 @@ void resetPoint(uint i) {
 	p0.position = float4(pos, scale);
 	p0.velocity = float4(vel, 0.0f);
 	p0.color = float4(col, 1.0f);
+	p0.tex_coords = float4(0.0f);
 
 	particles_out[i] = p0;
-	particles_prev[i] = p0; // keep prev/current in sync
+	particles_prev[i] = p0;
 }
 
 // Particles initialized in a rotating disc
@@ -351,7 +362,7 @@ void resetDisc(uint i) {
 	float2 dir = float2(cos(theta0), sin(theta0));
 	float3 pos = float3(params.origin.xy + dir * r, params.origin.z + (rand01(state) - 0.5f) * 2.0f);
 
-	// Initialize near-circular tangential velocity with slight noise
+	// Initialize tangential velocity with slight noise
 	float vt0 = v_circ_flat(r, 35.0f, 30.0f);
 	float2 t = float2(-dir.y, dir.x);
 	float2 vxy = vt0 * t + (rand_normal2(state) * 0.2f);
@@ -365,9 +376,10 @@ void resetDisc(uint i) {
 	p0.position = float4(pos, scale);
 	p0.velocity = float4(vel, 0.0f);
 	p0.color = float4(col, 1.0f);
+	p0.tex_coords = float4(0.0f);
 
 	particles_out[i] = p0;
-	particles_prev[i] = p0; // keep prev/current in sync
+	particles_prev[i] = p0;
 }
 
 [shader("compute")]
@@ -407,5 +419,38 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 			p = simulateGalaxyMassive(p);
 			break;
 	}
+
+	// update tex_coords, assume atlas is 4x4
+	float cycle_time = 1.0f; // const
+
+	int num_rows = 8;
+	int stage_count = num_rows * num_rows;
+	// constant for this specific particle to avoid particles being in sync with their flipbook textures
+	float flipbook_seed = p.position.w * 9.9f; // scale is used as a seed
+
+	float cycle_progress = ((params.total_time + flipbook_seed) % cycle_time) / cycle_time;
+	float atlas_progression = cycle_progress * (float)stage_count;
+
+	// lerp between two adjacent stages
+	int index1 = (int)floor(atlas_progression);
+	int index2 = index1 + 1;
+	if (index2 >= stage_count) {
+		index2 = 0;
+	}
+	// take decimal part of atlas_progression
+	float blend = atlas_progression - floor(atlas_progression);
+
+
+	int column1 = index1 % num_rows;
+	int column2 = index2 % num_rows;
+	int row1 = index1 / num_rows;
+	int row2 = index2 / num_rows;
+
+	p.tex_coords = float4(column1, row1, column2, row2) / (float)num_rows;
+	p.color.a = blend;
+
+
+
+
 	particles_out[i] = p;
 }

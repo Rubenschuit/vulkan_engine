@@ -66,10 +66,9 @@ void SkyboxRenderSystem::createPipeline(vk::Format color_format) {
 
 	// set formats for dynamic rendering
 	pipeline_config.color_format = color_format;
-	// Alter culling for skybox: only inside faces should be visible
+	// Alter culling for skybox: only inside faces need to be visible
 	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eFront;
-	// Skybox should not write to depth buffer (rendered at far plane)
-	pipeline_config.depth_stencil_info.depthWriteEnable = VK_FALSE;
+	pipeline_config.depth_stencil_info.depthWriteEnable = VK_TRUE;
 	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLessOrEqual;
 	auto attribute_descriptions = VeModel::Vertex::getAttributeDescriptionsSimple();
 	pipeline_config.attribute_descriptions = {attribute_descriptions[0]};

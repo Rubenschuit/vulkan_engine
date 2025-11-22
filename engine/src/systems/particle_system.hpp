@@ -42,10 +42,12 @@ struct ParticleParams {
 	alignas(16) glm::vec3 origin;
 };
 
+// Data structure for vertex shader input
 struct Particle {
 	glm::vec4 position; // w is scale
 	glm::vec4 velocity; // w component unused
 	glm::vec4 color;
+	glm::vec4 tex_coords;
 
 	static std::vector<vk::VertexInputBindingDescription> getBindingDescription() {
 		// Per-instance particle attributes (position, color)
@@ -56,7 +58,8 @@ struct Particle {
 	static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptions() {
 		return {
 			vk::VertexInputAttributeDescription( 0, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, position) ),
-			vk::VertexInputAttributeDescription( 1, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, color) )
+			vk::VertexInputAttributeDescription( 1, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, color) ),
+			vk::VertexInputAttributeDescription( 2, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, tex_coords) )
 		};
 	}
 };
@@ -67,6 +70,7 @@ public:
 		VeDevice& device,
 		std::shared_ptr<VeDescriptorPool> descriptor_pool,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
+		const vk::raii::DescriptorSetLayout& texture_set_layout,
 		vk::Format color_format,
 		uint32_t particle_count,
 		glm::vec3 origin,
@@ -81,6 +85,7 @@ public:
 	void scheduleRestart(); // schedule GPU reset of particle positions
 	void setMode(int32_t mode) { m_mode = mode; }
 	void setSpeed(float speed) { m_speed = speed; }
+	void setOrigin(const glm::vec3& origin) { m_origin = origin; }
 	void resetPoint() { m_reset_kind = 1u; scheduleRestart(); }
 	void resetDisc() { m_reset_kind = 2u; scheduleRestart(); }
 
@@ -108,7 +113,7 @@ private:
 	void createDescriptorSets();
 	void createComputePipelineLayout();
 	void createComputePipeline();
-	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout);
+	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& texture_set_layout);
 	void createPipeline(vk::Format color_format);
 
 	void ensureCapacity(uint32_t needed);
@@ -116,7 +121,7 @@ private:
 	VeDevice& m_ve_device;
 
 	float m_mean = 0.0f;
-	float m_stddev = 20.0f;
+	float m_stddev = 5.0f;
 	uint32_t m_particle_count = 0;   // active count
 	uint32_t m_capacity = 0;         // allocated particle capacity for buffers
 	uint32_t m_pending_particle_count = 0; // UI-staged value

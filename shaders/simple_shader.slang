@@ -1,4 +1,6 @@
 #define PI 3.1415926536
+#define MAX_LIGHTS 20
+#define MAX_SHADOW_LIGHTS 3
 
 struct VertexInput {
 	float3 in_pos : POSITION;
@@ -39,8 +41,8 @@ struct UniformBuffer {
     float4x4 proj;
 	float4 camera_position;
 	float4 ambient_light_color;
-	PointLight point_lights[20]; // MAX_LIGHTS TODO use specialization constant
-	ShadowLight shadow_lights[3]; // MAX_SHADOW_LIGHTS
+	PointLight point_lights[MAX_LIGHTS]; // MAX_LIGHTS TODO use specialization constant
+	ShadowLight shadow_lights[MAX_SHADOW_LIGHTS]; // MAX_SHADOW_LIGHTS
 	uint32_t num_lights;
 	uint32_t num_shadow_lights;
 	uint32_t render_mode; // see RenderMode enum
@@ -66,7 +68,7 @@ struct VertexOutput {
 	float3 frag_normal_world;
 	float3 frag_color;
 	float2 frag_tex_coord;
-	float4 shadow_coord[3]; // MAX_SHADOW_LIGHTS
+	float4 shadow_coord[MAX_SHADOW_LIGHTS]; // MAX_SHADOW_LIGHTS
 };
 
 static const float4x4 bias_matrix = float4x4(
@@ -104,8 +106,7 @@ VertexOutput vertMain(VertexInput input) {
     return output;
 }
 
-// binding
-[vk::binding(0, 1)]
+[vk::binding(2, 1)]
 Sampler2D albedo_texture;
 
 // Shadow maps (set 2) - single 2D array texture
@@ -156,7 +157,8 @@ float calculateShadowPCF(uint32_t light_index, float4 shadow_coord) {
 [shader("fragment")]
 
 float4 fragMain(VertexOutput in_vert) : SV_Target {
-	// Visualize shadow map of point light index 1 on textured quad
+	/*
+	// DEBUG:Visualize shadow map of point light index 1 on textured quad
 	if (push_constants.has_texture > 0.5f && ubo.num_lights > 0 && ubo.shadow_mode != 0) {
 		float shadow_depth = shadow_maps.SampleLevel(shadow_sampler, float3(in_vert.frag_tex_coord, 0), 0.0).r;
 		// Simple grayscale visualization: black=near, white=far
@@ -169,25 +171,27 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 
 		return float4(amplified, amplified, amplified, 1.0);
 	}
-
+    */
 	float3 normal = normalize(in_vert.frag_normal_world);
 
 	// visualize normal vector
 	if (ubo.render_mode == RenderMode::NORMAL_VECTOR)
 		return float4(0.5 * normal + 0.5, 1.0f);
 
-	// Textured objects: use albedo texture with lighting
+	// Textured objects (no shadow/lighting)
 	float4 base_color = float4(in_vert.frag_color, 1.0f);
 	if (push_constants.has_texture > 0.5f) {
-		base_color = albedo_texture.Sample(in_vert.frag_tex_coord);
+		float2 uv = in_vert.frag_tex_coord;
+		uv.x = 1.0f - uv.x;
+		//uv.y = 1.0f - uv.y;
+		base_color = albedo_texture.Sample(uv);
 		if (base_color.a <= 0.001f)
 			discard;
 		return base_color;
 	}
 
-	// Simple lighting and shadow for non-textured objects
 	// Create mapping from light index to shadow term (defaults to 1.0 = no shadow)
-	float shadow_terms[20]; // MAX_LIGHTS
+	float shadow_terms[MAX_LIGHTS]; // MAX_LIGHTS
 	for (uint32_t i = 0; i < ubo.num_lights; i++) {
 		shadow_terms[i] = 1.0;
 	}
@@ -209,9 +213,11 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	}
 
 	// Apply lighting with shadows
-	float3 diffuse_light = ubo.ambient_light_color.xyz * ubo.ambient_light_color.w;
+	float3 diffuse_light = ubo.ambient_light_color.xyz * ubo.ambient_light_color.w; // color * intensity
+	float3 specular_light = float3(0.0, 0.0, 0.0);
+	float3 view_dir = normalize(ubo.camera_position.xyz - in_vert.frag_pos_world);
 	for (uint32_t i = 0; i < ubo.num_lights; i++) {
-		float3 light_dir = ubo.point_lights[i].position.xyz - in_vert.frag_pos_world;
+		float3 light_dir = ubo.point_lights[i].position.xyz - in_vert.frag_pos_world; // not normalized for attenuation calculation
 		float3 L = normalize(light_dir);
 		float NdotL = max(dot(normal, L), 0.0);
 
@@ -221,8 +227,14 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		float attenuation = 1.0 / (0.01 * dot(light_dir, light_dir) + 0.1);
 		float3 light_color = ubo.point_lights[i].color.xyz * ubo.point_lights[i].color.w * attenuation;
 		diffuse_light += light_color * NdotL * shadow_terms[i];
+
+		float3 H = normalize(L + view_dir);
+		float blinn = dot(normal, H);
+		blinn = clamp(blinn, 0.0, 1.0);
+		blinn = pow(blinn, 256.0);
+		specular_light += light_color * blinn * shadow_terms[i];
 	}
 
-	float3 final_color = base_color.rgb * diffuse_light;
+	float3 final_color = base_color.rgb * diffuse_light + specular_light * base_color.rgb;
 	return float4(final_color, base_color.a);
 }
