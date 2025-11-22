@@ -99,7 +99,11 @@ if (MSVC)
 	target_compile_options(${PROJECT_NAME} PRIVATE $<$<CONFIG:Debug>:/Od /RTC1>)
 else()
 	foreach(tgt IN ITEMS VEngineLib ${PROJECT_NAME})
-		target_compile_options(${tgt} PRIVATE -Wall -Wextra -Wconversion -Wpedantic -Wreorder-init-list $<$<BOOL:${VE_WARNINGS_AS_ERRORS}>:-Werror>)
+		target_compile_options(${tgt} PRIVATE -Wall -Wextra -Wconversion -Wpedantic $<$<BOOL:${VE_WARNINGS_AS_ERRORS}>:-Werror>)
+		# Clang-specific warning for struct initialization order
+		if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+			target_compile_options(${tgt} PRIVATE -Wreorder-init-list)
+		endif()
 	endforeach()
 endif()
 
