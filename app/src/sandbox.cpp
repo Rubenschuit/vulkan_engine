@@ -50,8 +50,8 @@ VeFrameInfo Sandbox::update() {
 
 	VeFrameInfo frame_info = {
 		.global_descriptor_set = m_global_descriptor_sets[current_frame],
-		.material_descriptor_set = material_descriptor_set,
 		.texture_descriptor_set = m_texture_descriptor_set,
+		.material_descriptor_set = material_descriptor_set,
 		.cubemap_descriptor_set = m_cubemap_descriptor_set,
 		.shadow_descriptor_set = shadow_desc_set,
 		.command_buffer = command_buffer,
