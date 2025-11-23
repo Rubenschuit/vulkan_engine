@@ -12,13 +12,17 @@ struct VertexInput {
 	float4 pos : POSITION; // xyz = center, w = size
 	float4 color : COLOR; // rgba
 	float4 tex_coords : TEXCOORD; // uv1 and uv2
+	float4 extra_data;  // x = type, y = lifetime, z = blend
 };
 
 struct VertexOutput {
 	float4 pos : SV_Position;
 	float4 color : COLOR0;
-	float2 uv1 : TEXCOORD0;
-	float2 uv2 : TEXCOORD1;
+	float2 uv0 : TEXCOORD0;
+	float2 uv1 : TEXCOORD1;
+	float2 uv2 : TEXCOORD2;
+	nointerpolation uint type : TEXCOORD3;
+	float blend : TEXCOORD4;
 };
 
 static const float2 quad[6] = {
@@ -29,6 +33,14 @@ static const float2 quad[6] = {
 	float2( 0.5, -0.5),
 	float2(-0.5, -0.5),
 	float2( 0.5,  0.5)
+};
+
+enum ParticleType : uint {
+	TYPE_DEFAULT = 0,
+	TYPE_SMOKE = 1,
+	TYPE_SPARK = 2,
+	TYPE_ROCKET = 3,
+	TYPE_EXPLOSION = 4
 };
 
 
@@ -65,8 +77,11 @@ VertexOutput vertMain(VertexInput input, uint id : SV_VertexID) {
 
 	uv /= 8.0f;
 
+	out.uv0 = quad[corner];
 	out.uv1 = uv + input.tex_coords.xy;
 	out.uv2 = uv + input.tex_coords.zw;
+	out.type = (uint)input.extra_data.x;
+	out.blend = input.extra_data.z;
 	return out;
 }
 
@@ -79,19 +94,41 @@ Sampler2D smoke_texture;
 
 [shader("fragment")]
 float4 fragMain(VertexOutput in_vert) : SV_Target {
-
-	// Sample particle texture
-	float4 col1 = smoke_texture.Sample(in_vert.uv1);
-	float4 col2 = smoke_texture.Sample(in_vert.uv2);
-	float4 col = lerp(col1, col2, in_vert.color.a);
+	float4 col1, col2;
+	if (in_vert.type == ParticleType::TYPE_DEFAULT) {
+		// round mask
+		if (dot(in_vert.uv0, in_vert.uv0) > 0.25f) {
+			discard;
+		}
+		// For additive blending, we must pre-multiply alpha to affect RGB intensity
+		return float4(in_vert.color.rgb * in_vert.color.a, in_vert.color.a);
+	} else if (in_vert.type == ParticleType::TYPE_SMOKE) {
+		col1 = smoke_texture.Sample(in_vert.uv1);
+		col2 = smoke_texture.Sample(in_vert.uv2);
+	} else {
+		col1 = fire_texture.Sample(in_vert.uv1);
+		col2 = fire_texture.Sample(in_vert.uv2);
+	}
+	float4 col = lerp(col1, col2, in_vert.blend);
 	if (col.a <= 0.01f)
 		discard;
-	return col * float4(in_vert.color.rgb, 1.0f);
+
+	float4 final_col = col * in_vert.color;
+	return float4(final_col.rgb * final_col.a, final_col.a);
 }
 
 
 // --------------- Compute shader------------------
 
+
+
+
+struct SpawnEvent {
+	float4 position_scale; // xyz = position, w = scale
+	float4 velocity_life;     // xyz = velocity, w = life
+	float4 color;             // rgba
+	uint4 info;             // x = start_index, y = count, z = type, w = variance (as float bits)
+};
 
 struct Params {
 	float delta_time; // seconds
@@ -103,7 +140,17 @@ struct Params {
 	float stddev;
 	uint32_t reset_kind; // 1 = point, 2 = disc
 	int mode; // 1,2,3,4,5 see particle_system.hpp ParticleMode enum
-	float3 origin;
+	float4 origin;
+	uint32_t row_count;
+	float min_life;
+	float max_life;
+	uint32_t should_respawn;
+
+	uint32_t spawn_event_count;
+	uint32_t padding0;
+	uint32_t padding1;
+	uint32_t padding2;
+	SpawnEvent spawn_events[32];
 };
 [vk::binding(3, 0)]
 ConstantBuffer<Params> params;
@@ -113,6 +160,7 @@ struct Particle {
 	float4 velocity; // w unused
 	float4 color;    // rgba
 	float4 tex_coords; // uv1 and uv2
+	float4 extra_data; // x = type
 };
 [vk::binding(1, 0)]
 RWStructuredBuffer<Particle> particles_prev;
@@ -170,7 +218,7 @@ Particle simulateGravityFloor(Particle p) {
 // 2) Orbiting around a center with simple gravity + angular motion
 // weird but cool behavior
 Particle coolOrbit(Particle p) {
-	float3 center = params.origin;
+	float3 center = params.origin.xyz;
 	float3 to_center = center - p.position.xyz;
 	float dist = length(to_center) + 0.01f; // avoid div by zero
 	float3 dir = to_center / dist;
@@ -189,7 +237,7 @@ Particle coolOrbit(Particle p) {
 
 // 3) Simple gravity towards center
 Particle succ(Particle p) {
-	float3 center = params.origin;
+	float3 center = params.origin.xyz;
 	float3 to_center = center - p.position.xyz;
 	float dist = length(to_center) + 0.01f; // avoid div by zero
 	float3 dir = to_center / dist;
@@ -205,7 +253,7 @@ Particle succ(Particle p) {
 // 4) Attempt at a galaxy but puts particle in some kind of stasis
 Particle simulateStasis(Particle p) {
 	// Relative position in galaxy plane (XY), with origin as center
-	float3 rel = p.position.xyz - params.origin;
+	float3 rel = p.position.xyz - params.origin.xyz;
 	float2 relXY = rel.xy;
 	float r = length(relXY);
 	float eps = .9f; // softening to avoid singularity
@@ -269,7 +317,7 @@ Particle simulateGalaxyMassive(Particle p) {
 	const float omega = 0.1f; // arm rotation speed
 	const float arm_amp = 7.0f;// arm radial attraction
 
-	float3 rel = p.position.xyz - params.origin;
+	float3 rel = p.position.xyz - params.origin.xyz;
 	float2 relXY = rel.xy;
 	float r = length(relXY);
 	float rSafe = max(r, eps);
@@ -314,20 +362,23 @@ Particle simulateGalaxyMassive(Particle p) {
 
 
 // Particles explode in random directions from a point
-void resetPoint(uint i) {
-	uint state = (i + 1u) * 747796405u ^ params.seed;
+void resetPoint(uint i, uint extra_seed) {
+	uint state = (i + 1u) * 747796405u ^ params.seed ^ extra_seed;
 
 	// Scale in [0.1, 0.2)
 	float scale = 0.1f + 0.1f * rand01(state);
 
 	// Position around (0,0,10) with small normal noise
 
-	float3 pos = params.origin ;//+ float3(0.0f, 0.0f, 10.0f);
+	float3 pos = params.origin.xyz;
 	pos += 0.1 * rand_normal2(state).xyy; // small normal noise
 
 	// Velocity random normal
 	float2 vxy = rand_normal2(state);
 	float vz = rand_normal2(state).x;
+
+	// Initialize life in w component
+	float life = params.min_life + (params.max_life - params.min_life) * rand01(state);
 	float3 vel = float3(vxy.x, vxy.y, vz);
 
 	// Color random in [0,1)
@@ -335,17 +386,18 @@ void resetPoint(uint i) {
 
 	Particle p0;
 	p0.position = float4(pos, scale);
-	p0.velocity = float4(vel, 0.0f);
+	p0.velocity = float4(vel, life);
 	p0.color = float4(col, 1.0f);
 	p0.tex_coords = float4(0.0f);
+	p0.extra_data = float4(0.0f);
 
 	particles_out[i] = p0;
 	particles_prev[i] = p0;
 }
 
 // Particles initialized in a rotating disc
-void resetDisc(uint i) {
-	uint state = (i + 1u) * 747796405u ^ params.seed;
+void resetDisc(uint i, uint extra_seed) {
+	uint state = (i + 1u) * 747796405u ^ params.seed ^ extra_seed;
 
 	// Scale in [0.08, 0.18)
 	float scale = 0.08f + 0.10f * rand01(state);
@@ -367,6 +419,9 @@ void resetDisc(uint i) {
 	float2 t = float2(-dir.y, dir.x);
 	float2 vxy = vt0 * t + (rand_normal2(state) * 0.2f);
 	float vz = (rand01(state) - 0.5f) * 0.2f;
+
+	// Initialize life in w component
+	float life = params.min_life + (params.max_life - params.min_life) * rand01(state);
 	float3 vel = float3(vxy.x, vxy.y, vz);
 
 	// Color by radius gradient
@@ -374,12 +429,96 @@ void resetDisc(uint i) {
 
 	Particle p0;
 	p0.position = float4(pos, scale);
-	p0.velocity = float4(vel, 0.0f);
+	p0.velocity = float4(vel, life);
 	p0.color = float4(col, 1.0f);
 	p0.tex_coords = float4(0.0f);
+	p0.extra_data = float4(0.0f);
 
 	particles_out[i] = p0;
 	particles_prev[i] = p0;
+}
+
+void resetFromEvent(uint i, SpawnEvent e) {
+	uint seed = asuint(params.total_time) ^ i ^ e.info.x;
+	uint state = wang_hash(seed);
+
+	float4 pos_scale = e.position_scale; // xyz = pos, w = scale
+	float4 vel_life = e.velocity_life; // xyz = vel, w = life
+	float4 color = e.color;
+	uint type = e.info.z;
+
+	float variance = asfloat(e.info.w);
+
+	// Apply variance to position
+	if (variance > 0.0f) {
+		pos_scale.xyz += variance * rand_normal2(state).xyy;
+	}
+
+	float3 final_vel = vel_life.xyz;
+	float life = vel_life.w;
+
+	// Add lifetime variance
+	life *= (0.8f + 0.4f * rand01(state));
+
+	// Logic per type
+	if (type == ParticleType::TYPE_DEFAULT) {
+		 // Legacy / Default
+		 // If initial vel is zero, add random velocity like resetPoint
+		 if (length(final_vel) < 0.001f) {
+			 float2 vxy = rand_normal2(state);
+			 float vz = rand_normal2(state).x;
+			 final_vel = float3(vxy.x, vxy.y, vz);
+		 }
+		 if (vel_life.w <= 0.0f) { // Use base life if <= 0 provided
+			 life = params.min_life + (params.max_life - params.min_life) * rand01(state);
+		 }
+		 color.rgb *= (0.8f + 0.2f * rand01(state)); // slight color variance
+	} else if (type == ParticleType::TYPE_SPARK) { // Spark / Firework Star
+		 // Random burst velocity added to base velocity
+		 float2 vxy = rand_normal2(state);
+		 float vz = rand_normal2(state).x;
+		 float speed = 5.0f + 5.0f * rand01(state);
+		 final_vel += float3(vxy.x, vxy.y, vz) * speed;
+
+		 // More lifetime variance for sparks
+		 if (vel_life.w <= 0.0f) life = 0.5f + rand01(state) * 1.5f;
+		 else life = vel_life.w * (0.5f + 1.0f * rand01(state));
+
+	} else if (type == ParticleType::TYPE_EXPLOSION) { // Main explosion
+		 // High velocity burst
+		 float2 vxy = rand_normal2(state);
+		 float vz = rand_normal2(state).x;
+		 float speed = 1.0f + 5.0f * rand01(state);
+		 final_vel += float3(vxy.x, vxy.y, vz) * speed;
+
+		 if (vel_life.w <= 0.0f) life = 0.5f + rand01(state) * 0.5f;
+		 else life = vel_life.w * (0.8f + 0.4f * rand01(state));
+
+	} else if (type == ParticleType::TYPE_ROCKET) { // Rocket
+		 // Minimal noise
+		 final_vel += rand_normal2(state).xyy * 0.1f;
+		 if (vel_life.w <= 0.0f) life = 2.0f;
+		 else life = vel_life.w; // Rockets usually fixed life
+	} else if (type == ParticleType::TYPE_SMOKE) { // Smoke
+		 // Slow random drift
+		 final_vel += rand_normal2(state).xyy * 0.05f;
+		 if (vel_life.w <= 0.0f) life = 1.0f + rand01(state);
+		 else life = vel_life.w * (0.7f + 0.6f * rand01(state));
+	}
+
+	float scale = pos_scale.w;
+	if (scale <= 0.0f) scale = 0.1f + 0.1f * rand01(state); // Fallback if scale 0
+
+	Particle p;
+	p.position = float4(pos_scale.xyz, scale);
+	p.velocity = float4(final_vel, life);
+	p.color = color;
+	p.tex_coords = float4(0.0f);
+	// Store initial life in extra_data.y for texture animation
+	p.extra_data = float4((float)type, life, 0, 0);
+
+	particles_out[i] = p;
+	particles_prev[i] = p;
 }
 
 [shader("compute")]
@@ -392,53 +531,146 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 	// Reset particles
 	if (params.reset != 0u) {
 		if (params.reset_kind == 2u) {
-			resetDisc(i);
+			resetDisc(i, 0);
 		} else {
-			resetPoint(i);
+			resetPoint(i, 0);
 		}
 		return;
 	}
 
-	Particle p = particles_prev[i];
-
-	// Choose simulation based on mode
-	switch (params.mode) {
-		case 1:
-			p = simulateGravityFloor(p);
-			break;
-		case 2:
-			p = coolOrbit(p);
-			break;
-		case 3:
-			p = succ(p);
-			break;
-		case 4:
-			p = simulateStasis(p);
-			break;
-		default:
-			p = simulateGalaxyMassive(p);
-			break;
+	// Initialize emitted particles
+	for (uint k = 0; k < params.spawn_event_count; ++k) {
+		SpawnEvent e = params.spawn_events[k];
+		if (i >= e.info.x && i < e.info.x + e.info.y) {
+			 resetFromEvent(i, e);
+			 return;
+		}
 	}
 
-	// update tex_coords, assume atlas is 4x4
-	float cycle_time = 1.0f; // const
+	Particle p = particles_prev[i];
 
-	int num_rows = 8;
+	// Update lifetime
+	p.velocity.w -= params.delta_time;
+	if (p.velocity.w <= 0.0f) {
+		if (params.should_respawn != 0u) {
+			// Respawn with a seed based on time to vary the randomness
+			uint time_seed = asuint(params.total_time);
+			if (params.reset_kind == 2u) {
+				resetDisc(i, time_seed);
+			} else {
+				resetPoint(i, time_seed);
+			}
+			return;
+		} else {
+			// Do not respawn, make invisible
+			p.position.w = 0.0f;
+		}
+	}
+
+	// Physics Update
+	uint type = (uint)p.extra_data.x;
+	if (type == ParticleType::TYPE_DEFAULT) {
+		// Choose simulation based on mode
+		switch (params.mode) {
+			case 1:
+				p = simulateGravityFloor(p);
+				break;
+			case 2:
+				p = coolOrbit(p);
+				break;
+			case 3:
+				p = succ(p);
+				break;
+			case 4:
+				p = simulateStasis(p);
+				break;
+			default:
+				p = simulateGalaxyMassive(p);
+				break;
+		}
+	} else {
+		float gravity = 20.0f;
+		if (type == ParticleType::TYPE_SMOKE) {
+			gravity = -1.0f; // Buoyancy for smoke
+		}
+
+		p.velocity.z -= gravity * params.delta_time;
+
+		if (type == ParticleType::TYPE_SMOKE) { // Smoke
+			 p.velocity.xyz *= 0.999f; // Drag
+		} else if (type == ParticleType::TYPE_SPARK) { // Spark
+			 p.velocity.xyz *= 0.98f; // Drag
+			 p.color.a -= 1.0f * params.delta_time; // Fade
+		} else if (type == ParticleType::TYPE_EXPLOSION) { // Explosion
+			 p.velocity.xyz *= 0.995f; // Drag (air resistance)
+			 // Fade based on lifetime fraction
+			 float max_life = p.extra_data.y;
+			 if (max_life > 0.001f) {
+				 p.color.a = saturate(p.velocity.w / max_life);
+			 } else {
+				 p.color.a = 0.0f;
+			 }
+		}
+
+		p.position.xyz += p.velocity.xyz * params.delta_time;
+		if (p.position.z < 0.0f) p.position.z = 0.0f;
+	}
+
+
+
+	// update tex_coords
+	int num_rows = max(1, (int)params.row_count);
 	int stage_count = num_rows * num_rows;
-	// constant for this specific particle to avoid particles being in sync with their flipbook textures
-	float flipbook_seed = p.position.w * 9.9f; // scale is used as a seed
 
-	float cycle_progress = ((params.total_time + flipbook_seed) % cycle_time) / cycle_time;
+	float cycle_progress = 0.0f;
+	uint particle_type = (uint)p.extra_data.x;
+
+	if (particle_type == ParticleType::TYPE_SMOKE) {
+		// For smoke, animation is tied to lifetime (extra_data.y is max_life)
+		// Progress goes from 0.0 (start) to 1.0 (end)
+		float max_life = p.extra_data.y;
+		if (max_life > 0.001f) {
+			cycle_progress = 1.0f - (p.velocity.w / max_life);
+		} else {
+			cycle_progress = 1.0f;
+		}
+		cycle_progress = saturate(cycle_progress);
+		// Set alpha to 1.0 for smoke as it uses texture fade
+		p.color.a = 1.0f;
+	} else {
+		// other types: use time-based cycling
+		float cycle_time = 1.0f;
+		float flipbook_seed = p.position.w * 9.9f; // scale as seed
+		cycle_progress = ((params.total_time + flipbook_seed) % cycle_time) / cycle_time;
+	}
+
 	float atlas_progression = cycle_progress * (float)stage_count;
 
 	// lerp between two adjacent stages
 	int index1 = (int)floor(atlas_progression);
 	int index2 = index1 + 1;
-	if (index2 >= stage_count) {
-		index2 = 0;
+
+	// For smoke (one-shot), clamp to last frame instead of wrapping
+	if (particle_type == ParticleType::TYPE_SMOKE) {
+		if (index1 >= stage_count - 1) {
+			index1 = stage_count - 1;
+			index2 = stage_count - 1;
+		} else if (index2 >= stage_count) {
+			index2 = stage_count - 1;
+		}
+	} else {
+		if (index2 >= stage_count) {
+			index2 = 0;
+		}
 	}
+
 	// take decimal part of atlas_progression
 	float blend = atlas_progression - floor(atlas_progression);
+
+	// If smoke is clamped at end, blend should be 0 or irrelevant
+	if (particle_type == ParticleType::TYPE_SMOKE && index1 == stage_count - 1) {
+		blend = 0.0f;
+	}
 
 
 	int column1 = index1 % num_rows;
@@ -447,10 +679,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 	int row2 = index2 / num_rows;
 
 	p.tex_coords = float4(column1, row1, column2, row2) / (float)num_rows;
-	p.color.a = blend;
-
-
-
+	p.extra_data.z = blend;
 
 	particles_out[i] = p;
 }

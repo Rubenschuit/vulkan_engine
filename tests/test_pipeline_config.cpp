@@ -7,8 +7,10 @@
 
 TEST_CASE("defaultPipelineConfigInfo sets sane Vulkan defaults", "[pipeline][config]") {
     ve::PipelineConfigInfo cfg{};
-	ve::VeDevice dummy_device{*(new ve::VeWindow(800, 600, "Dummy"))}; // Dummy device for testing
-	ve::VePipeline::defaultPipelineConfigInfo(cfg, dummy_device);
+    ve::VeWindow window{800, 600, "Dummy"};
+    ve::VeDevice dummy_device{window};
+
+    ve::VePipeline::defaultPipelineConfigInfo(cfg, dummy_device);
 
     // Dynamic state: viewport & scissor expected
     REQUIRE(cfg.dynamic_state_enables.size() == 2);

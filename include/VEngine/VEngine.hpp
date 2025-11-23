@@ -36,3 +36,4 @@
 #include "systems/skybox_render_system.hpp"
 #include "systems/shadow_render_system.hpp"
 #include "systems/pbr_render_system.hpp"
+#include "systems/fireworks_system.hpp"

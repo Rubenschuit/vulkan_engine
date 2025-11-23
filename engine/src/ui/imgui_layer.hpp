@@ -37,6 +37,15 @@ struct VENGINE_API UIContext {
 	float particle_velocity_stddev;
 	bool apply_velocity_params;
 
+	// lifetime
+	float min_life;
+	float max_life;
+	bool should_respawn;
+
+	// emission
+	bool emit_burst;
+	int emit_count;
+
 };
 
 class VENGINE_API ImGuiLayer {

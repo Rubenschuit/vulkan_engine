@@ -97,6 +97,13 @@ namespace ve {
 		}
 		m_prev_reset_state = cur_reset;
 
+		// Launch firework
+		int cur_firework = glfwGetKey(m_window, m_key_mappings.launch_firework);
+		if (cur_firework == GLFW_PRESS && m_prev_firework_state == GLFW_RELEASE) {
+			actions.launch_firework = true;
+		}
+		m_prev_firework_state = cur_firework;
+
 		// Toggle reset disc mode with G
 		int cur_g = glfwGetKey(m_window, m_key_mappings.reset_disc_toggle);
 		if (cur_g == GLFW_PRESS && m_prev_g_state == GLFW_RELEASE) {

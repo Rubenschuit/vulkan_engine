@@ -79,12 +79,14 @@ TEST_CASE("lookAt marks dirty; view remains cached until update", "[camera][look
 TEST_CASE("Pitch is clamped near vertical", "[camera][edge]") {
 	ve::VeCamera cam{};
 	cam.setPosition({0,0,0});
-	// look straight up
-	cam.lookAt({0, 10, 0});
+	// look straight up along Z (World Up)
+	cam.lookAt({0, 0, 10});
 	cam.updateIfDirty();
-	// forward should have large positive Y, but not exactly 1 (due to clamp)
-	REQUIRE(cam.getForward().y <= 1.0f);
-	REQUIRE(cam.getForward().y > 0.0f);
+
+
+	REQUIRE(cam.getForward().z < 1.0f);
+	REQUIRE(cam.getForward().z > 0.99f);
+
 	// up must be well-defined and orthonormal
 	REQUIRE(approxEqual(glm::length(cam.getForward()), 1.0f, 1e-4f));
 	REQUIRE(approxEqual(glm::length(cam.getRight()), 1.0f, 1e-4f));
@@ -98,7 +100,7 @@ TEST_CASE("Yaw wraps into [-pi,pi]", "[camera][edge]") {
 	ve::VeCamera cam{};
 	// Apply large positive yaw in multiple steps
 	for (int i = 0; i < 20; ++i) cam.yawBy(glm::radians(45.0f));
-		cam.updateIfDirty();
+	cam.updateIfDirty();
 	// forward length still 1 and basis orthonormal
 	REQUIRE(approxEqual(glm::length(cam.getForward()), 1.0f, 1e-4f));
 	REQUIRE(approxEqual(glm::dot(cam.getForward(), cam.getRight()), 0.0f, 1e-4f));
@@ -107,9 +109,14 @@ TEST_CASE("Yaw wraps into [-pi,pi]", "[camera][edge]") {
 TEST_CASE("lookAt down handles singularity", "[camera][edge]") {
 	ve::VeCamera cam{};
 	cam.setPosition({0,0,0});
-	cam.lookAt({0, -5, 0});
+	// look straight down along -Z
+	cam.lookAt({0, 0, -5});
 	cam.updateIfDirty();
-	REQUIRE(cam.getForward().y < 0.0f);
+
+	// Should be clamped near -1
+	REQUIRE(cam.getForward().z > -1.0f);
+	REQUIRE(cam.getForward().z < -0.99f);
+
 	REQUIRE(approxEqual(glm::length(cam.getRight()), 1.0f, 1e-4f));
 	REQUIRE(approxEqual(glm::dot(cam.getForward(), cam.getRight()), 0.0f, 1e-4f));
 }

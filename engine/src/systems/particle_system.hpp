@@ -11,6 +11,7 @@
 #include <vector>
 #include <atomic>
 #include <atomic>
+#include <deque>
 
 namespace ve {
 
@@ -28,6 +29,21 @@ enum ParticleMode : int32_t {
 	GALAXY_MASSIVE = 5,
 };
 
+enum ParticleType : uint32_t {
+	TYPE_DEFAULT = 0,
+	TYPE_SMOKE = 1,
+	TYPE_SPARK = 2,
+	TYPE_ROCKET = 3,
+	TYPE_EXPLOSION = 4
+};
+
+struct SpawnEvent {
+	glm::vec4 position_scale;    // xyz = position, w = scale
+	glm::vec4 velocity_life;     // xyz = velocity, w = life
+	glm::vec4 color;             // rgba
+	glm::uvec4 info;             // x = start_index, y = count, z = type, w = variance (as float bits)
+};
+
 // Uniform buffer with parameters for compute shader
 struct ParticleParams {
 	float delta_time;
@@ -38,16 +54,27 @@ struct ParticleParams {
 	float mean;
 	float stddev;
 	uint32_t reset_kind; // see ParticleResetKind enum
-	int32_t mode; // see ParticleMode enum
-	alignas(16) glm::vec3 origin;
+	uint32_t mode; // see ParticleMode enum
+	alignas(16) glm::vec4 origin; // w unused
+	uint32_t row_count;
+	float min_life;
+	float max_life;
+	uint32_t should_respawn;
+	// ring buffer emission
+	uint32_t spawn_event_count;
+	uint32_t padding0;
+	uint32_t padding1;
+	uint32_t padding2;
+	SpawnEvent spawn_events[32];
 };
 
 // Data structure for vertex shader input
 struct Particle {
 	glm::vec4 position; // w is scale
-	glm::vec4 velocity; // w component unused
+	glm::vec4 velocity; // w is life
 	glm::vec4 color;
 	glm::vec4 tex_coords;
+	glm::vec4 extra_data; // x = type, yzw = unused/padding
 
 	static std::vector<vk::VertexInputBindingDescription> getBindingDescription() {
 		// Per-instance particle attributes (position, color)
@@ -59,7 +86,8 @@ struct Particle {
 		return {
 			vk::VertexInputAttributeDescription( 0, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, position) ),
 			vk::VertexInputAttributeDescription( 1, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, color) ),
-			vk::VertexInputAttributeDescription( 2, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, tex_coords) )
+			vk::VertexInputAttributeDescription( 2, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, tex_coords) ),
+			vk::VertexInputAttributeDescription( 3, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, extra_data) )
 		};
 	}
 };
@@ -74,7 +102,8 @@ public:
 		vk::Format color_format,
 		uint32_t particle_count,
 		glm::vec3 origin,
-		std::filesystem::path shader_path);
+		std::filesystem::path shader_path,
+		bool start_active = true);
 	~ParticleSystem();
 
 	ParticleSystem(const ParticleSystem&) = delete;
@@ -83,14 +112,14 @@ public:
 	void update(VeFrameInfo& frame_info);
 	void render(VeFrameInfo& frame_info) const;
 	void scheduleRestart(); // schedule GPU reset of particle positions
-	void setMode(int32_t mode) { m_mode = mode; }
+	void setMode(uint32_t mode) { m_mode = mode; }
 	void setSpeed(float speed) { m_speed = speed; }
 	void setOrigin(const glm::vec3& origin) { m_origin = origin; }
 	void resetPoint() { m_reset_kind = 1u; scheduleRestart(); }
 	void resetDisc() { m_reset_kind = 2u; scheduleRestart(); }
 
 	// Change particle count; recreates storage buffers and descriptor sets
-	void setParticleCount(uint32_t count);
+	void setParticleCount(uint32_t count, bool reset = true);
 	void setMean(float mean) { m_mean = mean;}
 	void setStddev(float stddev) { m_stddev = stddev;}
 	uint32_t getParticleCount() const { return m_particle_count; }
@@ -98,6 +127,16 @@ public:
 	float getMean() const { return m_mean; }
 	float getStddev() const { return m_stddev; }
 	float getSpeed() const { return m_speed; }
+	void setLifeRange(float min, float max) { m_min_life = min; m_max_life = max; }
+	float getMinLife() const { return m_min_life; }
+	float getMaxLife() const { return m_max_life; }
+	void setShouldRespawn(bool respawn) { m_should_respawn = respawn; }
+	bool getShouldRespawn() const { return m_should_respawn; }
+
+	// Legacy emit (single batch), might want to remove
+	void emitParticles(uint32_t count);
+	// ring-buffer emit
+	void emitParticles(SpawnEvent info);
 
 	// Pending/staged particle count UI helpers
 	void stageParticleCount(uint32_t count);
@@ -130,8 +169,15 @@ private:
 	std::atomic<bool> m_pending_reset{false}; // atomic not necessary (no multi-threading yet)
 	uint32_t m_reset_seed{0};
 	uint32_t m_reset_kind{ParticleResetKind::POINT}; // see ParticleResetKind enum
-	int32_t m_mode{ParticleMode::COOL}; // see ParticleMode enum
+	uint32_t m_mode{ParticleMode::GRAVITY_EARTH}; // see ParticleMode enum
 	float m_speed{1.0f};
+	float m_min_life{1.0f};
+	float m_max_life{3.0f};
+	bool m_should_respawn{true};
+
+	// Emission state
+	uint32_t m_emit_head{0}; // Current head of the ring buffer (in particle index)
+	std::deque<SpawnEvent> m_pending_spawns;
 
 	// Descriptor layouts for this system
 	std::unique_ptr<VeDescriptorSetLayout> m_compute_set_layout;
@@ -142,14 +188,10 @@ private:
 	std::vector<vk::raii::DescriptorSet> m_compute_descriptor_sets;
 
 
-
-
-	// Shared pool for descriptor allocations (shared to ensure lifetime across systems)
+	// Shared pool for descriptor allocations
 	std::shared_ptr<VeDescriptorPool> m_descriptor_pool;
 
 	std::filesystem::path  m_shader_path;
-
-	//
 	vk::raii::PipelineLayout m_compute_pipeline_layout{nullptr};
 	std::unique_ptr<VeComputePipeline> m_compute_pipeline;
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};

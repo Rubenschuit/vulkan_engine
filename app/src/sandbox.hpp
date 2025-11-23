@@ -39,8 +39,8 @@ private:
 	std::filesystem::path m_sphere_model_path = project_root / "models" / "sphere" / "scene.gltf";
 	// texture paths
 	std::filesystem::path m_glow_texture_path = project_root / "textures" / "light.png";
-	std::filesystem::path m_fire_texture_path = project_root / "textures" / "fire.png";
-	std::filesystem::path m_smoke_texture_path = project_root / "textures" / "fire_ball.ktx";
+	std::filesystem::path m_fire_texture_path = project_root / "textures" / "fire_ball.ktx";
+	std::filesystem::path m_smoke_texture_path = project_root / "textures" / "smoke_atlas.png";
 	std::filesystem::path m_skybox_path = project_root / "textures" / "skybox" / "starfield_haze.ktx";
 
 	// Textures
@@ -66,6 +66,7 @@ private:
 	std::unique_ptr<AxesRenderSystem> m_axes_render_system;
 	std::unique_ptr<PointLightSystem> m_point_light_system;
 	std::unique_ptr<ParticleSystem> m_particle_system;
+	std::unique_ptr<FireworksSystem> m_fireworks_system;
 	std::unique_ptr<ShadowRenderSystem> m_shadow_render_system;
 };
 

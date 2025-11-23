@@ -9,7 +9,8 @@ namespace ve {
 struct InputActions {
 	// particles
 	bool reset_particles = false;
-	int set_mode = 0; // 1..4 when pressed, 0 = no change
+	bool launch_firework = false;
+	uint32_t set_mode = 0; // 1..4 when pressed, 0 = no change
 	bool reset_disc = false; // G key toggles disc reset mode
 
 	// UI
@@ -35,7 +36,8 @@ public:
 
 		int toggle_mouse_look = GLFW_KEY_TAB;
 		int reset_camera = GLFW_KEY_R;
-		int reset_particles = GLFW_KEY_F;
+		int reset_particles = GLFW_KEY_E;
+		int launch_firework = GLFW_KEY_F;
 		int reset_disc_toggle = GLFW_KEY_G;
 		int mode1 = GLFW_KEY_1;
 		int mode2 = GLFW_KEY_2;
@@ -74,6 +76,7 @@ private:
 	bool m_mouse_look_enabled = true;
 	int m_prev_toggle_state = GLFW_RELEASE;
 	int m_prev_reset_state = GLFW_RELEASE;
+	int m_prev_firework_state = GLFW_RELEASE;
 	int m_prev_g_state = GLFW_RELEASE;
 	int m_prev_mode1 = GLFW_RELEASE;
 	int m_prev_mode2 = GLFW_RELEASE;

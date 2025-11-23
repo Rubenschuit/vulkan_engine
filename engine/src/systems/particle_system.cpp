@@ -14,7 +14,8 @@ ParticleSystem::ParticleSystem(
 	vk::Format color_format,
 	uint32_t particle_count,
 	glm::vec3 origin,
-	std::filesystem::path shader_path)
+	std::filesystem::path shader_path,
+	bool start_active)
 	: m_ve_device(device), m_particle_count(particle_count),
 	  m_origin(origin), m_descriptor_pool(std::move(descriptor_pool)),
 	  m_shader_path(shader_path) {
@@ -29,6 +30,9 @@ ParticleSystem::ParticleSystem(
 	createComputePipeline();
 	createPipelineLayout(global_set_layout, texture_set_layout);
 	createPipeline(color_format);
+	if (start_active) {
+		scheduleRestart();
+	}
 }
 
 ParticleSystem::~ParticleSystem() {}
@@ -76,7 +80,6 @@ void ParticleSystem::createShaderStorageBuffers() {
 		);
 		m_ve_device.copyBuffer(staging_buffer.getBuffer(), m_shader_storage_buffers[i]->getBuffer(), buffer_size);
 	}
-	scheduleRestart(); // sets m_reset_seed and m_pending_reset so the shader knows to init
 }
 
 void ParticleSystem::createUniformBuffers() {
@@ -200,11 +203,24 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 	params.delta_time = frame_info.frame_time * m_speed;
 	params.total_time = m_total_time;
 	params.particle_count = m_particle_count;
-	params.origin = m_origin;
+	params.origin = glm::vec4(m_origin, 1.0f);
 	params.reset_kind = m_reset_kind;
 	params.mode = m_mode;
 	params.mean = m_mean;
 	params.stddev = m_stddev;
+	params.row_count = 8; // TODO: make configurable
+	params.min_life = m_min_life;
+	params.max_life = m_max_life;
+	params.should_respawn = m_should_respawn ? 1u : 0u;
+
+	// Process pending spawns
+	params.spawn_event_count = 0;
+	while (!m_pending_spawns.empty() && params.spawn_event_count < 32) {
+		params.spawn_events[params.spawn_event_count] = m_pending_spawns.front();
+		m_pending_spawns.pop_front();
+		params.spawn_event_count++;
+	}
+
 	if (m_pending_reset.load(std::memory_order_relaxed)) {
 		params.reset = 1u;
 		params.seed = m_reset_seed;
@@ -215,8 +231,7 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 		params.seed = 0u;
 	}
 	m_compute_uniform_buffers[frame_info.current_frame]->writeToBuffer(&params);
-	frame_info.compute_command_buffer.reset();
-	frame_info.compute_command_buffer.begin(vk::CommandBufferBeginInfo{});
+
 	frame_info.compute_command_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
 	frame_info.compute_command_buffer.bindDescriptorSets(
 		vk::PipelineBindPoint::eCompute,
@@ -228,11 +243,35 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 
 	// Dispatch enough workgroups to cover all particles, even when not a multiple of 256
 	// shader discards excess threads
-	uint32_t group_count_x = (m_particle_count + 256 - 1) / 256; // ceilDiv
+	const uint32_t workgroup_size = 256;
+	uint32_t group_count_x = (m_particle_count + workgroup_size - 1) / workgroup_size; // ceilDiv
 	if (group_count_x > 0) {
 		frame_info.compute_command_buffer.dispatch(group_count_x, 1, 1);
 	}
-	frame_info.compute_command_buffer.end();
+
+
+	// Add barrier to ensure compute writes are visible to vertex shader read
+	// This assumes compute submits before graphics
+	vk::BufferMemoryBarrier barrier{
+		.srcAccessMask = vk::AccessFlagBits::eShaderWrite,
+		.dstAccessMask = vk::AccessFlagBits::eVertexAttributeRead,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.buffer = *m_shader_storage_buffers[frame_info.current_frame]->getBuffer(),
+		.offset = 0,
+		.size = VK_WHOLE_SIZE
+	};
+
+	frame_info.compute_command_buffer.pipelineBarrier(
+		vk::PipelineStageFlagBits::eComputeShader,
+		vk::PipelineStageFlagBits::eVertexInput,
+		{},
+		nullptr,
+		barrier,
+		nullptr
+	);
+
+
 }
 
 
@@ -246,7 +285,7 @@ void ParticleSystem::render(VeFrameInfo& frame_info) const {
 		vk::PipelineBindPoint::eGraphics,
 		m_pipeline_layout,
 		0,
-		{ frame_info.global_descriptor_set, frame_info.material_descriptor_set },
+		{ frame_info.global_descriptor_set, frame_info.texture_descriptor_set },
 		{}
 	);
 	vk::DeviceSize offsets[] = { 0 };
@@ -263,10 +302,59 @@ void ParticleSystem::render(VeFrameInfo& frame_info) const {
 	frame_info.command_buffer.draw(6, particles_to_spawn, 0, 0);
 }
 
-void ParticleSystem::setParticleCount(uint32_t count) {
+void ParticleSystem::emitParticles(uint32_t count) {
+	SpawnEvent e{};
+	e.info.y = count;
+	e.info.z = TYPE_DEFAULT; // Type 0 (Default)
+	e.position_scale = glm::vec4(m_origin, 1.0f);
+	e.velocity_life = glm::vec4(0.0f);
+	e.color = glm::vec4(1.0f);
+
+	emitParticles(e);
+}
+
+void ParticleSystem::emitParticles(SpawnEvent info) {
+	if (info.info.y == 0) return; // count is 0
+	if (m_particle_count == 0) return;
+
+	// info.y is count.
+	uint32_t count = info.info.y;
+
+	// Ensure head is valid
+	if (m_emit_head >= m_particle_count) m_emit_head = 0;
+
+	// Check for wrap
+	if (m_emit_head + count <= m_particle_count) {
+		// No wrap
+		info.info.x = m_emit_head; // start_index
+		m_pending_spawns.push_back(info);
+		m_emit_head += count;
+	} else {
+		// Wrap around
+		uint32_t first_chunk = m_particle_count - m_emit_head;
+		uint32_t second_chunk = count - first_chunk;
+
+		// First chunk
+		SpawnEvent e1 = info;
+		e1.info.x = m_emit_head;
+		e1.info.y = first_chunk;
+		m_pending_spawns.push_back(e1);
+
+		// Second chunk
+		SpawnEvent e2 = info;
+		e2.info.x = 0;
+		e2.info.y = second_chunk;
+		m_pending_spawns.push_back(e2);
+
+		m_emit_head = second_chunk;
+	}
+}
+
+void ParticleSystem::setParticleCount(uint32_t count, bool reset) {
 	if (count == 0) count = 1; // avoid zero-sized buffers
 	if (count == m_particle_count) return;
-	VE_LOGI("ParticleSystem::setParticleCount from " << m_particle_count << " to " << count);
+
+	m_emit_head = 0;
 	// Grow capacity if needed
 	if (count > m_capacity) {
 		// Ensure GPU is idle before resizing GPU resources
@@ -274,15 +362,17 @@ void ParticleSystem::setParticleCount(uint32_t count) {
 		m_particle_count = count;
 		m_pending_particle_count = m_particle_count;
 		// Recreate storage buffers sized to new capacity and reset on next dispatch
-		m_capacity = count;
+		// Reserve extra capacity to avoid frequent reallocations (growth factor 1.5)
+		m_capacity = std::max(count, static_cast<uint32_t>(m_capacity * 1.5));
 		createShaderStorageBuffers();
 		createDescriptorSets();
 	} else {
 		// Within capacity: just adjust logical count; compute shader will skip extra threads
 		m_particle_count = count;
 		m_pending_particle_count = m_particle_count;
-		scheduleRestart(); // schedule a re-init if desired when count changes
+		if (reset) scheduleRestart();
 	}
+	VE_LOGI("ParticleSystem::setParticleCount from " << m_particle_count << " to " << count << " with capacity " << m_capacity);
 }
 
 void ParticleSystem::ensureCapacity(uint32_t needed) {

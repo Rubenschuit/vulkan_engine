@@ -5,13 +5,16 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "sandbox.hpp"
+#include "utils/ve_random.hpp"
 #include <imgui.h>
 #include <vector>
+#include <cstdlib>
 
 namespace ve {
 
 // First a window, device and swap chain are initialised in the base class
 Sandbox::Sandbox(const std::filesystem::path& working_dir) : project_root(working_dir) {
+	Random::init();
 
 	// Initialize scenes
 	m_simple_scene = std::make_unique<VeScene>("Simple Scene");
@@ -114,9 +117,35 @@ void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 	m_particle_system->setStddev(ui_actions.particle_velocity_stddev);
 	ui_actions.apply_velocity_params = false; // not used currently
 
+	m_particle_system->setLifeRange(ui_actions.min_life, ui_actions.max_life);
+	m_particle_system->setShouldRespawn(ui_actions.should_respawn);
 
-	// Record and submit particle compute work
+	if (ui_actions.emit_burst) {
+		m_particle_system->emitParticles(static_cast<uint32_t>(ui_actions.emit_count));
+		ui_actions.emit_burst = false;
+		// Update UI particle count
+		ui_actions.pending_particle_count = m_particle_system->getParticleCount();
+	}
+
+	if (actions.launch_firework) {
+		glm::vec3 pos = glm::vec3(0.0f, -150.0f, 0.0f);
+		//random upwards velocity
+		glm::vec3 vel = glm::vec3(0.0f, 0.0f, 60.0f + Random::floatRange(0.0f, 50.0f));
+		// add some random xy velocity
+		vel += Random::vec3Range(-25.0f, 25.0f) * glm::vec3(1.0f, 1.0f, 0.0f);
+		glm::vec4 color = Random::color();
+		m_fireworks_system->launchRocket(pos, vel, color);
+	}
+
+	// Record and submit compute work (two particle systems)
+	frame_info.compute_command_buffer.reset();
+	frame_info.compute_command_buffer.begin(vk::CommandBufferBeginInfo{});
+
+	m_fireworks_system->update(frame_info);
 	m_particle_system->update(frame_info);
+
+	frame_info.compute_command_buffer.end();
+
 	m_ve_renderer.submitCompute(frame_info.compute_command_buffer);
 }
 
@@ -142,6 +171,7 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 		m_pbr_render_system->renderObjects(frame_info);
 	}
 	m_point_light_system->render(frame_info);
+	m_fireworks_system->render(frame_info);
 
 
 	m_ve_renderer.endSceneRender(command_buffer);
@@ -175,27 +205,51 @@ void Sandbox::renderAppWindows() {
 			}
 			if (ImGui::BeginTabItem("Particle")) {
 				int count = static_cast<int>(ui_actions.pending_particle_count);
-				ImGui::Text("Particle settings");
-				ImGui::Separator();
-				ImGui::SliderInt("Count", &count, 1000, 50000000);
-				ImGui::SameLine();
-				if (ImGui::Button("40k"))
-					count = 40000;
-				ImGui::SliderFloat("Speed", &ui_actions.speed, 0, 10);
-				ImGui::SameLine();
-				if (ImGui::Button("1.0x"))
-					ui_actions.speed = 1.0f;
-				ImGui::Separator();
-				ImGui::SliderFloat("Explosion mean", &ui_actions.particle_velocity_mean, -60, 60);
-				ImGui::SliderFloat("Explosion stddev", &ui_actions.particle_velocity_stddev, 0, 60);
 
+				// 1. Simulation Control
+				ImGui::Text("Simulation Control");
+				ImGui::Separator();
+				ImGui::SliderInt("Active Count", &count, 1000, 5000000);
 				if (count < 1) count = 1;
 				ui_actions.pending_particle_count = static_cast<uint32_t>(count);
-				if (ImGui::Button("Apply count"))
+				if (ImGui::Button("Apply Count"))
 					ui_actions.apply_particle_count = true;
+
 				ImGui::SameLine();
-				if (ImGui::Button("Reset"))
+				if (ImGui::Button("Reset System"))
 					ui_actions.reset_particle_count = true;
+
+				ImGui::SliderFloat("Speed", &ui_actions.speed, 0, 10);
+				ImGui::SameLine();
+				if (ImGui::Button("1.0x")) ui_actions.speed = 1.0f;
+
+				// 2. Emission
+				ImGui::Separator();
+				ImGui::Text("Emission");
+				ImGui::Separator();
+				ImGui::SliderInt("Burst Size", &ui_actions.emit_count, 1, 10000);
+				if (ImGui::Button("Emit Burst")) {
+					ui_actions.emit_burst = true;
+				}
+				ImGui::SameLine();
+				ImGui::Checkbox("Respawn", &ui_actions.should_respawn);
+
+				// 3. Lifetime
+				ImGui::Separator();
+				ImGui::Text("Lifetime");
+				ImGui::Separator();
+				ImGui::SliderFloat("Min Life", &ui_actions.min_life, 0.1f, 10.0f);
+				ImGui::SliderFloat("Max Life", &ui_actions.max_life, 0.1f, 10.0f);
+				// Ensure min <= max
+				if (ui_actions.min_life > ui_actions.max_life) ui_actions.min_life = ui_actions.max_life;
+
+				// 4. Physics
+				ImGui::Separator();
+				ImGui::Text("Physics / Explosion");
+				ImGui::Separator();
+				ImGui::SliderFloat("Mean Velocity", &ui_actions.particle_velocity_mean, -60, 60);
+				ImGui::SliderFloat("StdDev Velocity", &ui_actions.particle_velocity_stddev, 0, 60);
+
 				ImGui::EndTabItem();
 			}
 			if (ImGui::BeginTabItem("Graphics")) {
@@ -304,17 +358,17 @@ void Sandbox::createDescriptors() {
 	// Create descriptor pool
 	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
 		// Global sets (per-frame) + shadow global sets (per-frame, per-light) + compute sets (per-frame) + material set (3) + shadow sets (per-frame) + slack (7)
-		.setMaxSets(3 * MAX_FRAMES_IN_FLIGHT + (MAX_LIGHTS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT)
-		// Uniform buffers: global (per frame) + shadow global (per frame, per light) + compute (per frame)
-		.addPoolSize(vk::DescriptorType::eUniformBuffer, 3 * MAX_FRAMES_IN_FLIGHT + (MAX_LIGHTS * MAX_FRAMES_IN_FLIGHT))
+		.setMaxSets(4 * MAX_FRAMES_IN_FLIGHT + (MAX_LIGHTS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT)
+		// Uniform buffers: global (per frame) + shadow global (per frame, per light) + compute (2x per frame)
+		.addPoolSize(vk::DescriptorType::eUniformBuffer, 4 * MAX_FRAMES_IN_FLIGHT + (MAX_LIGHTS * MAX_FRAMES_IN_FLIGHT))
 		// Combined image samplers for material sets (3 textures per set)
 		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 3 * 3)
 		// Samplers: shadow sampler (1 per frame) + slack (7)
 		.addPoolSize(vk::DescriptorType::eSampler, MAX_FRAMES_IN_FLIGHT + 7)
 		// Sampled images: shadow map array (1 per frame) + slack (7)
 		.addPoolSize(vk::DescriptorType::eSampledImage, MAX_FRAMES_IN_FLIGHT + 7)
-		// Compute storage buffers: 2 per frame (prev + current)
-		.addPoolSize(vk::DescriptorType::eStorageBuffer, 2 * MAX_FRAMES_IN_FLIGHT)
+		// Compute storage buffers: 4 per frame (prev + current) * 2 systems
+		.addPoolSize(vk::DescriptorType::eStorageBuffer, 4 * MAX_FRAMES_IN_FLIGHT)
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
 		.buildShared();
 
@@ -406,7 +460,15 @@ void Sandbox::initSystems() {
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getSwapChainImageFormat(),
 		50000, // number of particles
-		glm::vec3{0.0f, -300.0f, 10.0f},
+		glm::vec3{0.0f, -300.0f, 50.0f},
+		project_root / "shaders" / "particle_compute.spv"
+	);
+	m_fireworks_system = std::make_unique<FireworksSystem>(
+		m_ve_device,
+		m_global_pool,
+		m_global_set_layout->getDescriptorSetLayout(),
+		m_material_set_layout->getDescriptorSetLayout(),
+		m_ve_renderer.getSwapChainImageFormat(),
 		project_root / "shaders" / "particle_compute.spv"
 	);
 	VE_LOGD("skybox system: " << project_root / "shaders" / "skybox_shader.spv");
@@ -433,7 +495,12 @@ void Sandbox::initUI() {
 		.reset_particle_count = false,
 		.particle_velocity_mean = m_particle_system->getMean(),
 		.particle_velocity_stddev = m_particle_system->getStddev(),
-		.apply_velocity_params = false
+		.apply_velocity_params = false,
+		.min_life = m_particle_system->getMinLife(),
+		.max_life = m_particle_system->getMaxLife(),
+		.should_respawn = m_particle_system->getShouldRespawn(),
+		.emit_burst = false,
+		.emit_count = 1000
 	};
 }
 
