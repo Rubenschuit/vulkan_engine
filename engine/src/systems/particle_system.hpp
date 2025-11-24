@@ -63,9 +63,10 @@ struct ParticleParams {
 	uint32_t should_respawn;
 	// ring buffer emission
 	uint32_t spawn_event_count;
-	uint32_t padding0;
+	float gravity;
 	uint32_t padding1;
 	uint32_t padding2;
+	alignas(16) glm::vec4 wind_direction; // xyz = direction, w = intensity
 };
 
 // Data structure for vertex shader input
@@ -127,11 +128,15 @@ public:
 	float getMean() const { return m_mean; }
 	float getStddev() const { return m_stddev; }
 	float getSpeed() const { return m_speed; }
+	void setWind(const glm::vec4& wind) { m_wind_direction = wind; }
+	glm::vec4 getWind() const { return m_wind_direction; }
 	void setLifeRange(float min, float max) { m_min_life = min; m_max_life = max; }
 	float getMinLife() const { return m_min_life; }
 	float getMaxLife() const { return m_max_life; }
 	void setShouldRespawn(bool respawn) { m_should_respawn = respawn; }
 	bool getShouldRespawn() const { return m_should_respawn; }
+	void setGravity(float gravity) { m_gravity = gravity; }
+	float getGravity() const { return m_gravity; }
 
 	// Legacy emit (single batch), might want to remove
 	void emitParticles(uint32_t count);
@@ -172,10 +177,12 @@ private:
 	std::atomic<bool> m_pending_reset{false}; // atomic not necessary (no multi-threading yet)
 	uint32_t m_reset_seed{0};
 	uint32_t m_reset_kind{ParticleResetKind::POINT}; // see ParticleResetKind enum
-	uint32_t m_mode{ParticleMode::GRAVITY_EARTH}; // see ParticleMode enum
+	uint32_t m_mode{ParticleMode::COOL}; // see ParticleMode enum
 	float m_speed{1.0f};
-	float m_min_life{1.0f};
-	float m_max_life{3.0f};
+	float m_gravity{9.81f};
+	float m_min_life{40.0f};
+	float m_max_life{80.0f};
+	glm::vec4 m_wind_direction{0.0f}; // default no wind
 	bool m_should_respawn{true};
 
 	// Emission state

@@ -235,6 +235,9 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 	params.min_life = m_min_life;
 	params.max_life = m_max_life;
 	params.should_respawn = m_should_respawn ? 1u : 0u;
+	params.gravity = m_gravity;
+	// Default wind
+	params.wind_direction = m_wind_direction;
 
 	// Process pending spawns
 	params.spawn_event_count = 0;

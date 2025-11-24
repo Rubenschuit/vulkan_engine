@@ -59,8 +59,11 @@ VertexOutput vertMain(VertexInput input, uint id : SV_VertexID) {
 	float scale = input.pos.w; // base size
 	float distance = length(pos.xyz - g_ubo.camera_position.xyz);
 	float distance_scale = 1.0f; // scale factor
+	uint type = (uint)input.extra_data.x;
+
 	// scale smoothly after 100 units
-	if (distance > 100.0f) {
+	// Skip scaling for rockets (these can be very large when they explode)
+	if (distance > 100.0f && type != ParticleType::TYPE_ROCKET) {
 		distance_scale = distance * 0.005f + 0.5f;
 	}
 
@@ -81,7 +84,7 @@ VertexOutput vertMain(VertexInput input, uint id : SV_VertexID) {
 	out.uv0 = quad[corner];
 	out.uv1 = uv + input.tex_coords.xy;
 	out.uv2 = uv + input.tex_coords.zw;
-	out.type = (uint)input.extra_data.x;
+	out.type = type;
 	out.blend = input.extra_data.z;
 	return out;
 }
@@ -148,9 +151,10 @@ struct Params {
 	uint32_t should_respawn;
 
 	uint32_t spawn_event_count;
-	uint32_t padding0;
+	float gravity;
 	uint32_t padding1;
 	uint32_t padding2;
+	float4 wind_direction; // xyz = direction, w = intensity
 };
 [vk::binding(3, 0)]
 ConstantBuffer<Params> params;
@@ -201,8 +205,7 @@ float2 rand_normal2(inout uint state) {
 
 // 1) Earth-like gravity and floor collision
 Particle simulateGravityFloor(Particle p) {
-	const float g = 9.81f;
-	float3 accel = float3(0.0, 0.0, -g);
+	float3 accel = float3(0.0, 0.0, -params.gravity);
 	p.velocity.xyz += accel * params.delta_time;
 	p.position.xyz += p.velocity.xyz * params.delta_time;
 
@@ -461,7 +464,9 @@ void resetFromEvent(uint i, SpawnEvent e) {
 	float life = vel_life.w;
 
 	// Add lifetime variance
-	life *= (0.8f + 0.4f * rand01(state));
+	if (type != ParticleType::TYPE_ROCKET) {
+		life *= (0.8f + 0.4f * rand01(state));
+	}
 
 	// Logic per type
 	if (type == ParticleType::TYPE_DEFAULT) {
@@ -601,17 +606,17 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 				break;
 		}
 	} else { // Firework particles
-		float gravity = 20.0f;
+		float gravity = params.gravity;
 		if (type == ParticleType::TYPE_SMOKE || type == ParticleType::TYPE_EXPLOSION_SMOKE || type == ParticleType::TYPE_EXPLOSION) {
-			gravity = -1.0f; // Buoyancy for smoke
+			gravity = -2.0f; // Buoyancy for smoke
 		}
 
 		p.velocity.z -= gravity * params.delta_time;
 
 		if (type == ParticleType::TYPE_SMOKE || type == ParticleType::TYPE_EXPLOSION_SMOKE) { // Smoke
-			 p.velocity.xyz *= 0.99f; // Drag
+			 p.velocity.xyz -= p.velocity.xyz * .9f * params.delta_time; // Drag applies only to internal velocity
 		} else if (type == ParticleType::TYPE_SPARK) { // Spark
-			 p.velocity.xyz *= 0.98f; // Drag
+			 p.velocity.xyz -= p.velocity.xyz * 0.8f * params.delta_time; // Drag
 			 float max_life = p.extra_data.y;
 			 if (max_life > 0.001f) {
 				 float life_frac = saturate(p.velocity.w / max_life);
@@ -622,7 +627,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 				 p.color.a = saturate(life_frac / 0.2f);
 			 }
 		} else if (type == ParticleType::TYPE_EXPLOSION) { // Explosion
-			 p.velocity.xyz *= 0.99f; // Drag (air resistance)
+			 p.velocity.xyz -= p.velocity.xyz * 0.9f * params.delta_time; // Drag (air resistance)
 			 // Fade based on lifetime fraction
 			 float max_life = p.extra_data.y;
 			 if (max_life > 0.001f) {
@@ -630,8 +635,37 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 			 } else {
 				 p.color.a = 0.0f;
 			 }
+		} else if (type == ParticleType::TYPE_ROCKET) {
+			 // Flash effect near end of life ( life < FLASH_TIME or z < -5.0f)
+			 const float FLASH_SCALE = 150.0f;
+			 const float FLASH_TIME = 0.15f;
+
+			 // If falling too fast, force life to end to trigger flash
+			 if (p.velocity.z < -5.0f && p.velocity.w > FLASH_TIME) {
+				p.velocity.w = FLASH_TIME;
+			 }
+
+			 float life = p.velocity.w;
+			 // Allow one frame of grace period after death (life <= 0) to show the peak flash
+			 if (life <= FLASH_TIME && life > -params.delta_time * 2.0f) {
+				 // Clamp t to [0, 1] to ensure we don't get negative scale or overshoot
+				 float t = saturate(life / FLASH_TIME);
+				 float flash_scale = FLASH_SCALE * t;
+				 p.position.w = flash_scale;
+				 p.color.a = 0.6f;
+			 } else {
+				 p.position.w = 0.0f;
+			 }
 		}
-		p.position.xyz += p.velocity.xyz * params.delta_time;
+
+		// Apply wind force constantly (not affected by drag in this simple model, or add it to position directly)
+		// Adding to position directly is better to keep "velocity" as the impulsive forces that decay.
+		// Wind direction: params.wind_direction.xyz, intensity: params.wind_direction.w
+		float3 wind_velocity = normalize(params.wind_direction.xyz) * params.wind_direction.w;
+
+		// Update position with internal velocity + wind
+		p.position.xyz += (p.velocity.xyz + wind_velocity) * params.delta_time;
+
 		if (p.position.z < 0.0f) p.position.z = 0.0f;
 	}
 
@@ -654,8 +688,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 			cycle_progress = 1.0f;
 		}
 		cycle_progress = saturate(cycle_progress);
-		// Set alpha to 1.0 for smoke as it uses texture fade
-		p.color.a = 1.0f;
+		p.color.a = 0.4f;
 	} else {
 		// other types: use time-based cycling
 		float cycle_time = 1.0f;

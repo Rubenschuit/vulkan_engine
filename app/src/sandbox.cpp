@@ -280,7 +280,7 @@ void Sandbox::renderAppWindows() {
 				ImGui::Separator();
 				ImGui::Text("Environment");
 				ImGui::DragFloat3("Wind Direction", &config.wind_direction.x, 0.05f, -1.0f, 1.0f);
-				ImGui::SliderFloat("Wind Strength", &config.wind_strength, 0.0f, 500.0f);
+				ImGui::SliderFloat("Wind Strength", &config.wind_strength, 0.0f, 50.0f);
 				ImGui::SliderFloat("Gravity", &config.gravity, 0.0f, 50.0f);
 
 				ImGui::Separator();

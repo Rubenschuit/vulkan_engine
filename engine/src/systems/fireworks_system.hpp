@@ -17,7 +17,7 @@ struct Rocket {
 };
 
 struct FireworksConfig {
-    glm::vec3 launch_pos{0.0f, -150.0f, 0.0f};
+    glm::vec3 launch_pos{0.0f, 0.0f, 0.0f};
     float launch_vel_min = 60.0f;
     float launch_vel_max = 110.0f;
     float launch_spread_xy = 15.0f;
@@ -29,12 +29,12 @@ struct FireworksConfig {
     int explosion_particle_count = 5000;
     float explosion_size = 0.8f;
 
-    glm::vec3 wind_direction{1.0f, 0.0f, 0.0f};
-    float wind_strength = 6.0f;
+    glm::vec3 wind_direction{1.0f, 1.0f, 0.0f};
+    float wind_strength = 3.0f;
 
     float gravity = 20.0f;
 
-    int max_particles = 100000;
+    int max_particles = 200000;
 };
 
 class VENGINE_API FireworksSystem {
