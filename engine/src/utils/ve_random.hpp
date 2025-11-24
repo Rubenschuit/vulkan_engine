@@ -27,7 +27,7 @@ public:
 	}
 
 	static glm::vec4 color() {
-		return glm::vec4(float01(), float01(), float01(), 1.0f);
+		return glm::vec4(0.3f + float01(), float01(), 0.5f * float01(), 1.0f);
 	}
 };
 

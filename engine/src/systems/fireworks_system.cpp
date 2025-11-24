@@ -29,81 +29,99 @@ FireworksSystem::FireworksSystem(
     m_particle_system->setLifeRange(0.5f, 3.0f);
     // Disable auto-respawn for fireworks, they should be spawned by events
     m_particle_system->setShouldRespawn(false);
+
+    // initialize config max_particles
+    m_config.max_particles = 100000;
+}
+
+void FireworksSystem::setParticleCapacity(uint32_t capacity) {
+    m_pending_capacity = capacity;
 }
 
 void FireworksSystem::launchRocket(glm::vec3 pos, glm::vec3 vel, glm::vec4 color) {
-    Rocket r;
-    r.pos = pos;
-    r.vel = vel;
-    r.color = color;
-    r.timer = Random::floatRange(4.0f, 7.0f); // explode time
+    Rocket r{
+		.pos = pos,
+		.vel = vel,
+		.color = color,
+		.timer = Random::floatRange(4.0f, 7.0f), // explode time
+		.exploded = false
+	};
     m_rockets.push_back(r);
 
-    // Emit the rocket particle
-    SpawnEvent e{};
-    e.info.y = 1; // count
-    e.info.z = TYPE_ROCKET;
-    e.position_scale = glm::vec4(pos, 1.0f); // scale
-    e.info.w = 0;
-
-    e.velocity_life = glm::vec4(vel, 2.0f); // life > timer
-    e.color = color;
-    m_particle_system->emitParticles(e);
+    // Emit the rocket particle (not used visually atm)
+    SpawnEvent event{
+		.position_scale = glm::vec4(pos, 0.0f),
+		.velocity_life = glm::vec4(vel, 2.0f),
+		.color = color,
+		.info = {0, 1, TYPE_ROCKET, 0}
+	};
+    m_particle_system->emitParticles(event);
 }
 
 void FireworksSystem::update(VeFrameInfo& frame_info) {
+    // Handle pending capacity change at the start of update (safe point)
+    if (m_pending_capacity > 0) {
+        if (m_particle_system) {
+             m_particle_system->setParticleCount(m_pending_capacity, true); // true = reset buffers
+             m_config.max_particles = static_cast<int>(m_pending_capacity);
+        }
+        m_pending_capacity = 0;
+    }
+
     float dt = frame_info.frame_time;
 
     for (auto it = m_rockets.begin(); it != m_rockets.end(); ) {
         Rocket& r = *it;
 
         // Physics
-        r.vel.z -= m_gravity * dt;
+		glm::vec3 wind = glm::length(m_config.wind_direction) > 0.0f ? glm::normalize(m_config.wind_direction) * m_config.wind_strength : glm::vec3(0.0f);
+        r.vel.z -= m_config.gravity * dt;
         r.pos += r.vel * dt;
-
-		r.pos.x += glm::cos(frame_info.total_time * 5.0f) * 0.05f;
-		r.pos.y += glm::sin(frame_info.total_time * 5.0f) * 0.05f;
+		r.pos += wind * dt;
+		float spiral_factor = glm::clamp(r.vel.z, 0.0f, 10.0f);
+		float spiral_speed = glm::clamp(r.vel.z, 0.0f, 5.0f);
+		r.pos.x += glm::cos(frame_info.total_time * spiral_speed) * spiral_factor * dt;
+		r.pos.y += glm::sin(frame_info.total_time * spiral_speed) * spiral_factor * dt;
         r.timer -= dt;
 
         // Trail emission
-        SpawnEvent smoke{};
-        smoke.info.y = 2; // count
-        smoke.info.z = TYPE_SMOKE;
-        smoke.position_scale = glm::vec4(r.pos, 4.0f);
-        float smoke_variance = 0.2f;
-        // bit_cast float to uint
-        smoke.info.w = *reinterpret_cast<uint32_t*>(&smoke_variance);
+		float smoke_variance = 0.1f;
+        SpawnEvent smoke{
+			.position_scale = glm::vec4(r.pos, 5.0f),
+			.velocity_life = glm::vec4(0.3f * wind + r.vel * 0.02f, 7.0f),
+			.color = glm::vec4(0.5f, 0.5f, 0.5f, 0.5f),
+			.info = {0, 2, TYPE_SMOKE, *reinterpret_cast<uint32_t*>(&smoke_variance)}
+		};
 
-		const float wind_speed = 5.0f;
-        smoke.velocity_life = glm::vec4(wind_speed, 0.0f, 0.0f, 6.0f);
-        smoke.color = glm::vec4(0.5f, 0.5f, 0.5f, 0.5f);
         m_particle_system->emitParticles(smoke);
 
-        SpawnEvent spark{};
-        spark.info.y = 5; // count
-        spark.info.z = TYPE_SPARK;
-        spark.position_scale = glm::vec4(r.pos, 0.3f);
-        float spark_variance = 0.1f;
-        spark.info.w = *reinterpret_cast<uint32_t*>(&spark_variance);
-
-        spark.velocity_life = glm::vec4(-r.vel * 0.4f, 0.3f); // backward vel
-        spark.color = glm::vec4(1.0f, 0.8f, 0.1f, 1.0f);
+        SpawnEvent spark{
+			.position_scale = glm::vec4(r.pos, 0.2f),
+			.velocity_life = glm::vec4(-r.vel * 0.4f, 0.3f),
+			.color = glm::vec4(1.0f, 0.8f, 0.1f, 1.0f),
+			.info = {0, 5, TYPE_SPARK, 0}
+		};
         m_particle_system->emitParticles(spark);
 
         // Explode condition: Timer or falling too fast
         if (r.timer <= 0.0f || r.vel.z < -5.0f) {
             // Explode
-            SpawnEvent burst{};
-            burst.info.y = 5000; // count
-            burst.info.z = TYPE_EXPLOSION; // Type 4 (Explosion)
-            burst.position_scale = glm::vec4(r.pos, 0.8f); // scale
+            SpawnEvent explode{
+				.position_scale = glm::vec4(r.pos, m_config.explosion_size),
+				.velocity_life = glm::vec4(r.vel * 1.5f, 2.2f),
+				.color = r.color,
+				.info = {0, static_cast<uint32_t>(m_config.explosion_particle_count), TYPE_EXPLOSION, 0}
+			};
+            m_particle_system->emitParticles(explode);
 
-            float burst_variance = 0.0f; // Start from a single point
-            burst.info.w = *reinterpret_cast<uint32_t*>(&burst_variance);
-
-            burst.velocity_life = glm::vec4(r.vel * 1.5f, 2.2f); // inherit small amount of vel
-            burst.color = r.color;
-            m_particle_system->emitParticles(burst);
+            // Smoke from explosion
+            SpawnEvent smoke_explode = explode;
+            smoke_explode.position_scale.w = 10.0f;
+			smoke_explode.velocity_life = glm::vec4(r.vel * 1.5f + wind * 0.3f, 7.0f);
+            smoke_explode.color = glm::vec4(0.5f, 0.5f, 0.5f, 0.5f);
+            smoke_explode.info.z = TYPE_EXPLOSION_SMOKE;
+			smoke_explode.info.y = static_cast<uint32_t>(m_config.explosion_particle_count);
+            m_particle_system->emitParticles(smoke_explode);
 
             it = m_rockets.erase(it);
         } else {

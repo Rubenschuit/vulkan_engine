@@ -128,13 +128,17 @@ void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 	}
 
 	if (actions.launch_firework) {
-		glm::vec3 pos = glm::vec3(0.0f, -150.0f, 0.0f);
-		//random upwards velocity
-		glm::vec3 vel = glm::vec3(0.0f, 0.0f, 60.0f + Random::floatRange(0.0f, 50.0f));
-		// add some random xy velocity
-		vel += Random::vec3Range(-25.0f, 25.0f) * glm::vec3(1.0f, 1.0f, 0.0f);
-		glm::vec4 color = Random::color();
-		m_fireworks_system->launchRocket(pos, vel, color);
+		auto& config = m_fireworks_system->getConfig();
+		for (int i = 0; i < config.launch_count; i++) {
+			glm::vec3 pos = config.launch_pos;
+			//random upwards velocity
+			float speed = Random::floatRange(config.launch_vel_min, config.launch_vel_max);
+			glm::vec3 vel = glm::vec3(0.0f, 0.0f, speed);
+			// add some random xy velocity
+			vel += Random::vec3Range(-config.launch_spread_xy, config.launch_spread_xy) * glm::vec3(1.0f, 1.0f, 0.0f);
+			glm::vec4 color = config.use_random_color ? Random::color() : config.particle_color;
+			m_fireworks_system->launchRocket(pos, vel, color);
+		}
 	}
 
 	// Record and submit compute work (two particle systems)
@@ -238,8 +242,8 @@ void Sandbox::renderAppWindows() {
 				ImGui::Separator();
 				ImGui::Text("Lifetime");
 				ImGui::Separator();
-				ImGui::SliderFloat("Min Life", &ui_actions.min_life, 0.1f, 10.0f);
-				ImGui::SliderFloat("Max Life", &ui_actions.max_life, 0.1f, 10.0f);
+				ImGui::SliderFloat("Min Life", &ui_actions.min_life, 0.1f, 100.0f);
+				ImGui::SliderFloat("Max Life", &ui_actions.max_life, 0.1f, 100.0f);
 				// Ensure min <= max
 				if (ui_actions.min_life > ui_actions.max_life) ui_actions.min_life = ui_actions.max_life;
 
@@ -252,6 +256,55 @@ void Sandbox::renderAppWindows() {
 
 				ImGui::EndTabItem();
 			}
+			if (ImGui::BeginTabItem("Fireworks")) {
+				auto& config = m_fireworks_system->getConfig();
+
+				ImGui::Text("Launch Settings");
+				ImGui::Separator();
+				ImGui::DragFloat3("Launch Position", &config.launch_pos.x);
+				ImGui::DragFloatRange2("Launch Velocity", &config.launch_vel_min, &config.launch_vel_max, 1.0f, 0.0f, 500.0f);
+				ImGui::SliderFloat("Spread XY", &config.launch_spread_xy, 0.0f, 100.0f);
+				ImGui::SliderInt("Launch Count", &config.launch_count, 1, 100);
+
+				ImGui::Text("Colors");
+				ImGui::Checkbox("Random Color", &config.use_random_color);
+				if (!config.use_random_color) {
+					ImGui::ColorEdit4("Particle Color", &config.particle_color.r);
+				}
+
+				ImGui::Separator();
+				ImGui::Text("Explosion");
+				ImGui::DragInt("Particle Count", &config.explosion_particle_count, 100, 100, 50000);
+				ImGui::SliderFloat("Explosion Size", &config.explosion_size, 0.1f, 5.0f);
+
+				ImGui::Separator();
+				ImGui::Text("Environment");
+				ImGui::DragFloat3("Wind Direction", &config.wind_direction.x, 0.05f, -1.0f, 1.0f);
+				ImGui::SliderFloat("Wind Strength", &config.wind_strength, 0.0f, 500.0f);
+				ImGui::SliderFloat("Gravity", &config.gravity, 0.0f, 50.0f);
+
+				ImGui::Separator();
+				ImGui::Text("System");
+				static int s_particle_capacity = config.max_particles;
+				ImGui::SliderInt("ParticleCapacity", &s_particle_capacity, 1000, 2000000);
+				if (ImGui::Button("Apply Capacity")) {
+					m_fireworks_system->setParticleCapacity(static_cast<uint32_t>(s_particle_capacity));
+				}
+
+				if (ImGui::Button("Launch Rocket", ImVec2(-1, 0))) {
+					// Manually trigger launch
+					for (int i = 0; i < config.launch_count; i++) {
+						glm::vec3 pos = config.launch_pos;
+						float speed = Random::floatRange(config.launch_vel_min, config.launch_vel_max);
+						glm::vec3 vel = glm::vec3(0.0f, 0.0f, speed);
+						vel += Random::vec3Range(-config.launch_spread_xy, config.launch_spread_xy) * glm::vec3(1.0f, 1.0f, 0.0f);
+						glm::vec4 color = config.use_random_color ? Random::color() : config.particle_color;
+						m_fireworks_system->launchRocket(pos, vel, color);
+					}
+				}
+
+				ImGui::EndTabItem();
+			}
 			if (ImGui::BeginTabItem("Graphics")) {
 				ImGui::Text("Graphics Settings");
 				ImGui::Separator();
@@ -259,7 +312,7 @@ void Sandbox::renderAppWindows() {
 				// MSAA toggle
 				static bool s_msaa_enabled = true;
 				if (ImGui::Checkbox("Enable MSAA", &s_msaa_enabled)) {
-					// TODO: recreate all pipelines
+					// TODO: recreate all pipelines, does not work on windows
 					m_ve_renderer.setMSAAEnabled(s_msaa_enabled);
 				}
 

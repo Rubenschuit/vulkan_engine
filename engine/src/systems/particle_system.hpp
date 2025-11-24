@@ -34,7 +34,8 @@ enum ParticleType : uint32_t {
 	TYPE_SMOKE = 1,
 	TYPE_SPARK = 2,
 	TYPE_ROCKET = 3,
-	TYPE_EXPLOSION = 4
+	TYPE_EXPLOSION = 4,
+	TYPE_EXPLOSION_SMOKE = 5
 };
 
 struct SpawnEvent {
@@ -65,7 +66,6 @@ struct ParticleParams {
 	uint32_t padding0;
 	uint32_t padding1;
 	uint32_t padding2;
-	SpawnEvent spawn_events[32];
 };
 
 // Data structure for vertex shader input
@@ -146,8 +146,11 @@ public:
 
 
 private:
+	static constexpr uint32_t MAX_SPAWN_EVENTS = 4096;
+
 	void createDescriptorSetLayouts();
 	void createShaderStorageBuffers();
+	void createSpawnBuffers();
 	void createUniformBuffers();
 	void createDescriptorSets();
 	void createComputePipelineLayout();
@@ -185,6 +188,7 @@ private:
 	// Per-frame resources
 	std::vector<std::unique_ptr<VeBuffer>> m_compute_uniform_buffers;  // small UBO per frame
 	std::vector<std::unique_ptr<VeBuffer>> m_shader_storage_buffers; // large SSBO per frame
+	std::vector<std::unique_ptr<VeBuffer>> m_spawn_storage_buffers; // spawn event SSBO per frame
 	std::vector<vk::raii::DescriptorSet> m_compute_descriptor_sets;
 
 

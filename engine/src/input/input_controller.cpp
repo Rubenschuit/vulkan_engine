@@ -14,6 +14,7 @@ namespace ve {
 
 	InputController::~InputController() {}
 
+	// TODO: Move application specific input handling to the application class
 	InputActions InputController::processInput(float delta_time, VeCamera& camera) {
 		InputActions actions{};
 		// Close window on double Escape key press
@@ -97,7 +98,7 @@ namespace ve {
 		}
 		m_prev_reset_state = cur_reset;
 
-		// Launch firework
+		// Launch firework on press
 		int cur_firework = glfwGetKey(m_window, m_key_mappings.launch_firework);
 		if (cur_firework == GLFW_PRESS && m_prev_firework_state == GLFW_RELEASE) {
 			actions.launch_firework = true;

@@ -23,6 +23,7 @@ ParticleSystem::ParticleSystem(
 	m_pending_particle_count = m_particle_count;
 	m_capacity = 0;
 	createShaderStorageBuffers();
+	createSpawnBuffers();
 	createUniformBuffers();
 	createDescriptorSetLayouts();
 	createDescriptorSets();
@@ -82,6 +83,24 @@ void ParticleSystem::createShaderStorageBuffers() {
 	}
 }
 
+void ParticleSystem::createSpawnBuffers() {
+	m_spawn_storage_buffers.clear();
+	m_spawn_storage_buffers.resize(MAX_FRAMES_IN_FLIGHT);
+
+	vk::DeviceSize buffer_size = sizeof(SpawnEvent) * MAX_SPAWN_EVENTS;
+
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+		m_spawn_storage_buffers[i] = std::make_unique<VeBuffer>(
+			m_ve_device,
+			buffer_size,
+			1,
+			vk::BufferUsageFlagBits::eStorageBuffer,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+		);
+		m_spawn_storage_buffers[i]->map();
+	}
+}
+
 void ParticleSystem::createUniformBuffers() {
 	m_compute_uniform_buffers.clear();
 	m_compute_uniform_buffers.resize(MAX_FRAMES_IN_FLIGHT);
@@ -106,6 +125,7 @@ void ParticleSystem::createDescriptorSetLayouts() {
 		.addBinding(3, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eCompute)
 		.addBinding(1, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
 		.addBinding(2, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
+		.addBinding(4, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
 		.build();
 }
 
@@ -119,10 +139,13 @@ void ParticleSystem::createDescriptorSets() {
 		auto ssbo_info = m_shader_storage_buffers[i]->getDescriptorInfo();
 		uint32_t prev = (i + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
 		auto ssbo_info_last_frame = m_shader_storage_buffers[prev]->getDescriptorInfo();
+		auto spawn_info = m_spawn_storage_buffers[i]->getDescriptorInfo();
+
 		VeDescriptorWriter(*m_compute_set_layout, *m_descriptor_pool)
 			.writeBuffer(3, &ubo_info)
 			.writeBuffer(1, &ssbo_info_last_frame)
 			.writeBuffer(2, &ssbo_info)
+			.writeBuffer(4, &spawn_info)
 			.build(set);
 		m_compute_descriptor_sets.push_back(std::move(set));
 	}
@@ -215,10 +238,17 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 
 	// Process pending spawns
 	params.spawn_event_count = 0;
-	while (!m_pending_spawns.empty() && params.spawn_event_count < 32) {
-		params.spawn_events[params.spawn_event_count] = m_pending_spawns.front();
+	std::vector<SpawnEvent> current_frame_spawns;
+	current_frame_spawns.reserve(MAX_SPAWN_EVENTS);
+
+	while (!m_pending_spawns.empty() && params.spawn_event_count < MAX_SPAWN_EVENTS) {
+		current_frame_spawns.push_back(m_pending_spawns.front());
 		m_pending_spawns.pop_front();
 		params.spawn_event_count++;
+	}
+
+	if (params.spawn_event_count > 0) {
+		m_spawn_storage_buffers[frame_info.current_frame]->writeToBuffer(current_frame_spawns.data(), sizeof(SpawnEvent) * params.spawn_event_count);
 	}
 
 	if (m_pending_reset.load(std::memory_order_relaxed)) {
@@ -359,6 +389,11 @@ void ParticleSystem::setParticleCount(uint32_t count, bool reset) {
 	if (count > m_capacity) {
 		// Ensure GPU is idle before resizing GPU resources
 		m_ve_device.getDevice().waitIdle();
+
+		// Explicitly clear old resources before creating new ones
+		m_shader_storage_buffers.clear();
+		m_compute_descriptor_sets.clear();
+
 		m_particle_count = count;
 		m_pending_particle_count = m_particle_count;
 		// Recreate storage buffers sized to new capacity and reset on next dispatch

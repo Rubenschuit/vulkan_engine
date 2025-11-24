@@ -40,7 +40,8 @@ enum ParticleType : uint {
 	TYPE_SMOKE = 1,
 	TYPE_SPARK = 2,
 	TYPE_ROCKET = 3,
-	TYPE_EXPLOSION = 4
+	TYPE_EXPLOSION = 4,
+	TYPE_EXPLOSION_SMOKE = 5
 };
 
 
@@ -102,7 +103,7 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		}
 		// For additive blending, we must pre-multiply alpha to affect RGB intensity
 		return float4(in_vert.color.rgb * in_vert.color.a, in_vert.color.a);
-	} else if (in_vert.type == ParticleType::TYPE_SMOKE) {
+	} else if (in_vert.type == ParticleType::TYPE_SMOKE || in_vert.type == ParticleType::TYPE_EXPLOSION_SMOKE) {
 		col1 = smoke_texture.Sample(in_vert.uv1);
 		col2 = smoke_texture.Sample(in_vert.uv2);
 	} else {
@@ -150,10 +151,12 @@ struct Params {
 	uint32_t padding0;
 	uint32_t padding1;
 	uint32_t padding2;
-	SpawnEvent spawn_events[32];
 };
 [vk::binding(3, 0)]
 ConstantBuffer<Params> params;
+
+[vk::binding(4, 0)]
+StructuredBuffer<SpawnEvent> spawn_events;
 
 struct Particle {
 	float4 position; // w is size
@@ -477,7 +480,7 @@ void resetFromEvent(uint i, SpawnEvent e) {
 		 // Random burst velocity added to base velocity
 		 float2 vxy = rand_normal2(state);
 		 float vz = rand_normal2(state).x;
-		 float speed = 5.0f + 5.0f * rand01(state);
+		 float speed = 1.0f + 1.0f * rand01(state);
 		 final_vel += float3(vxy.x, vxy.y, vz) * speed;
 
 		 // More lifetime variance for sparks
@@ -488,12 +491,21 @@ void resetFromEvent(uint i, SpawnEvent e) {
 		 // High velocity burst
 		 float2 vxy = rand_normal2(state);
 		 float vz = rand_normal2(state).x;
-		 float speed = 1.0f + 5.0f * rand01(state);
+		 float speed = 0.5f + 3.0f * rand01(state);
 		 final_vel += float3(vxy.x, vxy.y, vz) * speed;
 
 		 if (vel_life.w <= 0.0f) life = 0.5f + rand01(state) * 0.5f;
 		 else life = vel_life.w * (0.8f + 0.4f * rand01(state));
 
+	} else if (type == ParticleType::TYPE_EXPLOSION_SMOKE) { // Smoke from explosion
+		 // High velocity burst
+		 float2 vxy = rand_normal2(state);
+		 float vz = rand_normal2(state).x;
+		 float speed = 0.5f + 3.0f * rand01(state);
+		 final_vel += float3(vxy.x, vxy.y, vz) * speed;
+
+		 if (vel_life.w <= 0.0f) life = 0.5f + rand01(state) * 0.5f;
+		 else life = vel_life.w * (0.8f + 0.4f * rand01(state));
 	} else if (type == ParticleType::TYPE_ROCKET) { // Rocket
 		 // Minimal noise
 		 final_vel += rand_normal2(state).xyy * 0.1f;
@@ -540,7 +552,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 
 	// Initialize emitted particles
 	for (uint k = 0; k < params.spawn_event_count; ++k) {
-		SpawnEvent e = params.spawn_events[k];
+		SpawnEvent e = spawn_events[k];
 		if (i >= e.info.x && i < e.info.x + e.info.y) {
 			 resetFromEvent(i, e);
 			 return;
@@ -588,21 +600,29 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 				p = simulateGalaxyMassive(p);
 				break;
 		}
-	} else {
+	} else { // Firework particles
 		float gravity = 20.0f;
-		if (type == ParticleType::TYPE_SMOKE) {
+		if (type == ParticleType::TYPE_SMOKE || type == ParticleType::TYPE_EXPLOSION_SMOKE || type == ParticleType::TYPE_EXPLOSION) {
 			gravity = -1.0f; // Buoyancy for smoke
 		}
 
 		p.velocity.z -= gravity * params.delta_time;
 
-		if (type == ParticleType::TYPE_SMOKE) { // Smoke
-			 p.velocity.xyz *= 0.999f; // Drag
+		if (type == ParticleType::TYPE_SMOKE || type == ParticleType::TYPE_EXPLOSION_SMOKE) { // Smoke
+			 p.velocity.xyz *= 0.99f; // Drag
 		} else if (type == ParticleType::TYPE_SPARK) { // Spark
 			 p.velocity.xyz *= 0.98f; // Drag
-			 p.color.a -= 1.0f * params.delta_time; // Fade
+			 float max_life = p.extra_data.y;
+			 if (max_life > 0.001f) {
+				 float life_frac = saturate(p.velocity.w / max_life);
+				 float age = 1.0f - life_frac;
+				 // Yellow -> Orange -> Red
+				 p.color.rgb = lerp(float3(1.0f, 0.8f, 0.1f), float3(1.0f, 0.0f, 0.0f), age);
+				 // Fade out in last 20% of life
+				 p.color.a = saturate(life_frac / 0.2f);
+			 }
 		} else if (type == ParticleType::TYPE_EXPLOSION) { // Explosion
-			 p.velocity.xyz *= 0.995f; // Drag (air resistance)
+			 p.velocity.xyz *= 0.99f; // Drag (air resistance)
 			 // Fade based on lifetime fraction
 			 float max_life = p.extra_data.y;
 			 if (max_life > 0.001f) {
@@ -611,7 +631,6 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 				 p.color.a = 0.0f;
 			 }
 		}
-
 		p.position.xyz += p.velocity.xyz * params.delta_time;
 		if (p.position.z < 0.0f) p.position.z = 0.0f;
 	}
@@ -625,7 +644,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 	float cycle_progress = 0.0f;
 	uint particle_type = (uint)p.extra_data.x;
 
-	if (particle_type == ParticleType::TYPE_SMOKE) {
+	if (particle_type == ParticleType::TYPE_SMOKE || particle_type == ParticleType::TYPE_EXPLOSION_SMOKE) {
 		// For smoke, animation is tied to lifetime (extra_data.y is max_life)
 		// Progress goes from 0.0 (start) to 1.0 (end)
 		float max_life = p.extra_data.y;
@@ -651,7 +670,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 	int index2 = index1 + 1;
 
 	// For smoke (one-shot), clamp to last frame instead of wrapping
-	if (particle_type == ParticleType::TYPE_SMOKE) {
+	if (particle_type == ParticleType::TYPE_SMOKE || particle_type == ParticleType::TYPE_EXPLOSION_SMOKE) {
 		if (index1 >= stage_count - 1) {
 			index1 = stage_count - 1;
 			index2 = stage_count - 1;
@@ -668,7 +687,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 	float blend = atlas_progression - floor(atlas_progression);
 
 	// If smoke is clamped at end, blend should be 0 or irrelevant
-	if (particle_type == ParticleType::TYPE_SMOKE && index1 == stage_count - 1) {
+	if ((particle_type == ParticleType::TYPE_SMOKE || particle_type == ParticleType::TYPE_EXPLOSION_SMOKE) && index1 == stage_count - 1) {
 		blend = 0.0f;
 	}
 
