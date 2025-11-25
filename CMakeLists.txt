@@ -16,6 +16,9 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Use Vulkan 0-1 Z range for GLM
+add_compile_definitions(GLM_FORCE_DEPTH_ZERO_TO_ONE)
+
 # Generate compile_commands.json for IntelliSense support to /build/Debug/compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON )
 

@@ -13,6 +13,7 @@ struct Rocket {
     glm::vec3 vel;
     glm::vec4 color;
     float timer;
+    float trail_timer = 0.0f;
     bool exploded = false;
 };
 
@@ -35,6 +36,8 @@ struct FireworksConfig {
     float gravity = 20.0f;
 
     int max_particles = 200000;
+
+	glm::vec4 smoke_color = glm::vec4(0.4f, 0.4f, 0.4f, 0.5f);
 };
 
 class VENGINE_API FireworksSystem {
@@ -50,6 +53,7 @@ public:
     void update(VeFrameInfo& frame_info);
     void render(VeFrameInfo& frame_info) const;
 
+	void launchRocket(); // use m_config to launch a rocket
     void launchRocket(glm::vec3 pos, glm::vec3 vel, glm::vec4 color);
     void setParticleCapacity(uint32_t capacity);
 

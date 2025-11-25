@@ -67,6 +67,7 @@ struct ParticleParams {
 	uint32_t padding1;
 	uint32_t padding2;
 	alignas(16) glm::vec4 wind_direction; // xyz = direction, w = intensity
+	alignas(16) glm::vec4 frustum_planes[6]; // xyz = normal, w = distance
 };
 
 // Data structure for vertex shader input
@@ -195,6 +196,8 @@ private:
 	// Per-frame resources
 	std::vector<std::unique_ptr<VeBuffer>> m_compute_uniform_buffers;  // small UBO per frame
 	std::vector<std::unique_ptr<VeBuffer>> m_shader_storage_buffers; // large SSBO per frame
+	std::vector<std::unique_ptr<VeBuffer>> m_render_buffers; // packed SSBO for rendering
+	std::vector<std::unique_ptr<VeBuffer>> m_indirect_buffers; // Indirect draw commands
 	std::vector<std::unique_ptr<VeBuffer>> m_spawn_storage_buffers; // spawn event SSBO per frame
 	std::vector<vk::raii::DescriptorSet> m_compute_descriptor_sets;
 

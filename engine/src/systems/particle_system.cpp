@@ -69,7 +69,26 @@ void ParticleSystem::createShaderStorageBuffers() {
 	// Create per-frame SSBO and copy initial data
 	m_shader_storage_buffers.clear();
 	m_shader_storage_buffers.resize(MAX_FRAMES_IN_FLIGHT);
+
+	// Create render buffers (compacted)
+	m_render_buffers.clear();
+	m_render_buffers.resize(MAX_FRAMES_IN_FLIGHT);
+
+	// Create indirect draw buffers
+	m_indirect_buffers.clear();
+	m_indirect_buffers.resize(MAX_FRAMES_IN_FLIGHT);
+
+	VkDrawIndirectCommand initial_command{
+		.vertexCount = 6,
+		.instanceCount = 0,
+		.firstVertex = 0,
+		.firstInstance = 0
+	};
+
+	vk::DeviceSize indirect_size = sizeof(VkDrawIndirectCommand);
+
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+		// Simulation buffers
 		m_shader_storage_buffers[i] = std::make_unique<VeBuffer>(
 			m_ve_device,
 			buffer_size,
@@ -80,6 +99,29 @@ void ParticleSystem::createShaderStorageBuffers() {
 			vk::MemoryPropertyFlagBits::eDeviceLocal
 		);
 		m_ve_device.copyBuffer(staging_buffer.getBuffer(), m_shader_storage_buffers[i]->getBuffer(), buffer_size);
+
+		// Render buffers (same size as simulation for worst case)
+		m_render_buffers[i] = std::make_unique<VeBuffer>(
+			m_ve_device,
+			buffer_size,
+			1,
+			vk::BufferUsageFlagBits::eStorageBuffer |
+			vk::BufferUsageFlagBits::eVertexBuffer, // Used for rendering
+			vk::MemoryPropertyFlagBits::eDeviceLocal
+		);
+
+		// Indirect buffers
+		m_indirect_buffers[i] = std::make_unique<VeBuffer>(
+			m_ve_device,
+			indirect_size,
+			1,
+			vk::BufferUsageFlagBits::eStorageBuffer |
+			vk::BufferUsageFlagBits::eIndirectBuffer |
+			vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+		);
+		m_indirect_buffers[i]->map();
+		m_indirect_buffers[i]->writeToBuffer(&initial_command);
 	}
 }
 
@@ -120,12 +162,17 @@ void ParticleSystem::createUniformBuffers() {
 // For the compute shader we need:
 // - UBO with parameters
 // - An input and output particle SSBO
+// - Spawn event buffer
+// - Indirect command buffer (RW)
+// - Render buffer (RW)
 void ParticleSystem::createDescriptorSetLayouts() {
 	m_compute_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(3, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eCompute)
 		.addBinding(1, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
 		.addBinding(2, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
 		.addBinding(4, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
+		.addBinding(5, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Indirect buffer
+		.addBinding(6, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Render buffer
 		.build();
 }
 
@@ -141,11 +188,16 @@ void ParticleSystem::createDescriptorSets() {
 		auto ssbo_info_last_frame = m_shader_storage_buffers[prev]->getDescriptorInfo();
 		auto spawn_info = m_spawn_storage_buffers[i]->getDescriptorInfo();
 
+		auto indirect_info = m_indirect_buffers[i]->getDescriptorInfo();
+		auto render_info = m_render_buffers[i]->getDescriptorInfo();
+
 		VeDescriptorWriter(*m_compute_set_layout, *m_descriptor_pool)
 			.writeBuffer(3, &ubo_info)
 			.writeBuffer(1, &ssbo_info_last_frame)
 			.writeBuffer(2, &ssbo_info)
 			.writeBuffer(4, &spawn_info)
+			.writeBuffer(5, &indirect_info)
+			.writeBuffer(6, &render_info)
 			.build(set);
 		m_compute_descriptor_sets.push_back(std::move(set));
 	}
@@ -239,6 +291,25 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 	// Default wind
 	params.wind_direction = m_wind_direction;
 
+	// Calculate Frustum Planes from Camera
+	glm::mat4 view = frame_info.camera.getView();
+	glm::mat4 proj = frame_info.camera.getProj();
+	glm::mat4 m = proj * view;
+	glm::mat4 mt = glm::transpose(m);
+
+	params.frustum_planes[0] = mt[3] + mt[0]; // Left
+	params.frustum_planes[1] = mt[3] - mt[0]; // Right
+	params.frustum_planes[2] = mt[3] + mt[1]; // Bottom
+	params.frustum_planes[3] = mt[3] - mt[1]; // Top
+	params.frustum_planes[4] = mt[2]; // Near (Vulkan 0 to 1 Z range)
+	params.frustum_planes[5] = mt[3] - mt[2]; // Far
+
+	// Normalize planes
+	for (int i = 0; i < 6; i++) {
+		float length = glm::length(glm::vec3(params.frustum_planes[i]));
+		params.frustum_planes[i] /= length;
+	}
+
 	// Process pending spawns
 	params.spawn_event_count = 0;
 	std::vector<SpawnEvent> current_frame_spawns;
@@ -265,6 +336,36 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 	}
 	m_compute_uniform_buffers[frame_info.current_frame]->writeToBuffer(&params);
 
+	// Reset indirect command instance count to 0
+	VkDrawIndirectCommand command{
+		.vertexCount = 6,
+		.instanceCount = 0,
+		.firstVertex = 0,
+		.firstInstance = 0
+	};
+	m_indirect_buffers[frame_info.current_frame]->writeToBuffer(&command);
+
+	// Barrier to ensure indirect buffer write is visible to compute
+	vk::BufferMemoryBarrier indirect_write_barrier{
+		.srcAccessMask = vk::AccessFlagBits::eHostWrite,
+		.dstAccessMask = vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.buffer = *m_indirect_buffers[frame_info.current_frame]->getBuffer(),
+		.offset = 0,
+		.size = VK_WHOLE_SIZE
+	};
+
+	frame_info.compute_command_buffer.pipelineBarrier(
+		vk::PipelineStageFlagBits::eHost,
+		vk::PipelineStageFlagBits::eComputeShader,
+		{},
+		nullptr,
+		indirect_write_barrier,
+		nullptr
+	);
+
+
 	frame_info.compute_command_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
 	frame_info.compute_command_buffer.bindDescriptorSets(
 		vk::PipelineBindPoint::eCompute,
@@ -283,24 +384,36 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 	}
 
 
-	// Add barrier to ensure compute writes are visible to vertex shader read
-	// This assumes compute submits before graphics
+	// Add barrier to ensure compute writes are visible to vertex shader read and indirect command execution
 	vk::BufferMemoryBarrier barrier{
 		.srcAccessMask = vk::AccessFlagBits::eShaderWrite,
 		.dstAccessMask = vk::AccessFlagBits::eVertexAttributeRead,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.buffer = *m_shader_storage_buffers[frame_info.current_frame]->getBuffer(),
+		.buffer = *m_render_buffers[frame_info.current_frame]->getBuffer(),
 		.offset = 0,
 		.size = VK_WHOLE_SIZE
 	};
 
+	// Barrier for indirect buffer
+	vk::BufferMemoryBarrier indirect_barrier{
+		.srcAccessMask = vk::AccessFlagBits::eShaderWrite,
+		.dstAccessMask = vk::AccessFlagBits::eIndirectCommandRead,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.buffer = *m_indirect_buffers[frame_info.current_frame]->getBuffer(),
+		.offset = 0,
+		.size = VK_WHOLE_SIZE
+	};
+
+	vk::BufferMemoryBarrier barriers[] = { barrier, indirect_barrier };
+
 	frame_info.compute_command_buffer.pipelineBarrier(
 		vk::PipelineStageFlagBits::eComputeShader,
-		vk::PipelineStageFlagBits::eVertexInput,
+		vk::PipelineStageFlagBits::eVertexInput | vk::PipelineStageFlagBits::eDrawIndirect,
 		{},
 		nullptr,
-		barrier,
+		{ barriers[0], barriers[1] },
 		nullptr
 	);
 
@@ -322,27 +435,26 @@ void ParticleSystem::render(VeFrameInfo& frame_info) const {
 		{}
 	);
 	vk::DeviceSize offsets[] = { 0 };
-	vk::Buffer buffers[] = { *m_shader_storage_buffers[frame_info.current_frame]->getBuffer() };
+	// Use Render Buffer (compacted) instead of simulation buffer
+	vk::Buffer buffers[] = { *m_render_buffers[frame_info.current_frame]->getBuffer() };
 	frame_info.command_buffer.bindVertexBuffers(0, buffers, offsets);
 
-	// cap particles when spawning in
-	uint32_t particles_to_spawn = m_particle_count;
-	float delay_factor = 0.5f; // time to full spawn
-	if (m_total_time < delay_factor) {
-		particles_to_spawn = static_cast<uint32_t>(m_particle_count * (m_total_time / delay_factor));
-	}
-	// unit quad is generated in shader from SV_VertexID
-	frame_info.command_buffer.draw(6, particles_to_spawn, 0, 0);
+	// Indirect Draw
+	frame_info.command_buffer.drawIndirect(
+		*m_indirect_buffers[frame_info.current_frame]->getBuffer(),
+		0,
+		1,
+		sizeof(VkDrawIndirectCommand)
+	);
 }
 
 void ParticleSystem::emitParticles(uint32_t count) {
-	SpawnEvent e{};
-	e.info.y = count;
-	e.info.z = TYPE_DEFAULT; // Type 0 (Default)
-	e.position_scale = glm::vec4(m_origin, 1.0f);
-	e.velocity_life = glm::vec4(0.0f);
-	e.color = glm::vec4(1.0f);
-
+	SpawnEvent e{
+		.position_scale = glm::vec4(m_origin, 1.0f),
+		.velocity_life = glm::vec4(0.0f),
+		.color = glm::vec4(1.0f),
+		.info = {0, count, TYPE_DEFAULT, 0}
+	};
 	emitParticles(e);
 }
 
@@ -395,6 +507,8 @@ void ParticleSystem::setParticleCount(uint32_t count, bool reset) {
 
 		// Explicitly clear old resources before creating new ones
 		m_shader_storage_buffers.clear();
+		m_render_buffers.clear();
+		m_indirect_buffers.clear();
 		m_compute_descriptor_sets.clear();
 
 		m_particle_count = count;

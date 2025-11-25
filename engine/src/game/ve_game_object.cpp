@@ -70,7 +70,7 @@ glm::mat3 VeGameObject::getNormalTransform() const {
 
 VeGameObject VeGameObject::createPointLight(float intensity, float radius, glm::vec3 color) {
 	VeGameObject game_object = VeGameObject::createGameObject();
-	game_object.point_light_component = std::make_unique<PointLightComponent>();
+	game_object.point_light_component = PointLightComponent{};
 	game_object.point_light_component->intensity = intensity;
 	game_object.color = color;
 	game_object.has_texture = 0.0f;

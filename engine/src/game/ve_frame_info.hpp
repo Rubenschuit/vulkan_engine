@@ -5,6 +5,7 @@ for each frame in the rendering process. */
 #include "ve_model.hpp"
 #include "ve_game_object.hpp"
 #include "ve_config.hpp"
+#include "ve_camera.hpp"
 
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
@@ -62,6 +63,7 @@ struct VeFrameInfo {
 	vk::raii::DescriptorSet& shadow_descriptor_set;
 	vk::raii::CommandBuffer& command_buffer;
 	vk::raii::CommandBuffer& compute_command_buffer;
+	ve::VeCamera& camera;
 	std::unordered_map<uint32_t, VeGameObject>& game_objects;
 	float frame_time;
 	float total_time;

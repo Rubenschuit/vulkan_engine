@@ -1,6 +1,5 @@
 #include <glm/glm.hpp>
 #define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -59,6 +58,7 @@ VeFrameInfo Sandbox::update() {
 		.shadow_descriptor_set = shadow_desc_set,
 		.command_buffer = command_buffer,
 		.compute_command_buffer = compute_command_buffer,
+		.camera = m_camera,
 		.game_objects = ui_actions.current_scene == 1 ? m_simple_scene->getGameObjects() : m_sponza_scene->getGameObjects(),
 		.frame_time = m_frame_time,
 		.total_time = m_total_time,
@@ -110,35 +110,14 @@ void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 		m_particle_system->scheduleRestart();
 		ui_actions.reset_particle_count = false;
 	}
-
 	m_particle_system->setSpeed(ui_actions.speed);
-
 	m_particle_system->setMean(ui_actions.particle_velocity_mean);
 	m_particle_system->setStddev(ui_actions.particle_velocity_stddev);
 	ui_actions.apply_velocity_params = false; // not used currently
-
 	m_particle_system->setLifeRange(ui_actions.min_life, ui_actions.max_life);
 	m_particle_system->setShouldRespawn(ui_actions.should_respawn);
-
-	if (ui_actions.emit_burst) {
-		m_particle_system->emitParticles(static_cast<uint32_t>(ui_actions.emit_count));
-		ui_actions.emit_burst = false;
-		// Update UI particle count
-		ui_actions.pending_particle_count = m_particle_system->getParticleCount();
-	}
-
 	if (actions.launch_firework) {
-		auto& config = m_fireworks_system->getConfig();
-		for (int i = 0; i < config.launch_count; i++) {
-			glm::vec3 pos = config.launch_pos;
-			//random upwards velocity
-			float speed = Random::floatRange(config.launch_vel_min, config.launch_vel_max);
-			glm::vec3 vel = glm::vec3(0.0f, 0.0f, speed);
-			// add some random xy velocity
-			vel += Random::vec3Range(-config.launch_spread_xy, config.launch_spread_xy) * glm::vec3(1.0f, 1.0f, 0.0f);
-			glm::vec4 color = config.use_random_color ? Random::color() : config.particle_color;
-			m_fireworks_system->launchRocket(pos, vel, color);
-		}
+		m_fireworks_system->launchRocket();
 	}
 
 	// Record and submit compute work (two particle systems)
@@ -227,16 +206,8 @@ void Sandbox::renderAppWindows() {
 				ImGui::SameLine();
 				if (ImGui::Button("1.0x")) ui_actions.speed = 1.0f;
 
-				// 2. Emission
-				ImGui::Separator();
-				ImGui::Text("Emission");
-				ImGui::Separator();
-				ImGui::SliderInt("Burst Size", &ui_actions.emit_count, 1, 10000);
-				if (ImGui::Button("Emit Burst")) {
-					ui_actions.emit_burst = true;
-				}
-				ImGui::SameLine();
-				ImGui::Checkbox("Respawn", &ui_actions.should_respawn);
+
+
 
 				// 3. Lifetime
 				ImGui::Separator();
@@ -244,6 +215,7 @@ void Sandbox::renderAppWindows() {
 				ImGui::Separator();
 				ImGui::SliderFloat("Min Life", &ui_actions.min_life, 0.1f, 100.0f);
 				ImGui::SliderFloat("Max Life", &ui_actions.max_life, 0.1f, 100.0f);
+				ImGui::Checkbox("Respawn", &ui_actions.should_respawn);
 				// Ensure min <= max
 				if (ui_actions.min_life > ui_actions.max_life) ui_actions.min_life = ui_actions.max_life;
 
@@ -253,6 +225,7 @@ void Sandbox::renderAppWindows() {
 				ImGui::Separator();
 				ImGui::SliderFloat("Mean Velocity", &ui_actions.particle_velocity_mean, -60, 60);
 				ImGui::SliderFloat("StdDev Velocity", &ui_actions.particle_velocity_stddev, 0, 60);
+
 
 				ImGui::EndTabItem();
 			}
@@ -292,15 +265,7 @@ void Sandbox::renderAppWindows() {
 				}
 
 				if (ImGui::Button("Launch Rocket", ImVec2(-1, 0))) {
-					// Manually trigger launch
-					for (int i = 0; i < config.launch_count; i++) {
-						glm::vec3 pos = config.launch_pos;
-						float speed = Random::floatRange(config.launch_vel_min, config.launch_vel_max);
-						glm::vec3 vel = glm::vec3(0.0f, 0.0f, speed);
-						vel += Random::vec3Range(-config.launch_spread_xy, config.launch_spread_xy) * glm::vec3(1.0f, 1.0f, 0.0f);
-						glm::vec4 color = config.use_random_color ? Random::color() : config.particle_color;
-						m_fireworks_system->launchRocket(pos, vel, color);
-					}
+					m_fireworks_system->launchRocket();
 				}
 
 				ImGui::EndTabItem();

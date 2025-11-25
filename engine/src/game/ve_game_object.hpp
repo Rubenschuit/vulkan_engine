@@ -5,6 +5,7 @@ The user manually sets the object's properties (position, rotation, scale, etc.)
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <memory>
+#include <optional>
 
 namespace ve {
     // Forward declaration
@@ -30,6 +31,11 @@ public:
 	static VeGameObject createGameObject();
 	static VeGameObject createPointLight(float intensity = 1.0f, float radius = 1.0f, glm::vec3 color = glm::vec3(1.0f));
 
+	VeGameObject(const VeGameObject&) = delete;
+	VeGameObject& operator=(const VeGameObject&) = delete;
+	VeGameObject(VeGameObject&&) = default;
+	VeGameObject& operator=(VeGameObject&&) = default;
+
 	uint32_t getId() const { return m_id; }
 	// Composes a transformation matrix from translation, rotation, and scale.
 	glm::mat4 getTransform() const;
@@ -43,7 +49,7 @@ public:
 
 	// optional components can be nullptr
 	std::shared_ptr<VeModel> ve_model;
-	std::unique_ptr<PointLightComponent> point_light_component;
+	std::optional<PointLightComponent> point_light_component;
 private:
 	VeGameObject(uint32_t id) : m_id(id) {}
 

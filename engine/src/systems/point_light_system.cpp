@@ -5,7 +5,6 @@
 #include "utils/ve_log.hpp"
 
 #define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -100,7 +99,7 @@ void PointLightSystem::render(VeFrameInfo& frame_info) const {
 	);
 
 	for (auto& [id, obj] : frame_info.game_objects) {
-		if (obj.point_light_component == nullptr)
+		if (!obj.point_light_component)
 			continue;
 		SimplePushConstantData push{};
 		push.position = glm::vec4{obj.transform.translation, 1.0f};
@@ -124,7 +123,7 @@ void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBuffe
 	uint32_t num_shadow_lights = 0;
 
 	for (auto& [id, obj] : frame_info.game_objects) {
-		if (obj.point_light_component == nullptr)
+		if (!obj.point_light_component)
 			continue;
 		assert(num_lights < MAX_LIGHTS && "Number of point lights exceeds MAX_LIGHTS");
 

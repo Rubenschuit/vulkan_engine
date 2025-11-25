@@ -99,7 +99,7 @@ Sampler2D smoke_texture;
 [shader("fragment")]
 float4 fragMain(VertexOutput in_vert) : SV_Target {
 	float4 col1, col2;
-	if (in_vert.type == ParticleType::TYPE_DEFAULT) {
+	if (in_vert.type == ParticleType::TYPE_DEFAULT || in_vert.type == ParticleType::TYPE_EXPLOSION) {
 		// round mask
 		if (dot(in_vert.uv0, in_vert.uv0) > 0.25f) {
 			discard;
@@ -155,12 +155,23 @@ struct Params {
 	uint32_t padding1;
 	uint32_t padding2;
 	float4 wind_direction; // xyz = direction, w = intensity
+	float4 frustum_planes[6]; // xyz = normal, w = distance
 };
 [vk::binding(3, 0)]
 ConstantBuffer<Params> params;
 
 [vk::binding(4, 0)]
 StructuredBuffer<SpawnEvent> spawn_events;
+
+// Indirect command structure layout
+struct DrawIndirectCommand {
+    uint vertexCount;
+    uint instanceCount;
+    uint firstVertex;
+    uint firstInstance;
+};
+[vk::binding(5, 0)]
+RWStructuredBuffer<DrawIndirectCommand> indirect_command;
 
 struct Particle {
 	float4 position; // w is size
@@ -173,6 +184,10 @@ struct Particle {
 RWStructuredBuffer<Particle> particles_prev;
 [vk::binding(2, 0)]
 RWStructuredBuffer<Particle> particles_out;
+
+// Compacted render buffer
+[vk::binding(6, 0)]
+RWStructuredBuffer<Particle> particles_render;
 
 // RNG helpers
 uint wang_hash(uint seed) {
@@ -496,7 +511,7 @@ void resetFromEvent(uint i, SpawnEvent e) {
 		 // High velocity burst
 		 float2 vxy = rand_normal2(state);
 		 float vz = rand_normal2(state).x;
-		 float speed = 0.5f + 3.0f * rand01(state);
+		 float speed = 0.5f + 4.0f * rand01(state);
 		 final_vel += float3(vxy.x, vxy.y, vz) * speed;
 
 		 if (vel_life.w <= 0.0f) life = 0.5f + rand01(state) * 0.5f;
@@ -506,7 +521,7 @@ void resetFromEvent(uint i, SpawnEvent e) {
 		 // High velocity burst
 		 float2 vxy = rand_normal2(state);
 		 float vz = rand_normal2(state).x;
-		 float speed = 0.5f + 3.0f * rand01(state);
+		 float speed = 0.5f + 4.0f * rand01(state);
 		 final_vel += float3(vxy.x, vxy.y, vz) * speed;
 
 		 if (vel_life.w <= 0.0f) life = 0.5f + rand01(state) * 0.5f;
@@ -538,6 +553,24 @@ void resetFromEvent(uint i, SpawnEvent e) {
 	particles_prev[i] = p;
 }
 
+void appendToRenderBuffer(Particle p) {
+	uint index;
+	// Atomic increment to get unique index in render buffer
+	InterlockedAdd(indirect_command[0].instanceCount, 1, index);
+	particles_render[index] = p;
+}
+
+// Helper function for Frustum Culling
+bool isVisible(float3 pos, float radius) {
+	for (int i = 0; i < 6; ++i) {
+		// Plane equation: dot(normal, pos) + dist + radius < 0 means fully outside
+		if (dot(params.frustum_planes[i].xyz, pos) + params.frustum_planes[i].w < -radius) {
+			return false;
+		}
+	}
+	return true;
+}
+
 [shader("compute")]
 [numthreads(256, 1, 1)]
 void compMain(uint3 thread_id : SV_DispatchThreadID) {
@@ -552,6 +585,8 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 		} else {
 			resetPoint(i, 0);
 		}
+		// Add to render buffer after reset
+		appendToRenderBuffer(particles_out[i]);
 		return;
 	}
 
@@ -560,6 +595,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 		SpawnEvent e = spawn_events[k];
 		if (i >= e.info.x && i < e.info.x + e.info.y) {
 			 resetFromEvent(i, e);
+			 appendToRenderBuffer(particles_out[i]);
 			 return;
 		}
 	}
@@ -577,10 +613,14 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 			} else {
 				resetPoint(i, time_seed);
 			}
+			appendToRenderBuffer(particles_out[i]);
 			return;
 		} else {
 			// Do not respawn, make invisible
 			p.position.w = 0.0f;
+			particles_out[i] = p;
+			// Do NOT add to render buffer (dead particle)
+			return;
 		}
 	}
 
@@ -734,4 +774,13 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 	p.extra_data.z = blend;
 
 	particles_out[i] = p;
+
+	// Only write to render buffer if visible (alpha > 0 or size > 0)
+	if (p.position.w > 0.001f && p.color.a > 0.001f) {
+		// Check frustum culling
+		// Use particle size * 2 as the radius for culling.
+		if (isVisible(p.position.xyz, p.position.w * 2.0f)) {
+			appendToRenderBuffer(p);
+		}
+	}
 }

@@ -97,9 +97,9 @@ private:
 
 
 	VeWindow &m_window;
+	vk::raii::Context m_context;
 	vk::raii::Instance m_instance{nullptr};
 	vk::raii::Device m_device{nullptr};
-	vk::raii::Context m_context;
 	vk::raii::DebugUtilsMessengerEXT m_debug_messenger{nullptr};
 	vk::raii::SurfaceKHR m_surface{nullptr};
 	vk::raii::PhysicalDevice m_physical_device{nullptr};

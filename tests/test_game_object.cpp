@@ -61,7 +61,7 @@ TEST_CASE("VeGameObject transform matrix calculation", "[gameobject][transform]"
 TEST_CASE("VeGameObject point light factory", "[gameobject][factory]") {
 	auto light = ve::VeGameObject::createPointLight(5.0f, 2.0f, {1.0f, 0.0f, 0.0f});
 
-	REQUIRE(light.point_light_component != nullptr);
+	REQUIRE(light.point_light_component.has_value());
 	REQUIRE(light.point_light_component->intensity == 5.0f);
 	REQUIRE(light.transform.scale.x == 2.0f);
 	REQUIRE(light.color == glm::vec3(1.0f, 0.0f, 0.0f));
