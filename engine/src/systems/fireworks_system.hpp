@@ -28,7 +28,7 @@ struct FireworksConfig {
     bool use_random_color = true;
 
     int explosion_particle_count = 5000;
-    float explosion_size = 0.8f;
+    float explosion_size = 0.4f;
 
     glm::vec3 wind_direction{1.0f, 1.0f, 0.0f};
     float wind_strength = 3.0f;
@@ -52,6 +52,9 @@ public:
 
     void update(VeFrameInfo& frame_info);
     void render(VeFrameInfo& frame_info) const;
+	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+		m_particle_system->recreatePipeline(color_format, sample_count);
+	}
 
 	void launchRocket(); // use m_config to launch a rocket
     void launchRocket(glm::vec3 pos, glm::vec3 vel, glm::vec4 color);

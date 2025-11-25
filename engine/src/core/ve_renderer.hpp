@@ -45,6 +45,7 @@ public:
 
 	// only max or none MSAA supported for now
 	void setMSAAEnabled(bool enabled) { m_msaa_enabled = enabled; m_desired_num_samples = enabled ? m_ve_device.getSampleCount() : vk::SampleCountFlagBits::e1; m_swap_chain_needs_recreation = true; }
+	vk::SampleCountFlagBits getSampleCount() const { return m_desired_num_samples; }
 	void setPresentMode(vk::PresentModeKHR present_mode) {
 		m_present_mode = present_mode;
 		m_swap_chain_needs_recreation = true;
@@ -69,6 +70,5 @@ private:
 	bool m_msaa_enabled = true;
 	vk::SampleCountFlagBits m_desired_num_samples = m_ve_device.getSampleCount();
 };
-
 }
 

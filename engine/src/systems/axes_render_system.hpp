@@ -19,7 +19,7 @@ namespace ve {
 class VENGINE_API AxesRenderSystem {
 public:
 
-AxesRenderSystem( 
+AxesRenderSystem(
 		VeDevice& device,
 		const vk::raii::DescriptorSetLayout& descriptor_set_layout,
 		vk::Format color_format,
@@ -30,10 +30,14 @@ AxesRenderSystem(
 	AxesRenderSystem& operator=(const AxesRenderSystem&) = delete;
 
 	void render(VeFrameInfo& frame_info) const;
+	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+		m_ve_pipeline.reset();
+		createPipeline(color_format, sample_count);
+	}
 
 private:
 	void createPipelineLayout(const vk::raii::DescriptorSetLayout& descriptor_set_layout);
-	void createPipeline(vk::Format color_format);
+	void createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
 	void createAxesModel();
 
 	VeDevice& m_ve_device;

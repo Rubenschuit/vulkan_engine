@@ -17,6 +17,7 @@ public:
 
 	virtual VeFrameInfo update() override;
 	virtual void render(VeFrameInfo& frame_info) override;
+	virtual void onSwapChainRecreated() override;
 
 private:
 	void createUniformBuffers();
@@ -28,6 +29,7 @@ private:
 
 	void updateParticles(VeFrameInfo& frame_info, InputActions& actions);
 	void renderAppWindows();
+	void recreatePipelines();
 
 	// model paths
 	const std::filesystem::path project_root;

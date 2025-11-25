@@ -31,10 +31,14 @@ public:
 
 	void updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObject& ubo);
 	void render(VeFrameInfo& frame_info) const;
+	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+		m_ve_pipeline.reset();
+		createPipeline(color_format, sample_count);
+	}
 
 private:
 	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout);
-	void createPipeline(vk::Format color_format);
+	void createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
 
 	VeDevice& m_ve_device;
 

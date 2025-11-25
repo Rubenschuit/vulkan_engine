@@ -34,12 +34,14 @@ void VeApplication::run() {
 			m_ve_device.getDevice().waitIdle();
 			m_ve_window.resetWindowResizedFlag();
 			m_ve_renderer.recreateSwapChain();
+			onSwapChainRecreated();
 			continue;
 		}
 		else if (m_ve_renderer.isSwapChainOutOfDate()) {
 			VE_LOGD("Swap chain out of date detected in main loop, recreating swap chain.");
 			m_ve_device.getDevice().waitIdle();
 			m_ve_renderer.recreateSwapChain();
+			onSwapChainRecreated();
 			continue;
 		}
 

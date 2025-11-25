@@ -168,6 +168,24 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	m_imgui_layer->endFrame(m_ve_renderer.getCurrentCommandBuffer());
 }
 
+void Sandbox::onSwapChainRecreated() {
+	recreatePipelines();
+}
+
+void Sandbox::recreatePipelines() {
+	m_ve_device.getDevice().waitIdle();
+	auto color_format = m_ve_renderer.getSwapChainImageFormat();
+	auto sample_count = m_ve_renderer.getSampleCount();
+	m_simple_render_system->recreatePipeline(color_format, sample_count);
+	m_point_light_system->recreatePipeline(color_format, sample_count);
+	m_pbr_render_system->recreatePipeline(color_format, sample_count);
+	m_axes_render_system->recreatePipeline(color_format, sample_count);
+	m_skybox_render_system->recreatePipeline(color_format, sample_count);
+	m_particle_system->recreatePipeline(color_format, sample_count);
+	m_fireworks_system->recreatePipeline(color_format, sample_count);
+	// Shadow render system pipeline does not depend on swap chain MSAA
+}
+
 // Should be called between beginFrame() and endFrame() of imgui_layer
 void Sandbox::renderAppWindows() {
 	// Settings window with tabs
@@ -277,7 +295,6 @@ void Sandbox::renderAppWindows() {
 				// MSAA toggle
 				static bool s_msaa_enabled = true;
 				if (ImGui::Checkbox("Enable MSAA", &s_msaa_enabled)) {
-					// TODO: recreate all pipelines, does not work on windows
 					m_ve_renderer.setMSAAEnabled(s_msaa_enabled);
 				}
 

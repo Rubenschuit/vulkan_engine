@@ -15,7 +15,7 @@ AxesRenderSystem::AxesRenderSystem(
 	std::filesystem::path shader_path)
 	: m_ve_device(device), m_shader_path(shader_path) {
 	createPipelineLayout(global_set_layout);
-	createPipeline(color_format);
+	createPipeline(color_format, m_ve_device.getSampleCount());
 	createAxesModel();
 }
 
@@ -30,9 +30,10 @@ vk::PipelineLayoutCreateInfo pipeline_layout_info{
 m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), pipeline_layout_info);
 }
 
-void AxesRenderSystem::createPipeline(vk::Format color_format) {
+void AxesRenderSystem::createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
 	PipelineConfigInfo config{};
 	VePipeline::defaultPipelineConfigInfo(config, m_ve_device);
+	config.multisample_info.rasterizationSamples = sample_count;
 	config.input_assembly_info.topology = vk::PrimitiveTopology::eTriangleList;
 	config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	config.depth_stencil_info.depthWriteEnable = VK_FALSE;

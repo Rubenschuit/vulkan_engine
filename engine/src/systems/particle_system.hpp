@@ -113,6 +113,10 @@ public:
 
 	void update(VeFrameInfo& frame_info);
 	void render(VeFrameInfo& frame_info) const;
+	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+		m_pipeline.reset();
+		createPipeline(color_format, sample_count);
+	}
 	void scheduleRestart(); // schedule GPU reset of particle positions
 	void setMode(uint32_t mode) { m_mode = mode; }
 	void setSpeed(float speed) { m_speed = speed; }
@@ -162,7 +166,7 @@ private:
 	void createComputePipelineLayout();
 	void createComputePipeline();
 	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& texture_set_layout);
-	void createPipeline(vk::Format color_format);
+	void createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
 
 	void ensureCapacity(uint32_t needed);
 

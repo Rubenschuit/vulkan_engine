@@ -25,7 +25,7 @@ SkyboxRenderSystem::SkyboxRenderSystem(
 	: m_ve_device(device), m_shader_path(shader_path) {
 
 	createPipelineLayout(global_set_layout, material_set_layout);
-	createPipeline(color_format);
+	createPipeline(color_format, m_ve_device.getSampleCount());
 	loadCubeModel(cube_model_path);
 }
 
@@ -59,9 +59,10 @@ void SkyboxRenderSystem::createPipelineLayout(
 	m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), pipeline_layout_info);
 }
 
-void SkyboxRenderSystem::createPipeline(vk::Format color_format) {
+void SkyboxRenderSystem::createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
 	PipelineConfigInfo pipeline_config{};
 	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
+	pipeline_config.multisample_info.rasterizationSamples = sample_count;
 
 	// set formats for dynamic rendering
 	pipeline_config.color_format = color_format;

@@ -31,6 +31,8 @@ public:
 	// called by main in entry point to start the application loop
     void run();
 
+	virtual void onSwapChainRecreated() {};
+
 	// Pure virtual methods to be implemented by derived classes
 	virtual VeFrameInfo update() = 0;
 	virtual void render(VeFrameInfo& frame_info) = 0;

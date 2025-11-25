@@ -30,7 +30,7 @@ ParticleSystem::ParticleSystem(
 	createComputePipelineLayout();
 	createComputePipeline();
 	createPipelineLayout(global_set_layout, texture_set_layout);
-	createPipeline(color_format);
+	createPipeline(color_format, m_ve_device.getSampleCount());
 	if (start_active) {
 		scheduleRestart();
 	}
@@ -234,9 +234,10 @@ void ParticleSystem::createPipelineLayout(
 	m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), pipeline_layout_info);
 }
 
-void ParticleSystem::createPipeline(vk::Format color_format) {
+void ParticleSystem::createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
 	PipelineConfigInfo config{};
 	VePipeline::defaultPipelineConfigInfo(config, m_ve_device);
+	config.multisample_info.rasterizationSamples = sample_count;
 	config.attribute_descriptions = Particle::getAttributeDescriptions();
 	config.binding_descriptions = Particle::getBindingDescription();
 
