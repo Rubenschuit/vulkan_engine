@@ -40,6 +40,11 @@ enum ShadowMode {
 	PCF = 2,
 };
 
+enum Topology {
+	TRIANGLE_LIST = 0,
+	LINE_LIST = 1,
+};
+
 struct UniformBufferObject {
 	glm::mat4 view;
 	glm::mat4 proj;

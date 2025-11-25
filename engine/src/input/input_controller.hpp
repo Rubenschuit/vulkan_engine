@@ -16,6 +16,7 @@ struct InputActions {
 	// UI
 	bool ui_toggle = false;   // true exactly on the frame Tab toggled state
 	bool ui_visible = false;  // true when mouse-look is disabled
+	bool toggle_performance_ui = false;
 };
 
 class VENGINE_API InputController {
@@ -35,6 +36,7 @@ public:
 		int look_right = GLFW_KEY_RIGHT;
 
 		int toggle_mouse_look = GLFW_KEY_TAB;
+		int toggle_performance_ui = GLFW_KEY_P;
 		int reset_camera = GLFW_KEY_R;
 		int reset_particles = GLFW_KEY_E;
 		int launch_firework = GLFW_KEY_F;
@@ -75,6 +77,8 @@ private:
 	// Mouse-look toggle state
 	bool m_mouse_look_enabled = true;
 	int m_prev_toggle_state = GLFW_RELEASE;
+	int m_prev_p_state = GLFW_RELEASE;
+	int m_prev_escape_state = GLFW_RELEASE;
 	int m_prev_reset_state = GLFW_RELEASE;
 	int m_prev_firework_state = GLFW_RELEASE;
 	int m_prev_g_state = GLFW_RELEASE;

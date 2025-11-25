@@ -17,10 +17,6 @@ namespace ve {
 	// TODO: Move application specific input handling to the application class
 	InputActions InputController::processInput(float delta_time, VeCamera& camera) {
 		InputActions actions{};
-		// Close window on double Escape key press
-		if (glfwGetKey(m_window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-			glfwSetWindowShouldClose(m_window, true);
-		}
 
 		// Handle mouse-look toggle (Tab). Also drive UI visibility from this state.
 		{
@@ -44,6 +40,33 @@ namespace ve {
 			m_prev_toggle_state = cur_btn;
 			actions.ui_visible = !m_mouse_look_enabled;
 		}
+
+		// Toggle performance/control UI with P
+		int cur_p = glfwGetKey(m_window, m_key_mappings.toggle_performance_ui);
+		if (cur_p == GLFW_PRESS && m_prev_p_state == GLFW_RELEASE) {
+			actions.toggle_performance_ui = true;
+		}
+		m_prev_p_state = cur_p;
+
+		// Close window on Escape key press, but only if not in UI mode
+		int cur_escape = glfwGetKey(m_window, GLFW_KEY_ESCAPE);
+		if (cur_escape == GLFW_PRESS && m_prev_escape_state == GLFW_RELEASE) {
+			if (m_mouse_look_enabled) {
+				// In game mode: close app
+				glfwSetWindowShouldClose(m_window, true);
+			} else {
+				// In UI mode: close UI mode
+				m_mouse_look_enabled = true;
+				actions.ui_toggle = true; // Signal toggle
+				actions.ui_visible = false;
+
+				glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+				if (glfwRawMouseMotionSupported())
+					glfwSetInputMode(m_window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+				glfwGetCursorPos(m_window, &m_last_x, &m_last_y);
+			}
+		}
+		m_prev_escape_state = cur_escape;
 
 		// Keyboard look
 		m_yaw_delta = 0.0f;

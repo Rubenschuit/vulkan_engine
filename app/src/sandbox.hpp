@@ -29,6 +29,7 @@ private:
 
 	void updateParticles(VeFrameInfo& frame_info, InputActions& actions);
 	void renderAppWindows();
+	void renderControlsWindow();
 	void recreatePipelines();
 
 	// model paths

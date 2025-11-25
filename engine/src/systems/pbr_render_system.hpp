@@ -32,6 +32,9 @@ public:
 		m_ve_pipeline.reset();
 		createPipeline(color_format, sample_count);
 	}
+	void setTopology(vk::PrimitiveTopology topology) {
+		m_topology = topology;
+	}
 
 private:
 	void createPipelineLayout(
@@ -42,6 +45,9 @@ private:
 
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;
+	vk::PrimitiveTopology m_topology = vk::PrimitiveTopology::eTriangleList;
+	vk::Format m_color_format = vk::Format::eUndefined;
+	vk::SampleCountFlagBits m_sample_count = vk::SampleCountFlagBits::e1;
 
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_ve_pipeline;

@@ -69,7 +69,15 @@ VeFrameInfo Sandbox::update() {
 	auto input_actions = m_input_controller.processInput(m_frame_time, m_camera);
 
 	// Update state based on actions and ui_actions updated in previous renderUI
-	ui_actions.visible = input_actions.ui_visible; // Tab toggles UI visibility
+	// Tab toggles "UI Mode" (cursor visible). Settings window is ONLY visible in UI mode.
+	ui_actions.visible = input_actions.ui_visible;
+
+	// P key toggles performance and controls windows
+	if (input_actions.toggle_performance_ui) {
+		ui_actions.show_performance = !ui_actions.show_performance;
+		ui_actions.show_controls = !ui_actions.show_controls;
+	}
+
 	updateCamera();
 	updateParticles(frame_info, input_actions);
 	updateWindowTitle();
@@ -91,6 +99,7 @@ void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 	// Apply input actions
 	if (actions.set_mode >= 1 && actions.set_mode <= 5) {
 		m_particle_system->setMode(actions.set_mode);
+		ui_actions.current_mode = static_cast<int>(actions.set_mode);
 	}
 	if (actions.reset_particles) {
 		m_particle_system->setOrigin(m_camera.getForward() * 100.0f + m_camera.getPosition());
@@ -148,7 +157,9 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	m_skybox_render_system->render(frame_info);
 	if (ui_actions.current_scene == 1) { // only render particles in simple scene TODO: make enum for scenes
 		m_simple_render_system->renderObjects(frame_info);
-		m_axes_render_system->render(frame_info);
+		if (ui_actions.show_axes) {
+			m_axes_render_system->render(frame_info);
+		}
 		m_particle_system->render(frame_info);
 	} else {
 		m_pbr_render_system->renderObjects(frame_info);
@@ -163,8 +174,9 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	m_imgui_layer->beginFrame();
 	if (ui_actions.visible) {
 		renderAppWindows();
-		m_imgui_layer->renderEngineWindows();
 	}
+	m_imgui_layer->renderEngineWindows(ui_actions);
+	renderControlsWindow();
 	m_imgui_layer->endFrame(m_ve_renderer.getCurrentCommandBuffer());
 }
 
@@ -224,9 +236,6 @@ void Sandbox::renderAppWindows() {
 				ImGui::SameLine();
 				if (ImGui::Button("1.0x")) ui_actions.speed = 1.0f;
 
-
-
-
 				// 3. Lifetime
 				ImGui::Separator();
 				ImGui::Text("Lifetime");
@@ -276,10 +285,9 @@ void Sandbox::renderAppWindows() {
 
 				ImGui::Separator();
 				ImGui::Text("System");
-				static int s_particle_capacity = config.max_particles;
-				ImGui::SliderInt("ParticleCapacity", &s_particle_capacity, 1000, 2000000);
+				ImGui::SliderInt("ParticleCapacity", &config.max_particles, 1000, 2000000);
 				if (ImGui::Button("Apply Capacity")) {
-					m_fireworks_system->setParticleCapacity(static_cast<uint32_t>(s_particle_capacity));
+					m_fireworks_system->setParticleCapacity(static_cast<uint32_t>(config.max_particles));
 				}
 
 				if (ImGui::Button("Launch Rocket", ImVec2(-1, 0))) {
@@ -294,23 +302,42 @@ void Sandbox::renderAppWindows() {
 
 				// MSAA toggle
 				static bool s_msaa_enabled = true;
-				if (ImGui::Checkbox("Enable MSAA", &s_msaa_enabled)) {
+				if (ImGui::Checkbox("Enable MSAA (device maximum sample count)", &s_msaa_enabled)) {
 					m_ve_renderer.setMSAAEnabled(s_msaa_enabled);
 				}
 
 				// VSync toggle (eMailbox instead of eImmediate)
 				static bool s_vsync_enabled = false;
 				if (ImGui::Checkbox("Enable VSync", &s_vsync_enabled)) {
-					m_ve_renderer.setPresentMode(s_vsync_enabled ? vk::PresentModeKHR::eMailbox : vk::PresentModeKHR::eImmediate);
+					m_ve_renderer.setPresentMode(s_vsync_enabled ? vk::PresentModeKHR::eFifo : vk::PresentModeKHR::eImmediate);
 				}
 
-			// Shadow mode selection
-			const char* shadow_options[] = { "Disabled", "Regular", "PCF" };
-			ImGui::Combo("Shadows", &ui_actions.shadow_mode, shadow_options, 3);
+				// Shadow mode selection
+				ImGui::Text("Shadows: ");
+				ImGui::SameLine();
+				const char* shadow_options[] = { "Disabled", "Regular", "PCF" };
+				ImGui::Combo(" ", &ui_actions.shadow_mode, shadow_options, 3);
+
+				// Topology selection. Requires pipeline recreation
+				ImGui::Text("Topology: ");
+				ImGui::SameLine();
+				if (ImGui::RadioButton("Triangle List", &ui_actions.topology, 0)) {
+					ui_actions.topology = Topology::TRIANGLE_LIST;
+					m_simple_render_system->setTopology(vk::PrimitiveTopology::eTriangleList);
+					m_pbr_render_system->setTopology(vk::PrimitiveTopology::eTriangleList);
+					m_ve_renderer.setSwapChainNeedsRecreation();
+				}
+				ImGui::SameLine();
+				if (ImGui::RadioButton("Line List", &ui_actions.topology, 1)) {
+					ui_actions.topology = Topology::LINE_LIST;
+					m_simple_render_system->setTopology(vk::PrimitiveTopology::eLineList);
+					m_pbr_render_system->setTopology(vk::PrimitiveTopology::eLineList);
+					m_ve_renderer.setSwapChainNeedsRecreation();
+				}
+
 
 				ImGui::Separator();
-				ImGui::Text("Render mode");
-				ImGui::Separator();
+				ImGui::Text("Render mode (sponza): ");
 				static int s_render_mode = static_cast<int>(ui_actions.render_mode);
 				if (ImGui::RadioButton("BRDF Microfacets", &s_render_mode, 5))
 					ui_actions.render_mode = RenderMode::BRDF_MICROFACET;
@@ -326,28 +353,16 @@ void Sandbox::renderAppWindows() {
 				if (ImGui::RadioButton("Normal map", &s_render_mode, 4))
 					ui_actions.render_mode = RenderMode::NORMAL_MAP;
 
+				// Axes system visibility
+				ImGui::Separator();
+				ImGui::Checkbox("Show Axes", &ui_actions.show_axes);
+
 				ImGui::EndTabItem();
 			}
 			ImGui::EndTabBar();
 		}
 		ImGui::End();
 	}
-
-	// Controls window
-	if (ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-		// bottom right
-		ImGui::SetWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 200, ImGui::GetIO().DisplaySize.y - 200), ImGuiCond_Always);
-		ImGui::Text("WASD: Move");
-		ImGui::Text("C: Down");
-		ImGui::Text("Space: Up");
-		ImGui::Separator();
-		ImGui::Text("1: Earth Gravity");
-		ImGui::Text("2: Cool Gravity");
-		ImGui::Text("3: Succ mode");
-		ImGui::Text("4: Stasis");
-		ImGui::Text("5: Galaxy");
-	}
-	ImGui::End();
 }
 
 void Sandbox::createUniformBuffers() {
@@ -524,6 +539,8 @@ void Sandbox::initUI() {
 
 	ui_actions = {
 		.visible = false,
+		.show_performance = true,
+		.show_controls = true,
 		.speed = m_particle_system->getSpeed(),
 		.pending_particle_count = m_particle_system->getPendingParticleCount(),
 		.apply_particle_count = false,
@@ -710,10 +727,10 @@ void Sandbox::loadGameObjects() {
 
 
 	// --------------------------------------------------------------
-	// textured quad
+	// textured quad to display certain textures or shadow maps
 	// --------------------------------------------------------------
 
-
+	/*
 	VeGameObject textured_quad = VeGameObject::createGameObject();
 	auto textured_quad_model = std::make_shared<VeModel>(m_ve_device, m_quad_model_path);
 	textured_quad.ve_model = quad;
@@ -725,9 +742,9 @@ void Sandbox::loadGameObjects() {
 		.scale = {20.0f, 1.0f, 20.0f}
 	};
 	m_simple_scene->getGameObjects().emplace(textured_quad.getId(), std::move(textured_quad));
-
+	*/
 	// --------------------------------------------------------------
-	// viking rooms
+	// Spheres
 	// --------------------------------------------------------------
 
 	// Spheres in a grid
@@ -745,7 +762,7 @@ void Sandbox::loadGameObjects() {
 	}
 
 	// --------------------------------------------------------------
-	// cubes
+	// Cubes
 	// --------------------------------------------------------------
 
 	// Cubes in a grid
@@ -797,6 +814,36 @@ void Sandbox::loadGameObjects() {
 
 }
 
+
+void Sandbox::renderControlsWindow() {
+	if (!ui_actions.show_controls) return;
+
+	ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 10.0f, ImGui::GetIO().DisplaySize.y - 10.0f), ImGuiCond_Always, ImVec2(1.0f, 1.0f));
+	ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs;
+	// If UI is visible (mouse unlocked), allow interaction and decoration (close button)
+	if (ui_actions.visible) {
+		flags = ImGuiWindowFlags_AlwaysAutoResize;
+	}
+
+	if (ImGui::Begin("Controls", &ui_actions.show_controls, flags)) {
+		ImGui::Text("WASD: Move | Space/C: Up/Down");
+		ImGui::Separator();
+		ImGui::Text("Particle simulation mode: ");
+		const char* modes[] = { "Earth Gravity", "Cool Gravity", "Succ mode", "Stasis", "Galaxy" };
+		for (int i = 0; i < 5; i++) {
+			bool is_active = (ui_actions.current_mode == (i + 1));
+			if (is_active) ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "> %d: %s", i + 1, modes[i]);
+			else ImGui::Text("  %d: %s", i + 1, modes[i]);
+		}
+		ImGui::Text("E/G: Reset particles in front of camera");
+		ImGui::Separator();
+		ImGui::Text("F: Launch Firework");
+		ImGui::Separator();
+		ImGui::Text("P: Toggle controls/performance ui");
+		ImGui::Text("Tab: Toggle Settings");
+	}
+	ImGui::End();
+}
 
 } // namespace ve
 

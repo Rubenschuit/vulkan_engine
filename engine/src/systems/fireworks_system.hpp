@@ -33,9 +33,9 @@ struct FireworksConfig {
     glm::vec3 wind_direction{1.0f, 1.0f, 0.0f};
     float wind_strength = 3.0f;
 
-    float gravity = 20.0f;
+    float gravity = 15.0f;
 
-    int max_particles = 200000;
+    int max_particles = 1000000;
 
 	glm::vec4 smoke_color = glm::vec4(0.4f, 0.4f, 0.4f, 0.5f);
 };

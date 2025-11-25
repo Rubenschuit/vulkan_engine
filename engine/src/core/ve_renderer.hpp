@@ -51,6 +51,7 @@ public:
 		m_swap_chain_needs_recreation = true;
 		VE_LOGI("Present mode set to " + std::to_string(static_cast<int>(present_mode)) + " with MSAA " + std::to_string(static_cast<int>(m_desired_num_samples))); }
 	void recreateSwapChain();
+	void setSwapChainNeedsRecreation() { m_swap_chain_needs_recreation = true; }
 
 private:
 	void createCommandBuffers();

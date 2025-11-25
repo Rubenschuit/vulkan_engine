@@ -20,7 +20,7 @@ FireworksSystem::FireworksSystem(
         global_set_layout,
         texture_set_layout,
         color_format,
-        100000, // Dedicated particle count for fireworks
+        m_config.max_particles, // Dedicated particle count for fireworks
         glm::vec3(0.0f), // origin
         shader_path,
 		false
@@ -29,9 +29,6 @@ FireworksSystem::FireworksSystem(
     m_particle_system->setLifeRange(0.5f, 3.0f);
     // Disable auto-respawn for fireworks, they should be spawned by events
     m_particle_system->setShouldRespawn(false);
-
-    // initialize config max_particles
-    m_config.max_particles = 100000;
 }
 
 void FireworksSystem::setParticleCapacity(uint32_t capacity) {

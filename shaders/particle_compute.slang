@@ -511,7 +511,7 @@ void resetFromEvent(uint i, SpawnEvent e) {
 		 // High velocity burst
 		 float2 vxy = rand_normal2(state);
 		 float vz = rand_normal2(state).x;
-		 float speed = 0.5f + 4.0f * rand01(state);
+		 float speed = 2.5f + 0.3f * rand01(state);
 		 final_vel += float3(vxy.x, vxy.y, vz) * speed;
 
 		 if (vel_life.w <= 0.0f) life = 0.5f + rand01(state) * 0.5f;
@@ -521,7 +521,7 @@ void resetFromEvent(uint i, SpawnEvent e) {
 		 // High velocity burst
 		 float2 vxy = rand_normal2(state);
 		 float vz = rand_normal2(state).x;
-		 float speed = 0.5f + 4.0f * rand01(state);
+		 float speed = 2.5f + 0.3f * rand01(state);
 		 final_vel += float3(vxy.x, vxy.y, vz) * speed;
 
 		 if (vel_life.w <= 0.0f) life = 0.5f + rand01(state) * 0.5f;
@@ -647,7 +647,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 		}
 	} else { // Firework particles
 		float gravity = params.gravity;
-		if (type == ParticleType::TYPE_SMOKE || type == ParticleType::TYPE_EXPLOSION_SMOKE || type == ParticleType::TYPE_EXPLOSION) {
+		if (type == ParticleType::TYPE_SMOKE || type == ParticleType::TYPE_EXPLOSION_SMOKE) {
 			gravity = -2.0f; // Buoyancy for smoke
 		}
 
@@ -675,6 +675,10 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 			 } else {
 				 p.color.a = 0.0f;
 			 }
+			 // lerp color to orange when life is less than 0.2
+			 if (p.velocity.w < 0.2f) {
+				p.color.rgb = lerp(p.color.rgb, float3(1.0f, 0.6f, 0.0f), saturate(p.velocity.w / 0.2f));
+			 }
 		} else if (type == ParticleType::TYPE_ROCKET) {
 			 // Flash effect near end of life ( life < FLASH_TIME or z < -5.0f)
 			 const float FLASH_SCALE = 150.0f;
@@ -698,9 +702,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 			 }
 		}
 
-		// Apply wind force constantly (not affected by drag in this simple model, or add it to position directly)
-		// Adding to position directly is better to keep "velocity" as the impulsive forces that decay.
-		// Wind direction: params.wind_direction.xyz, intensity: params.wind_direction.w
+		// Apply wind force constantly (not affected by drag)
 		float3 wind_velocity = normalize(params.wind_direction.xyz) * params.wind_direction.w;
 
 		// Update position with internal velocity + wind

@@ -24,10 +24,10 @@ SimpleRenderSystem::SimpleRenderSystem(
 	const vk::raii::DescriptorSetLayout& shadow_set_layout,
 	vk::Format color_format,
 	std::filesystem::path shader_path)
-	: m_ve_device(device), m_shader_path(shader_path) {
+	: m_ve_device(device), m_shader_path(shader_path), m_color_format(color_format), m_sample_count(m_ve_device.getSampleCount()) {
 
 	createPipelineLayout(global_set_layout, material_set_layout, shadow_set_layout);
-	createPipeline(color_format, m_ve_device.getSampleCount());
+	createPipeline(m_color_format, m_sample_count);
 }
 
 SimpleRenderSystem::~SimpleRenderSystem() {
@@ -56,6 +56,7 @@ void SimpleRenderSystem::createPipeline(vk::Format color_format, vk::SampleCount
 	pipeline_config.multisample_info.rasterizationSamples = sample_count;
 	pipeline_config.color_format = color_format;
 	pipeline_config.attribute_descriptions = VeModel::Vertex::getAttributeDescriptionsSimple();
+	pipeline_config.input_assembly_info.topology = m_topology;
 
 	assert(m_pipeline_layout != VK_NULL_HANDLE && "Pipeline layout is null");
 	pipeline_config.pipeline_layout = m_pipeline_layout;

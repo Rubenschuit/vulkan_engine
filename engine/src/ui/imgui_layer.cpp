@@ -125,28 +125,67 @@ void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd) {
     cmd.endRendering();
 }
 
-void ImGuiLayer::renderEngineWindows() {
+void ImGuiLayer::renderEngineWindows(UIContext& context) {
+
+	if (!context.show_performance) return;
 
 	// crude performance window
 	static auto s_time_start = std::chrono::high_resolution_clock::now();
 	auto now = std::chrono::high_resolution_clock::now();
 	auto time_elapsed = std::chrono::duration<float, std::chrono::seconds::period>(now - s_time_start).count();
+
 	static int frame_count = 0;
 	static float fps = 0.0f;
 	static float frame_time_ms = 0.0f;
+	static float fps_history[120] = {};
+	static int history_offset = 0;
+	static float graph_update_timer = 0.0f;
+	static int graph_frames = 0;
+
+	// Text display updates (every 60 frames)
 	frame_count++;
 	if (frame_count >= 60) {
 		frame_count = 0;
-		fps = 1.0f / time_elapsed;
+		fps = (time_elapsed > 0.0f) ? (1.0f / time_elapsed) : 0.0f;
 		frame_time_ms = time_elapsed * 1000.0f;
 	}
 
-	if (ImGui::Begin("Performance", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-		//set location to top right
-		ImGui::SetWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 200, 10), ImGuiCond_Always);
-		ImGui::Separator();
+	// Graph updates
+	graph_update_timer += time_elapsed;
+	graph_frames++;
+	if (graph_update_timer >= 0.1f) {
+		fps_history[history_offset] = (float)graph_frames / graph_update_timer;
+		history_offset = (history_offset + 1) % 120;
+		graph_update_timer = 0.0f;
+		graph_frames = 0;
+	}
+
+	ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 10.0f, 10.0f), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+
+	ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs;
+	if (context.visible) {
+		flags = ImGuiWindowFlags_AlwaysAutoResize;
+	}
+
+	if (ImGui::Begin("Performance", &context.show_performance, flags)) {
 		ImGui::Text("FPS: %.1f", fps);
 		ImGui::Text("Frame Time: %.2f ms", frame_time_ms);
+
+		float max_fps = 0.0f;
+		for (float f : fps_history) if (f > max_fps) max_fps = f;
+		if (max_fps < 60.0f) max_fps = 60.0f;
+
+		// Axis labels and graph
+		ImGui::BeginGroup();
+		ImGui::Text("%.0f", max_fps);
+		ImGui::Dummy(ImVec2(0.0f, 42.0f)); // Spacer
+		ImGui::Text("0");
+		ImGui::EndGroup();
+		ImGui::SameLine();
+
+		ImGui::PlotLines("##FPS", fps_history, 120, history_offset, "FPS", 0.0f, max_fps * 1.1f, ImVec2(250, 80));
+
+		ImGui::Separator();
 		//resolution
 		auto extent = m_renderer.getExtent();
 		ImGui::Text("Resolution: %d x %d", extent.width, extent.height);
@@ -158,7 +197,7 @@ void ImGuiLayer::renderEngineWindows() {
 void ImGuiLayer::renderUI(UIContext& context) {
 	beginFrame();
 	if (context.visible) {
-		renderEngineWindows();
+		renderEngineWindows(context);
 	}
 	endFrame(m_renderer.getCurrentCommandBuffer());
 }

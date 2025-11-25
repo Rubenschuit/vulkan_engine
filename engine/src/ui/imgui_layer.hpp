@@ -3,6 +3,7 @@
 #include "game/ve_frame_info.hpp"
 #include <cstdint>
 #include <vulkan/vulkan.hpp>
+#include "systems/particle_system.hpp"
 #define VULKAN_HPP_ENABLE_RAII
 #include <vulkan/vulkan_raii.hpp>
 
@@ -18,13 +19,18 @@ class VeRenderer;
 struct VENGINE_API UIContext {
 	// general
 	bool visible = false;
+	bool show_performance = true;
+	bool show_controls = true;
+	bool show_axes = false;
 	int current_scene = 1;
 	RenderMode render_mode = RenderMode::BRDF_MICROFACET;
 
 	// graphics settings
 	int shadow_mode = ShadowMode::REGULAR;
+	int topology = Topology::TRIANGLE_LIST;
 
 	// particle system
+	int current_mode = ParticleMode::COOL;
 	float speed = 1.0f;
 
 	// particle count
@@ -69,7 +75,7 @@ public:
 
     // Render engine-specific windows (Settings, Performance).
     // Should be called between beginFrame() and endFrame().
-    void renderEngineWindows();
+    void renderEngineWindows(UIContext& context);
 
 private:
     void uploadFonts();
