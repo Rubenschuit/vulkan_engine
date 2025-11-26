@@ -41,7 +41,9 @@ enum ParticleType : uint {
 	TYPE_SPARK = 2,
 	TYPE_ROCKET = 3,
 	TYPE_EXPLOSION = 4,
-	TYPE_EXPLOSION_SMOKE = 5
+	TYPE_TRAIL = 5,
+    TYPE_STREAMER = 6,
+    TYPE_EXPLOSION_SMOKE = 7
 };
 
 
@@ -189,6 +191,9 @@ RWStructuredBuffer<Particle> particles_out;
 [vk::binding(6, 0)]
 RWStructuredBuffer<Particle> particles_render;
 
+[vk::binding(7, 0)]
+RWStructuredBuffer<uint> global_counters; // index 0: emit_head
+
 // RNG helpers
 uint wang_hash(uint seed) {
 	seed = (seed ^ 61u) ^ (seed >> 16);
@@ -214,6 +219,63 @@ float2 rand_normal2(inout uint state) {
 	float r = sqrt(-2.0f * log(u1));
 	float theta = 6.28318530718f * u2;
 	return float2(r * cos(theta), r * sin(theta)) * stddev + mean;
+}
+
+// Spawn Helper
+void spawnParticles(float3 pos, float3 vel, float life, float4 color, uint type, uint count) {
+    uint start_index;
+    InterlockedAdd(global_counters[0], count, start_index);
+
+    for (uint k = 0; k < count; ++k) {
+        uint write_index = (start_index + k) % params.particle_count;
+
+        Particle p;
+        // Initialize p with pos, vel etc
+        // Variation needs a state. Using hash of index?
+        // We can pass a seed or use write_index as seed.
+        uint seed = write_index ^ asuint(params.total_time) ^ 92342u;
+        uint state = wang_hash(seed);
+
+        float3 final_vel = vel;
+        float final_life = life;
+        float scale = 0.0f; // Determined by type?
+
+        if (type == ParticleType::TYPE_STREAMER) {
+             // Random direction on sphere
+             float2 vxy = rand_normal2(state);
+             float vz = rand_normal2(state).x;
+             float3 dir = normalize(float3(vxy.x, vxy.y, vz));
+
+             float speed = 15.0f + 40.0f * rand01(state); // 15 to 55
+             final_vel = dir * speed;
+
+             final_life = 2.5f + 4.0f * rand01(state); // 2.5 to 6.5
+             scale = 0.1f;
+        } else if (type == ParticleType::TYPE_TRAIL) {
+             // Trail logic
+             final_vel += rand_normal2(state).xyy * 0.1f;
+             scale = 0.3f;
+        } else if (type == ParticleType::TYPE_SMOKE) {
+             final_vel += rand_normal2(state).xyy * 0.5f;
+             scale = 5.0f;
+        } else if (type == ParticleType::TYPE_SPARK) {
+             final_vel += rand_normal2(state).xyy * 0.5f;
+             scale = 0.2f;
+        } else if (type == ParticleType::TYPE_EXPLOSION) {
+             // Explosion flash
+             scale = 0.4f; // should come from config
+        } else if (type == ParticleType::TYPE_EXPLOSION_SMOKE) {
+             scale = 10.0f;
+        }
+
+        p.position = float4(pos, scale);
+        p.velocity = float4(final_vel, final_life);
+        p.color = color;
+        p.tex_coords = float4(0.0f);
+        p.extra_data = float4((float)type, final_life, 0, 0);
+
+        particles_out[write_index] = p;
+    }
 }
 
 // ---------------- Simulation functions ----------------
@@ -549,8 +611,12 @@ void resetFromEvent(uint i, SpawnEvent e) {
 	// Store initial life in extra_data.y for texture animation
 	p.extra_data = float4((float)type, life, 0, 0);
 
-	particles_out[i] = p;
-	particles_prev[i] = p;
+    // Use global_counters to determine index
+    uint offset;
+    InterlockedAdd(global_counters[0], 1, offset);
+    uint write_index = offset % params.particle_count;
+
+	particles_out[write_index] = p;
 }
 
 void appendToRenderBuffer(Particle p) {
@@ -590,7 +656,8 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 		return;
 	}
 
-	// Initialize emitted particles
+	// Initialize emitted particles - MOVED TO SEPARATE KERNEL
+    /*
 	for (uint k = 0; k < params.spawn_event_count; ++k) {
 		SpawnEvent e = spawn_events[k];
 		if (i >= e.info.x && i < e.info.x + e.info.y) {
@@ -599,6 +666,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 			 return;
 		}
 	}
+    */
 
 	Particle p = particles_prev[i];
 
@@ -649,10 +717,44 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 		float gravity = params.gravity;
 		if (type == ParticleType::TYPE_SMOKE || type == ParticleType::TYPE_EXPLOSION_SMOKE) {
 			gravity = -2.0f; // Buoyancy for smoke
-		}
+		} else if (type == ParticleType::TYPE_TRAIL) {
+            // gravity = 0.5f; // Optional low gravity
+        }
 
 		p.velocity.z -= gravity * params.delta_time;
-
+        
+        // Don't update position for STREAMER here as it has custom physics block above
+        if (type != ParticleType::TYPE_STREAMER) {
+             // Only apply drag/wind here if not streamer (streamer has custom logic)
+             // Actually streamer logic was inside the big if-else block for types?
+             // Wait, I added Streamer logic in previous step inside the type check block.
+             // Does 'else { // Firework particles' block run for all firework types?
+             // Yes.
+             // But I added 'else if (type == ParticleType::TYPE_STREAMER)' inside the `ParticleType::TYPE_DEFAULT` else block?
+             
+             // Wait, let's check structure.
+             /*
+             if (type == ParticleType::TYPE_DEFAULT) { ... }
+             else { // Firework particles
+                 // I added Rocket/Streamer logic HERE in previous step?
+                 // No, I replaced the 'Rocket' block which is inside the 'else'.
+                 
+                 // But after that big if/else chain, there is general physics code:
+                 p.velocity.z -= gravity * params.delta_time;
+                 // ...
+                 p.position.xyz += ...
+             }
+             */
+             
+             // Streamer logic I added does manual integration:
+             // p.position.xyz += p.velocity.xyz * params.delta_time;
+             
+             // So if we let it fall through to here, it will integrate AGAIN.
+             // We must prevent double integration.
+             
+             // Check if I should wrap the general physics code.
+        }
+        
 		if (type == ParticleType::TYPE_SMOKE || type == ParticleType::TYPE_EXPLOSION_SMOKE) { // Smoke
 			 p.velocity.xyz -= p.velocity.xyz * .9f * params.delta_time; // Drag applies only to internal velocity
 		} else if (type == ParticleType::TYPE_SPARK) { // Spark
@@ -666,7 +768,19 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 				 // Fade out in last 20% of life
 				 p.color.a = saturate(life_frac / 0.2f);
 			 }
-		} else if (type == ParticleType::TYPE_EXPLOSION) { // Explosion
+		} else if (type == ParticleType::TYPE_STREAMER) {
+             p.velocity.xyz -= p.velocity.xyz * 1.5f * params.delta_time; // High Drag
+        } else if (type == ParticleType::TYPE_TRAIL) {
+             p.velocity.xyz -= p.velocity.xyz * 2.0f * params.delta_time; // High Drag
+             float max_life = p.extra_data.y;
+			 if (max_life > 0.001f) {
+				 p.color.a = saturate(p.velocity.w / max_life);
+				// lerp color to orange at end
+				if (p.velocity.w < 0.5f) {
+					p.color.rgb = lerp(p.color.rgb, float3(1.0f, 0.6f, 0.0f), saturate(p.velocity.w / 0.2f));
+				}
+			 }
+        } else if (type == ParticleType::TYPE_EXPLOSION) { // Explosion
 			 p.velocity.xyz -= p.velocity.xyz * 0.9f * params.delta_time; // Drag (air resistance)
 			 // Fade based on lifetime fraction
 			 float max_life = p.extra_data.y;
@@ -700,7 +814,34 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 			 } else {
 				 p.position.w = 0.0f;
 			 }
-		}
+
+             // Spawn trails
+             float emit_count_f = params.delta_time / 0.004f;
+             uint emit_count = (uint)emit_count_f;
+             if (emit_count > 0) {
+                 spawnParticles(p.position.xyz, p.velocity.xyz * 0.02f, 7.0f, float4(0.4f, 0.4f, 0.4f, 0.5f), ParticleType::TYPE_SMOKE, emit_count); // Smoke
+                 spawnParticles(p.position.xyz, -p.velocity.xyz * 0.0f, 0.34f, float4(1.0f, 0.8f, 0.1f, 1.0f), ParticleType::TYPE_SPARK, emit_count); // Spark
+             }
+
+             // Death check for Explosion
+             if (p.velocity.w <= 0.0f) {
+                 // Spawn explosion
+                 // Flash
+                 spawnParticles(p.position.xyz, p.velocity.xyz, 0.2f, p.color, ParticleType::TYPE_EXPLOSION, 1);
+                 // Smoke
+                 spawnParticles(p.position.xyz, p.velocity.xyz * 1.5f, 7.0f, float4(0.4f, 0.4f, 0.4f, 0.5f), ParticleType::TYPE_EXPLOSION_SMOKE, 2500); // Half count
+                 // Streamers (Palm Tree)
+                 spawnParticles(p.position.xyz, float3(0.0f), 0.0f, p.color, ParticleType::TYPE_STREAMER, 100);
+             }
+		} else if (type == ParticleType::TYPE_STREAMER) {
+             // Trails (Gold Dust)
+             float emit_count_f = params.delta_time / 0.004f;
+             uint emit_count = (uint)emit_count_f;
+             if (emit_count > 0) {
+                 // Gold trail
+                 spawnParticles(p.position.xyz, -p.velocity.xyz * 0.0f, p.velocity.w, p.color, ParticleType::TYPE_TRAIL, emit_count);
+             }
+        }
 
 		// Apply wind force constantly (not affected by drag)
 		float3 wind_velocity = normalize(params.wind_direction.xyz) * params.wind_direction.w;

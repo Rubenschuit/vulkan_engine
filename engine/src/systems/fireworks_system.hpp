@@ -8,14 +8,16 @@
 
 namespace ve {
 
-struct Rocket {
-    glm::vec3 pos;
-    glm::vec3 vel;
-    glm::vec4 color;
-    float timer;
-    float trail_timer = 0.0f;
-    bool exploded = false;
-};
+// Struct not needed anymore as all logic is on GPU
+// struct Rocket {
+//     glm::vec3 pos;
+//     glm::vec3 vel;
+//     glm::vec4 color;
+//     float timer;
+//     float trail_timer = 0.0f;
+//     bool exploded = false;
+//     int generation = 0; // 0 = Initial Rocket, 1 = Explosion Streamer
+// };
 
 struct FireworksConfig {
     glm::vec3 launch_pos{0.0f, 0.0f, 0.0f};
@@ -27,8 +29,8 @@ struct FireworksConfig {
     glm::vec4 particle_color{1.0f};
     bool use_random_color = true;
 
-    int explosion_particle_count = 5000;
-    float explosion_size = 0.4f;
+    int explosion_particle_count = 100;
+    float explosion_size = 0.5f;
 
     glm::vec3 wind_direction{1.0f, 1.0f, 0.0f};
     float wind_strength = 3.0f;
@@ -37,6 +39,7 @@ struct FireworksConfig {
 
     int max_particles = 1000000;
 
+	float trail_interval = 0.004f; // 4ms
 	glm::vec4 smoke_color = glm::vec4(0.4f, 0.4f, 0.4f, 0.5f);
 };
 
@@ -64,7 +67,7 @@ public:
 
 private:
     std::unique_ptr<ParticleSystem> m_particle_system;
-    std::vector<Rocket> m_rockets;
+    // std::vector<Rocket> m_rockets; // removed
     FireworksConfig m_config;
     uint32_t m_pending_capacity{0};
 };

@@ -6,12 +6,12 @@
 
 namespace ve {
 
-VeComputePipeline::VeComputePipeline(VeDevice& device, const std::filesystem::path& comp_spv_path, const vk::raii::PipelineLayout& pipeline_layout)
+VeComputePipeline::VeComputePipeline(VeDevice& device, const std::filesystem::path& comp_spv_path, const vk::raii::PipelineLayout& pipeline_layout, const std::string& entry_point)
 	: m_ve_device(device) {
-	createComputePipeline(comp_spv_path, pipeline_layout);
+	createComputePipeline(comp_spv_path, pipeline_layout, entry_point);
 }
 
-void VeComputePipeline::createComputePipeline(const std::filesystem::path& comp_spv_path, const vk::raii::PipelineLayout& pipeline_layout) {
+void VeComputePipeline::createComputePipeline(const std::filesystem::path& comp_spv_path, const vk::raii::PipelineLayout& pipeline_layout, const std::string& entry_point) {
 	auto code = VeFileSystem::readFile(comp_spv_path);
 
 	vk::ShaderModuleCreateInfo create_info{
@@ -23,7 +23,7 @@ void VeComputePipeline::createComputePipeline(const std::filesystem::path& comp_
 	vk::PipelineShaderStageCreateInfo stage_info{
 		.stage = vk::ShaderStageFlagBits::eCompute,
 		.module = *m_shader_module,
-		.pName = "compMain"
+		.pName = entry_point.c_str()
 	};
 
 	vk::ComputePipelineCreateInfo pipeline_info{

@@ -138,14 +138,20 @@ foreach(SLANG_SHADER ${SLANG_SHADER_FILES})
 		OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/${SLANG_SHADER_NAME}.spv"
 	)
 	if ( SLANG_SHADER_NAME MATCHES ".*_compute$")
-		add_slang_spirv_target(${SLANG_SHADER_NAME}c
-			TYPE COMPUTE
-			SOURCES ${SLANG_SHADER}
-			ENTRY compMain
-			PROFILE spirv_1_5
-			OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
-			OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/${SLANG_SHADER_NAME}c.spv"
+        set(_ENTRIES "-entry compMain -stage compute")
+        if (SLANG_SHADER_NAME STREQUAL "particle_compute")
+            set(_ENTRIES "${_ENTRIES} -entry spawnMain -stage compute")
+        endif()
+
+		add_custom_command(
+			OUTPUT "${PROJECT_SOURCE_DIR}/shaders/${SLANG_SHADER_NAME}c.spv"
+			COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_SOURCE_DIR}/shaders"
+			COMMAND "${SLANGC}" "${SLANG_SHADER}" -target spirv -profile spirv_1_5 -fvk-use-gl-layout ${_ENTRIES} -emit-spirv-directly -fvk-use-entrypoint-name -o "${PROJECT_SOURCE_DIR}/shaders/${SLANG_SHADER_NAME}c.spv"
+			DEPENDS "${SLANG_SHADER}"
+			COMMENT "Slang compiling ${SLANG_SHADER_NAME}.slang -> ${SLANG_SHADER_NAME}c.spv (compute entries)"
+			VERBATIM
 		)
+        add_custom_target(${SLANG_SHADER_NAME}c DEPENDS "${PROJECT_SOURCE_DIR}/shaders/${SLANG_SHADER_NAME}c.spv")
 		list(APPEND SHADER_TARGETS ${SLANG_SHADER_NAME}c)
 	endif()
 	# Add to list of shader targets

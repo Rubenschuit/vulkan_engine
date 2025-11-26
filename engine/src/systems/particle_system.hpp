@@ -35,7 +35,7 @@ enum ParticleType : uint32_t {
 	TYPE_SPARK = 2,
 	TYPE_ROCKET = 3,
 	TYPE_EXPLOSION = 4,
-	TYPE_EXPLOSION_SMOKE = 5
+	TYPE_TRAIL = 5
 };
 
 struct SpawnEvent {
@@ -203,6 +203,7 @@ private:
 	std::vector<std::unique_ptr<VeBuffer>> m_render_buffers; // packed SSBO for rendering
 	std::vector<std::unique_ptr<VeBuffer>> m_indirect_buffers; // Indirect draw commands
 	std::vector<std::unique_ptr<VeBuffer>> m_spawn_storage_buffers; // spawn event SSBO per frame
+	std::vector<std::unique_ptr<VeBuffer>> m_counter_buffers; // Global atomic counters
 	std::vector<vk::raii::DescriptorSet> m_compute_descriptor_sets;
 
 
@@ -212,6 +213,7 @@ private:
 	std::filesystem::path  m_shader_path;
 	vk::raii::PipelineLayout m_compute_pipeline_layout{nullptr};
 	std::unique_ptr<VeComputePipeline> m_compute_pipeline;
+    std::unique_ptr<VeComputePipeline> m_spawn_pipeline;
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_pipeline;
 };

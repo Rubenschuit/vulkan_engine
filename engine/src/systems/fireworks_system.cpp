@@ -49,20 +49,12 @@ void FireworksSystem::launchRocket() {
 }
 
 void FireworksSystem::launchRocket(glm::vec3 pos, glm::vec3 vel, glm::vec4 color) {
-    Rocket r{
-		.pos = pos,
-		.vel = vel,
-		.color = color,
-		.timer = Random::floatRange(2.0f, 7.0f), // explode time
-		.trail_timer = 0.0f,
-		.exploded = false
-	};
-    m_rockets.push_back(r);
-
     // Emit a singular rocket particle (invisible until it explodes, then it simulates a flash)
+    float timer = Random::floatRange(2.0f, 7.0f);
+
     SpawnEvent event{
-		.position_scale = glm::vec4(pos, 0.0f),
-		.velocity_life = glm::vec4(vel, r.timer),
+		.position_scale = glm::vec4(pos, 10.0f),
+		.velocity_life = glm::vec4(vel, timer),
 		.color = color,
 		.info = {0, 1, TYPE_ROCKET, 0}
 	};
@@ -79,7 +71,7 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
         m_pending_capacity = 0;
     }
 
-    float dt = frame_info.frame_time;
+    // float dt = frame_info.frame_time;
 
 	// Set wind direction/strength and gravity from ui
 	glm::vec3 dir = glm::length(m_config.wind_direction) > 0.001f
@@ -88,74 +80,7 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
 	m_particle_system->setWind(glm::vec4(dir, m_config.wind_strength));
 	m_particle_system->setGravity(m_config.gravity);
 
-    for (auto it = m_rockets.begin(); it != m_rockets.end(); ) {
-        Rocket& r = *it;
-
-        // Apply wind to rocket
-        if (m_config.wind_strength > 0.0f && glm::length(m_config.wind_direction) > 0.001f) {
-             glm::vec3 wind_velocity = glm::normalize(m_config.wind_direction) * m_config.wind_strength;
-             r.pos += wind_velocity * dt;
-        }
-
-        r.vel.z -= m_config.gravity * dt;
-        r.pos += r.vel * dt;
-		float spiral_factor = glm::clamp(r.vel.z, 0.0f, 10.0f);
-		float spiral_speed = glm::clamp(r.vel.z, 0.0f, 5.0f);
-		float rocket_seed = r.color.r * 1000.0f;
-		r.pos.x += glm::cos(frame_info.total_time * spiral_speed + rocket_seed) * spiral_factor * dt;
-		r.pos.y += glm::sin(frame_info.total_time * spiral_speed + rocket_seed) * spiral_factor * dt;
-
-        r.timer -= dt;
-		r.trail_timer -= dt;
-
-		// Trail emission should be framerate independent
-		if (r.trail_timer <= 0.0f) {
-			r.trail_timer = 0.004f; // Emit every 4ms (~250Hz)
-
-			float smoke_variance = 0.1f;
-			SpawnEvent smoke{
-				.position_scale = glm::vec4(r.pos, 5.0f),
-				.velocity_life = glm::vec4(r.vel * 0.02f, 7.0f),
-				.color = m_config.smoke_color,
-				.info = {0, 2, TYPE_SMOKE, *reinterpret_cast<uint32_t*>(&smoke_variance)}
-			};
-
-			m_particle_system->emitParticles(smoke);
-
-			SpawnEvent spark{
-				.position_scale = glm::vec4(r.pos, 0.2f),
-				.velocity_life = glm::vec4(-r.vel * 0.4f, 0.3f),
-				.color = glm::vec4(1.0f, 0.8f, 0.1f, 1.0f),
-				.info = {0, 5, TYPE_SPARK, 0}
-			};
-			m_particle_system->emitParticles(spark);
-		}
-        // Explode condition: Timer or falling too fast
-        if (r.timer <= 0.0f || r.vel.z < -5.0f) {
-            // Explode
-            SpawnEvent explode{
-				.position_scale = glm::vec4(r.pos, m_config.explosion_size),
-				.velocity_life = glm::vec4(r.vel * 1.5f, 2.2f),
-				.color = r.color,
-				.info = {0, static_cast<uint32_t>(m_config.explosion_particle_count), TYPE_EXPLOSION, 0}
-			};
-            // Smoke from explosion
-            SpawnEvent smoke_explode = explode;
-            smoke_explode.position_scale.w = 10.0f;
-			smoke_explode.velocity_life = glm::vec4(r.vel * 1.5f, 7.0f);
-            smoke_explode.color = m_config.smoke_color;
-            smoke_explode.info.z = TYPE_EXPLOSION_SMOKE;
-			smoke_explode.info.y = static_cast<uint32_t>(m_config.explosion_particle_count) / 2;
-
-			// emit smoke first (no additive blending)
-            m_particle_system->emitParticles(smoke_explode);
-			m_particle_system->emitParticles(explode);
-
-            it = m_rockets.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    // CPU simulation loop removed. Physics is now on GPU.
 
     // Update the internal particle system
     m_particle_system->update(frame_info);
