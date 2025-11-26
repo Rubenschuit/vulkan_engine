@@ -140,25 +140,6 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
                 };
                 m_particle_system->emitParticles(spark);
             }
-            else if (r.generation == 1) {
-                // Palm Tree Trail: Long lasting gold/white sparks
-                SpawnEvent trail{
-                    .position_scale = glm::vec4(r.pos, m_config.explosion_size),
-                    // Very little velocity inheritance to make trail hang in air
-                    .velocity_life = glm::vec4(-r.vel * 0.0f, r.timer),
-                    .color = r.color, // Use the streamer's color
-                    .info = {0, 1, TYPE_TRAIL, 0}
-                };
-                m_particle_system->emitParticles(trail);
-				SpawnEvent smoke{
-                    .position_scale = glm::vec4(r.pos, 5.0f),
-                    .velocity_life = glm::vec4(r.vel * 0.02f, 7.0f),
-                    .color = m_config.smoke_color,
-                    .info = {0, 1, TYPE_SMOKE, *reinterpret_cast<uint32_t*>(&smoke_variance)}
-                };
-                m_particle_system->emitParticles(smoke);
-
-            }
 		}
 
         // DEATH / EXPLOSION CHECK
@@ -168,26 +149,14 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
 
         if (dead) {
             if (r.generation == 0) {
-                // 2. Spawn CPU Streamers (The "Palm Tree" arms)
-                 for(int i = 0; i < m_config.explosion_particle_count; i++) {
-                     // Random direction on sphere
-                     glm::vec3 dir = glm::normalize(Random::vec3Range(-1.0f, 1.0f));
-                     // Add some upward bias
-                     // dir.z += 0.5f; dir = glm::normalize(dir);
 
-                     float speed = Random::floatRange(15.0f, 75.0f);
-
-                     Rocket streamer{
-                         .pos = r.pos,
-                         .vel = dir * speed,
-                         .color = r.color,
-                         .timer = Random::floatRange(0.5f, 3.5f), // Fall time
-                         .trail_timer = 0.0f,
-                         .exploded = false,
-                         .generation = 1
-                     };
-                     new_rockets.push_back(streamer);
-                 }
+                SpawnEvent streamers{
+                    .position_scale = glm::vec4(r.pos, 0.3f),
+                    .velocity_life = glm::vec4(0.0f, 0.0f, 0.0f, 2.5f),
+                    .color = r.color,
+                    .info = {0, static_cast<uint32_t>(m_config.explosion_particle_count), 6, 0}
+                };
+                m_particle_system->emitParticles(streamers);
             }
 
             it = m_rockets.erase(it);

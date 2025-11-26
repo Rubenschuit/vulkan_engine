@@ -22,6 +22,7 @@ ParticleSystem::ParticleSystem(
 	VE_LOGI("ParticleSystem constructor: particles=" << m_particle_count);
 	m_pending_particle_count = m_particle_count;
 	m_capacity = 0;
+
 	createShaderStorageBuffers();
 	createSpawnBuffers();
 	createUniformBuffers();
@@ -141,6 +142,26 @@ void ParticleSystem::createSpawnBuffers() {
 		);
 		m_spawn_storage_buffers[i]->map();
 	}
+
+	// Create global counter buffer (2 uints: WriteHead, ReadHead)
+	m_global_counter_buffer = std::make_unique<VeBuffer>(
+		m_ve_device,
+		sizeof(uint32_t) * 4, // Padding to 16 bytes just in case
+		1,
+		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+		vk::MemoryPropertyFlagBits::eDeviceLocal
+	);
+
+	// Create GPU trail buffer (Queue)
+	// Size 200,000 particles should be enough for buffering trails
+	vk::DeviceSize trail_buffer_size = sizeof(Particle) * 200000;
+	m_gpu_trail_buffer = std::make_unique<VeBuffer>(
+		m_ve_device,
+		trail_buffer_size,
+		1,
+		vk::BufferUsageFlagBits::eStorageBuffer,
+		vk::MemoryPropertyFlagBits::eDeviceLocal
+	);
 }
 
 void ParticleSystem::createUniformBuffers() {
@@ -173,6 +194,8 @@ void ParticleSystem::createDescriptorSetLayouts() {
 		.addBinding(4, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
 		.addBinding(5, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Indirect buffer
 		.addBinding(6, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Render buffer
+		.addBinding(7, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Global Counter
+		.addBinding(8, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Trail Queue
 		.build();
 }
 
@@ -190,6 +213,8 @@ void ParticleSystem::createDescriptorSets() {
 
 		auto indirect_info = m_indirect_buffers[i]->getDescriptorInfo();
 		auto render_info = m_render_buffers[i]->getDescriptorInfo();
+		auto counter_info = m_global_counter_buffer->getDescriptorInfo();
+		auto trail_info = m_gpu_trail_buffer->getDescriptorInfo();
 
 		VeDescriptorWriter(*m_compute_set_layout, *m_descriptor_pool)
 			.writeBuffer(3, &ubo_info)
@@ -198,6 +223,8 @@ void ParticleSystem::createDescriptorSets() {
 			.writeBuffer(4, &spawn_info)
 			.writeBuffer(5, &indirect_info)
 			.writeBuffer(6, &render_info)
+			.writeBuffer(7, &counter_info)
+			.writeBuffer(8, &trail_info)
 			.build(set);
 		m_compute_descriptor_sets.push_back(std::move(set));
 	}

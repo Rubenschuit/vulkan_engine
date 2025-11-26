@@ -12,7 +12,7 @@ struct VertexInput {
 	float4 pos : POSITION; // xyz = center, w = size
 	float4 color : COLOR; // rgba
 	float4 tex_coords : TEXCOORD; // uv1 and uv2
-	float4 extra_data;  // x = type, y = lifetime, z = blend
+	float4 extra_data;  // x = type, y = lifetime, z = blend, w = timestamp
 };
 
 struct VertexOutput {
@@ -41,7 +41,8 @@ enum ParticleType : uint {
 	TYPE_SPARK = 2,
 	TYPE_ROCKET = 3,
 	TYPE_EXPLOSION = 4,
-	TYPE_TRAIL = 5
+	TYPE_TRAIL = 5,
+	TYPE_STREAMER = 6
 };
 
 
@@ -99,7 +100,7 @@ Sampler2D smoke_texture;
 [shader("fragment")]
 float4 fragMain(VertexOutput in_vert) : SV_Target {
 	float4 col1, col2;
-	if (in_vert.type == ParticleType::TYPE_DEFAULT || in_vert.type == ParticleType::TYPE_EXPLOSION) {
+	if (in_vert.type == ParticleType::TYPE_DEFAULT || in_vert.type == ParticleType::TYPE_EXPLOSION || in_vert.type == ParticleType::TYPE_TRAIL) {
 		// round mask
 		if (dot(in_vert.uv0, in_vert.uv0) > 0.25f) {
 			discard;
@@ -179,6 +180,7 @@ struct Particle {
 	float4 color;    // rgba
 	float4 tex_coords; // uv1 and uv2
 	float4 extra_data; // x = type
+	float4 simulation_data; // x = accumulator
 };
 [vk::binding(1, 0)]
 RWStructuredBuffer<Particle> particles_prev;
@@ -188,6 +190,14 @@ RWStructuredBuffer<Particle> particles_out;
 // Compacted render buffer
 [vk::binding(6, 0)]
 RWStructuredBuffer<Particle> particles_render;
+
+// Global atomic counters: [0]=WriteHead, [1]=ReadHead
+[vk::binding(7, 0)]
+RWStructuredBuffer<uint> global_counters;
+
+// GPU Trail Queue (Ring Buffer)
+[vk::binding(8, 0)]
+RWStructuredBuffer<Particle> trail_queue;
 
 // RNG helpers
 uint wang_hash(uint seed) {
@@ -411,6 +421,7 @@ void resetPoint(uint i, uint extra_seed) {
 	p0.color = float4(col, 1.0f);
 	p0.tex_coords = float4(0.0f);
 	p0.extra_data = float4(0.0f);
+	p0.simulation_data = float4(0.0f);
 
 	particles_out[i] = p0;
 	particles_prev[i] = p0;
@@ -454,6 +465,7 @@ void resetDisc(uint i, uint extra_seed) {
 	p0.color = float4(col, 1.0f);
 	p0.tex_coords = float4(0.0f);
 	p0.extra_data = float4(0.0f);
+	p0.simulation_data = float4(0.0f);
 
 	particles_out[i] = p0;
 	particles_prev[i] = p0;
@@ -525,6 +537,19 @@ void resetFromEvent(uint i, SpawnEvent e) {
 		 // More lifetime variance for sparks
 		 if (vel_life.w <= 0.0f) life = 0.5f + rand01(state) * 1.5f;
 		 else life = vel_life.w * (0.5f + 1.0f * rand01(state));
+	} else if (type == ParticleType::TYPE_STREAMER) {
+		 // Explode outward in random sphere direction
+		 float2 vxy = rand_normal2(state);
+		 float vz = rand_normal2(state).x;
+		 float3 dir = normalize(float3(vxy, vz));
+
+
+		 float speed = 45.0f + 5.0f * rand01(state);
+		 final_vel = dir * speed;
+
+		 // Lifetime variance
+		 life = vel_life.w * (0.5f + 1.0f * rand01(state));
+
 	} else if (type == ParticleType::TYPE_ROCKET) { // Rocket
 		 // Minimal noise
 		 final_vel += rand_normal2(state).xyy * 0.1f;
@@ -547,6 +572,7 @@ void resetFromEvent(uint i, SpawnEvent e) {
 	p.tex_coords = float4(0.0f);
 	// Store initial life in extra_data.y for texture animation
 	p.extra_data = float4((float)type, life, 0, 0);
+	p.simulation_data = float4(0.0f);
 
 	particles_out[i] = p;
 	particles_prev[i] = p;
@@ -604,6 +630,44 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 	// Update lifetime
 	p.velocity.w -= params.delta_time;
 	if (p.velocity.w <= 0.0f) {
+
+		// DEAD PARTICLE (Scavenger) Logic
+		// Check if there are trails in the queue to spawn
+		bool spawned = false;
+
+		// Simple heuristic: only check if we are in the "scavenger zone"
+		// Or just check the read head.
+
+		// Note: We do this check BEFORE assuming dead.
+		// We rely on atomic read head.
+
+		uint read_head = global_counters[1];
+		uint write_head = global_counters[0];
+
+		// If queue has items (Read < Write)
+		// NOTE: This is a racy read, but if it looks like there's data, we try to take it.
+		if (read_head < write_head) {
+			uint my_slot;
+			InterlockedAdd(global_counters[1], 1, my_slot); // Increment ReadHead
+
+			// Double check if we actually got a valid slot (in case multiple threads raced)
+			if (my_slot < global_counters[0]) {
+				uint queue_size = 200000; // Must match C++ buffer size
+				p = trail_queue[my_slot % queue_size];
+
+				if (params.total_time - p.extra_data.w < 0.1f) {
+					spawned = true;
+				}
+			}
+		}
+
+		if (spawned) {
+			// We revived this particle as a trail
+			particles_out[i] = p;
+			appendToRenderBuffer(p);
+			return;
+		}
+
 		if (params.should_respawn != 0u) {
 			// Respawn with a seed based on time to vary the randomness
 			uint time_seed = asuint(params.total_time);
@@ -650,6 +714,8 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 			gravity = -2.0f; // Buoyancy for smoke
 		} else if (type == ParticleType::TYPE_TRAIL) {
 			//gravity = 0.5f; // Very low gravity for hanging trails
+		} else if (type == ParticleType::TYPE_STREAMER) {
+			//gravity = params.gravity * 0.6f; // Slightly less gravity for streamers
 		}
 
 		p.velocity.z -= gravity * params.delta_time;
@@ -668,14 +734,11 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 				 p.color.a = saturate(life_frac / 0.2f);
 			 }
 		} else if (type == ParticleType::TYPE_TRAIL) { // Spark
-			 p.velocity.xyz -= p.velocity.xyz * 2.0f * params.delta_time; // High Drag
+			 p.velocity.xyz -= p.velocity.xyz * 0.9f * params.delta_time; // High Drag
 			 float max_life = p.extra_data.y;
 			 if (max_life > 0.001f) {
 				 p.color.a = saturate(p.velocity.w / max_life);
-				// lerp color to orange at end
-				if (p.velocity.w < 0.5f) {
-					p.color.rgb = lerp(p.color.rgb, float3(1.0f, 0.6f, 0.0f), saturate(p.velocity.w / 0.2f));
-				}
+
 			 }
 			 else {
 				p.color.a = 0.0f;
@@ -693,12 +756,66 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 			 if (p.velocity.w < 0.2f) {
 				p.color.rgb = lerp(p.color.rgb, float3(1.0f, 0.6f, 0.0f), saturate(p.velocity.w / 0.2f));
 			 }
+		} else if (type == ParticleType::TYPE_STREAMER) {
+			 p.velocity.xyz -= p.velocity.xyz * 0.9f * params.delta_time;
+
+			 const float TRAIL_INTERVAL = 0.001f;
+
+			 float accumulator = p.simulation_data.x + params.delta_time;
+			 int emit_count = clamp(0, 1, (int)(accumulator / TRAIL_INTERVAL));
+
+
+			 p.simulation_data.x = accumulator - (emit_count * TRAIL_INTERVAL);
+
+			 if (emit_count > 0) {
+				 uint slot_idx;
+				 // Reserve slots for both Trail and Smoke
+				 InterlockedAdd(global_counters[0], emit_count * 2, slot_idx);
+
+				 uint queue_size = 200000;
+
+				 // Interpolate along the path traveled this frame
+				 float3 start_pos = p.position.xyz;
+				 // Current p.velocity is already updated with drag for this step.
+				 // We use this to approximate the path traveled during the frame.
+				 float3 move_vec = p.velocity.xyz * params.delta_time;
+
+				 for (int k = 0; k < emit_count; ++k) {
+					 // Distribute particles evenly along the segment
+					 float t = (float)(k + 1) / (float)(emit_count + 1);
+					 float3 emit_pos = start_pos + move_vec * t;
+
+					 uint base_idx = slot_idx + k * 2;
+
+					 Particle trail;
+					 trail.position = float4(emit_pos, 0.5f);
+					 trail.velocity = float4(p.velocity.xyz * 0.0f, p.velocity.w / 2.0f);
+					 trail.color = p.color;
+					 trail.tex_coords = float4(0.0f);
+					 trail.extra_data = float4((float)ParticleType::TYPE_TRAIL, p.velocity.w, 0.0f, params.total_time);
+					 trail.simulation_data = float4(0.0f);
+					 trail_queue[base_idx % queue_size] = trail;
+
+					 uint state = wang_hash(asuint(base_idx + 1));
+					 if (rand01(state) < 0.4f) {
+						Particle smoke;
+						smoke.position = float4(emit_pos, 5.0f);
+						smoke.velocity = float4(p.velocity.xyz * 0.02f, 7.0f);
+						smoke.color = float4(0.4f, 0.4f, 0.4f, 0.5f);
+						smoke.tex_coords = float4(0.0f);
+						smoke.extra_data = float4((float)ParticleType::TYPE_SMOKE, 7.0f, 0.0f, params.total_time);
+						smoke.simulation_data = float4(0.0f);
+						trail_queue[(base_idx + 1) % queue_size] = smoke;
+					 }
+				 }
+			 }
+
 		} else if (type == ParticleType::TYPE_ROCKET) {
 			 // Flash effect near end of life ( life < FLASH_TIME or z < -5.0f)
 			 const float FLASH_SCALE = 150.0f;
 			 const float FLASH_TIME = 0.15f;
 
-			 // If falling too fast, force life to end to trigger flash
+			 // If falling too fast
 			 if (p.velocity.z < -5.0f && p.velocity.w > FLASH_TIME) {
 				p.velocity.w = FLASH_TIME;
 			 }

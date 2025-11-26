@@ -35,7 +35,8 @@ enum ParticleType : uint32_t {
 	TYPE_SPARK = 2,
 	TYPE_ROCKET = 3,
 	TYPE_EXPLOSION = 4,
-	TYPE_TRAIL = 5
+	TYPE_TRAIL = 5,
+	TYPE_STREAMER = 6
 };
 
 struct SpawnEvent {
@@ -76,7 +77,8 @@ struct Particle {
 	glm::vec4 velocity; // w is life
 	glm::vec4 color;
 	glm::vec4 tex_coords;
-	glm::vec4 extra_data; // x = type, yzw = unused/padding
+	glm::vec4 extra_data; // x = type, y = max_life, z = blend, w = timestamp
+	glm::vec4 simulation_data; // x = accumulator for trail emission
 
 	static std::vector<vk::VertexInputBindingDescription> getBindingDescription() {
 		// Per-instance particle attributes (position, color)
@@ -205,6 +207,10 @@ private:
 	std::vector<std::unique_ptr<VeBuffer>> m_spawn_storage_buffers; // spawn event SSBO per frame
 	std::vector<vk::raii::DescriptorSet> m_compute_descriptor_sets;
 
+	// Global atomic counter for GPU-side allocations
+	std::unique_ptr<VeBuffer> m_global_counter_buffer;
+	// Buffer for queuing GPU-spawned trails
+	std::unique_ptr<VeBuffer> m_gpu_trail_buffer;
 
 	// Shared pool for descriptor allocations
 	std::shared_ptr<VeDescriptorPool> m_descriptor_pool;
