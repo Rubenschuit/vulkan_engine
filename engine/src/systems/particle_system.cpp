@@ -24,17 +24,6 @@ ParticleSystem::ParticleSystem(
 	m_capacity = 0;
 	createShaderStorageBuffers();
 	createSpawnBuffers();
-    // Create counter buffers
-    m_counter_buffers.resize(MAX_FRAMES_IN_FLIGHT);
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        m_counter_buffers[i] = std::make_unique<VeBuffer>(
-            m_ve_device,
-            sizeof(uint32_t) * 4, // atomic counters padding
-            1,
-            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-            vk::MemoryPropertyFlagBits::eDeviceLocal
-        );
-    }
 	createUniformBuffers();
 	createDescriptorSetLayouts();
 	createDescriptorSets();
@@ -184,7 +173,6 @@ void ParticleSystem::createDescriptorSetLayouts() {
 		.addBinding(4, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
 		.addBinding(5, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Indirect buffer
 		.addBinding(6, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Render buffer
-		.addBinding(7, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Counter buffer
 		.build();
 }
 
@@ -202,7 +190,6 @@ void ParticleSystem::createDescriptorSets() {
 
 		auto indirect_info = m_indirect_buffers[i]->getDescriptorInfo();
 		auto render_info = m_render_buffers[i]->getDescriptorInfo();
-		auto counter_info = m_counter_buffers[i]->getDescriptorInfo();
 
 		VeDescriptorWriter(*m_compute_set_layout, *m_descriptor_pool)
 			.writeBuffer(3, &ubo_info)
@@ -211,7 +198,6 @@ void ParticleSystem::createDescriptorSets() {
 			.writeBuffer(4, &spawn_info)
 			.writeBuffer(5, &indirect_info)
 			.writeBuffer(6, &render_info)
-			.writeBuffer(7, &counter_info)
 			.build(set);
 		m_compute_descriptor_sets.push_back(std::move(set));
 	}
@@ -232,8 +218,7 @@ void ParticleSystem::createComputePipeline() {
 	path_str = path_str.substr(0, path_str.size() - 4) + "c.spv";
 	std::filesystem::path path = std::filesystem::path(path_str);
 
-	m_compute_pipeline = std::make_unique<VeComputePipeline>(m_ve_device, path, m_compute_pipeline_layout, "compMain");
-    m_spawn_pipeline = std::make_unique<VeComputePipeline>(m_ve_device, path, m_compute_pipeline_layout, "spawnMain");
+	m_compute_pipeline = std::make_unique<VeComputePipeline>(m_ve_device, path, m_compute_pipeline_layout);
 }
 
 void ParticleSystem::createPipelineLayout(
@@ -372,41 +357,14 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 		.size = VK_WHOLE_SIZE
 	};
 
-    if (params.reset) {
-        frame_info.compute_command_buffer.updateBuffer<uint32_t>(
-            *m_counter_buffers[frame_info.current_frame]->getBuffer(),
-            0,
-            {0, 0, 0, 0}
-        );
-
-        vk::BufferMemoryBarrier counter_barrier{
-            .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
-            .dstAccessMask = vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer = *m_counter_buffers[frame_info.current_frame]->getBuffer(),
-            .offset = 0,
-            .size = VK_WHOLE_SIZE
-        };
-
-        frame_info.compute_command_buffer.pipelineBarrier(
-            vk::PipelineStageFlagBits::eHost | vk::PipelineStageFlagBits::eTransfer,
-            vk::PipelineStageFlagBits::eComputeShader,
-            {},
-            nullptr,
-            {indirect_write_barrier, counter_barrier},
-            nullptr
-        );
-    } else {
-        frame_info.compute_command_buffer.pipelineBarrier(
-            vk::PipelineStageFlagBits::eHost,
-            vk::PipelineStageFlagBits::eComputeShader,
-            {},
-            nullptr,
-            indirect_write_barrier,
-            nullptr
-        );
-    }
+	frame_info.compute_command_buffer.pipelineBarrier(
+		vk::PipelineStageFlagBits::eHost,
+		vk::PipelineStageFlagBits::eComputeShader,
+		{},
+		nullptr,
+		indirect_write_barrier,
+		nullptr
+	);
 
 
 	frame_info.compute_command_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
@@ -425,38 +383,6 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 	if (group_count_x > 0) {
 		frame_info.compute_command_buffer.dispatch(group_count_x, 1, 1);
 	}
-
-    // Dispatch Spawn Kernel
-    // Only if there are spawn events
-    if (params.spawn_event_count > 0) {
-        // Barrier to ensure simulation updates to particles are visible (if we cared about read-write consistency)
-        // But mostly we care about 'spawn_events' being ready (which they are).
-        // And we want to write to particles_out potentially overwriting what simulation did.
-        // The simulation writes to particles_out. Spawn writes to particles_out.
-        // We need a barrier on the SSBO.
-        
-        vk::BufferMemoryBarrier spawn_barrier{
-            .srcAccessMask = vk::AccessFlagBits::eShaderWrite,
-            .dstAccessMask = vk::AccessFlagBits::eShaderWrite | vk::AccessFlagBits::eShaderRead,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer = *m_shader_storage_buffers[frame_info.current_frame]->getBuffer(), // This is particles_out for this frame
-            .offset = 0,
-            .size = VK_WHOLE_SIZE
-        };
-        
-        frame_info.compute_command_buffer.pipelineBarrier(
-            vk::PipelineStageFlagBits::eComputeShader,
-            vk::PipelineStageFlagBits::eComputeShader,
-            {},
-            nullptr,
-            spawn_barrier,
-            nullptr
-        );
-
-        frame_info.compute_command_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_spawn_pipeline->getPipeline());
-        frame_info.compute_command_buffer.dispatch(1, 1, 1); // Only 1 group needed for spawn loop
-    }
 
 
 	// Add barrier to ensure compute writes are visible to vertex shader read and indirect command execution

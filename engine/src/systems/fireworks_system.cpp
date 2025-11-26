@@ -49,12 +49,21 @@ void FireworksSystem::launchRocket() {
 }
 
 void FireworksSystem::launchRocket(glm::vec3 pos, glm::vec3 vel, glm::vec4 color) {
-    // Emit a singular rocket particle (invisible until it explodes, then it simulates a flash)
-    float timer = Random::floatRange(2.0f, 7.0f);
+    Rocket r{
+		.pos = pos,
+		.vel = vel,
+		.color = color,
+		.timer = Random::floatRange(2.0f, 7.0f), // explode time
+		.trail_timer = 0.0f,
+		.exploded = false,
+        .generation = 0
+	};
+    m_rockets.push_back(r);
 
+    // Emit a singular rocket particle (invisible until it explodes, then it simulates a flash)
     SpawnEvent event{
-		.position_scale = glm::vec4(pos, 10.0f),
-		.velocity_life = glm::vec4(vel, timer),
+		.position_scale = glm::vec4(pos, 0.0f),
+		.velocity_life = glm::vec4(vel, r.timer),
 		.color = color,
 		.info = {0, 1, TYPE_ROCKET, 0}
 	};
@@ -71,7 +80,7 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
         m_pending_capacity = 0;
     }
 
-    // float dt = frame_info.frame_time;
+    float dt = frame_info.frame_time;
 
 	// Set wind direction/strength and gravity from ui
 	glm::vec3 dir = glm::length(m_config.wind_direction) > 0.001f
@@ -80,7 +89,115 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
 	m_particle_system->setWind(glm::vec4(dir, m_config.wind_strength));
 	m_particle_system->setGravity(m_config.gravity);
 
-    // CPU simulation loop removed. Physics is now on GPU.
+    std::vector<Rocket> new_rockets; // Store new streamers here
+
+    for (auto it = m_rockets.begin(); it != m_rockets.end(); ) {
+        Rocket& r = *it;
+
+		// apply physics
+		glm::vec3 wind_velocity = glm::normalize(m_config.wind_direction) * m_config.wind_strength;
+		r.pos += wind_velocity * dt;
+        r.vel.z -= m_config.gravity * dt;
+        r.pos += r.vel * dt;
+
+        // GENERATION 0: The Main Rocket (Spirals + Smoke)
+        if (r.generation == 0) {
+            float spiral_factor = glm::clamp(r.vel.z, 0.0f, 10.0f);
+            float spiral_speed = glm::clamp(r.vel.z, 0.0f, 5.0f);
+            float rocket_seed = r.color.r * 1000.0f; // desync the spirals of different rockets
+            r.pos.x += glm::cos(frame_info.total_time * spiral_speed + rocket_seed) * spiral_factor * dt;
+            r.pos.y += glm::sin(frame_info.total_time * spiral_speed + rocket_seed) * spiral_factor * dt;
+        }
+        // GENERATION 1: The Palm Streamers (High Drag + Gold Trails)
+        else if (r.generation == 1) {
+            // Apply drag to create the "hanging" effect of a willow firework
+            r.vel *= (1.0f - 1.5f * dt);
+        }
+
+        r.timer -= dt;
+		r.trail_timer -= dt;
+
+		// Trail emission should be framerate independent: emit every 4ms
+		if (r.trail_timer <= m_config.trail_interval) {
+			r.trail_timer = m_config.trail_interval;
+			float smoke_variance = 0.1f;
+
+            if (r.generation == 0) {
+
+                SpawnEvent smoke{
+                    .position_scale = glm::vec4(r.pos, 5.0f),
+                    .velocity_life = glm::vec4(r.vel * 0.02f, 7.0f),
+                    .color = m_config.smoke_color,
+                    .info = {0, 2, TYPE_SMOKE, *reinterpret_cast<uint32_t*>(&smoke_variance)}
+                };
+                m_particle_system->emitParticles(smoke);
+
+                SpawnEvent spark{
+                    .position_scale = glm::vec4(r.pos, 0.2f),
+                    .velocity_life = glm::vec4(-r.vel * 0.0f, 0.34f),
+                    .color = glm::vec4(1.0f, 0.8f, 0.1f, 1.0f),
+                    .info = {0, 5, TYPE_SPARK, 0}
+                };
+                m_particle_system->emitParticles(spark);
+            }
+            else if (r.generation == 1) {
+                // Palm Tree Trail: Long lasting gold/white sparks
+                SpawnEvent trail{
+                    .position_scale = glm::vec4(r.pos, m_config.explosion_size),
+                    // Very little velocity inheritance to make trail hang in air
+                    .velocity_life = glm::vec4(-r.vel * 0.0f, r.timer),
+                    .color = r.color, // Use the streamer's color
+                    .info = {0, 1, TYPE_TRAIL, 0}
+                };
+                m_particle_system->emitParticles(trail);
+				SpawnEvent smoke{
+                    .position_scale = glm::vec4(r.pos, 5.0f),
+                    .velocity_life = glm::vec4(r.vel * 0.02f, 7.0f),
+                    .color = m_config.smoke_color,
+                    .info = {0, 1, TYPE_SMOKE, *reinterpret_cast<uint32_t*>(&smoke_variance)}
+                };
+                m_particle_system->emitParticles(smoke);
+
+            }
+		}
+
+        // DEATH / EXPLOSION CHECK
+        bool dead = (r.timer <= 0.0f);
+        // Rocket specific fail condition
+        if (r.generation == 0 && r.vel.z < -5.0f) dead = true;
+
+        if (dead) {
+            if (r.generation == 0) {
+                // 2. Spawn CPU Streamers (The "Palm Tree" arms)
+                 for(int i = 0; i < m_config.explosion_particle_count; i++) {
+                     // Random direction on sphere
+                     glm::vec3 dir = glm::normalize(Random::vec3Range(-1.0f, 1.0f));
+                     // Add some upward bias
+                     // dir.z += 0.5f; dir = glm::normalize(dir);
+
+                     float speed = Random::floatRange(15.0f, 75.0f);
+
+                     Rocket streamer{
+                         .pos = r.pos,
+                         .vel = dir * speed,
+                         .color = r.color,
+                         .timer = Random::floatRange(0.5f, 3.5f), // Fall time
+                         .trail_timer = 0.0f,
+                         .exploded = false,
+                         .generation = 1
+                     };
+                     new_rockets.push_back(streamer);
+                 }
+            }
+
+            it = m_rockets.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Add newly spawned streamers to the main list
+    m_rockets.insert(m_rockets.end(), new_rockets.begin(), new_rockets.end());
 
     // Update the internal particle system
     m_particle_system->update(frame_info);

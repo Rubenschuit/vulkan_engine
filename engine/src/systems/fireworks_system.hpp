@@ -8,16 +8,15 @@
 
 namespace ve {
 
-// Struct not needed anymore as all logic is on GPU
-// struct Rocket {
-//     glm::vec3 pos;
-//     glm::vec3 vel;
-//     glm::vec4 color;
-//     float timer;
-//     float trail_timer = 0.0f;
-//     bool exploded = false;
-//     int generation = 0; // 0 = Initial Rocket, 1 = Explosion Streamer
-// };
+struct Rocket {
+    glm::vec3 pos;
+    glm::vec3 vel;
+    glm::vec4 color;
+    float timer;
+    float trail_timer = 0.0f;
+    bool exploded = false;
+    int generation = 0; // 0 = Initial Rocket, 1 = Explosion Streamer
+};
 
 struct FireworksConfig {
     glm::vec3 launch_pos{0.0f, 0.0f, 0.0f};
@@ -67,7 +66,7 @@ public:
 
 private:
     std::unique_ptr<ParticleSystem> m_particle_system;
-    // std::vector<Rocket> m_rockets; // removed
+    std::vector<Rocket> m_rockets;
     FireworksConfig m_config;
     uint32_t m_pending_capacity{0};
 };

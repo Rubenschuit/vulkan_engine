@@ -12,7 +12,7 @@ namespace ve {
 
 class VENGINE_API VeComputePipeline {
 public:
-	VeComputePipeline(VeDevice& device, const std::filesystem::path& comp_spv_path, const vk::raii::PipelineLayout& pipeline_layout, const std::string& entry_point = "compMain");
+	VeComputePipeline(VeDevice& device, const std::filesystem::path& comp_spv_path, const vk::raii::PipelineLayout& pipeline_layout);
 	~VeComputePipeline() = default;
 
 	VeComputePipeline(const VeComputePipeline&) = delete;
@@ -22,7 +22,7 @@ public:
 
 private:
 
-	void createComputePipeline(const std::filesystem::path& comp_spv_path, const vk::raii::PipelineLayout& pipeline_layout, const std::string& entry_point);
+	void createComputePipeline(const std::filesystem::path& comp_spv_path, const vk::raii::PipelineLayout& pipeline_layout);
 
 	VeDevice& m_ve_device;
 	vk::raii::ShaderModule m_shader_module{nullptr};
