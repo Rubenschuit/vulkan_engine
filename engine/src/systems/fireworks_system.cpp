@@ -35,6 +35,10 @@ void FireworksSystem::setParticleCapacity(uint32_t capacity) {
     m_pending_capacity = capacity;
 }
 
+void FireworksSystem::setTrailBufferSize(uint32_t size) {
+    m_pending_trail_buffer_size = size;
+}
+
 void FireworksSystem::launchRocket() {
 	for (int i = 0; i < m_config.launch_count; i++) {
 		glm::vec3 pos = m_config.launch_pos;
@@ -56,7 +60,7 @@ void FireworksSystem::launchRocket(glm::vec3 pos, glm::vec3 vel, glm::vec4 color
 		.timer = Random::floatRange(2.0f, 7.0f), // explode time
 		.trail_timer = 0.0f,
 		.exploded = false,
-        .generation = 0
+        .type = 0
 	};
     m_rockets.push_back(r);
 
@@ -80,6 +84,15 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
         m_pending_capacity = 0;
     }
 
+    // Handle pending trail buffer size change
+    if (m_pending_trail_buffer_size > 0) {
+        if (m_particle_system) {
+            m_particle_system->setTrailBufferSize(m_pending_trail_buffer_size);
+            m_config.trail_buffer_size = static_cast<int>(m_pending_trail_buffer_size);
+        }
+        m_pending_trail_buffer_size = 0;
+    }
+
     float dt = frame_info.frame_time;
 
 	// Set wind direction/strength and gravity from ui
@@ -89,8 +102,7 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
 	m_particle_system->setWind(glm::vec4(dir, m_config.wind_strength));
 	m_particle_system->setGravity(m_config.gravity);
 
-    std::vector<Rocket> new_rockets; // Store new streamers here
-
+	// Update active rockets
     for (auto it = m_rockets.begin(); it != m_rockets.end(); ) {
         Rocket& r = *it;
 
@@ -101,19 +113,13 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
         r.pos += r.vel * dt;
 
         // GENERATION 0: The Main Rocket (Spirals + Smoke)
-        if (r.generation == 0) {
+        if (r.type == 0) {
             float spiral_factor = glm::clamp(r.vel.z, 0.0f, 10.0f);
             float spiral_speed = glm::clamp(r.vel.z, 0.0f, 5.0f);
             float rocket_seed = r.color.r * 1000.0f; // desync the spirals of different rockets
             r.pos.x += glm::cos(frame_info.total_time * spiral_speed + rocket_seed) * spiral_factor * dt;
             r.pos.y += glm::sin(frame_info.total_time * spiral_speed + rocket_seed) * spiral_factor * dt;
         }
-        // GENERATION 1: The Palm Streamers (High Drag + Gold Trails)
-        else if (r.generation == 1) {
-            // Apply drag to create the "hanging" effect of a willow firework
-            r.vel *= (1.0f - 1.5f * dt);
-        }
-
         r.timer -= dt;
 		r.trail_timer -= dt;
 
@@ -122,7 +128,7 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
 			r.trail_timer = m_config.trail_interval;
 			float smoke_variance = 0.1f;
 
-            if (r.generation == 0) {
+            if (r.type == 0) {
 
                 SpawnEvent smoke{
                     .position_scale = glm::vec4(r.pos, 5.0f),
@@ -142,19 +148,21 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
             }
 		}
 
-        // DEATH / EXPLOSION CHECK
+        // Explosion check
         bool dead = (r.timer <= 0.0f);
-        // Rocket specific fail condition
-        if (r.generation == 0 && r.vel.z < -5.0f) dead = true;
+        // Rocket specific explosion condition
+        if (r.type == 0 && r.vel.z < -5.0f) dead = true;
 
         if (dead) {
-            if (r.generation == 0) {
+            if (r.type == 0) {
+				uint32_t streamer_count = static_cast<uint32_t>(Random::intRange(m_config.explosion_particle_count, m_config.explosion_particle_count * 2));
 
+				// Each streamer is a single particle emitting a trail of particles spawned from the shader
                 SpawnEvent streamers{
-                    .position_scale = glm::vec4(r.pos, 0.3f),
+                    .position_scale = glm::vec4(r.pos, m_config.explosion_size),
                     .velocity_life = glm::vec4(0.0f, 0.0f, 0.0f, 2.5f),
                     .color = r.color,
-                    .info = {0, static_cast<uint32_t>(m_config.explosion_particle_count), 6, 0}
+                    .info = {0, streamer_count, TYPE_STREAMER, 0}
                 };
                 m_particle_system->emitParticles(streamers);
             }
@@ -164,9 +172,6 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
             ++it;
         }
     }
-
-    // Add newly spawned streamers to the main list
-    m_rockets.insert(m_rockets.end(), new_rockets.begin(), new_rockets.end());
 
     // Update the internal particle system
     m_particle_system->update(frame_info);

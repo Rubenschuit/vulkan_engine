@@ -15,7 +15,7 @@ struct Rocket {
     float timer;
     float trail_timer = 0.0f;
     bool exploded = false;
-    int generation = 0; // 0 = Initial Rocket, 1 = Explosion Streamer
+    int type = 0; // 0 = 'palm tree' firework
 };
 
 struct FireworksConfig {
@@ -40,6 +40,8 @@ struct FireworksConfig {
 
 	float trail_interval = 0.004f; // 4ms
 	glm::vec4 smoke_color = glm::vec4(0.4f, 0.4f, 0.4f, 0.5f);
+
+	int trail_buffer_size = 1000000;
 };
 
 class VENGINE_API FireworksSystem {
@@ -61,6 +63,7 @@ public:
 	void launchRocket(); // use m_config to launch a rocket
     void launchRocket(glm::vec3 pos, glm::vec3 vel, glm::vec4 color);
     void setParticleCapacity(uint32_t capacity);
+    void setTrailBufferSize(uint32_t size);
 
     FireworksConfig& getConfig() { return m_config; }
 
@@ -69,6 +72,7 @@ private:
     std::vector<Rocket> m_rockets;
     FireworksConfig m_config;
     uint32_t m_pending_capacity{0};
+    uint32_t m_pending_trail_buffer_size{0};
 };
 
 }

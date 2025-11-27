@@ -18,6 +18,10 @@ public:
 		return min + (max - min) * float01();
 	}
 
+	static int intRange(int min, int max) {
+		return min + static_cast<int>(rand() % (max - min + 1));
+	}
+
 	static glm::vec3 vec3Range(float min, float max) {
 		return glm::vec3(floatRange(min, max), floatRange(min, max), floatRange(min, max));
 	}

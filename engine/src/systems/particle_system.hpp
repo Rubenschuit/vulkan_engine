@@ -65,8 +65,11 @@ struct ParticleParams {
 	// ring buffer emission
 	uint32_t spawn_event_count;
 	float gravity;
-	uint32_t padding1;
-	uint32_t padding2;
+	uint32_t trail_buffer_size;
+	float trail_interval;
+	float trail_timeout;
+	float flash_scale;
+	float flash_time;
 	alignas(16) glm::vec4 wind_direction; // xyz = direction, w = intensity
 	alignas(16) glm::vec4 frustum_planes[6]; // xyz = normal, w = distance
 };
@@ -144,6 +147,8 @@ public:
 	bool getShouldRespawn() const { return m_should_respawn; }
 	void setGravity(float gravity) { m_gravity = gravity; }
 	float getGravity() const { return m_gravity; }
+	void setTrailBufferSize(uint32_t size);
+	uint32_t getTrailBufferSize() const { return m_trail_buffer_size; }
 
 	// Legacy emit (single batch), might want to remove
 	void emitParticles(uint32_t count);
@@ -187,6 +192,11 @@ private:
 	uint32_t m_mode{ParticleMode::COOL}; // see ParticleMode enum
 	float m_speed{1.0f};
 	float m_gravity{9.81f};
+	uint32_t m_trail_buffer_size{1000000};
+	float m_trail_interval{0.001f};
+	float m_trail_timeout{0.1f};
+	float m_flash_scale{150.0f};
+	float m_flash_time{0.15f};
 	float m_min_life{40.0f};
 	float m_max_life{80.0f};
 	glm::vec4 m_wind_direction{0.0f}; // default no wind

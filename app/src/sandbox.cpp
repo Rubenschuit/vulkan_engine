@@ -274,7 +274,7 @@ void Sandbox::renderAppWindows() {
 
 				ImGui::Separator();
 				ImGui::Text("Explosion");
-				ImGui::DragInt("Particle Count", &config.explosion_particle_count, 100, 100, 50000);
+				ImGui::DragInt("Particle Count", &config.explosion_particle_count, 100, 100, 10000);
 				ImGui::SliderFloat("Explosion Size", &config.explosion_size, 0.1f, 5.0f);
 
 				ImGui::Separator();
@@ -285,9 +285,14 @@ void Sandbox::renderAppWindows() {
 
 				ImGui::Separator();
 				ImGui::Text("System");
-				ImGui::SliderInt("ParticleCapacity", &config.max_particles, 1000, 2000000);
+				ImGui::SliderInt("ParticleCapacity", &config.max_particles, 1000, 5000000);
 				if (ImGui::Button("Apply Capacity")) {
 					m_fireworks_system->setParticleCapacity(static_cast<uint32_t>(config.max_particles));
+				}
+
+				ImGui::SliderInt("Trail Buffer Size", &config.trail_buffer_size, 10, 5000000);
+				if (ImGui::Button("Apply Trail Buffer Size")) {
+					m_fireworks_system->setTrailBufferSize(static_cast<uint32_t>(config.trail_buffer_size));
 				}
 
 				if (ImGui::Button("Launch Rocket", ImVec2(-1, 0))) {

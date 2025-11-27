@@ -71,7 +71,7 @@ void ParticleSystem::createShaderStorageBuffers() {
 	m_shader_storage_buffers.clear();
 	m_shader_storage_buffers.resize(MAX_FRAMES_IN_FLIGHT);
 
-	// Create render buffers (compacted)
+	// Create render buffers
 	m_render_buffers.clear();
 	m_render_buffers.resize(MAX_FRAMES_IN_FLIGHT);
 
@@ -152,9 +152,21 @@ void ParticleSystem::createSpawnBuffers() {
 		vk::MemoryPropertyFlagBits::eDeviceLocal
 	);
 
-	// Create GPU trail buffer (Queue)
-	// Size 200,000 particles should be enough for buffering trails
-	vk::DeviceSize trail_buffer_size = sizeof(Particle) * 200000;
+	// Initialize counters to zero
+	uint32_t zeros[4] = {0, 0, 0, 0};
+	VeBuffer staging_buffer(
+		m_ve_device,
+		sizeof(uint32_t) * 4,
+		1,
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+	);
+	staging_buffer.map();
+	staging_buffer.writeToBuffer(zeros);
+	m_ve_device.copyBuffer(staging_buffer.getBuffer(), m_global_counter_buffer->getBuffer(), sizeof(uint32_t) * 4);
+
+	// Create GPU trail buffer
+	vk::DeviceSize trail_buffer_size = sizeof(Particle) * m_trail_buffer_size;
 	m_gpu_trail_buffer = std::make_unique<VeBuffer>(
 		m_ve_device,
 		trail_buffer_size,
@@ -316,6 +328,11 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 	params.max_life = m_max_life;
 	params.should_respawn = m_should_respawn ? 1u : 0u;
 	params.gravity = m_gravity;
+	params.trail_buffer_size = m_trail_buffer_size;
+	params.trail_interval = m_trail_interval;
+	params.trail_timeout = m_trail_timeout;
+	params.flash_scale = m_flash_scale;
+	params.flash_time = m_flash_time;
 	// Default wind
 	params.wind_direction = m_wind_direction;
 
@@ -572,4 +589,63 @@ void ParticleSystem::applyStagedParticleCount() {
 	}
 }
 
+void ParticleSystem::setTrailBufferSize(uint32_t size) {
+	if (size == 0) size = 10; // minimal safe size
+	if (size == m_trail_buffer_size) return;
+
+	m_trail_buffer_size = size;
+	VE_LOGI("ParticleSystem: Resizing trail buffer to " << m_trail_buffer_size);
+
+	m_ve_device.getDevice().waitIdle();
+
+	// Destroy old buffer first to free resources
+	m_gpu_trail_buffer.reset();
+
+	// Recreate buffer
+	vk::DeviceSize buffer_size = sizeof(Particle) * m_trail_buffer_size;
+	m_gpu_trail_buffer = std::make_unique<VeBuffer>(
+		m_ve_device,
+		buffer_size,
+		1,
+		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+		vk::MemoryPropertyFlagBits::eDeviceLocal
+	);
+
+	// Clear trail buffer to prevent reading garbage data
+	std::vector<Particle> empty_particles(m_trail_buffer_size);
+	for (auto& p : empty_particles) {
+		p.position.w = 0.0f;
+		p.color.a = 0.0f;
+		p.extra_data = glm::vec4(0.0f);
+	}
+	VeBuffer trail_staging_buffer(
+		m_ve_device,
+		buffer_size,
+		1,
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+	);
+	trail_staging_buffer.map();
+	trail_staging_buffer.writeToBuffer(empty_particles.data());
+	m_ve_device.copyBuffer(trail_staging_buffer.getBuffer(), m_gpu_trail_buffer->getBuffer(), buffer_size);
+
+	// Reset global counter buffer (WriteHead and ReadHead to 0)
+	uint32_t zeros[4] = {0, 0, 0, 0};
+	VeBuffer staging_buffer(
+		m_ve_device,
+		sizeof(uint32_t) * 4,
+		1,
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+	);
+	staging_buffer.map();
+	staging_buffer.writeToBuffer(zeros);
+	m_ve_device.copyBuffer(staging_buffer.getBuffer(), m_global_counter_buffer->getBuffer(), sizeof(uint32_t) * 4);
+
+	// Recreate descriptor sets to point to new buffer
+	m_compute_descriptor_sets.clear();
+	createDescriptorSets();
+}
+
 } // namespace ve
+
