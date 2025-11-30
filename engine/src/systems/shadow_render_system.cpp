@@ -100,7 +100,7 @@ void ShadowRenderSystem::createPipeline(vk::Format depth_format) {
 	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLess;
 
 	assert(m_pipeline_layout != VK_NULL_HANDLE && "Pipeline layout is null");
-	pipeline_config.pipeline_layout = m_pipeline_layout;
+	pipeline_config.pipeline_layout = *m_pipeline_layout;
 	m_ve_pipeline = std::make_unique<VePipeline>(
 		m_ve_device,
 		m_shader_path,
@@ -351,7 +351,7 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,
 		0,  // firstSet - bind starting at set 0
-		{*shadow_global_set, frame_info.material_descriptor_set},
+		{*shadow_global_set, *frame_info.material_descriptor_set},
 		{}  // dynamicOffsets
 	);
 

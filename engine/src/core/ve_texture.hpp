@@ -1,7 +1,8 @@
 /* The VeTexture class is responsible for loading texture images
    and creating Vulkan image resources. Loads .ktx, .ktx2 using ktx.h and
    .png, .jpg, etc using stb_image.h.
-   Has overloaded constructors for single texture and textures array.*/
+   Has overloaded constructors for single texture and textures array.
+*/
 #pragma once
 #include "ve_export.hpp"
 #include "ve_device.hpp"

@@ -20,7 +20,6 @@ namespace ve {
 class VENGINE_API VeApplication {
 public:
 
-	// Move this these as constructors parameters together with project_root
 	static constexpr int WIDTH = 1920;
 	static constexpr int HEIGHT = 1080;
 	const char* APP_NAME = "Vulkan Engine!";
@@ -31,11 +30,10 @@ public:
 	// called by main in entry point to start the application loop
     void run();
 
-	virtual void onSwapChainRecreated() {};
-
 	// Pure virtual methods to be implemented by derived classes
 	virtual VeFrameInfo update() = 0;
 	virtual void render(VeFrameInfo& frame_info) = 0;
+	virtual void onSwapChainRecreated() {};
 
 
 protected:

@@ -1,8 +1,5 @@
 struct VertexInput {
 	float3 in_pos : POSITION;
-	float3 in_color : COLOR;
-	float3 in_normal : NORMAL;
-	float2 in_tex_coord : TEXCOORD0;
 };
 
 struct UniformBuffer {
@@ -41,9 +38,5 @@ SamplerCube cube_texture;
 [shader("fragment")]
 float4 fragMain(VertexOutput in_vert, uint id : SV_SampleIndex) : SV_Target {
 
-	float4 c = cube_texture.Sample(in_vert.cube_dir);
-	if (c.a <= 0.001)
-		discard;
-	return c;
-
+	return cube_texture.Sample(in_vert.cube_dir);
 }

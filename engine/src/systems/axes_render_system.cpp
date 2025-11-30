@@ -41,7 +41,7 @@ void AxesRenderSystem::createPipeline(vk::Format color_format, vk::SampleCountFl
 	config.rasterization_info.depthBiasEnable = VK_TRUE;
 	config.rasterization_info.depthBiasClamp = 0.0f;
 	config.color_format = color_format;
-	config.pipeline_layout = m_pipeline_layout;
+	config.pipeline_layout = *m_pipeline_layout;
 	m_ve_pipeline = std::make_unique<VePipeline>(
 		m_ve_device,
 		m_shader_path,
@@ -126,7 +126,7 @@ void AxesRenderSystem::render(VeFrameInfo& frame_info) const {
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,
 		0,
-		{frame_info.global_descriptor_set},
+		{*frame_info.global_descriptor_set},
 		{}
 	);
 	m_axes_model->bindVertexBuffer(frame_info.command_buffer);

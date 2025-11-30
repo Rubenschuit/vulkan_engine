@@ -110,7 +110,7 @@ void VeDescriptorPool::allocateDescriptor(const vk::raii::DescriptorSetLayout& d
 
 void VeDescriptorPool::resetPool() {
 	vk::Device device = *m_ve_device.getDevice();
-	device.resetDescriptorPool(m_descriptor_pool);
+	device.resetDescriptorPool(*m_descriptor_pool);
 }
 
 // *************** Descriptor Writer *********************

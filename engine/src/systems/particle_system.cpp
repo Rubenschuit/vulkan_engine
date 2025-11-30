@@ -281,7 +281,7 @@ void ParticleSystem::createPipeline(vk::Format color_format, vk::SampleCountFlag
 	config.binding_descriptions = Particle::getBindingDescription();
 
 	config.color_format = color_format;
-	config.pipeline_layout = m_pipeline_layout;
+	config.pipeline_layout = *m_pipeline_layout;
 
 	// attempt to reduce z-fighting
 	config.depth_stencil_info.depthTestEnable = VK_TRUE;
@@ -416,7 +416,7 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 		vk::PipelineBindPoint::eCompute,
 		*m_compute_pipeline_layout,
 		0,
-		*m_compute_descriptor_sets[frame_info.current_frame],
+		{*m_compute_descriptor_sets[frame_info.current_frame]},
 		{}
 	);
 
@@ -474,9 +474,9 @@ void ParticleSystem::render(VeFrameInfo& frame_info) const {
 
 	frame_info.command_buffer.bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics,
-		m_pipeline_layout,
+		*m_pipeline_layout,
 		0,
-		{ frame_info.global_descriptor_set, frame_info.texture_descriptor_set },
+		{ *frame_info.global_descriptor_set, *frame_info.texture_descriptor_set },
 		{}
 	);
 	vk::DeviceSize offsets[] = { 0 };

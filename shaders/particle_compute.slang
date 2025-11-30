@@ -101,12 +101,23 @@ Sampler2D smoke_texture;
 float4 fragMain(VertexOutput in_vert) : SV_Target {
 	float4 col1, col2;
 	if (in_vert.type == ParticleType::TYPE_DEFAULT || in_vert.type == ParticleType::TYPE_EXPLOSION || in_vert.type == ParticleType::TYPE_TRAIL) {
-		// round mask
-		if (dot(in_vert.uv0, in_vert.uv0) > 0.25f) {
+		// round mask with soft edges and bloom effect
+
+		float dot = dot(in_vert.uv0, in_vert.uv0);
+
+		// Bloom brightness: bright at center, smooth falloff
+		float bloom_intensity = 1.0f - smoothstep(0.0f, 0.1f, dot);
+		float brightness = lerp(1.0f, 2.5f, bloom_intensity);
+		float edge_alpha = 1.0f - smoothstep(0.01f, 0.25f, dot);
+		float alpha = in_vert.color.a * edge_alpha;
+
+		if (alpha <= 0.001f) {
 			discard;
 		}
+
 		// For additive blending, we must pre-multiply alpha to affect RGB intensity
-		return float4(in_vert.color.rgb * in_vert.color.a, in_vert.color.a);
+		// Apply bloom brightness to RGB
+		return float4(in_vert.color.rgb * brightness * alpha, alpha);
 	} else if (in_vert.type == ParticleType::TYPE_SMOKE) {
 		col1 = smoke_texture.Sample(in_vert.uv1);
 		col2 = smoke_texture.Sample(in_vert.uv2);
@@ -130,9 +141,9 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 
 struct SpawnEvent {
 	float4 position_scale; // xyz = position, w = scale
-	float4 velocity_life;     // xyz = velocity, w = life
-	float4 color;             // rgba
-	uint4 info;             // x = start_index, y = count, z = type, w = variance (as float bits)
+	float4 velocity_life;  // xyz = velocity, w = life
+	float4 color;          // rgba
+	uint4 info;            // x = start_index, y = count, z = type, w = variance (as float bits)
 };
 
 struct Params {
@@ -150,7 +161,6 @@ struct Params {
 	float min_life;
 	float max_life;
 	uint32_t should_respawn;
-
 	uint32_t spawn_event_count;
 	float gravity;
 	uint32_t trail_buffer_size;
@@ -513,7 +523,7 @@ void resetFromEvent(uint i, SpawnEvent e) {
 		 // Random burst velocity added to base velocity
 		 float2 vxy = rand_normal2(state);
 		 float vz = rand_normal2(state).x;
-		 float speed = 1.0f + 1.0f * rand01(state);
+		 float speed = rand01(state);
 		 final_vel += float3(vxy.x, vxy.y, vz) * speed;
 
 		 // More lifetime variance for sparks
@@ -822,6 +832,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 						 trail_queue[trail_slot] = trail;
 
 						 uint state = wang_hash(asuint(slot_idx + k * 2 + 1));
+						 // random chance to spawn smoke
 						 if (rand01(state) < 0.3f) {
 							Particle smoke;
 							smoke.position = float4(emit_pos, 5.0f);
@@ -846,7 +857,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 			 }
 
 			 float life = p.velocity.w;
-			 // Allow one frame of grace period after death (life <= 0) to show the peak flash
+			 // Allow one frame after life <= 0
 			 if (life <= params.flash_time && life > -params.delta_time * 2.0f) {
 				 // Clamp t to [0, 1]
 				 float t = saturate(life / params.flash_time);

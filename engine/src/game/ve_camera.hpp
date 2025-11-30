@@ -56,7 +56,7 @@ private:
 	float m_pitch{0.0f}; // radians
 	bool m_view_dirty{true};
 
-	// Derived
+	// Derived from yaw/pitch
 	glm::vec3 m_forward{1,0,0};
 	glm::vec3 m_right{0,0,1};
 	glm::vec3 m_up{0,1,0};

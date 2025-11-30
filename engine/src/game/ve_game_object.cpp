@@ -12,6 +12,7 @@ VeGameObject VeGameObject::createGameObject() {
 	return game_object;
 }
 
+// Composes a model matrix from translation, rotation, and scale.
 glm::mat4 VeGameObject::getTransform() const {
 	const float c3 = glm::cos(transform.rotation.z);
 	const float s3 = glm::sin(transform.rotation.z);
@@ -41,6 +42,7 @@ glm::mat4 VeGameObject::getTransform() const {
 		{transform.translation.x, transform.translation.y, transform.translation.z, 1.0f}};
 }
 
+//
 glm::mat3 VeGameObject::getNormalTransform() const {
 	const float c3 = glm::cos(transform.rotation.z);
 	const float s3 = glm::sin(transform.rotation.z);

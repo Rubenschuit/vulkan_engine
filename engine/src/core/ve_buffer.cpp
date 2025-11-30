@@ -77,7 +77,7 @@ void VeBuffer::writeToBuffer(void* data, vk::DeviceSize size, vk::DeviceSize off
 
 vk::DescriptorBufferInfo VeBuffer::getDescriptorInfo(vk::DeviceSize size, vk::DeviceSize offset) const {
 	vk::DescriptorBufferInfo buffer_info{
-		.buffer = m_buffer,
+		.buffer = *m_buffer,
 		.offset = offset,
 		.range = size
 	};

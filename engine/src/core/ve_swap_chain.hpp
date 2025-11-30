@@ -71,7 +71,6 @@ private:
 	vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR>& available_present_modes);
 	vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities);
 
-	// Order matters: C++ destroys members in reverse declaration order.
 	// We declare the swapchain before image views so that views are destroyed first.
 	VeDevice& m_ve_device;                 // (not owned) must outlive swapchain
 	vk::Extent2D m_window_extent;

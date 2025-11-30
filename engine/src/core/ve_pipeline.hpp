@@ -7,6 +7,7 @@ It also creates the necessary shader modules. */
 #include <string>
 #include <vector>
 #include <filesystem>
+#include <unordered_map>
 
 namespace ve { class VeDevice; }
 
@@ -32,6 +33,8 @@ struct PipelineConfigInfo {
 	vk::Format depth_format = vk::Format::eUndefined;
 	std::vector<vk::VertexInputAttributeDescription> attribute_descriptions{};
 	std::vector<vk::VertexInputBindingDescription> binding_descriptions{};
+	// Specialization constants: map from constant ID to value
+	std::unordered_map<uint32_t, uint32_t> specialization_constants{};
 };
 
 class VENGINE_API VePipeline {

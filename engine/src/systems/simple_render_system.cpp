@@ -59,7 +59,7 @@ void SimpleRenderSystem::createPipeline(vk::Format color_format, vk::SampleCount
 	pipeline_config.input_assembly_info.topology = m_topology;
 
 	assert(m_pipeline_layout != VK_NULL_HANDLE && "Pipeline layout is null");
-	pipeline_config.pipeline_layout = m_pipeline_layout;
+	pipeline_config.pipeline_layout = *m_pipeline_layout;
 	m_ve_pipeline = std::make_unique<VePipeline>(
 		m_ve_device,
 		m_shader_path,
@@ -77,7 +77,7 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,
 		0,  // first set index
-		{frame_info.global_descriptor_set, frame_info.material_descriptor_set, frame_info.shadow_descriptor_set},
+		{*frame_info.global_descriptor_set, *frame_info.material_descriptor_set, *frame_info.shadow_descriptor_set},
 		{}
 	);
 

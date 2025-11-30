@@ -77,7 +77,7 @@ void PointLightSystem::createPipeline(vk::Format color_format, vk::SampleCountFl
 	pipeline_config.color_blend_attachment.alphaBlendOp = vk::BlendOp::eAdd;
 
 	assert(m_pipeline_layout != VK_NULL_HANDLE && "Pipeline layout is null");
-	pipeline_config.pipeline_layout = m_pipeline_layout;
+	pipeline_config.pipeline_layout = *m_pipeline_layout;
 	m_ve_pipeline = std::make_unique<VePipeline>(
 		m_ve_device,
 		m_shader_path,
@@ -90,7 +90,7 @@ void PointLightSystem::createPipeline(vk::Format color_format, vk::SampleCountFl
 // Performs a draw call for each game object with a point light component
 void PointLightSystem::render(VeFrameInfo& frame_info) const {
 	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-	std::array<vk::DescriptorSet, 2> sets{frame_info.global_descriptor_set, frame_info.texture_descriptor_set};
+	std::array<vk::DescriptorSet, 2> sets{*frame_info.global_descriptor_set, *frame_info.texture_descriptor_set};
 	frame_info.command_buffer.bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,

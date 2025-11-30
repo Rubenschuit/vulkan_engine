@@ -29,7 +29,7 @@ struct FireworksConfig {
     bool use_random_color = true;
 
     int explosion_particle_count = 100;
-    float explosion_size = 0.5f;
+    float explosion_size = 0.8f;
 
     glm::vec3 wind_direction{1.0f, 1.0f, 0.0f};
     float wind_strength = 3.0f;

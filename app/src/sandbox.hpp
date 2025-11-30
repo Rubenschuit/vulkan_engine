@@ -11,7 +11,6 @@ public:
 	Sandbox(const std::filesystem::path& working_dir);
 	~Sandbox();
 
-	//destroy copy and move constructors and assignment operators
 	Sandbox(const Sandbox&) = delete;
 	Sandbox& operator=(const Sandbox&) = delete;
 

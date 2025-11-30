@@ -276,18 +276,6 @@ void VeTexture::createTextureImageArraySTB(const std::vector<std::filesystem::pa
 	uint32_t total_size = instance_size * layer_count;
 	VE_LOGD("Texture paths read successfully");
 
-	// Concatenate all texture data into a single contiguous buffer in CPU memory
-	// TODO: skip this ?
-	/*
-	std::vector<uint8_t> combined_data(total_size);
-	uint8_t* dest_ptr = combined_data.data();
-	for (size_t i = 0; i < layer_count; i++) {
-		std::memcpy(dest_ptr, pixels[i], instance_size);
-		dest_ptr += instance_size;
-	}
-	VE_LOGD("Combined data size: " << combined_data.size() << ", expected: " << total_size);
-	*/
-
 	// Create a local scope staging buffer
 	ve::VeBuffer staging_buffer(
 		m_ve_device,
@@ -297,7 +285,7 @@ void VeTexture::createTextureImageArraySTB(const std::vector<std::filesystem::pa
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 	);
 
-	// Write all data to staging buffer in one operation
+	// Write all data to staging buffer
 	VE_LOGD("Buffer size: " << staging_buffer.getBufferSize() << ", expected: " << total_size);
 	staging_buffer.map();
 	for (size_t i = 0; i < layer_count; i++) {
@@ -385,8 +373,7 @@ void VeTexture::createTextureSampler() {
 }
 
 vk::raii::Sampler VeTexture::createDepthCompareSampler(VeDevice& device) {
-	// MoltenVK doesn't support comparison samplers (mutableComparisonSamplers = false)
-	// Disable compare mode on macOS - we'll do comparison in shader instead
+	// MoltenVK doesn't support comparison samplers
 	bool enable_compare = false;
 
 	vk::SamplerCreateInfo sampler_info{
@@ -403,7 +390,7 @@ vk::raii::Sampler VeTexture::createDepthCompareSampler(VeDevice& device) {
 		.compareOp = vk::CompareOp::eLess,
 		.minLod = 0.0f,
 		.maxLod = 0.0f,
-		.borderColor = vk::BorderColor::eFloatOpaqueWhite,  // outside shadow map = lit (clamp to border)
+		.borderColor = vk::BorderColor::eFloatOpaqueWhite,  // outside shadow map is lit (clamp to border)
 		.unnormalizedCoordinates = vk::False
 	};
 	return vk::raii::Sampler(device.getDevice(), sampler_info);
@@ -448,8 +435,8 @@ stbi_uc* VeTexture::generateDefaultTexture(int width, int height, TextureType ty
 
 vk::DescriptorImageInfo VeTexture::getDescriptorInfo() const {
 	vk::DescriptorImageInfo image_info{
-		.sampler = m_texture_sampler,
-		.imageView = m_texture_image->getImageView(),
+		.sampler = *m_texture_sampler,
+		.imageView = *m_texture_image->getImageView(),
 		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
 	};
 	return image_info;

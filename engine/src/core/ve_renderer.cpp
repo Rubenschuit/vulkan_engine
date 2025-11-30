@@ -121,7 +121,7 @@ void VeRenderer::endFrame(vk::raii::CommandBuffer& command_buffer) {
 
 	// submit graphics and present
 	// Submit the command buffer, present the image in accordance with the timeline semaphore values
-	auto result = m_ve_swap_chain->submitAndPresent(command_buffer, &m_current_image_index);
+	auto result = m_ve_swap_chain->submitAndPresent(*command_buffer, &m_current_image_index);
 	if (result == vk::Result::eErrorOutOfDateKHR) {
 		VE_LOGD("Result of present is eErrorOutOfDateKHR, recreating swap chain.");
 		recreateSwapChain();
@@ -168,10 +168,10 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer) {
 	if (m_msaa_enabled) {
 		color_attachment_info = {
 			.sType = vk::StructureType::eRenderingAttachmentInfo,
-			.imageView = m_ve_swap_chain->getColorImageView(),
+			.imageView = *m_ve_swap_chain->getColorImageView(),
 			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
 			.resolveMode = vk::ResolveModeFlagBits::eAverage,
-			.resolveImageView = m_ve_swap_chain->getSwapChainImageViews()[m_current_image_index],
+			.resolveImageView = *m_ve_swap_chain->getSwapChainImageViews()[m_current_image_index],
 			.resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
 			.loadOp = vk::AttachmentLoadOp::eClear,
 			.storeOp = vk::AttachmentStoreOp::eDontCare,
@@ -180,7 +180,7 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer) {
 	} else {
 		color_attachment_info = {
 			.sType = vk::StructureType::eRenderingAttachmentInfo,
-			.imageView = m_ve_swap_chain->getSwapChainImageViews()[m_current_image_index],
+			.imageView = *m_ve_swap_chain->getSwapChainImageViews()[m_current_image_index],
 			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
 			.loadOp = vk::AttachmentLoadOp::eClear,
 			.storeOp = vk::AttachmentStoreOp::eStore,
@@ -189,7 +189,7 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer) {
 	}
 
 	vk::RenderingAttachmentInfo depth_attachment_info = {
-		.imageView = m_ve_swap_chain->getDepthImageView(),
+		.imageView = *m_ve_swap_chain->getDepthImageView(),
 		.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 		.loadOp = vk::AttachmentLoadOp::eClear,
 		.storeOp = vk::AttachmentStoreOp::eDontCare,
@@ -239,7 +239,7 @@ void VeRenderer::transitionToPresent(vk::raii::CommandBuffer& command_buffer) {
 void VeRenderer::submitCompute(vk::raii::CommandBuffer& compute_command_buffer) {
 	assert(m_is_frame_started && "Can't call submitCompute while frame is not in progress");
 	assert(&compute_command_buffer == &getCurrentComputeCommandBuffer() && "Can't submit compute on command buffer from a different frame");
-	m_ve_swap_chain->submitComputeWork(compute_command_buffer);
+	m_ve_swap_chain->submitComputeWork(*compute_command_buffer);
 }
 
 }

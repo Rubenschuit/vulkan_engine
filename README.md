@@ -10,6 +10,7 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 - Dear ImGui overlay with settings for particle system and render modes
 - Skybox
 - Point lights
+- Shadow mapping
 - FPS-style camera
 - MSAA
 
@@ -18,11 +19,8 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 - [Features](#features)
 - [Requirements](#requirements)
   - [Downloads](#downloads)
-    - [Windows](#windows)
-    - [macOS](#macos)
-    - [Linux](#linux)
 - [Quick start with scripts](#quick-start-with-scripts)
-  - [macOS, Linux, MinGW](#macos-linux-and-windows-mingw64-shell)
+  - [macOS, Linux, Windows (MinGW)](#macos-linux-and-windows-mingw64-shell)
   - [Windows (cmd or PowerShell)](#windows-cmd-or-powershell)
 - [Manual build](#manual-build)
   - [Unix or MinGW shell](#unix-or-mingw64-shell)
@@ -130,14 +128,17 @@ Then, in VS, right-click the VeApp target, set as startup project, build and the
 
 ##### Linux
 
-TODO
+```bash
+sudo apt install build-essential mesa-utils libvulkan-dev ktx
+```
 
 ## Controls
 
 - Camera: WASD/C/Space to move, arrow keys or mouse to look
 - UI toggle: Tab
 - Particle modes: 1 / 2 / 3 / 4 / 5
-- Reset particles: F (explosion) or G (rotating disk)
+- Reset particles: E (explosion) or G (rotating disk)
+- Launch fireworks: F
 - Escape to exit the application
 
 ## Credits

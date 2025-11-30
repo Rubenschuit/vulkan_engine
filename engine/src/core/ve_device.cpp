@@ -45,7 +45,7 @@ VeDevice::VeDevice(VeWindow &window) : m_window(window) {
 }
 
 VeDevice::~VeDevice() {
-	// commandPool, ve_device, surface, debugMessenger and instance are RAII objects and will be cleaned up automatically
+	// command pool, ve_device, surface, debug messenger and instance are RAII objects and will be cleaned up automatically
 }
 
 void VeDevice::createInstance() {

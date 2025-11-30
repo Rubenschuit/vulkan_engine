@@ -109,6 +109,34 @@ void VePipeline::createGraphicsPipeline(
 	// Use the same combined SPIR-V for both stages; entry points differ per stage
 	createShaderModule(shader_code, &m_shader_module);
 
+	// Build specialization constant data if provided
+	std::vector<vk::SpecializationMapEntry> spec_map_entries;
+	std::vector<uint32_t> spec_data;
+	vk::SpecializationInfo frag_spec_info{};
+
+	if (!config_info.specialization_constants.empty()) {
+		spec_map_entries.reserve(config_info.specialization_constants.size());
+		spec_data.reserve(config_info.specialization_constants.size());
+
+		uint32_t offset = 0;
+		for (const auto& [constant_id, value] : config_info.specialization_constants) {
+			spec_map_entries.push_back({
+				.constantID = constant_id,
+				.offset = static_cast<uint32_t>(offset * sizeof(uint32_t)),
+				.size = sizeof(uint32_t)
+			});
+			spec_data.push_back(value);
+			offset++;
+		}
+
+		frag_spec_info = {
+			.mapEntryCount = static_cast<uint32_t>(spec_map_entries.size()),
+			.pMapEntries = spec_map_entries.data(),
+			.dataSize = spec_data.size() * sizeof(uint32_t),
+			.pData = spec_data.data()
+		};
+	}
+
 	vk::PipelineShaderStageCreateInfo shader_stages[2] = {
 		{
 			.sType = vk::StructureType::ePipelineShaderStageCreateInfo,
@@ -122,7 +150,7 @@ void VePipeline::createGraphicsPipeline(
 			.stage = vk::ShaderStageFlagBits::eFragment,
 			.module = *m_shader_module,
 			.pName = "fragMain",
-			.pSpecializationInfo = nullptr
+			.pSpecializationInfo = config_info.specialization_constants.empty() ? nullptr : &frag_spec_info
 		}
 	};
 	vk::PipelineVertexInputStateCreateInfo vertex_input_info{

@@ -74,7 +74,7 @@ void SkyboxRenderSystem::createPipeline(vk::Format color_format, vk::SampleCount
 	pipeline_config.attribute_descriptions = {attribute_descriptions[0]};
 
 	assert(m_pipeline_layout != VK_NULL_HANDLE && "Pipeline layout is null");
-	pipeline_config.pipeline_layout = m_pipeline_layout;
+	pipeline_config.pipeline_layout = *m_pipeline_layout;
 	m_ve_pipeline = std::make_unique<VePipeline>(
 		m_ve_device,
 		m_shader_path,
@@ -91,7 +91,7 @@ void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,
 		{},
-		{frame_info.global_descriptor_set, frame_info.cubemap_descriptor_set},
+		{*frame_info.global_descriptor_set, *frame_info.cubemap_descriptor_set},
 		{}
 	);
 	SimplePushConstantData push{};

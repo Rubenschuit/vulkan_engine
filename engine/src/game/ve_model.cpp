@@ -343,13 +343,13 @@ void VeModel::createDescriptorSet(VeDescriptorPool& pool, VeDescriptorSetLayout&
 }
 
 void VeModel::bindVertexBuffer(vk::raii::CommandBuffer& command_buffer) {
-	vk::Buffer buffers[] = { m_vertex_buffer->getBuffer() };
+	vk::Buffer buffers[] = { *m_vertex_buffer->getBuffer() };
 	vk::DeviceSize offsets[] = { 0 };
 	command_buffer.bindVertexBuffers(0, buffers, offsets);
 }
 
 void VeModel::bindIndexBuffer(vk::raii::CommandBuffer& command_buffer) {
-	command_buffer.bindIndexBuffer(m_index_buffer->getBuffer(), 0, vk::IndexType::eUint32);
+	command_buffer.bindIndexBuffer(*m_index_buffer->getBuffer(), 0, vk::IndexType::eUint32);
 }
 
 void VeModel::draw(vk::raii::CommandBuffer& command_buffer) {

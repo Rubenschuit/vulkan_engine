@@ -16,7 +16,6 @@ public:
 	VeRenderer(VeDevice& device, VeWindow& window);
 	~VeRenderer();
 
-	//destroy copy and move constructors and assignment operators
 	VeRenderer(const VeRenderer&) = delete;
 	VeRenderer& operator=(const VeRenderer&) = delete;
 
