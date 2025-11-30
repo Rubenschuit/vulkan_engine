@@ -1,11 +1,12 @@
 # Vulkan Engine
 
-Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. Produces a shared library (`VEngineLib`) and an app (`VeApp`).
+Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. Produces a shared library (`VEngineLib`) and an app (`VeApp`). The goal of this project is for me to learn more about graphics programming, but also for fun!
 
 ## Features
 - Modern Vulkan: dynamic rendering, Vulkan-Hpp RAII
 - Cross-platform builds: Windows (MSVC or MinGW), macOS, and Linux
 - Particle system with compute shaders
+- Fireworks using the particle system (wip)
 - Simple physically based renderer for textured .gltf models
 - Dear ImGui overlay with settings for particle system and render modes
 - Skybox
@@ -45,45 +46,25 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 
 
 #### Downloads:
-Note: CMake will auto-discover Slang (`slangc`) and the Vulkan SDK in common install locations and via standard environment variables. Use `.env.cmake` only when installing to uncommon/custom paths, or to explicitly override detection. See `envWindowsExample.cmake` for examples.
+Besides git, cmake and c++ , three dependencies will have to be installed manually:
 
 - Slang: https://github.com/shader-slang/slang/releases
 	- Windows: `C:\Program Files\Slang\bin\slangc.exe`
 	- Unix: `/usr/local/bin/slangc`
 
 - Vulkan SDK (LunarG): https://vulkan.lunarg.com/sdk/home
+	- Check 'System global installation' component
 
 - KTX: https://github.com/KhronosGroup/KTX-Software/releases
 	- Note: make sure to check the 'Development' package in the installer
-
 
 - Optional (will be fetched if no path is set):
 	- GLFW: https://www.glfw.org/download.html
 	- GLM: https://github.com/g-truc/glm/releases
 
-To install required packages:
-- ##### Windows
-	With MSYS2/MinGW (run in the MinGW64 shell):
-	```bash
-	pacman -S --needed \
-		mingw-w64-x86_64-toolchain \
-		mingw-w64-x86_64-cmake \
-		mingw-w64-x86_64-glfw \
-		mingw-w64-x86_64-glm
-	```
-	Alternatively, use VS with vcpkg.
-
-- ##### macOS
-	With homebrew:
-	```bash
-	brew install cmake glfw glm
-	```
-- ##### Linux
-	TODO: add packages
-
 
 ## Quick start with scripts
-Build and run with one script. Optional arguments include [debug|release|test|clean] (default is Release).
+After installing all the dependencies, we can build and run with one script. Optional arguments include [debug|release|test|clean] (default is Release).
 
 - ##### macOS, Linux and Windows (MinGW64 shell):
 

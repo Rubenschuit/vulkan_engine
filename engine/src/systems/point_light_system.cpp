@@ -76,7 +76,6 @@ void PointLightSystem::createPipeline(vk::Format color_format, vk::SampleCountFl
 	pipeline_config.color_blend_attachment.dstAlphaBlendFactor = vk::BlendFactor::eOne; //
 	pipeline_config.color_blend_attachment.alphaBlendOp = vk::BlendOp::eAdd;
 
-	assert(m_pipeline_layout != VK_NULL_HANDLE && "Pipeline layout is null");
 	pipeline_config.pipeline_layout = *m_pipeline_layout;
 	m_ve_pipeline = std::make_unique<VePipeline>(
 		m_ve_device,

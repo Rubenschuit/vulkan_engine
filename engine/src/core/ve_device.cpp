@@ -5,6 +5,38 @@
 namespace ve {
 
 //local function
+
+#if defined(__x86_64__) && (defined(__APPLE__) || defined(__linux__))
+// Linux and macOS Intel: C-style types required
+static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
+	VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+	VkDebugUtilsMessageTypeFlagsEXT type,
+	const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+	void*) {
+	// Basic ANSI color mapping
+	const char* reset   =  "\033[0m";  // reset color
+	const char* red     = "\033[31m";  // red
+	const char* yellow  = "\033[33m";  // yellow
+	const char* blue    = "\033[34m";  // blue
+	const char* magenta = "\033[35m";  // magenta
+	const char* gray    = "\033[90m";  // gray
+
+	const char* sev_color = gray;
+	const char* sev_label = "VERBOSE";
+	if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)   { sev_color = red;    sev_label = "ERROR"; }
+	else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT){ sev_color = yellow; sev_label = "WARNING"; }
+	else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)   { sev_color = blue;   sev_label = "INFO"; }
+	else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT){ sev_color = gray;   sev_label = "VERBOSE"; }
+
+	const char* type_color = magenta;
+	std::string type_str = vk::to_string(static_cast<vk::DebugUtilsMessageTypeFlagsEXT>(type));
+
+	std::cerr << sev_color << "[VULKAN]" << '[' << sev_label << "] "
+				<< type_color << '[' << type_str << "] "
+				<< reset << pCallbackData->pMessage << '\n';
+	return VK_FALSE; // don't abort
+}
+#else // windows or arm64: want c++ style types
 static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
 	vk::DebugUtilsMessageTypeFlagsEXT type,
@@ -18,22 +50,24 @@ static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	const char* magenta = "\033[35m";  // magenta
 	const char* gray    = "\033[90m";  // gray
 
-	const char* sevColor = gray;
-	const char* sevLabel = "VERBOSE";
-	if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eError)   { sevColor = red;    sevLabel = "ERROR"; }
-	else if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning){ sevColor = yellow; sevLabel = "WARNING"; }
-	else if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo)   { sevColor = blue;   sevLabel = "INFO"; }
-	else if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose){ sevColor = gray;   sevLabel = "VERBOSE"; }
+	const char* sev_color = gray;
+	const char* sev_label = "VERBOSE";
+	if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eError)   { sev_color = red;    sev_label = "ERROR"; }
+	else if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning){ sev_color = yellow; sev_label = "WARNING"; }
+	else if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo)   { sev_color = blue;   sev_label = "INFO"; }
+	else if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose){ sev_color = gray;   sev_label = "VERBOSE"; }
 
-	// Type coloring (optional subtle variation)
-	const char* typeColor = magenta;
-	std::string typeStr = to_string(type);
 
-	std::cerr << sevColor << "[VULKAN]" << '[' << sevLabel << "] "
-				<< typeColor << '[' << typeStr << "] "
+	const char* type_color = magenta;
+	std::string type_str = to_string(type);
+
+	std::cerr << sev_color << "[VULKAN]" << '[' << sev_label << "] "
+				<< type_color << '[' << type_str << "] "
 				<< reset << pCallbackData->pMessage << '\n';
 	return vk::False; // don't abort
 }
+#endif
+
 
 VeDevice::VeDevice(VeWindow &window) : m_window(window) {
 	createInstance();

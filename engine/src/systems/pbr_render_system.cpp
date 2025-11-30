@@ -62,7 +62,6 @@ void PbrRenderSystem::createPipeline(vk::Format color_format, vk::SampleCountFla
 	pipeline_config.attribute_descriptions = VeModel::Vertex::getAttributeDescriptions();
 	pipeline_config.input_assembly_info.topology = m_topology;
 
-	assert(m_pipeline_layout != VK_NULL_HANDLE && "Pipeline layout is null");
 	pipeline_config.pipeline_layout = *m_pipeline_layout;
 	m_ve_pipeline = std::make_unique<VePipeline>(
 		m_ve_device,

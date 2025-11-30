@@ -99,7 +99,6 @@ void ShadowRenderSystem::createPipeline(vk::Format depth_format) {
 	pipeline_config.depth_stencil_info.depthWriteEnable = VK_TRUE;
 	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLess;
 
-	assert(m_pipeline_layout != VK_NULL_HANDLE && "Pipeline layout is null");
 	pipeline_config.pipeline_layout = *m_pipeline_layout;
 	m_ve_pipeline = std::make_unique<VePipeline>(
 		m_ve_device,

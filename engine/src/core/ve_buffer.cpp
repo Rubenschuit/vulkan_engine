@@ -46,7 +46,6 @@ VeBuffer::~VeBuffer() {
 }
 
 void VeBuffer::map(vk::DeviceSize size, vk::DeviceSize offset) {
-	assert(m_buffer_memory != VK_NULL_HANDLE && "Buffer memory is null");
 	m_mapped = m_buffer_memory.mapMemory(offset, size);
 	assert(m_mapped != VK_NULL_HANDLE && "Failed to map buffer memory");
 }

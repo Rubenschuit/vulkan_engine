@@ -150,7 +150,7 @@ void VeSwapChain::createSwapChain() {
 		.sType = vk::StructureType::eSwapchainCreateInfoKHR,
 		.pNext = nullptr,
 		.flags = {},
-		.surface = *m_ve_device.getSurface(),
+		.surface = **m_ve_device.getSurface(),
 		.minImageCount = image_count,
 		.imageFormat = m_surface_format.format,
 		.imageColorSpace = m_surface_format.colorSpace,
