@@ -276,6 +276,7 @@ void Sandbox::renderAppWindows() {
 				ImGui::Text("Explosion");
 				ImGui::DragInt("Particle Count", &config.explosion_particle_count, 100, 100, 10000);
 				ImGui::SliderFloat("Explosion Size", &config.explosion_size, 0.1f, 5.0f);
+				ImGui::SliderFloat("Trail Interval", &config.trail_interval, 0.0001f, 0.1f, "%.4f");
 
 				ImGui::Separator();
 				ImGui::Text("Environment");
@@ -285,7 +286,7 @@ void Sandbox::renderAppWindows() {
 
 				ImGui::Separator();
 				ImGui::Text("System");
-				ImGui::SliderInt("ParticleCapacity", &config.max_particles, 1000, 5000000);
+				ImGui::SliderInt("Particle Capacity", &config.max_particles, 1000, 5000000);
 				if (ImGui::Button("Apply Capacity")) {
 					m_fireworks_system->setParticleCapacity(static_cast<uint32_t>(config.max_particles));
 				}
@@ -422,8 +423,8 @@ void Sandbox::createDescriptors() {
 		.addPoolSize(vk::DescriptorType::eSampler, MAX_FRAMES_IN_FLIGHT + 7)
 		// Sampled images: shadow map array (1 per frame) + slack (7)
 		.addPoolSize(vk::DescriptorType::eSampledImage, MAX_FRAMES_IN_FLIGHT + 7)
-		// Compute storage buffers: 4 per frame (prev + current) * 2 systems
-		.addPoolSize(vk::DescriptorType::eStorageBuffer, 4 * MAX_FRAMES_IN_FLIGHT)
+		// Compute storage buffers:
+		.addPoolSize(vk::DescriptorType::eStorageBuffer, 14 * MAX_FRAMES_IN_FLIGHT)
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
 		.buildShared();
 

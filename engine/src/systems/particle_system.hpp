@@ -77,7 +77,7 @@ struct ParticleParams {
 // Data structure for vertex shader input
 struct Particle {
 	glm::vec4 position; // w is scale
-	glm::vec4 velocity; // w is life
+	glm::vec4 velocity = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f); // w is life
 	glm::vec4 color;
 	glm::vec4 tex_coords;
 	glm::vec4 extra_data; // x = type, y = max_life, z = blend, w = timestamp
@@ -129,7 +129,7 @@ public:
 	void resetPoint() { m_reset_kind = 1u; scheduleRestart(); }
 	void resetDisc() { m_reset_kind = 2u; scheduleRestart(); }
 
-	// Change particle count; recreates storage buffers and descriptor sets
+	// getters/setters
 	void setParticleCount(uint32_t count, bool reset = true);
 	void setMean(float mean) { m_mean = mean;}
 	void setStddev(float stddev) { m_stddev = stddev;}
@@ -140,6 +140,8 @@ public:
 	float getSpeed() const { return m_speed; }
 	void setWind(const glm::vec4& wind) { m_wind_direction = wind; }
 	glm::vec4 getWind() const { return m_wind_direction; }
+	void setTrailInterval(float interval) { m_trail_interval = interval; }
+	float getTrailInterval() const { return m_trail_interval; }
 	void setLifeRange(float min, float max) { m_min_life = min; m_max_life = max; }
 	float getMinLife() const { return m_min_life; }
 	float getMaxLife() const { return m_max_life; }
@@ -193,7 +195,7 @@ private:
 	float m_speed{1.0f};
 	float m_gravity{9.81f};
 	uint32_t m_trail_buffer_size{1000000};
-	float m_trail_interval{0.001f};
+	float m_trail_interval{0.004f};
 	float m_trail_timeout{0.1f};
 	float m_flash_scale{150.0f};
 	float m_flash_time{0.15f};

@@ -95,12 +95,13 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
 
     float dt = frame_info.frame_time;
 
-	// Set wind direction/strength and gravity from ui
+	// Set parameters from ui
 	glm::vec3 dir = glm::length(m_config.wind_direction) > 0.001f
 		? glm::normalize(m_config.wind_direction)
 		: glm::vec3(1.0f, 0.0f, 0.0f);
 	m_particle_system->setWind(glm::vec4(dir, m_config.wind_strength));
 	m_particle_system->setGravity(m_config.gravity);
+	m_particle_system->setTrailInterval(m_config.trail_interval);
 
 	// Update active rockets
     for (auto it = m_rockets.begin(); it != m_rockets.end(); ) {
@@ -124,9 +125,8 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
 		r.trail_timer -= dt;
 
 		// Trail emission should be framerate independent: emit every 4ms
-		if (r.trail_timer <= m_config.trail_interval) {
+		if (r.trail_timer <= 0.0f) {
 			r.trail_timer = m_config.trail_interval;
-			float smoke_variance = 0.1f;
 
             if (r.type == 0) {
 
@@ -134,7 +134,7 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
                     .position_scale = glm::vec4(r.pos, 5.0f),
                     .velocity_life = glm::vec4(r.vel * 0.02f, 7.0f),
                     .color = m_config.smoke_color,
-                    .info = {0, 2, TYPE_SMOKE, *reinterpret_cast<uint32_t*>(&smoke_variance)}
+                    .info = {0, 2, TYPE_SMOKE, 0}
                 };
                 m_particle_system->emitParticles(smoke);
 

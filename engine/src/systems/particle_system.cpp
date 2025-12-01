@@ -54,7 +54,8 @@ void ParticleSystem::createShaderStorageBuffers() {
 	// Allocate to capacity
 	uint32_t alloc_count = std::max(m_particle_count, m_capacity > 0 ? m_capacity : m_particle_count);
 	m_capacity = alloc_count;
-	std::vector<Particle> particles(m_capacity);
+	// zero initialize
+	std::vector<Particle> particles(m_capacity, Particle{});
 	// Staging buffer for upload to device local
 	vk::DeviceSize buffer_size = static_cast<vk::DeviceSize>(m_capacity) * sizeof(Particle);
 	VeBuffer staging_buffer(
@@ -423,7 +424,7 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 	// Dispatch enough workgroups to cover all particles, even when not a multiple of 256
 	// shader discards excess threads
 	const uint32_t workgroup_size = 256;
-	uint32_t group_count_x = (m_particle_count + workgroup_size - 1) / workgroup_size; // ceilDiv
+	uint32_t group_count_x = (m_capacity + workgroup_size - 1) / workgroup_size; // ceilDiv
 	if (group_count_x > 0) {
 		frame_info.compute_command_buffer.dispatch(group_count_x, 1, 1);
 	}
@@ -559,8 +560,7 @@ void ParticleSystem::setParticleCount(uint32_t count, bool reset) {
 		m_particle_count = count;
 		m_pending_particle_count = m_particle_count;
 		// Recreate storage buffers sized to new capacity and reset on next dispatch
-		// Reserve extra capacity to avoid frequent reallocations (growth factor 1.5)
-		m_capacity = std::max(count, static_cast<uint32_t>(m_capacity * 1.5));
+		m_capacity = std::max(count, static_cast<uint32_t>(m_capacity ));
 		createShaderStorageBuffers();
 		createDescriptorSets();
 	} else {
@@ -648,4 +648,3 @@ void ParticleSystem::setTrailBufferSize(uint32_t size) {
 }
 
 } // namespace ve
-
