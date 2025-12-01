@@ -163,7 +163,6 @@ struct Params {
 	uint32_t should_respawn;
 	uint32_t spawn_event_count;
 	float gravity;
-	uint32_t trail_buffer_size;
 	float trail_interval;
 	float trail_timeout;
 	float flash_scale;
@@ -204,13 +203,18 @@ RWStructuredBuffer<Particle> particles_out;
 [vk::binding(6, 0)]
 RWStructuredBuffer<Particle> particles_render;
 
-// Global atomic counters: [0]=WriteHead, [1]=ReadHead
+// Dead and alive particle index lists
+// Counters: [0]=dead_count, [1]=alive_count, [2]=dead_head, [3]=dead_tail, [4]=alive_head, [5]=alive_tail
 [vk::binding(7, 0)]
-RWStructuredBuffer<uint> global_counters;
+RWStructuredBuffer<uint> indices_counters;
 
-// GPU Trail Queue (Ring Buffer)
+// Dead particle indices (ring buffer)
 [vk::binding(8, 0)]
-RWStructuredBuffer<Particle> trail_queue;
+RWStructuredBuffer<uint> dead_indices;
+
+// Alive particle indices (ring buffer)
+[vk::binding(9, 0)]
+RWStructuredBuffer<uint> alive_indices;
 
 // RNG helpers
 uint wang_hash(uint seed) {
@@ -438,6 +442,7 @@ void resetPoint(uint i, uint extra_seed) {
 
 	particles_out[i] = p0;
 	particles_prev[i] = p0;
+	addToAliveIndices(i);
 }
 
 // Particles initialized in a rotating disc
@@ -482,6 +487,7 @@ void resetDisc(uint i, uint extra_seed) {
 
 	particles_out[i] = p0;
 	particles_prev[i] = p0;
+	addToAliveIndices(i);
 }
 
 void resetFromEvent(uint i, SpawnEvent e) {
@@ -584,6 +590,7 @@ void resetFromEvent(uint i, SpawnEvent e) {
 
 	particles_out[i] = p;
 	particles_prev[i] = p;
+	addToAliveIndices(i);
 }
 
 void appendToRenderBuffer(Particle p) {
@@ -591,6 +598,54 @@ void appendToRenderBuffer(Particle p) {
 	// Atomic increment to get unique index in render buffer
 	InterlockedAdd(indirect_command[0].instanceCount, 1, index);
 	particles_render[index % params.particle_count] = p;
+}
+
+// Add a dead particle index to the dead_indices list
+void addToDeadIndices(uint particle_index) {
+	uint tail;
+	InterlockedAdd(indices_counters[3], 1, tail); // dead_tail
+	uint wrapped_tail = tail % params.particle_count;
+	dead_indices[wrapped_tail] = particle_index;
+	InterlockedAdd(indices_counters[0], 1); // dead_count
+}
+
+void removeFromAliveIndices(uint particle_index) {
+	int decrement = -1;
+	InterlockedAdd(indices_counters[1], asuint(decrement));
+}
+
+void addToAliveIndices(uint particle_index) {
+	uint tail;
+	InterlockedAdd(indices_counters[5], 1, tail); // alive_tail
+	uint wrapped_tail = tail % params.particle_count;
+	alive_indices[wrapped_tail] = particle_index;
+	InterlockedAdd(indices_counters[1], 1); // alive_count
+}
+
+// Pop a dead particle index from dead_indices, or fallback to oldest alive if empty
+// Returns true if a dead index was found, false if using alive fallback
+bool popDeadIndex(out uint particle_index) {
+	uint dead_count = indices_counters[0];
+	if (dead_count > 0) {
+		uint head;
+		InterlockedAdd(indices_counters[2], 1, head); // dead_head
+		// Verify we still have dead particles
+		if (head < indices_counters[3]) { // head < tail means we have items
+			uint wrapped_head = head % params.particle_count;
+			particle_index = dead_indices[wrapped_head];
+			int decrement = -1;
+			InterlockedAdd(indices_counters[0], asuint(decrement)); // dead_count--
+			return true;
+		}
+		// Race condition: another thread consumed it, fall through to alive fallback
+	}
+
+	// Fallback: use oldest from alive_indices (circular buffer behavior)
+	uint alive_head;
+	InterlockedAdd(indices_counters[4], 1, alive_head); // alive_head
+	uint wrapped_head = alive_head % params.particle_count;
+	particle_index = alive_indices[wrapped_head];
+	return false;
 }
 
 // Helper function for Frustum Culling
@@ -613,12 +668,21 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 
 	// Reset particles
 	if (params.reset != 0u) {
+		if (i == 0) {
+			// First thread resets counters
+			indices_counters[0] = 0; // dead_count
+			indices_counters[1] = 0; // alive_count
+			indices_counters[2] = 0; // dead_head
+			indices_counters[3] = 0; // dead_tail
+			indices_counters[4] = 0; // alive_head
+			indices_counters[5] = 0; // alive_tail
+		}
+
 		if (params.reset_kind == 2u) {
 			resetDisc(i, 0);
 		} else {
 			resetPoint(i, 0);
 		}
-		// Add to render buffer after reset
 		appendToRenderBuffer(particles_out[i]);
 		return;
 	}
@@ -636,60 +700,30 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 	}
 
 	Particle p = particles_prev[i];
+	Particle p_out = particles_out[i];
+
+	// Check if this particle was just spawned this frame
+	if (p.simulation_data.w == -1.0f || p.extra_data.x != p_out.extra_data.x) {
+
+		p.simulation_data.w = 0.0f;
+		particles_prev[i].simulation_data.w = 0.0f;
+		return;
+	}
+
+	// Also check particles_out to see if a particle was just spawned there
+
+	if (p_out.simulation_data.w == -1.0f) {
+		return;
+	}
 
 	// Update lifetime
 	p.velocity.w -= params.delta_time;
 
-	// if particle is dead, check if it can be revived as a trail
+	// if particle is dead, add to dead_indices and handle respawn
 	if (p.velocity.w <= 0.0f) {
-
-		bool spawned = false;
-		uint read_head = global_counters[1];
-		uint write_head = global_counters[0];
-		uint queue_size = params.trail_buffer_size;
-
-		// We optimistically check if there is data to read
-		if (read_head < write_head) {
-			uint my_slot;
-			// Claim a slot
-			InterlockedAdd(global_counters[1], 1, my_slot);
-
-			// Verify the slot is actually written
-			if (my_slot < global_counters[0]) {
-				uint wrapped_slot = my_slot % queue_size;
-				p = trail_queue[wrapped_slot];
-
-				uint trail_type = (uint)p.extra_data.x;
-				bool is_valid_trail = (trail_type == ParticleType::TYPE_TRAIL || trail_type == ParticleType::TYPE_SMOKE);
-
-				// We use a short spin-wait to handle the case where the writer is slightly behind.
-				uint stored_id = 0;
-				for (int i = 0; i < 32; ++i) {
-					stored_id = asuint(trail_queue[wrapped_slot].simulation_data.w);
-					if (stored_id >= my_slot) break;
-				}
-
-				bool is_correct_entry = (stored_id == my_slot);
-				float age = params.total_time - p.extra_data.w;
-				if (is_valid_trail && p.extra_data.w > 0.0f && is_correct_entry && age >= 0.0f && age < params.trail_timeout && p.velocity.w > 0.0f) {
-					spawned = true;
-					// Clear the timestamp to mark as consumed/invalid
-					trail_queue[wrapped_slot].extra_data.w = -1.0f;
-				}
-			}
-		}
-		else {
-			p.position.w = 0.0f;
-			particles_out[i] = p;
-			return;
-		}
-
-		if (spawned) {
-			// We revived this particle as a trail
-			particles_out[i] = p;
-			appendToRenderBuffer(p);
-			return;
-		}
+		// Add this particle index to dead_indices
+		addToDeadIndices(i);
+		removeFromAliveIndices(i);
 
 		if (params.should_respawn != 0u) {
 			// Respawn with a seed based on time to vary the randomness
@@ -789,48 +823,46 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 			if (p.simulation_data.x <= 0.0f) {
 				p.simulation_data.x = params.trail_interval;
 
-				uint queue_size = params.trail_buffer_size;
-				uint needed_slots = 2;
-
-				uint read_head = global_counters[1];
-				uint write_head = global_counters[0];
-
-
-				// If we overflow the buffer size (distance > queue_size), we just overwrite old data
-				// The reader will read the latest data because it follows the write head
-				uint slot_idx;
-				InterlockedAdd(global_counters[0], needed_slots, slot_idx);
-
-				uint trail_slot = slot_idx % queue_size;
-				uint smoke_slot = (slot_idx + 1) % queue_size;
-
+				// Spawn trail particle
+				uint trail_index;
+				bool used_dead = popDeadIndex(trail_index);
 
 				Particle trail;
 				trail.position = p.position;
 				trail.velocity = float4(p.velocity.xyz * 0.0f, p.velocity.w / 2.0f);
 				trail.color = p.color;
 				trail.tex_coords = float4(0.0f);
-				trail.extra_data = float4((float)ParticleType::TYPE_TRAIL, p.velocity.w, 0.0f, -1.0f);
-				trail.simulation_data = float4(0.0f, 0.0f, 0.0f, asfloat(slot_idx));
-				trail_queue[trail_slot] = trail;
+				trail.extra_data = float4((float)ParticleType::TYPE_TRAIL, p.velocity.w, 0.0f, 0.0f);
+				trail.simulation_data = float4(0.0f, 0.0f, 0.0f, -1.0f); // .w=-1.0 means just spawned
 
-				// Commit the timestamp last
-				trail_queue[trail_slot].extra_data.w = params.total_time;
+				particles_out[trail_index] = trail;
+				particles_prev[trail_index] = trail;
+				addToAliveIndices(trail_index);
+				appendToRenderBuffer(trail);
 
-				uint state = wang_hash(asuint(slot_idx + 1));
-				// random chance to spawn smoke
+				// Random chance to spawn smoke
+				uint state = wang_hash(asuint(trail_index + 1));
 				if (rand01(state) < 0.3f) {
+					uint smoke_index;
+					popDeadIndex(smoke_index);
+
 					Particle smoke;
 					smoke.position = float4(p.position.xyz, 5.0f);
 					smoke.velocity = float4(p.velocity.xyz * 0.02f, 7.0f);
 					smoke.color = float4(0.4f, 0.4f, 0.4f, 0.5f);
 					smoke.tex_coords = float4(0.0f);
-					smoke.extra_data = float4((float)ParticleType::TYPE_SMOKE, 7.0f, 0.0f, -1.0f);
-					smoke.simulation_data = float4(0.0f, 0.0f, 0.0f, asfloat(slot_idx + 1));
-					trail_queue[smoke_slot] = smoke;
+					smoke.extra_data = float4((float)ParticleType::TYPE_SMOKE, 7.0f, 0.0f, 0.0f);
+					smoke.simulation_data = float4(0.0f, 0.0f, 0.0f, -1.0f);
 
-					// Commit timestamp
-					trail_queue[smoke_slot].extra_data.w = params.total_time;
+					// Write type field first to ensure it's set even if write is partial/interleaved
+					// This prevents type corruption when another thread writes at the same time
+					particles_out[smoke_index].extra_data = smoke.extra_data;
+					particles_prev[smoke_index].extra_data = smoke.extra_data;
+					// Then write full struct - type is already set
+					particles_out[smoke_index] = smoke;
+					particles_prev[smoke_index] = smoke;
+					addToAliveIndices(smoke_index);
+					appendToRenderBuffer(smoke);
 				}
 			}
 		} else if (type == ParticleType::TYPE_ROCKET) {
@@ -927,6 +959,22 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 
 	p.tex_coords = float4(column1, row1, column2, row2) / (float)num_rows;
 	p.extra_data.z = blend;
+
+
+	Particle final_check = particles_out[i];
+	if (final_check.simulation_data.w == -1.0f) {
+		// Particle was just spawned (has sentinel), don't overwrite
+		return;
+	}
+
+
+	uint final_check_type = (uint)final_check.extra_data.x;
+	uint p_type = (uint)p.extra_data.x;
+	if ((final_check_type == ParticleType::TYPE_SMOKE || final_check_type == ParticleType::TYPE_TRAIL) &&
+	    final_check_type != p_type) {
+		// Particle was just spawned, don't overwrite
+		return;
+	}
 
 	particles_out[i] = p;
 

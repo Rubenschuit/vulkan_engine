@@ -144,33 +144,43 @@ void ParticleSystem::createSpawnBuffers() {
 		m_spawn_storage_buffers[i]->map();
 	}
 
-	// Create global counter buffer (2 uints: WriteHead, ReadHead)
-	m_global_counter_buffer = std::make_unique<VeBuffer>(
+	// Create indices counter buffer (6 uints: dead_count, alive_count, dead_head, dead_tail, alive_head, alive_tail)
+	m_indices_counter_buffer = std::make_unique<VeBuffer>(
 		m_ve_device,
-		sizeof(uint32_t) * 4, // Padding to 16 bytes just in case
+		sizeof(uint32_t) * 8, // 6 counters + padding to 32 bytes alignment
 		1,
 		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
 		vk::MemoryPropertyFlagBits::eDeviceLocal
 	);
 
-	// Initialize counters to zero
-	uint32_t zeros[4] = {0, 0, 0, 0};
+	// Initialize counters to zero (dead_count=0, alive_count=0, dead_head=0, dead_tail=0, alive_head=0, alive_tail=0)
+	uint32_t zeros[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 	VeBuffer staging_buffer(
 		m_ve_device,
-		sizeof(uint32_t) * 4,
+		sizeof(uint32_t) * 8,
 		1,
 		vk::BufferUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 	);
 	staging_buffer.map();
 	staging_buffer.writeToBuffer(zeros);
-	m_ve_device.copyBuffer(staging_buffer.getBuffer(), m_global_counter_buffer->getBuffer(), sizeof(uint32_t) * 4);
+	m_ve_device.copyBuffer(staging_buffer.getBuffer(), m_indices_counter_buffer->getBuffer(), sizeof(uint32_t) * 8);
 
-	// Create GPU trail buffer
-	vk::DeviceSize trail_buffer_size = sizeof(Particle) * m_trail_buffer_size;
-	m_gpu_trail_buffer = std::make_unique<VeBuffer>(
+	uint32_t buffer_capacity = (m_capacity > 0) ? m_capacity : m_particle_count;
+	vk::DeviceSize dead_indices_size = sizeof(uint32_t) * buffer_capacity;
+	m_dead_indices_buffer = std::make_unique<VeBuffer>(
 		m_ve_device,
-		trail_buffer_size,
+		dead_indices_size,
+		1,
+		vk::BufferUsageFlagBits::eStorageBuffer,
+		vk::MemoryPropertyFlagBits::eDeviceLocal
+	);
+
+	// Create alive indices buffer (size = capacity to match particle buffers)
+	vk::DeviceSize alive_indices_size = sizeof(uint32_t) * buffer_capacity;
+	m_alive_indices_buffer = std::make_unique<VeBuffer>(
+		m_ve_device,
+		alive_indices_size,
 		1,
 		vk::BufferUsageFlagBits::eStorageBuffer,
 		vk::MemoryPropertyFlagBits::eDeviceLocal
@@ -199,6 +209,9 @@ void ParticleSystem::createUniformBuffers() {
 // - Spawn event buffer
 // - Indirect command buffer (RW)
 // - Render buffer (RW)
+// - Indices counters buffer (RW)
+// - Dead indices buffer (RW)
+// - Alive indices buffer (RW)
 void ParticleSystem::createDescriptorSetLayouts() {
 	m_compute_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(3, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eCompute)
@@ -207,8 +220,9 @@ void ParticleSystem::createDescriptorSetLayouts() {
 		.addBinding(4, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
 		.addBinding(5, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Indirect buffer
 		.addBinding(6, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Render buffer
-		.addBinding(7, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Global Counter
-		.addBinding(8, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Trail Queue
+		.addBinding(7, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Indices Counters
+		.addBinding(8, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Dead Indices
+		.addBinding(9, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Alive Indices
 		.build();
 }
 
@@ -226,8 +240,9 @@ void ParticleSystem::createDescriptorSets() {
 
 		auto indirect_info = m_indirect_buffers[i]->getDescriptorInfo();
 		auto render_info = m_render_buffers[i]->getDescriptorInfo();
-		auto counter_info = m_global_counter_buffer->getDescriptorInfo();
-		auto trail_info = m_gpu_trail_buffer->getDescriptorInfo();
+		auto counter_info = m_indices_counter_buffer->getDescriptorInfo();
+		auto dead_indices_info = m_dead_indices_buffer->getDescriptorInfo();
+		auto alive_indices_info = m_alive_indices_buffer->getDescriptorInfo();
 
 		VeDescriptorWriter(*m_compute_set_layout, *m_descriptor_pool)
 			.writeBuffer(3, &ubo_info)
@@ -237,7 +252,8 @@ void ParticleSystem::createDescriptorSets() {
 			.writeBuffer(5, &indirect_info)
 			.writeBuffer(6, &render_info)
 			.writeBuffer(7, &counter_info)
-			.writeBuffer(8, &trail_info)
+			.writeBuffer(8, &dead_indices_info)
+			.writeBuffer(9, &alive_indices_info)
 			.build(set);
 		m_compute_descriptor_sets.push_back(std::move(set));
 	}
@@ -329,7 +345,6 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 	params.max_life = m_max_life;
 	params.should_respawn = m_should_respawn ? 1u : 0u;
 	params.gravity = m_gravity;
-	params.trail_buffer_size = m_trail_buffer_size;
 	params.trail_interval = m_trail_interval;
 	params.trail_timeout = m_trail_timeout;
 	params.flash_scale = m_flash_scale;
@@ -557,11 +572,16 @@ void ParticleSystem::setParticleCount(uint32_t count, bool reset) {
 		m_indirect_buffers.clear();
 		m_compute_descriptor_sets.clear();
 
+		m_dead_indices_buffer.reset();
+		m_alive_indices_buffer.reset();
+		m_indices_counter_buffer.reset();
+
 		m_particle_count = count;
 		m_pending_particle_count = m_particle_count;
 		// Recreate storage buffers sized to new capacity and reset on next dispatch
 		m_capacity = std::max(count, static_cast<uint32_t>(m_capacity ));
 		createShaderStorageBuffers();
+		createSpawnBuffers();
 		createDescriptorSets();
 	} else {
 		// Within capacity: just adjust logical count; compute shader will skip extra threads
@@ -589,62 +609,5 @@ void ParticleSystem::applyStagedParticleCount() {
 	}
 }
 
-void ParticleSystem::setTrailBufferSize(uint32_t size) {
-	if (size == 0) size = 10; // minimal safe size
-	if (size == m_trail_buffer_size) return;
-
-	m_trail_buffer_size = size;
-	VE_LOGI("ParticleSystem: Resizing trail buffer to " << m_trail_buffer_size);
-
-	m_ve_device.getDevice().waitIdle();
-
-	// Destroy old buffer first to free resources
-	m_gpu_trail_buffer.reset();
-
-	// Recreate buffer
-	vk::DeviceSize buffer_size = sizeof(Particle) * m_trail_buffer_size;
-	m_gpu_trail_buffer = std::make_unique<VeBuffer>(
-		m_ve_device,
-		buffer_size,
-		1,
-		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
-		vk::MemoryPropertyFlagBits::eDeviceLocal
-	);
-
-	// Clear trail buffer to prevent reading garbage data
-	std::vector<Particle> empty_particles(m_trail_buffer_size);
-	for (auto& p : empty_particles) {
-		p.position.w = 0.0f;
-		p.color.a = 0.0f;
-		p.extra_data = glm::vec4(0.0f);
-	}
-	VeBuffer trail_staging_buffer(
-		m_ve_device,
-		buffer_size,
-		1,
-		vk::BufferUsageFlagBits::eTransferSrc,
-		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
-	);
-	trail_staging_buffer.map();
-	trail_staging_buffer.writeToBuffer(empty_particles.data());
-	m_ve_device.copyBuffer(trail_staging_buffer.getBuffer(), m_gpu_trail_buffer->getBuffer(), buffer_size);
-
-	// Reset global counter buffer (WriteHead and ReadHead to 0)
-	uint32_t zeros[4] = {0, 0, 0, 0};
-	VeBuffer staging_buffer(
-		m_ve_device,
-		sizeof(uint32_t) * 4,
-		1,
-		vk::BufferUsageFlagBits::eTransferSrc,
-		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
-	);
-	staging_buffer.map();
-	staging_buffer.writeToBuffer(zeros);
-	m_ve_device.copyBuffer(staging_buffer.getBuffer(), m_global_counter_buffer->getBuffer(), sizeof(uint32_t) * 4);
-
-	// Recreate descriptor sets to point to new buffer
-	m_compute_descriptor_sets.clear();
-	createDescriptorSets();
-}
 
 } // namespace ve

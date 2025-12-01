@@ -65,7 +65,6 @@ struct ParticleParams {
 	// ring buffer emission
 	uint32_t spawn_event_count;
 	float gravity;
-	uint32_t trail_buffer_size;
 	float trail_interval;
 	float trail_timeout;
 	float flash_scale;
@@ -149,8 +148,6 @@ public:
 	bool getShouldRespawn() const { return m_should_respawn; }
 	void setGravity(float gravity) { m_gravity = gravity; }
 	float getGravity() const { return m_gravity; }
-	void setTrailBufferSize(uint32_t size);
-	uint32_t getTrailBufferSize() const { return m_trail_buffer_size; }
 
 	// Legacy emit (single batch), might want to remove
 	void emitParticles(uint32_t count);
@@ -194,7 +191,6 @@ private:
 	uint32_t m_mode{ParticleMode::COOL}; // see ParticleMode enum
 	float m_speed{1.0f};
 	float m_gravity{9.81f};
-	uint32_t m_trail_buffer_size{1000000};
 	float m_trail_interval{0.004f};
 	float m_trail_timeout{0.1f};
 	float m_flash_scale{150.0f};
@@ -219,10 +215,10 @@ private:
 	std::vector<std::unique_ptr<VeBuffer>> m_spawn_storage_buffers; // spawn event SSBO per frame
 	std::vector<vk::raii::DescriptorSet> m_compute_descriptor_sets;
 
-	// Global atomic counter for GPU-side allocations
-	std::unique_ptr<VeBuffer> m_global_counter_buffer;
-	// Buffer for queuing GPU-spawned trails
-	std::unique_ptr<VeBuffer> m_gpu_trail_buffer;
+	// Dead and alive particle index tracking
+	std::unique_ptr<VeBuffer> m_indices_counter_buffer; // 6 uints: dead_count, alive_count, dead_head, dead_tail, alive_head, alive_tail
+	std::unique_ptr<VeBuffer> m_dead_indices_buffer; // array of dead particle indices
+	std::unique_ptr<VeBuffer> m_alive_indices_buffer; // array of alive particle indices
 
 	// Shared pool for descriptor allocations
 	std::shared_ptr<VeDescriptorPool> m_descriptor_pool;

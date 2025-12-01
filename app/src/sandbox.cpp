@@ -291,11 +291,6 @@ void Sandbox::renderAppWindows() {
 					m_fireworks_system->setParticleCapacity(static_cast<uint32_t>(config.max_particles));
 				}
 
-				ImGui::SliderInt("Trail Buffer Size", &config.trail_buffer_size, 10, 5000000);
-				if (ImGui::Button("Apply Trail Buffer Size")) {
-					m_fireworks_system->setTrailBufferSize(static_cast<uint32_t>(config.trail_buffer_size));
-				}
-
 				if (ImGui::Button("Launch Rocket", ImVec2(-1, 0))) {
 					m_fireworks_system->launchRocket();
 				}

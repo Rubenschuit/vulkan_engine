@@ -35,10 +35,6 @@ void FireworksSystem::setParticleCapacity(uint32_t capacity) {
     m_pending_capacity = capacity;
 }
 
-void FireworksSystem::setTrailBufferSize(uint32_t size) {
-    m_pending_trail_buffer_size = size;
-}
-
 void FireworksSystem::launchRocket() {
 	for (int i = 0; i < m_config.launch_count; i++) {
 		glm::vec3 pos = m_config.launch_pos;
@@ -82,15 +78,6 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
              m_config.max_particles = static_cast<int>(m_pending_capacity);
         }
         m_pending_capacity = 0;
-    }
-
-    // Handle pending trail buffer size change
-    if (m_pending_trail_buffer_size > 0) {
-        if (m_particle_system) {
-            m_particle_system->setTrailBufferSize(m_pending_trail_buffer_size);
-            m_config.trail_buffer_size = static_cast<int>(m_pending_trail_buffer_size);
-        }
-        m_pending_trail_buffer_size = 0;
     }
 
     float dt = frame_info.frame_time;
