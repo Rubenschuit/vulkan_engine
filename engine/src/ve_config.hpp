@@ -25,9 +25,9 @@ constexpr float SHADOW_BIAS = 0.0001f;
 // Central list of required Vulkan device extensions
 inline const std::vector<const char*> REQUIRED_DEVICE_EXTENSIONS = {
 	VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-	VK_KHR_SPIRV_1_4_EXTENSION_NAME,
-	VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
-	VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+	//VK_KHR_SPIRV_1_4_EXTENSION_NAME, promoted to core in Vulkan 1.2
+	//VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, promoted to core in Vulkan 1.3
+	//VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, promoted to core in Vulkan 1.3
 #if defined(__APPLE__)
 	VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME, // required for portability on macOS
 #endif

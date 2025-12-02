@@ -38,8 +38,6 @@ void AxesRenderSystem::createPipeline(vk::Format color_format, vk::SampleCountFl
 	config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	config.depth_stencil_info.depthWriteEnable = VK_FALSE;
 	config.rasterization_info.cullMode = vk::CullModeFlagBits::eNone;
-	config.rasterization_info.depthBiasEnable = VK_TRUE;
-	config.rasterization_info.depthBiasClamp = 0.0f;
 	config.color_format = color_format;
 	config.pipeline_layout = *m_pipeline_layout;
 	m_ve_pipeline = std::make_unique<VePipeline>(

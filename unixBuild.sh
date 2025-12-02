@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # usage: ./unixBuild.sh [debug|release|test|leaks|clean]
-#  - debug: builds in Debug mode and runs the app
-#  - release (default): builds in Release mode and runs the app
-#  - test: builds in Debug mode with tests enabled, runs all tests via CTest
-#  - leaks: builds in Debug mode, runs the app and checks for memory leaks (macOS only)
+#  - debug: builds in debug mode and runs the app
+#  - release (default): builds in release mode and runs the app
+#  - test: builds in debug mode with tests enabled, runs all tests via CTest
+#  - leaks: builds in debug mode, runs the app and checks for memory leaks (macOS only)
 #  - clean: removes the build directory and compiled shader files
 
 set -e
@@ -16,25 +16,25 @@ if [[ "$1" == 'clean' ]]; then
 	exit 0
 fi
 
-# Default build type is Release
+# Default build type is release
 BUILD_TYPE="Release"
 MODE="$1"
 EXTRA_CMAKE_ARGS=""
 case "$MODE" in
 	release)
 		BUILD_TYPE="Release"
-		echo "Building in Release mode";;
+		echo "Building in release mode";;
 	debug)
 		BUILD_TYPE="Debug"
-		echo "Building in Debug mode";;
+		echo "Building in debug mode";;
 	test)
 		BUILD_TYPE="Debug"
-		echo "Building in Debug mode (tests enabled)";;
+		echo "Building in debug mode (tests enabled)";;
 	leaks)
 		BUILD_TYPE="Debug"
-		echo "Building in Debug mode (leaks check)";;
+		echo "Building in debug mode (leaks check)";;
 	*)
-		echo "Building in Release mode";;
+		echo "Building in release mode";;
 esac
 
 mkdir -p build

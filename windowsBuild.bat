@@ -2,14 +2,16 @@
 setlocal
 
 :: windowsBuild.bat
-:: Usage: windowsBuild.bat [debug|release|test|clean]
-::   debug: builds in Debug mode and runs the app
-::   release (default): builds in Release mode and runs the app
-::   test: builds in Debug mode with tests enabled, runs all tests via CTest
+:: Usage: windowsBuild.bat [debug|release|test|clean] [vs2022|vs2026]
+::   debug: builds in debug mode and runs the app
+::   release (default): builds in release mode and runs the app
+::   test: builds in debug mode with tests enabled, runs all tests via CTest
 ::   clean: removes the build directory and compiled shader files
 
 set MODE=%~1
 if "%MODE%"=="" set MODE=release
+set VS_VERSION=%~2
+if "%VS_VERSION%"=="" set VS_VERSION=vs2022
 
 if /I "%MODE%"=="clean" (
 	if exist build rmdir /S /Q build
@@ -19,19 +21,25 @@ if /I "%MODE%"=="clean" (
 )
 
 :: Determine build type
-set BUILD_TYPE=Release
-if /I "%MODE%"=="debug" set BUILD_TYPE=Debug
-if /I "%MODE%"=="test" set BUILD_TYPE=Debug
+set BUILD_TYPE=release
+if /I "%MODE%"=="debug" set BUILD_TYPE=debug
+if /I "%MODE%"=="test" set BUILD_TYPE=debug
 
+:: Set Visual Studio generator
+if /I "%VS_VERSION%"=="vs2022" set VS_GENERATOR="Visual Studio 17 2022"
+if /I "%VS_VERSION%"=="vs2026" set VS_GENERATOR="Visual Studio 17 2026"
+
+echo "Building in %BUILD_TYPE% mode"
+echo "Using %VS_GENERATOR%"
 :: CMake args
 set CMAKE_ARGS=-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 if /I "%MODE%"=="test" set CMAKE_ARGS=%CMAKE_ARGS% -DVE_BUILD_TESTS=ON
 
 :: Build directory
-set BUILD_DIR=build
+set BUILD_DIR=build\%BUILD_TYPE%
 
 :: Configure and build
-cmake -S . -B "%BUILD_DIR%" -G "Visual Studio 17 2022" -A x64 %CMAKE_ARGS%
+cmake -S . -B "%BUILD_DIR%" -G "%VS_GENERATOR%" -A x64 %CMAKE_ARGS%
 if errorlevel 1 exit /b %ERRORLEVEL%
 
 cmake --build "%BUILD_DIR%" --config %BUILD_TYPE% -j

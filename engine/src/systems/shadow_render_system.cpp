@@ -184,12 +184,12 @@ void ShadowRenderSystem::createShadowResources() {
 		m_shadow_map_layer_views.push_back(m_shadow_map_array->createLayerImageView(i));
 	}
 
-	// Transition shadow map array to depth stencil read-only optimal layout
+	// Transition shadow maps
 	m_shadow_map_array->transitionImageLayout(
 		vk::ImageLayout::eUndefined,
-		vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+		vk::ImageLayout::eDepthStencilAttachmentOptimal,
 		vk::AccessFlags2{},
-		vk::AccessFlagBits2::eShaderRead,
+		vk::AccessFlagBits2::eDepthStencilAttachmentRead,
 		vk::PipelineStageFlagBits2::eTopOfPipe,
 		vk::PipelineStageFlagBits2::eFragmentShader
 	);

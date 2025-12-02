@@ -143,6 +143,8 @@ void VeSwapChain::createSwapChain() {
 	m_present_mode = chooseSwapPresentMode(m_swap_chain_support.presentModes);
 	m_swap_chain_extent = chooseSwapExtent(m_swap_chain_support.capabilities);
 	m_swap_chain_image_format = m_surface_format.format;
+	VE_LOGI("Color format: " << vk::to_string(m_surface_format.format));
+	VE_LOGI("Color space: " << vk::to_string(m_surface_format.colorSpace));
 
 	// try to use one more than the minimum number of images to improve gpu utilization
 	// note that there is no guarantee that we can get that many images, so we need to check against the maximum as well
@@ -211,7 +213,7 @@ void VeSwapChain::createColorResources() {
 		m_swap_chain_image_format,
 		vk::ImageTiling::eOptimal,
 		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransientAttachment,
-		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		vk::MemoryPropertyFlagBits::eDeviceLocal | vk::MemoryPropertyFlagBits::eLazilyAllocated,
 		vk::ImageAspectFlagBits::eColor,
 		false,
 		1);
@@ -236,8 +238,8 @@ void VeSwapChain::createDepthResources() {
 		m_desired_num_samples,
 		depth_format,
 		vk::ImageTiling::eOptimal,
-		vk::ImageUsageFlagBits::eDepthStencilAttachment,
-		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eTransientAttachment,
+		vk::MemoryPropertyFlagBits::eDeviceLocal | vk::MemoryPropertyFlagBits::eLazilyAllocated,
 		vk::ImageAspectFlagBits::eDepth,
 		false,
 		1

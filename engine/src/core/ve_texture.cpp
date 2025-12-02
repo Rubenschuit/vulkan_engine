@@ -91,7 +91,7 @@ void VeTexture::createTextureImage(const std::filesystem::path& texture_path) {
 		// For KTX2 files, get the format after transcoding
 		auto* ktx2 = reinterpret_cast<ktxTexture2*>(k_texture);
 		texture_format = static_cast<vk::Format>(ktx2->vkFormat);
-		VE_LOGD("Texture format: " << static_cast<uint32_t>(texture_format));
+		VE_LOGD("Texture format: " << vk::to_string(texture_format));
 		if (texture_format == vk::Format::eUndefined) {
 			texture_format = vk::Format::eR8G8B8A8Unorm;
 			VE_LOGD("Texture format: eR8G8B8A8Unorm (ktx2 fallback)");
@@ -352,6 +352,16 @@ void VeTexture::createTextureImageArraySTB(const std::vector<std::filesystem::pa
 // Sets max anisotropy to the maximum value supported by the device or 16, whichever is lower
 void VeTexture::createTextureSampler() {
 	auto max_anisotropy = std::min(16.0f, m_ve_device.getDeviceProperties().limits.maxSamplerAnisotropy);
+
+	// Disable anisotropy on Arm GPUs for better performance
+	// Arm GPUs have less efficient descriptors with anisotropy enabled
+	// according to vulkan validation layers
+#if defined(__arm64__) || defined(__aarch64__) || (defined(__APPLE__) && defined(__ARM_ARCH))
+	bool enable_anisotropy = false;
+#else
+	bool enable_anisotropy = true;
+#endif
+
 	vk::SamplerCreateInfo sampler_info{
 		.magFilter = vk::Filter::eLinear,
 		.minFilter = vk::Filter::eLinear,
@@ -360,13 +370,13 @@ void VeTexture::createTextureSampler() {
 		.addressModeV = vk::SamplerAddressMode::eRepeat,
 		.addressModeW = vk::SamplerAddressMode::eRepeat,
 		.mipLodBias = 0.0f,
-		.anisotropyEnable = vk::True,
-		.maxAnisotropy = max_anisotropy,
+		.anisotropyEnable = enable_anisotropy ? vk::True : vk::False,
+		.maxAnisotropy = enable_anisotropy ? max_anisotropy : 1.0f,
 		.compareEnable = vk::False,
 		.compareOp = vk::CompareOp::eAlways,
 		.minLod = 0.0f,
-		.maxLod = 0.0f,
-		.borderColor = vk::BorderColor::eIntOpaqueBlack,
+		.maxLod = VK_LOD_CLAMP_NONE,
+		.borderColor = vk::BorderColor::eIntTransparentBlack,
 		.unnormalizedCoordinates = vk::False
 	};
 	m_texture_sampler = vk::raii::Sampler(m_ve_device.getDevice(), sampler_info);
@@ -389,7 +399,7 @@ vk::raii::Sampler VeTexture::createDepthCompareSampler(VeDevice& device) {
 		.compareEnable = enable_compare,
 		.compareOp = vk::CompareOp::eLess,
 		.minLod = 0.0f,
-		.maxLod = 0.0f,
+		.maxLod = VK_LOD_CLAMP_NONE,
 		.borderColor = vk::BorderColor::eFloatOpaqueWhite,  // outside shadow map is lit (clamp to border)
 		.unnormalizedCoordinates = vk::False
 	};

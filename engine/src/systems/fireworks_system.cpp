@@ -43,7 +43,7 @@ void FireworksSystem::launchRocket() {
 		float spread_x = Random::floatRange(-m_config.launch_spread_xy, m_config.launch_spread_xy);
 		float spread_y = Random::floatRange(-m_config.launch_spread_xy, m_config.launch_spread_xy);
 		glm::vec3 vel = glm::vec3(spread_x, spread_y, speed);
-		glm::vec4 color = m_config.use_random_color ? Random::color() : m_config.particle_color;
+		glm::vec4 color = m_config.use_random_color ? Random::colorHSV() : m_config.particle_color;
 		launchRocket(pos, vel, color);
 	}
 }
@@ -100,7 +100,6 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
         r.vel.z -= m_config.gravity * dt;
         r.pos += r.vel * dt;
 
-        // GENERATION 0: The Main Rocket (Spirals + Smoke)
         if (r.type == 0) {
             float spiral_factor = glm::clamp(r.vel.z, 0.0f, 10.0f);
             float spiral_speed = glm::clamp(r.vel.z, 0.0f, 5.0f);

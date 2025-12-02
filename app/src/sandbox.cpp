@@ -13,8 +13,6 @@ namespace ve {
 
 // First a window, device and swap chain are initialised in the base class
 Sandbox::Sandbox(const std::filesystem::path& working_dir) : project_root(working_dir) {
-	Random::init();
-
 	// Initialize scenes
 	m_simple_scene = std::make_unique<VeScene>("Simple Scene");
 	m_sponza_scene = std::make_unique<VeScene>("Sponza Scene");

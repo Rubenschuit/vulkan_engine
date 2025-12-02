@@ -1,8 +1,27 @@
 # Vulkan Engine
 
-Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. Produces a shared library (`VEngineLib`) and an app (`VeApp`). The goal of this project is for me to learn more about graphics programming, but also for fun!
-
 ![PBR Rendering](screenshots/sponza.png)
+
+Small modern cross-platform C++20 Vulkan 1.3+ renderer using GLFW and Slang. Produces a shared library (`VEngineLib`) and an app (`VeApp`). The goal of this project is for me to learn more about graphics programming, but also for fun!
+
+
+## Table of Contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+  - [Downloads](#downloads)
+- [Quick start with scripts](#quick-start-with-scripts)
+  - [macOS, Linux, Windows (MinGW)](#macos-linux-and-windows-mingw64-shell)
+  - [Windows (cmd or PowerShell)](#windows-cmd-or-powershell)
+- [Manual build](#manual-build)
+  - [Unix or MinGW shell](#unix-or-mingw64-shell)
+  - [Windows (Visual Studio)](#windows-with-visual-studio)
+- [Controls](#controls)
+- [Credits](#credits)
+
+
+![Simple scene](screenshots/simple_scene.png)
+
 ![Particle System](screenshots/particles.png)
 ![Fireworks](screenshots/fireworks.png)
 
@@ -19,21 +38,6 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 - FPS-style camera
 - MSAA
 
-## Table of Contents
-
-- [Features](#features)
-- [Requirements](#requirements)
-  - [Downloads](#downloads)
-- [Quick start with scripts](#quick-start-with-scripts)
-  - [macOS, Linux, Windows (MinGW)](#macos-linux-and-windows-mingw64-shell)
-  - [Windows (cmd or PowerShell)](#windows-cmd-or-powershell)
-- [Manual build](#manual-build)
-  - [Unix or MinGW shell](#unix-or-mingw64-shell)
-  - [Windows (Visual Studio)](#windows-with-visual-studio)
-  - [Linux](#linux-1)
-- [Controls](#controls)
-- [Credits](#credits)
-
 
 ## Requirements
 
@@ -41,7 +45,7 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 - CMake ≥ 3.16
 - C++20 toolchain (Clang 14+/MSVC 2019+/GCC 11+)
 - Vulkan SDK ≥ 1.3
-- Slang compiler (included in Vulkan SDK)
+- Slang compiler (included in Vulkan SDK since 1.3.296)
 - KTX library
 - GLFW 3.3+ (automatically fetched if missing)
 - GLM (automatically fetched if missing)
@@ -50,29 +54,26 @@ Small modern C++20 Vulkan 1.3+ renderer using Vulkan-Hpp RAII, GLFW, and Slang. 
 
 
 #### Downloads:
-Besides git, cmake and a c++20 compiler, two dependencies will have to be installed manually:
+Besides git, cmake and a c++20 compiler, two dependencies will have to be installed manually: Vulkan SDK and KTX.
 
 - Vulkan SDK (LunarG): https://vulkan.lunarg.com/sdk/home
 	- macOS and Windows:Check 'System global installation' component in the installer
-	- Linux: Consult https://vulkan.lunarg.com/doc/sdk/1.4.328.1/linux/getting_started.html for instructions to install the tar file. This also installs Slang.
+	- Linux: Consult https://vulkan.lunarg.com/doc/sdk/1.4.328.1/linux/getting_started.html (1.4.328) for instructions to install the tar file.
 
 - KTX: https://github.com/KhronosGroup/KTX-Software/releases
-	- macOS and Windows: Check the 'Development' package in the installer
+	- macOS and Windows: Ceck 'add to path' and the 'Development' package in the installer
 	- Linux: Download the .deb file and install with `sudo apt install ./filename.deb`
 
-- Slang (if not included in Vulkan SDK): https://github.com/shader-slang/slang/releases
-	- Windows: `C:\Program Files\Slang\bin\slangc.exe`
-	- Unix: Copy the files to `/usr/local` or set the SLANG_HOME environment variable
+- Extra:
+	- Slang (if not included in your Vulkan SDK): https://github.com/shader-slang/slang/releases
+	- GLFW (fetched automatically): https://www.glfw.org/download.html
+	- GLM (fetched automatically): https://github.com/g-truc/glm/releases
 
-- Optional (will be fetched if no path is set):
-	- GLFW: https://www.glfw.org/download.html
-	- GLM: https://github.com/g-truc/glm/releases
-
-- Packages for fresh ubuntu install:
+- Additional packages for fresh ubuntu install:
 ```bash
 sudo apt update
 sudo apt upgrade
-sudo apt install git cmake xorg-dev libglfw3-dev libglm-dev libxcb-xinerama0-dev libxcb-xinput-dev  libxcb-cursor-dev
+sudo apt install git cmake xorg-dev libglfw3-dev libglm-dev libxcb-xinerama0-dev libxcb-xinput-dev libxcb-cursor-dev
 ```
 
 
@@ -99,9 +100,9 @@ From repository root:
 ##### Unix or MinGW64 shell:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-./build/VeApp
+cmake -S . -B build/Release -DCMAKE_BUILD_TYPE=Release
+cmake --build build/Release
+./build/Release/VeApp
 ```
 
 ##### Windows with MSVC:
@@ -110,8 +111,8 @@ From command prompt:
 
 ```bat
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build
-build\release\VeApp.exe
+cmake --build build --config Release
+build\Release\VeApp.exe
 ```
 
 Or generate VeApp.sln to open with Visual Studio:

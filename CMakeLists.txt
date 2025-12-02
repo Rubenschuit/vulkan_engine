@@ -45,9 +45,9 @@ endif()
 project(${NAME} VERSION 0.1)
 
 include(${CMAKE_SOURCE_DIR}/cmake/Options.cmake)
-include(${CMAKE_SOURCE_DIR}/cmake/Leaks.cmake)
-include(${CMAKE_SOURCE_DIR}/cmake/Shaders.cmake)
 include(${CMAKE_SOURCE_DIR}/cmake/Dependencies.cmake)
+include(${CMAKE_SOURCE_DIR}/cmake/Shaders.cmake)
+include(${CMAKE_SOURCE_DIR}/cmake/Leaks.cmake)
 include(${CMAKE_SOURCE_DIR}/cmake/Targets.cmake)
 
 foreach(shader_target IN LISTS SHADER_TARGETS)

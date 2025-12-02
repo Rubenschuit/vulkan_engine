@@ -44,7 +44,7 @@ void VePipeline::defaultPipelineConfigInfo(PipelineConfigInfo& config_info, VeDe
 		.polygonMode = vk::PolygonMode::eFill,
 		.cullMode = vk::CullModeFlagBits::eBack,
 		.frontFace = vk::FrontFace::eClockwise,
-		.depthBiasEnable = VK_TRUE,
+		.depthBiasEnable = VK_FALSE,
 		.depthBiasConstantFactor = 0.0f,
 		.depthBiasClamp = 0.0f,
 		.depthBiasSlopeFactor = 0.0f,

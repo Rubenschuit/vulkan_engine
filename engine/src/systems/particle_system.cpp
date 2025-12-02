@@ -436,9 +436,9 @@ void ParticleSystem::update(VeFrameInfo& frame_info) {
 		{}
 	);
 
-	// Dispatch enough workgroups to cover all particles, even when not a multiple of 256
+	// Dispatch enough workgroups to cover all particles
 	// shader discards excess threads
-	const uint32_t workgroup_size = 256;
+	const uint32_t workgroup_size = 64;
 	uint32_t group_count_x = (m_capacity + workgroup_size - 1) / workgroup_size; // ceilDiv
 	if (group_count_x > 0) {
 		frame_info.compute_command_buffer.dispatch(group_count_x, 1, 1);
