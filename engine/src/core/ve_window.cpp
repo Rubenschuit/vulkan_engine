@@ -19,6 +19,7 @@ void VeWindow::framebufferResizeCallback(GLFWwindow* glfw_window, int width, int
 	ve_window->m_height = height;
 	ve_window->m_width = width;
 	ve_window->m_framebuffer_resized = true;
+	VE_LOGI("Framebuffer resized to " + std::to_string(width) + "x" + std::to_string(height));
 }
 
 void VeWindow::initWindow() {

@@ -92,7 +92,9 @@ set(_SLANG_HINTS
 	${SLANG_PATH}/bin
 	/usr/local/bin
 	/usr/bin
+	/opt/homebrew/bin
 	./bin
+	${VULKAN_SDK_PATH}/bin
 )
 
 # Common Windows locations (Program Files, vcpkg, MSYS2/MinGW)
@@ -112,7 +114,6 @@ if (WIN32)
 	)
 endif()
 
-unset(SLANGC CACHE)
 find_program(SLANGC
 	NAMES slangc
 	HINTS ${_SLANG_HINTS}

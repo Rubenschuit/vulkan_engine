@@ -129,7 +129,12 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer command_buffer, uint3
 	};
 
 	// Present the image to the screen
-	return m_ve_device.getQueue().presentKHR(present_info);
+	try {
+		return m_ve_device.getQueue().presentKHR(present_info);
+	} catch (const vk::OutOfDateKHRError& e) {
+		VE_LOGD("PresentKHR threw eErrorOutOfDateKHR");
+		return vk::Result::eErrorOutOfDateKHR;
+	}
 }
 
 void VeSwapChain::createSwapChain() {

@@ -6,8 +6,8 @@ namespace ve {
 
 //local function
 
-#if defined(__x86_64__) && (defined(__APPLE__) || defined(__linux__))
-// Linux and macOS Intel: C-style types required
+#if defined(__x86_64__) && defined(__APPLE__)
+// macOS Intel: C-style types required
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 	VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 	VkDebugUtilsMessageTypeFlagsEXT type,
@@ -36,7 +36,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 				<< reset << pCallbackData->pMessage << '\n';
 	return VK_FALSE; // don't abort
 }
-#else // windows or arm64: want c++ style types
+#else // want c++ style types
 static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
 	vk::DebugUtilsMessageTypeFlagsEXT type,
@@ -341,8 +341,6 @@ void VeDevice::createLogicalDevice() {
 		.pNext = &feature_chain.get<vk::PhysicalDeviceFeatures2>(),
 		.queueCreateInfoCount = static_cast<uint32_t>(queue_create_infos.size()),
 		.pQueueCreateInfos = queue_create_infos.data(),
-		.enabledLayerCount = 0,
-		.ppEnabledLayerNames = nullptr,
 		.enabledExtensionCount = static_cast<uint32_t>(m_required_device_extensions.size()),
 		.ppEnabledExtensionNames = m_required_device_extensions.data()
 	};

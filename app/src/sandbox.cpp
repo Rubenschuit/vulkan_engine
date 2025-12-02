@@ -360,10 +360,11 @@ void Sandbox::renderAppWindows() {
 
 				ImGui::EndTabItem();
 			}
-			ImGui::EndTabBar();
+
 		}
-		ImGui::End();
+		ImGui::EndTabBar();
 	}
+	ImGui::End();
 }
 
 void Sandbox::createUniformBuffers() {

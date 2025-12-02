@@ -854,11 +854,6 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 					smoke.extra_data = float4((float)ParticleType::TYPE_SMOKE, 7.0f, 0.0f, 0.0f);
 					smoke.simulation_data = float4(0.0f, 0.0f, 0.0f, -1.0f);
 
-					// Write type field first to ensure it's set even if write is partial/interleaved
-					// This prevents type corruption when another thread writes at the same time
-					particles_out[smoke_index].extra_data = smoke.extra_data;
-					particles_prev[smoke_index].extra_data = smoke.extra_data;
-					// Then write full struct - type is already set
 					particles_out[smoke_index] = smoke;
 					particles_prev[smoke_index] = smoke;
 					addToAliveIndices(smoke_index);
