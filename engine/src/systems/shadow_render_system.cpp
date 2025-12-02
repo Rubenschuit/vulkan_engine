@@ -187,7 +187,7 @@ void ShadowRenderSystem::createShadowResources() {
 	// Transition shadow maps
 	m_shadow_map_array->transitionImageLayout(
 		vk::ImageLayout::eUndefined,
-		vk::ImageLayout::eDepthStencilAttachmentOptimal,
+		vk::ImageLayout::eDepthStencilReadOnlyOptimal,
 		vk::AccessFlags2{},
 		vk::AccessFlagBits2::eDepthStencilAttachmentRead,
 		vk::PipelineStageFlagBits2::eTopOfPipe,

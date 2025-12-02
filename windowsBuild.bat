@@ -26,17 +26,17 @@ if /I "%MODE%"=="debug" set BUILD_TYPE=debug
 if /I "%MODE%"=="test" set BUILD_TYPE=debug
 
 :: Set Visual Studio generator
-if /I "%VS_VERSION%"=="vs2022" set VS_GENERATOR="Visual Studio 17 2022"
-if /I "%VS_VERSION%"=="vs2026" set VS_GENERATOR="Visual Studio 17 2026"
+if /I "%VS_VERSION%"=="vs2022" set VS_GENERATOR=Visual Studio 17 2022
+if /I "%VS_VERSION%"=="vs2026" set VS_GENERATOR=Visual Studio 18 2026
 
-echo "Building in %BUILD_TYPE% mode"
-echo "Using %VS_GENERATOR%"
+echo Building in %BUILD_TYPE% mode
+echo Using %VS_GENERATOR%
 :: CMake args
 set CMAKE_ARGS=-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 if /I "%MODE%"=="test" set CMAKE_ARGS=%CMAKE_ARGS% -DVE_BUILD_TESTS=ON
 
 :: Build directory
-set BUILD_DIR=build\%BUILD_TYPE%
+set BUILD_DIR=build
 
 :: Configure and build
 cmake -S . -B "%BUILD_DIR%" -G "%VS_GENERATOR%" -A x64 %CMAKE_ARGS%
