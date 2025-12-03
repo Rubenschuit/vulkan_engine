@@ -16,8 +16,8 @@
 # MinGW path (for Windows MinGW builds)
 # set(MINGW_PATH "C:/Program Files/mingw-w64/x86_64-8.1.0-posix-seh-rt_v6-rev0/mingw64")
 
-# Slang compiler path (if not in PATH)
-# set(SLANG_HOME "C:/Tools/slang")
+# Slang compiler path (path to folder containing bin/slangc)
+# set(SLANG_HOME "C:/Program Files/Slang")
 
 # Custom paths for external libraries
 # set(TINYOBJ_PATH "X:/dev/Libraries/tinygltf")

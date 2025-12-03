@@ -85,16 +85,23 @@ endfunction()
 # Build candidate hint paths for slangc across platforms
 set(_SLANG_HINTS
 	$ENV{SLANG_HOME}/bin
+	$ENV{SLANG_HOME}
 	${SLANG_HOME}/bin
+	${SLANG_HOME}
 	$ENV{SLANG_ROOT}/bin
+	$ENV{SLANG_ROOT}
 	${SLANG_ROOT}/bin
+	${SLANG_ROOT}
 	$ENV{SLANG_PATH}/bin
+	$ENV{SLANG_PATH}
 	${SLANG_PATH}/bin
+	${SLANG_PATH}
 	/usr/local/bin
 	/usr/bin
 	/opt/homebrew/bin
 	./bin
 	${VULKAN_SDK_PATH}/bin
+	$ENV{VULKAN_SDK_PATH}/bin
 )
 
 # Common Windows locations (Program Files, vcpkg, MSYS2/MinGW)
@@ -111,6 +118,8 @@ if (WIN32)
 		${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/tools/slang
 		$ENV{VCPKG_ROOT}/installed/x64-windows/tools/slang
 		$ENV{VCPKG_ROOT}/installed/x64-windows-static/tools/slang
+		C:/Program Files/Slang/bin
+		C:/VulkanSDK/*/Bin
 	)
 endif()
 
@@ -119,7 +128,8 @@ find_program(SLANGC
 	HINTS ${_SLANG_HINTS}
 )
 if (NOT SLANGC)
-	message(FATAL_ERROR "slangc not found. Slang is required. Set SLANG_HOME or ensure slangc is on PATH.")
+	message(STATUS "SLANG_HOME: ${SLANG_HOME}")
+	message(FATAL_ERROR "slangc not found. Slang is required. Set SLANG_HOME in .env.cmake or ensure slangc is on PATH.")
 else()
 	message(STATUS "Found slangc: ${SLANGC}")
 endif()
