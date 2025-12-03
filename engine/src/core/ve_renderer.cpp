@@ -104,9 +104,12 @@ bool VeRenderer::beginFrame() {
 	m_ve_swap_chain->resetCurrentFence();
 	m_ve_swap_chain->updateTimelineValues();
 
+	// Begin command buffer for recording commands
 	auto& command_buffer = getCurrentCommandBuffer();
 	command_buffer.reset();
-	command_buffer.begin({});
+	vk::CommandBufferBeginInfo info{};
+	info.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+	command_buffer.begin(info);
 
 	return true;
 }
@@ -157,13 +160,11 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer) {
 		vk::ImageLayout::eColorAttachmentOptimal,
 		{},
 		vk::AccessFlagBits2::eColorAttachmentWrite,
-		vk::PipelineStageFlagBits2::eTopOfPipe,
+		vk::PipelineStageFlagBits2::eColorAttachmentOutput,
 		vk::PipelineStageFlagBits2::eColorAttachmentOutput
 	);
-	//
 
 	// Setup dynamic rendering attachments
-
 	vk::RenderingAttachmentInfo color_attachment_info;
 	if (m_msaa_enabled) {
 		color_attachment_info = {

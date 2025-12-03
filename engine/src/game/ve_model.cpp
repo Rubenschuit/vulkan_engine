@@ -158,27 +158,27 @@ VeModel::VeModel(VeDevice& device, const std::filesystem::path& model_path) : m_
 			uint32_t material_idx = 0;
 			if (primitive.material >= 0 && (static_cast<size_t>(primitive.material) < model.materials.size())) {
 				material_idx = static_cast<uint32_t>(primitive.material);
-				assert(material_idx == 0 || material_idx < albedo_paths.size() && "Material index out of bounds");
-				assert(material_idx == 0 || material_idx < normal_paths.size() && "Material index out of bounds");
-				assert(material_idx == 0 || material_idx < metallic_roughness_paths.size() && "Material index out of bounds");
+				assert((material_idx == 0 || material_idx < albedo_paths.size()) && "Material index out of bounds");
+				assert((material_idx == 0 || material_idx < normal_paths.size()) && "Material index out of bounds");
+				assert((material_idx == 0 || material_idx < metallic_roughness_paths.size()) && "Material index out of bounds");
 			}
 
 			// Handle vertex data
 			for (size_t i = 0; i < pos_accessor.count; i++) {
 				Vertex vertex{};
 
-				// Set position (x,y,z) (3*4 bytes)
+				// Set position (x,y,z)
 				const float* pos = reinterpret_cast<const float*>(&pos_buffer.data[pos_buffer_view.byteOffset + pos_accessor.byteOffset + i * 12]);
 				vertex.pos = {pos[0], pos[2], pos[1]}; // gltf is right-handed, y-up, we go to z-up
 
 				// Default color
 				vertex.color = {1.0f, 1.0f, 1.0f};
 
-				// Set normal (3*4 bytes)
+				// Set normal
 				const float* normal = reinterpret_cast<const float*>(&normal_buffer.data[normal_buffer_view.byteOffset + normal_accessor.byteOffset + i * 12]);
 				vertex.normal = glm::vec3{normal[0], normal[2], normal[1]};
 
-				// Set texture coordinates if available (2*4 bytes)
+				// Set texture coordinates if available
 				if (has_tex_coords) {
 					const float* tex_coord = reinterpret_cast<const float*>(&tex_coord_buffer->data[tex_coord_buffer_view->byteOffset + tex_coord_accessor->byteOffset + i * 8]);
 					vertex.tex_coord = {tex_coord[0], tex_coord[1]};
@@ -188,7 +188,7 @@ VeModel::VeModel(VeDevice& device, const std::filesystem::path& model_path) : m_
 					vertex.tex_coord = {0.0f, 0.0f};
 				}
 
-				// Set tangent if available (4*4 bytes)
+				// Set tangent if available
 				if (has_tangents) {
 					const float* tangent = reinterpret_cast<const float*>(&tangent_buffer->data[tangent_buffer_view->byteOffset + tangent_accessor->byteOffset + i * 16]);
 					vertex.tangent = glm::vec4{tangent[0], tangent[2], tangent[1], -tangent[3]};

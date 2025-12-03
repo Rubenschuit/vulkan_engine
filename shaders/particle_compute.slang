@@ -147,8 +147,12 @@ struct SpawnEvent {
 };
 
 struct Params {
+	float4 wind_direction; // xyz = direction, w = intensity
+	float4 frustum_planes[6]; // xyz = normal, w = distance
+	float4 origin;
 	float delta_time; // seconds
 	float total_time; // seconds
+	float gravity;
 	uint32_t particle_count;
 	uint32_t reset; // 1 = reinitialize particles this dispatch
 	uint32_t seed;  // rng seed for reset
@@ -156,19 +160,18 @@ struct Params {
 	float stddev;
 	uint32_t reset_kind; // 1 = point, 2 = disc
 	int mode; // 1,2,3,4,5 see particle_system.hpp ParticleMode enum
-	float4 origin;
-	uint32_t row_count;
+	uint32_t row_count; // number of rows in the texture atlas
 	float min_life;
 	float max_life;
 	uint32_t should_respawn;
 	uint32_t spawn_event_count;
-	float gravity;
+
+	// Firework only (move?)
 	float trail_interval;
 	float trail_timeout;
 	float flash_scale;
 	float flash_time;
-	float4 wind_direction; // xyz = direction, w = intensity
-	float4 frustum_planes[6]; // xyz = normal, w = distance
+
 };
 [vk::binding(3, 0)]
 ConstantBuffer<Params> params;
@@ -829,7 +832,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 
 				Particle trail;
 				trail.position = p.position;
-				trail.velocity = float4(p.velocity.xyz * 0.0f, p.velocity.w / 2.0f);
+				trail.velocity = float4(p.velocity.xyz * 0.1f, p.velocity.w / 2.0f);
 				trail.color = p.color;
 				trail.tex_coords = float4(0.0f);
 				trail.extra_data = float4((float)ParticleType::TYPE_TRAIL, p.velocity.w, 0.0f, 0.0f);

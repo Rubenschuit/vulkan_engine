@@ -48,8 +48,12 @@ struct SpawnEvent {
 
 // Uniform buffer with parameters for compute shader
 struct ParticleParams {
+	glm::vec4 wind_direction; // xyz = direction, w = intensity
+	glm::vec4 frustum_planes[6]; // xyz = normal, w = distance
+	glm::vec4 origin; // w unused
 	float delta_time;
 	float total_time = 0.0f;
+	float gravity;
 	uint32_t particle_count;
 	uint32_t reset; // 1 = reset particles this dispatch
 	uint32_t seed;  // rng seed for reset
@@ -57,20 +61,18 @@ struct ParticleParams {
 	float stddev;
 	uint32_t reset_kind; // see ParticleResetKind enum
 	uint32_t mode; // see ParticleMode enum
-	alignas(16) glm::vec4 origin; // w unused
-	uint32_t row_count;
+	uint32_t row_count; // number of rows in the texture atlas
 	float min_life;
 	float max_life;
 	uint32_t should_respawn;
-	// ring buffer emission
 	uint32_t spawn_event_count;
-	float gravity;
+
+	// Firework only (move?)
 	float trail_interval;
 	float trail_timeout;
 	float flash_scale;
 	float flash_time;
-	alignas(16) glm::vec4 wind_direction; // xyz = direction, w = intensity
-	alignas(16) glm::vec4 frustum_planes[6]; // xyz = normal, w = distance
+
 };
 
 // Data structure for vertex shader input

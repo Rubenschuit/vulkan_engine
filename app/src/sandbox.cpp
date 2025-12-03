@@ -129,7 +129,9 @@ void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 
 	// Record and submit compute work (two particle systems)
 	frame_info.compute_command_buffer.reset();
-	frame_info.compute_command_buffer.begin(vk::CommandBufferBeginInfo{});
+	vk::CommandBufferBeginInfo info{};
+	info.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+	frame_info.compute_command_buffer.begin(info);
 
 	m_fireworks_system->update(frame_info);
 	m_particle_system->update(frame_info);

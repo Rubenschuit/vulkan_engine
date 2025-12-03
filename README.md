@@ -78,17 +78,17 @@ sudo apt install git cmake xorg-dev libglfw3-dev libglm-dev libxcb-xinerama0-dev
 
 
 ## Quick start with scripts
-After installing all the dependencies, we can build and run with one script. Optional arguments include [debug|release|test|clean] (default is Release).
+After installing all the dependencies, we can build and run with one script.
 
 - ##### macOS, Linux and Windows (MinGW64 shell):
-
+Optional arguments include [release|debug|test|clean]. Default is release.
 ```bash
 cd vulkan_engine
 ./unixBuild.sh
 ```
 
 - ##### Windows (cmd or PowerShell):
-
+Optional arguments include [release|debug|test|clean] and [vs2022|vs2026]. Default is release vs2022.
 ```cmd
 cd vulkan_engine
 .\windowsBuild.bat

@@ -272,6 +272,9 @@ void VeDevice::pickPhysicalDevice() {
 			return isDeviceSuitable(phyisical_device);
 		}
 	);
+	if (dev_iter == p_devices.end()) {
+		throw std::runtime_error("No suitable GPU found");
+	}
 	assert(dev_iter != p_devices.end() && "No suitable GPU found");
 
 	// found a suitable physical device

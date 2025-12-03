@@ -132,7 +132,7 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer command_buffer, uint3
 	try {
 		return m_ve_device.getQueue().presentKHR(present_info);
 	} catch (const vk::OutOfDateKHRError& e) {
-		VE_LOGD("PresentKHR threw eErrorOutOfDateKHR");
+		VE_LOGD("PresentKHR threw eErrorOutOfDateKHR" << e.what());
 		return vk::Result::eErrorOutOfDateKHR;
 	}
 }
