@@ -28,6 +28,7 @@ struct VENGINE_API UIContext {
 	// graphics settings
 	int shadow_mode = ShadowMode::REGULAR;
 	int topology = Topology::TRIANGLE_LIST;
+	bool hdr_enabled = false;
 
 	// particle system
 	int current_mode = ParticleMode::COOL;
@@ -55,6 +56,7 @@ struct VENGINE_API UIContext {
 	// post process
 	int blur_radius = 0;
 	float blur_strength = 1.0f;
+	float exposure = 1.0f;
 };
 
 class VENGINE_API ImGuiLayer {
@@ -79,6 +81,8 @@ public:
     // Render engine-specific windows (Settings, Performance).
     // Should be called between beginFrame() and endFrame().
     void renderEngineWindows(UIContext& context);
+
+    void recreatePipeline();
 
 private:
     void uploadFonts();

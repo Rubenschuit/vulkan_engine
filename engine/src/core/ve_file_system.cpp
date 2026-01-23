@@ -10,7 +10,7 @@ std::vector<char> VeFileSystem::readFile(const std::filesystem::path& file_path)
 	if (!file.is_open()) {
 		throw std::runtime_error(std::string("failed to open file: ") + file_path.string());
 	}
-	VE_LOGI("Reading file: " << file_path.string());
+	//VE_LOGI("Reading file: " << file_path.string());
 
 	std::streampos end = file.tellg();
 	file.seekg(0, std::ios::beg);

@@ -280,6 +280,10 @@ void VeDevice::pickPhysicalDevice() {
 	// found a suitable physical device
 	m_physical_device = *dev_iter;
 
+	if (!hasHdrColorSpaceExtension()) {
+		VE_LOGW("HDR Support: VK_EXT_swapchain_colorspace NOT found.");
+	}
+
 	// set the maximum msaa samples
 	m_max_msaa_samples = queryMaxUsableSampleCount();
 
@@ -340,12 +344,14 @@ void VeDevice::createLogicalDevice() {
 	if (m_queue_index != m_compute_queue_index)
 		queue_create_infos.push_back(device_queue_create_info_compute);
 
+	std::vector<const char*> enabled_extensions = m_required_device_extensions;
+
 	vk::DeviceCreateInfo device_create_info {
 		.pNext = &feature_chain.get<vk::PhysicalDeviceFeatures2>(),
 		.queueCreateInfoCount = static_cast<uint32_t>(queue_create_infos.size()),
 		.pQueueCreateInfos = queue_create_infos.data(),
-		.enabledExtensionCount = static_cast<uint32_t>(m_required_device_extensions.size()),
-		.ppEnabledExtensionNames = m_required_device_extensions.data()
+		.enabledExtensionCount = static_cast<uint32_t>(enabled_extensions.size()),
+		.ppEnabledExtensionNames = enabled_extensions.data()
 	};
 
 	m_device = vk::raii::Device(m_physical_device, device_create_info);
@@ -400,7 +406,7 @@ uint32_t VeDevice::findTransferQueueFamilies(const vk::raii::PhysicalDevice& phy
 	return _queue_index;
 }
 
-const std::vector<const char*> VeDevice::getRequiredInstanceExtensions() const {
+std::vector<const char *> VeDevice::getRequiredInstanceExtensions() {
 	uint32_t glfw_extensionCount = 0;
 	auto glfw_extensions = glfwGetRequiredInstanceExtensions(&glfw_extensionCount);
 
@@ -413,6 +419,17 @@ const std::vector<const char*> VeDevice::getRequiredInstanceExtensions() const {
 	}
 	// add configured instance extensions
 	extensions.insert(extensions.end(), ve::REQUIRED_INSTANCE_EXTENSIONS.begin(), ve::REQUIRED_INSTANCE_EXTENSIONS.end());
+
+	// check for optional HDR instance extension
+	auto available_extensions = m_context.enumerateInstanceExtensionProperties();
+	for (const auto& ext : available_extensions) {
+		if (strcmp(ext.extensionName, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME) == 0) {
+			extensions.push_back(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
+			m_has_hdr_instance_extension = true;
+			VE_LOGI("HDR Support: VK_EXT_swapchain_colorspace found at Instance level.");
+			break;
+		}
+	}
 
 	return extensions;
 }

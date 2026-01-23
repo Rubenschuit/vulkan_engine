@@ -48,6 +48,14 @@ VeFrameInfo Sandbox::update() {
 
 	vk::raii::DescriptorSet& shadow_desc_set = m_shadow_render_system->getShadowDescriptorSet(current_frame);
 
+	int color_space_type = 0; // default SRGB
+	auto swapchain_color_space = m_ve_renderer.getSwapChainColorSpace();
+	if (swapchain_color_space == vk::ColorSpaceKHR::eExtendedSrgbLinearEXT) {
+		color_space_type = 1;
+	} else if (swapchain_color_space == vk::ColorSpaceKHR::eHdr10St2084EXT) {
+		color_space_type = 2;
+	}
+
 	VeFrameInfo frame_info = {
 		.global_descriptor_set = m_global_descriptor_sets[current_frame],
 		.texture_descriptor_set = m_texture_descriptor_set,
@@ -61,7 +69,7 @@ VeFrameInfo Sandbox::update() {
 		.frame_time = m_frame_time,
 		.total_time = m_total_time,
 		.current_frame = current_frame,
-		.post_process_push = { ui_actions.blur_radius, ui_actions.blur_strength }
+		.post_process_push = { ui_actions.blur_radius, ui_actions.blur_strength, ui_actions.exposure, color_space_type }
 	};
 
 	// Updates camera state based on input and frame time. Returns actions for systems.
@@ -187,15 +195,19 @@ void Sandbox::onSwapChainRecreated() {
 void Sandbox::recreatePipelines() {
 	m_ve_device.getDevice().waitIdle();
 	auto color_format = m_ve_renderer.getSwapChainImageFormat();
+	auto offscreen_format = m_ve_renderer.getOffscreenImageFormat();
 	auto sample_count = m_ve_renderer.getSampleCount();
-	m_simple_render_system->recreatePipeline(color_format, sample_count);
-	m_point_light_system->recreatePipeline(color_format, sample_count);
-	m_pbr_render_system->recreatePipeline(color_format, sample_count);
-	m_axes_render_system->recreatePipeline(color_format, sample_count);
-	m_skybox_render_system->recreatePipeline(color_format, sample_count);
-	m_particle_system->recreatePipeline(color_format, sample_count);
-	m_fireworks_system->recreatePipeline(color_format, sample_count);
+
+	m_simple_render_system->recreatePipeline(offscreen_format, sample_count);
+	m_point_light_system->recreatePipeline(offscreen_format, sample_count);
+	m_pbr_render_system->recreatePipeline(offscreen_format, sample_count);
+	m_axes_render_system->recreatePipeline(offscreen_format, sample_count);
+	m_skybox_render_system->recreatePipeline(offscreen_format, sample_count);
+	m_particle_system->recreatePipeline(offscreen_format, sample_count);
+	m_fireworks_system->recreatePipeline(offscreen_format, sample_count);
+
 	m_post_process_system->recreatePipeline(color_format, m_ve_renderer.getResolveTargetImageView());
+	m_imgui_layer->recreatePipeline();
 	// Shadow render system pipeline does not depend on swap chain MSAA
 }
 
@@ -275,7 +287,7 @@ void Sandbox::renderAppWindows() {
 
 				ImGui::Separator();
 				ImGui::Text("Explosion");
-				ImGui::DragInt("Particle Count", &config.explosion_particle_count, 100, 100, 10000);
+				ImGui::SliderInt("Particle Count", &config.explosion_particle_count, 5, 3000);
 				ImGui::SliderFloat("Explosion Size", &config.explosion_size, 0.1f, 5.0f);
 				ImGui::SliderFloat("Trail Interval", &config.trail_interval, 0.0001f, 0.1f, "%.4f");
 
@@ -312,6 +324,20 @@ void Sandbox::renderAppWindows() {
 				static bool s_vsync_enabled = false;
 				if (ImGui::Checkbox("Enable VSync", &s_vsync_enabled)) {
 					m_ve_renderer.setPresentMode(s_vsync_enabled ? vk::PresentModeKHR::eFifo : vk::PresentModeKHR::eImmediate);
+				}
+
+				// HDR toggle
+				bool hdr_supported = m_ve_renderer.hasHdrSupport();
+				if (!hdr_supported) {
+					ImGui::BeginDisabled();
+				}
+				if (ImGui::Checkbox("Enable HDR", &ui_actions.hdr_enabled)) {
+					m_ve_renderer.setHdrEnabled(ui_actions.hdr_enabled);
+				}
+				if (!hdr_supported) {
+					ImGui::EndDisabled();
+					ImGui::SameLine();
+					ImGui::TextDisabled("(Not supported by device)");
 				}
 
 				// Shadow mode selection
@@ -363,6 +389,7 @@ void Sandbox::renderAppWindows() {
 				ImGui::Text("Post Processing: ");
 				ImGui::SliderInt("Blur Radius", &ui_actions.blur_radius, 0, 10);
 				ImGui::SliderFloat("Blur Strength", &ui_actions.blur_strength, 0.0f, 5.0f);
+				ImGui::SliderFloat("Exposure", &ui_actions.exposure, 0.0f, 5.0f);
 
 				ImGui::EndTabItem();
 			}
@@ -483,7 +510,7 @@ void Sandbox::initSystems() {
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_shadow_render_system->getShadowSetLayout(),
-		m_ve_renderer.getSwapChainImageFormat(),
+		m_ve_renderer.getOffscreenImageFormat(),
 		project_root / "shaders" / "simple_shader.spv"
 	);
 	VE_LOGD("pbr system: " << project_root / "shaders" / "pbr_shader.spv");
@@ -492,14 +519,14 @@ void Sandbox::initSystems() {
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_shadow_render_system->getShadowSetLayout(),
-		m_ve_renderer.getSwapChainImageFormat(),
+		m_ve_renderer.getOffscreenImageFormat(),
 		project_root / "shaders" / "pbr_shader.spv"
 	);
 	VE_LOGD("axes system: " << project_root / "shaders" / "axes_shader.spv");
 	m_axes_render_system = std::make_unique<AxesRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
-		m_ve_renderer.getSwapChainImageFormat(),
+		m_ve_renderer.getOffscreenImageFormat(),
 		project_root / "shaders" / "axes_shader.spv"
 	);
 	VE_LOGD("pl system: " << project_root / "shaders" / "point_light_shader.spv");
@@ -507,7 +534,7 @@ void Sandbox::initSystems() {
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
-		m_ve_renderer.getSwapChainImageFormat(),
+		m_ve_renderer.getOffscreenImageFormat(),
 		project_root / "shaders" / "point_light_shader.spv"
 	);
 	VE_LOGD("particle system: " << project_root / "shaders" / "particle_compute.spv");
@@ -516,7 +543,7 @@ void Sandbox::initSystems() {
 		m_global_pool,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
-		m_ve_renderer.getSwapChainImageFormat(),
+		m_ve_renderer.getOffscreenImageFormat(),
 		50000, // number of particles
 		glm::vec3{0.0f, -300.0f, 50.0f},
 		project_root / "shaders" / "particle_compute.spv"
@@ -526,7 +553,7 @@ void Sandbox::initSystems() {
 		m_global_pool,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
-		m_ve_renderer.getSwapChainImageFormat(),
+		m_ve_renderer.getOffscreenImageFormat(),
 		project_root / "shaders" / "particle_compute.spv"
 	);
 	VE_LOGD("skybox system: " << project_root / "shaders" / "skybox_shader.spv");
@@ -534,7 +561,7 @@ void Sandbox::initSystems() {
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
-		m_ve_renderer.getSwapChainImageFormat(),
+		m_ve_renderer.getOffscreenImageFormat(),
 		project_root / "shaders" / "skybox_shader.spv",
 		project_root / "models" / "cube.gltf"
 	);
@@ -555,6 +582,7 @@ void Sandbox::initUI() {
 		.visible = false,
 		.show_performance = true,
 		.show_controls = true,
+		.hdr_enabled = m_ve_renderer.hasHdrSupport() && m_ve_renderer.isHdrEnabled(),
 		.speed = m_particle_system->getSpeed(),
 		.pending_particle_count = m_particle_system->getPendingParticleCount(),
 		.apply_particle_count = false,
@@ -568,7 +596,8 @@ void Sandbox::initUI() {
 		.emit_burst = false,
 		.emit_count = 1000,
 		.blur_radius = 0,
-		.blur_strength = 1.0f
+		.blur_strength = 1.0f,
+		.exposure = 1.0f
 	};
 }
 
@@ -598,9 +627,8 @@ void Sandbox::loadGameObjects() {
 
 
 	// sponza sun light
-	VeGameObject sun = VeGameObject::createPointLight(1.0f, 4.0f, glm::vec3(1.0f, 1.0f, 1.0f));
+	VeGameObject sun = VeGameObject::createPointLight(200.0f, 4.0f, glm::vec3(1.0f, 1.0f, 1.0f));
 	sun.transform.translation = glm::vec3{0.0f, 50.0f, -140.0f} + sponza_translation;
-	sun.point_light_component->intensity = 100.0f;
 	sun.point_light_component->rotates = true;
 	m_sponza_scene->getGameObjects().emplace(sun.getId(), std::move(sun));
 
@@ -644,7 +672,7 @@ void Sandbox::loadGameObjects() {
 
 	// lion eyes
 	{
-		VeGameObject green_eye = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+		VeGameObject green_eye = VeGameObject::createPointLight(2.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
 		green_eye.transform.translation = glm::vec3{126.7f, -5.87f, -331.2f} + sponza_translation;
 		green_eye.transform.scale = {.3f, .3f, .3f};
 		green_eye.point_light_component->intensity = .1f;
@@ -654,7 +682,7 @@ void Sandbox::loadGameObjects() {
 		m_sponza_scene->getGameObjects().emplace(green_eye.getId(), std::move(green_eye));
 	}
 	{
-		VeGameObject green_eye = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+		VeGameObject green_eye = VeGameObject::createPointLight(2.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
 		green_eye.transform.translation = glm::vec3{126.7f, -1.24f, -331.2f} + sponza_translation;
 		green_eye.transform.scale = {.3f, .3f, .3f};
 		green_eye.point_light_component->intensity = .1f;
@@ -670,7 +698,7 @@ void Sandbox::loadGameObjects() {
 
 	// stationary light
 	{
-		auto l = VeGameObject::createPointLight(1.0f, 2.0f, glm::vec3(1.0f, 1.0f, 1.0f));
+		auto l = VeGameObject::createPointLight(100.0f, 2.0f, glm::vec3(1.0f, 1.0f, 1.0f));
 		glm::vec3 pos = {0.0f, 0.0f, 20.0f};
 		l.transform.translation = pos;
 		l.point_light_component->rotates = false;
@@ -679,7 +707,7 @@ void Sandbox::loadGameObjects() {
 
 	// Create some lights with ranging colors
 	constexpr uint32_t num_lights = 7; // max 100 see config
-	constexpr float intensity = 0.7f;
+	constexpr float intensity = 100.0f;
 	constexpr float radius = 1.0f;
 	const glm::vec3 colors[10] = {
 		{0.0f, 1.0f, 1.0f}, //cyan

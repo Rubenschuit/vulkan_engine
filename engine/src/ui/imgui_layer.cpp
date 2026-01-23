@@ -104,7 +104,7 @@ void ImGuiLayer::beginFrame() {
 void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd) {
     ImGui::Render();
     ImDrawData* draw_data = ImGui::GetDrawData();
-    // Fender on top of the current swapchain image view
+    // Render on top of the current swapchain image view
     VkImageView color_view = static_cast<VkImageView>(*m_renderer.getSwapChainImageView(m_renderer.getCurrentImageIndex()));
     const vk::RenderingAttachmentInfo color_attachment{
         .imageView = color_view,
@@ -200,6 +200,35 @@ void ImGuiLayer::renderUI(UIContext& context) {
 		renderEngineWindows(context);
 	}
 	endFrame(m_renderer.getCurrentCommandBuffer());
+}
+
+void ImGuiLayer::recreatePipeline() {
+	ImGui_ImplVulkan_Shutdown();
+
+	ImGui_ImplVulkan_InitInfo init_info{};
+	init_info.Instance = *m_device.getInstance();
+	init_info.PhysicalDevice = *m_device.getPhysicalDevice();
+	init_info.Device = *m_device.getDevice();
+	init_info.QueueFamily = m_device.getGraphicsQueueFamilyIndex();
+	init_info.Queue = *m_device.getQueue();
+	init_info.PipelineCache = VK_NULL_HANDLE;
+	init_info.DescriptorPool = m_descriptor_pool;
+	init_info.MinImageCount = static_cast<uint32_t>(m_renderer.getImageCount());
+	init_info.ImageCount = static_cast<uint32_t>(m_renderer.getImageCount());
+	init_info.Allocator = nullptr;
+	init_info.CheckVkResultFn = nullptr;
+	init_info.PipelineInfoMain.RenderPass = VK_NULL_HANDLE;
+	init_info.PipelineInfoMain.Subpass = 0;
+	init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+	init_info.UseDynamicRendering = true;
+
+	m_color_format = static_cast<VkFormat>(m_renderer.getSwapChainImageFormat());
+	memset(&init_info.PipelineInfoMain.PipelineRenderingCreateInfo, 0, sizeof(init_info.PipelineInfoMain.PipelineRenderingCreateInfo));
+	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
+	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &m_color_format;
+
+	ImGui_ImplVulkan_Init(&init_info);
 }
 
 void ImGuiLayer::uploadFonts() {}

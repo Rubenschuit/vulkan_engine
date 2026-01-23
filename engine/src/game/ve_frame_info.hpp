@@ -48,6 +48,8 @@ enum Topology {
 struct PostProcessPushConstant {
 	int blur_radius = 0; // 0 means no blur
 	float blur_strength = 1.0f;
+	float exposure = 1.0f;
+	int color_space = 0; // 0: SRGB, 1: Extended Linear, 2: HDR10 ST2084
 };
 
 struct UniformBufferObject {

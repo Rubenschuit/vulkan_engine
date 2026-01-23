@@ -7,7 +7,7 @@
 namespace ve {
 // Constructor, initializes swap chain with present mode immediate and command buffers
 VeRenderer::VeRenderer(VeDevice& device, VeWindow& window) : m_ve_device(device), m_ve_window(window) {
-	m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, m_ve_window.getExtent(), m_desired_num_samples, m_present_mode);
+	m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, m_ve_window.getExtent(), m_desired_num_samples, m_present_mode, m_hdr_enabled);
 	createCommandBuffers();
 }
 
@@ -15,6 +15,8 @@ VeRenderer::~VeRenderer() {}
 
 float VeRenderer::getExtentAspectRatio() const { return m_ve_swap_chain->getExtentAspectRatio(); }
 vk::Format VeRenderer::getSwapChainImageFormat() const { return m_ve_swap_chain->getSwapChainImageFormat(); }
+vk::ColorSpaceKHR VeRenderer::getSwapChainColorSpace() const { return m_ve_swap_chain->getSwapChainColorSpace(); }
+vk::Format VeRenderer::getOffscreenImageFormat() const { return m_ve_swap_chain->getOffscreenImageFormat(); }
 size_t VeRenderer::getImageCount() const { return m_ve_swap_chain->getImageCount(); }
 vk::Extent2D VeRenderer::getExtent() const { return m_ve_swap_chain->getSwapChainExtent(); }
 uint32_t VeRenderer::getCurrentFrame() const {
@@ -61,16 +63,12 @@ void VeRenderer::recreateSwapChain() {
 	m_ve_device.getDevice().waitIdle();
 	extent = m_ve_window.getExtent();
 	if (m_ve_swap_chain == nullptr) {
-		m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent, m_desired_num_samples, m_present_mode);
+		m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent, m_desired_num_samples, m_present_mode, m_hdr_enabled);
 	} else {
 		// Transfer ownership of the existing swap chain to a shared_ptr so the new one
 		// can safely reference it during recreation.
 		std::shared_ptr<VeSwapChain> old_swap_chain{ std::move(m_ve_swap_chain) };
-		m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent, m_desired_num_samples, m_present_mode, old_swap_chain);
-		if (!old_swap_chain->compareSwapFormats(*m_ve_swap_chain)) {
-			throw std::runtime_error("Swap chain image (or depth) format has changed!");
-			// Todo: Handle swap chain format changes (e.g. recreate pipelines)
-		}
+		m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent, m_desired_num_samples, m_present_mode, m_hdr_enabled, old_swap_chain);
 	}
 	m_swap_chain_needs_recreation = false;
 	VE_LOGI("Swap chain recreated: " << extent.width << "x" << extent.height);

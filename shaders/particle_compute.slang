@@ -117,7 +117,7 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 
 		// For additive blending, we must pre-multiply alpha to affect RGB intensity
 		// Apply bloom brightness to RGB
-		return float4(in_vert.color.rgb * brightness * alpha, alpha);
+		return float4(in_vert.color.rgb * 2.0f * brightness * alpha, alpha);
 	} else if (in_vert.type == ParticleType::TYPE_SMOKE) {
 		col1 = smoke_texture.Sample(in_vert.uv1);
 		col2 = smoke_texture.Sample(in_vert.uv2);
@@ -822,9 +822,12 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 
 			p.simulation_data.x -= params.delta_time;
 
+			int spawn_count = 0;
+			const int MAX_SPAWNS_PER_FRAME = 8;
 
-			if (p.simulation_data.x <= 0.0f) {
-				p.simulation_data.x = params.trail_interval;
+			while (p.simulation_data.x <= 0.0f && spawn_count < MAX_SPAWNS_PER_FRAME) {
+				p.simulation_data.x += params.trail_interval;
+				spawn_count++;
 
 				// Spawn trail particle
 				uint trail_index;
@@ -844,7 +847,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 				appendToRenderBuffer(trail);
 
 				// Random chance to spawn smoke
-				uint state = wang_hash(asuint(trail_index + 1));
+				uint state = wang_hash(asuint(trail_index) ^ asuint(params.total_time) ^ uint(spawn_count));
 				if (rand01(state) < 0.3f) {
 					uint smoke_index;
 					popDeadIndex(smoke_index);

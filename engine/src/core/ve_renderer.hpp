@@ -22,6 +22,8 @@ public:
 	bool isFrameInProgress() const { return m_is_frame_started; }
 	float getExtentAspectRatio() const;
 	vk::Format getSwapChainImageFormat() const;
+	vk::ColorSpaceKHR getSwapChainColorSpace() const;
+	vk::Format getOffscreenImageFormat() const;
 	size_t getImageCount() const;
 	vk::Extent2D getExtent() const;
 	uint32_t getCurrentFrame() const;
@@ -58,6 +60,10 @@ public:
 	void recreateSwapChain();
 	void setSwapChainNeedsRecreation() { m_swap_chain_needs_recreation = true; }
 
+	bool hasHdrSupport() const { return m_ve_device.hasHdrColorSpaceExtension(); }
+	void setHdrEnabled(bool enabled) { m_hdr_enabled = hasHdrSupport() && enabled; m_swap_chain_needs_recreation = true; }
+	bool isHdrEnabled() const { return m_hdr_enabled; }
+
 private:
 	void createCommandBuffers();
 	void transitionToPresent(vk::raii::CommandBuffer& command_buffer);
@@ -74,6 +80,7 @@ private:
 	bool m_swap_chain_needs_recreation = false;
 
 	bool m_msaa_enabled = true;
+	bool m_hdr_enabled = false;
 	vk::SampleCountFlagBits m_desired_num_samples = m_ve_device.getSampleCount();
 };
 }

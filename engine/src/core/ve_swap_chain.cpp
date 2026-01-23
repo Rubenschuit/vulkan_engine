@@ -10,15 +10,15 @@
 
 namespace ve {
 
-VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, vk::PresentModeKHR present_mode)
-	: m_ve_device(device), m_window_extent(window_extent), m_present_mode(present_mode) {
+VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, vk::PresentModeKHR present_mode, bool hdr_enabled)
+	: m_ve_device(device), m_window_extent(window_extent), m_present_mode(present_mode), m_desired_num_samples(desired_num_samples), m_hdr_enabled(hdr_enabled) {
 	// Clamp desired samples to device max
 	m_desired_num_samples = desired_num_samples > m_ve_device.getSampleCount() ? m_ve_device.getSampleCount() : desired_num_samples;
 	init();
 }
 
-VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, vk::PresentModeKHR present_mode, std::shared_ptr<VeSwapChain> old_swap_chain)
-	: m_ve_device(device), m_window_extent(window_extent), m_desired_num_samples(desired_num_samples), m_present_mode(present_mode), m_old_swap_chain(old_swap_chain) {
+VeSwapChain::VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, vk::PresentModeKHR present_mode, bool hdr_enabled, std::shared_ptr<VeSwapChain> old_swap_chain)
+	: m_ve_device(device), m_window_extent(window_extent), m_present_mode(present_mode), m_desired_num_samples(desired_num_samples), m_hdr_enabled(hdr_enabled), m_old_swap_chain(old_swap_chain) {
 
 	m_desired_num_samples = desired_num_samples > m_ve_device.getSampleCount() ? m_ve_device.getSampleCount() : desired_num_samples;
 	init();
@@ -143,6 +143,12 @@ void VeSwapChain::createSwapChain() {
 	m_present_mode = chooseSwapPresentMode(m_swap_chain_support.presentModes);
 	m_swap_chain_extent = chooseSwapExtent(m_swap_chain_support.capabilities);
 	m_swap_chain_image_format = m_surface_format.format;
+	m_offscreen_image_format = m_ve_device.findSupportedFormat(
+		{vk::Format::eR16G16B16A16Sfloat, vk::Format::eR32G32B32A32Sfloat},
+		vk::ImageTiling::eOptimal,
+		vk::FormatFeatureFlagBits::eColorAttachment | vk::FormatFeatureFlagBits::eSampledImage
+	);
+	VE_LOGI("Offscreen format: " << vk::to_string(m_offscreen_image_format));
 	VE_LOGI("Color format: " << vk::to_string(m_surface_format.format));
 	VE_LOGI("Color space: " << vk::to_string(m_surface_format.colorSpace));
 
@@ -210,7 +216,7 @@ void VeSwapChain::createColorResources() {
 		m_swap_chain_extent.width,
 		m_swap_chain_extent.height,
 		m_desired_num_samples,
-		m_swap_chain_image_format,
+		m_offscreen_image_format,
 		vk::ImageTiling::eOptimal,
 		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransientAttachment,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
@@ -232,7 +238,7 @@ void VeSwapChain::createColorResources() {
 		m_swap_chain_extent.width,
 		m_swap_chain_extent.height,
 		vk::SampleCountFlagBits::e1,
-		m_swap_chain_image_format,
+		m_offscreen_image_format,
 		vk::ImageTiling::eOptimal,
 		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
@@ -318,12 +324,37 @@ void VeSwapChain::createSyncObjects() {
 // Choose the surface format, which is a combination of color depth and color space.
 // Prefer 8-bit BGRA and SRGB nonlinear color space for now.
 vk::SurfaceFormatKHR VeSwapChain::chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& available_formats) {
+	// Priority 1: HDR Color Spaces (Extended SRGB Linear preferred)
+	// ONLY if the VK_EXT_swapchain_colorspace extension is supported and enabled, AND user has enabled HDR.
+	if (m_ve_device.hasHdrColorSpaceExtension() && m_hdr_enabled) {
+		// First try Extended SRGB Linear
+		for (const auto& format : available_formats) {
+			if (format.format == vk::Format::eR16G16B16A16Sfloat &&
+				format.colorSpace == vk::ColorSpaceKHR::eExtendedSrgbLinearEXT) {
+				VE_LOGI("Selected HDR (Linear) Swapchain Format: " << vk::to_string(format.format) << " ColorSpace: " << vk::to_string(format.colorSpace));
+				return format;
+			}
+		}
+		// Fallback to HDR10 (PQ curve)
+		for (const auto& format : available_formats) {
+			if ((format.format == vk::Format::eR16G16B16A16Sfloat || format.format == vk::Format::eA2B10G10R10UnormPack32) &&
+				format.colorSpace == vk::ColorSpaceKHR::eHdr10St2084EXT) {
+				VE_LOGI("Selected HDR (PQ) Swapchain Format: " << vk::to_string(format.format) << " ColorSpace: " << vk::to_string(format.colorSpace));
+				return format;
+			}
+		}
+	}
+
+	// Priority 2: Standard SRGB
 	for (const auto& available_format : available_formats) {
 		if (available_format.format == vk::Format::eB8G8R8A8Srgb &&
 			available_format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
+			VE_LOGI("Selected SDR Swapchain Format: " << vk::to_string(available_format.format) << " ColorSpace: " << vk::to_string(available_format.colorSpace));
 			return available_format;
 		}
 	}
+
+	VE_LOGW("Could not find preferred swapchain format, falling back to: " << vk::to_string(available_formats[0].format));
 	return available_formats[0];
 }
 
@@ -462,6 +493,7 @@ float VeSwapChain::getExtentAspectRatio() const {
 
 bool VeSwapChain::compareSwapFormats(const VeSwapChain& other) const {
 	return (other.m_swap_chain_image_format == m_swap_chain_image_format &&
+			other.m_offscreen_image_format == m_offscreen_image_format &&
 			other.m_depth_image->getFormat() == m_depth_image->getFormat());
 }
 

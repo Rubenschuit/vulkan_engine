@@ -28,7 +28,7 @@ struct FireworksConfig {
     glm::vec4 particle_color{1.0f};
     bool use_random_color = true;
 
-    int explosion_particle_count = 100;
+    int explosion_particle_count = 60;
     float explosion_size = 0.8f;
 
     glm::vec3 wind_direction{1.0f, 1.0f, 0.0f};
@@ -38,7 +38,7 @@ struct FireworksConfig {
 
     int max_particles = 1000000;
 
-	float trail_interval = 0.004f; // 4ms
+	float trail_interval = 0.012f;
 	glm::vec4 smoke_color = glm::vec4(0.4f, 0.4f, 0.4f, 0.5f);
 };
 

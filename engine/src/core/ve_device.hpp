@@ -73,6 +73,7 @@ public:
 
 	const vk::PhysicalDeviceProperties getDeviceProperties() const { return m_physical_device.getProperties(); }
 	vk::SampleCountFlagBits getSampleCount() const { return m_max_msaa_samples; };
+	bool hasHdrColorSpaceExtension() const { return m_has_hdr_instance_extension; }
 
 	// Single-time command buffer helpers (select queue/pool)
 	std::unique_ptr<vk::raii::CommandBuffer> beginSingleTimeCommands(QueueKind kind = QueueKind::Graphics);
@@ -87,7 +88,7 @@ private:
 	void createCommandPools();
 
 	bool isDeviceSuitable (const vk::raii::PhysicalDevice& device) const;
-	const std::vector<const char *> getRequiredInstanceExtensions() const;
+	std::vector<const char *> getRequiredInstanceExtensions();
 	uint32_t findQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device) const;
 	uint32_t findTransferQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device) const;
 	//TODO: uint32_t findComputeQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device);
@@ -117,6 +118,7 @@ private:
 
 	// MSAA samples
 	vk::SampleCountFlagBits m_max_msaa_samples = vk::SampleCountFlagBits::e1; // set in pickPhysicalDevice
+	bool m_has_hdr_instance_extension = false;
 
 	const std::vector<const char *> m_validation_layers = ve::VALIDATION_LAYERS;
 	std::vector<const char*> m_required_device_extensions = ve::REQUIRED_DEVICE_EXTENSIONS;

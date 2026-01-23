@@ -16,8 +16,8 @@ namespace ve {
 
 class VENGINE_API VeSwapChain {
 public:
-	VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, vk::PresentModeKHR present_mode);
-	VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, vk::PresentModeKHR present_mode, std::shared_ptr<VeSwapChain> old_swap_chain);
+	VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, vk::PresentModeKHR present_mode, bool hdr_enabled);
+	VeSwapChain(VeDevice& device, vk::Extent2D window_extent, vk::SampleCountFlagBits desired_num_samples, vk::PresentModeKHR present_mode, bool hdr_enabled, std::shared_ptr<VeSwapChain> old_swap_chain);
 	~VeSwapChain();
 
 	// Not copyable or movable
@@ -31,6 +31,8 @@ public:
 	uint32_t getCurrentFrame() const { return m_current_frame; }
 	vk::raii::SwapchainKHR& getSwapChain() { return m_swap_chain; }
 	vk::Format getSwapChainImageFormat() const { return m_swap_chain_image_format; }
+	vk::ColorSpaceKHR getSwapChainColorSpace() const { return m_surface_format.colorSpace; }
+	vk::Format getOffscreenImageFormat() const { return m_offscreen_image_format; }
 	vk::Extent2D getSwapChainExtent() const { return m_swap_chain_extent; }
 	vk::PresentModeKHR getPresentMode() const { return m_present_mode; }
 	const vk::raii::ImageView& getImageView(size_t index) const { return m_swap_chain_image_views[index]; };
@@ -93,7 +95,9 @@ private:
 	std::unique_ptr<VeImage> m_color_image;
 	std::unique_ptr<VeImage> m_resolve_target_image;
 	std::unique_ptr<VeImage> m_depth_image;
+	vk::PresentModeKHR m_present_mode;
 	vk::SampleCountFlagBits m_desired_num_samples;
+	bool m_hdr_enabled;
 
 	// Synchronization primitives
 	// TODO: consider moving the timeline semaphore somewhere else
@@ -109,11 +113,11 @@ private:
 	// Per-frame binary semaphores signaled by acquire and waited by graphics submit
 	std::vector<vk::raii::Semaphore> m_image_available_semaphores;
 
-	vk::PresentModeKHR m_present_mode;
 	SwapChainSupportDetails m_swap_chain_support;
 	vk::SurfaceFormatKHR m_surface_format;
 	vk::Extent2D m_swap_chain_extent;
 	vk::Format m_swap_chain_image_format;
+	vk::Format m_offscreen_image_format;
 
 	std::shared_ptr<VeSwapChain> m_old_swap_chain; // kept alive during recreation only
 

@@ -224,7 +224,7 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		if (NdotL <= 0.0)
 			continue;
 
-		float attenuation = 1.0 / (0.01 * dot(light_dir, light_dir) + 0.1);
+		float attenuation = 1.0 / (dot(light_dir, light_dir));
 		float3 light_color = ubo.point_lights[i].color.xyz * ubo.point_lights[i].color.w * attenuation;
 		diffuse_light += light_color * NdotL * shadow_terms[i];
 
