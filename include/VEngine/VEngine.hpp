@@ -23,6 +23,7 @@
 #include "game/ve_game_object.hpp"
 #include "game/ve_camera.hpp"
 #include "game/ve_model.hpp"
+#include "game/ve_scene.hpp"
 
 #include "utils/ve_log.hpp"
 #include "input/input_controller.hpp"
@@ -37,3 +38,4 @@
 #include "systems/shadow_render_system.hpp"
 #include "systems/pbr_render_system.hpp"
 #include "systems/fireworks_system.hpp"
+#include "systems/post_process_system.hpp"

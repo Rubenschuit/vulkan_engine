@@ -323,7 +323,7 @@ void ParticleSystem::createPipeline(vk::Format color_format, vk::SampleCountFlag
 
 // Updates the particle system by recording compute commands into the compute command buffer.
 // updates the particle parameters UBO for compute shader
-void ParticleSystem::update(VeFrameInfo& frame_info) {
+void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 	assert(frame_info.current_frame < MAX_FRAMES_IN_FLIGHT && "current_frame out of bounds");
 	assert(m_compute_uniform_buffers.size() == MAX_FRAMES_IN_FLIGHT && "compute_uniform_buffers size incorrect");
 	assert(m_total_time >= 0.0f && "total_time should be non-negative");

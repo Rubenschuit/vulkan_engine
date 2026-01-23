@@ -70,7 +70,7 @@ void FireworksSystem::launchRocket(glm::vec3 pos, glm::vec3 vel, glm::vec4 color
     m_particle_system->emitParticles(event);
 }
 
-void FireworksSystem::update(VeFrameInfo& frame_info) {
+void FireworksSystem::recordComputeCommands(VeFrameInfo& frame_info) {
     // Handle pending capacity change at the start of update (safe point)
     if (m_pending_capacity > 0) {
         if (m_particle_system) {
@@ -160,7 +160,7 @@ void FireworksSystem::update(VeFrameInfo& frame_info) {
     }
 
     // Update the internal particle system
-    m_particle_system->update(frame_info);
+    m_particle_system->recordComputeCommands(frame_info);
 }
 
 void FireworksSystem::render(VeFrameInfo& frame_info) const {

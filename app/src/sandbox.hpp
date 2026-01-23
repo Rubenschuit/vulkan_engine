@@ -1,6 +1,5 @@
 #pragma once
 #include "VEngine/VEngine.hpp"
-#include "game/ve_scene.hpp"
 #include <filesystem>
 #include <memory>
 
@@ -26,7 +25,7 @@ private:
 	void initUI();
 	void loadGameObjects();
 
-	void updateParticles(VeFrameInfo& frame_info, InputActions& actions);
+	void updateParticles(InputActions& actions);
 	void renderAppWindows();
 	void renderControlsWindow();
 	void recreatePipelines();
@@ -70,6 +69,7 @@ private:
 	std::unique_ptr<ParticleSystem> m_particle_system;
 	std::unique_ptr<FireworksSystem> m_fireworks_system;
 	std::unique_ptr<ShadowRenderSystem> m_shadow_render_system;
+	std::unique_ptr<PostProcessSystem> m_post_process_system;
 };
 
 }

@@ -164,7 +164,7 @@ void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBuffe
 	static bool first_log = true;
 	if (first_log) {
 		first_log = false;
-		VE_LOGI("Point light system: updated UBO with " << num_lights << " lights, " << num_shadow_lights << " shadow-casting");
+		//VE_LOGI("Point light system: updated UBO with " << num_lights << " lights, " << num_shadow_lights << " shadow-casting");
 	}
 }
 } // namespace ve

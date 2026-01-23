@@ -226,7 +226,30 @@ void VeSwapChain::createColorResources() {
 		vk::PipelineStageFlagBits2::eTopOfPipe, // src stage
 		vk::PipelineStageFlagBits2::eColorAttachmentOutput // dst stage
 	);
-	VE_LOGD("Color resource created");
+
+	m_resolve_target_image = std::make_unique<VeImage>(
+		m_ve_device,
+		m_swap_chain_extent.width,
+		m_swap_chain_extent.height,
+		vk::SampleCountFlagBits::e1,
+		m_swap_chain_image_format,
+		vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		vk::ImageAspectFlagBits::eColor,
+		false,
+		1);
+
+	m_resolve_target_image->transitionImageLayout(
+		vk::ImageLayout::eUndefined,
+		vk::ImageLayout::eShaderReadOnlyOptimal,
+		{},
+		vk::AccessFlagBits2::eShaderRead,
+		vk::PipelineStageFlagBits2::eTopOfPipe,
+		vk::PipelineStageFlagBits2::eFragmentShader
+	);
+
+	VE_LOGD("Color resources created (including resolve target)");
 }
 
 void VeSwapChain::createDepthResources() {
@@ -381,6 +404,41 @@ void VeSwapChain::transitionImageLayout(
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.image = m_swap_chain_images[image_index],
+		.subresourceRange = {
+			.aspectMask = vk::ImageAspectFlagBits::eColor,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = 0,
+			.layerCount = 1
+		}
+	};
+	vk::DependencyInfo dependency_info = {
+		.dependencyFlags = {},
+		.imageMemoryBarrierCount = 1,
+		.pImageMemoryBarriers = &barrier
+	};
+	command_buffer.pipelineBarrier2(dependency_info);
+}
+
+void VeSwapChain::transitionResolveTargetLayout(
+		vk::raii::CommandBuffer& command_buffer,
+		vk::ImageLayout old_layout,
+		vk::ImageLayout new_layout,
+		vk::AccessFlags2 src_access_mask,
+		vk::AccessFlags2 dst_access_mask,
+		vk::PipelineStageFlags2 src_stage_mask,
+		vk::PipelineStageFlags2 dst_stage_mask) {
+
+	vk::ImageMemoryBarrier2 barrier = {
+		.srcStageMask = src_stage_mask,
+		.srcAccessMask = src_access_mask,
+		.dstStageMask = dst_stage_mask,
+		.dstAccessMask = dst_access_mask,
+		.oldLayout = old_layout,
+		.newLayout = new_layout,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = *m_resolve_target_image->getImage(),
 		.subresourceRange = {
 			.aspectMask = vk::ImageAspectFlagBits::eColor,
 			.baseMipLevel = 0,

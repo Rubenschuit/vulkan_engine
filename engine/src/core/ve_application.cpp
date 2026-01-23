@@ -49,6 +49,7 @@ void VeApplication::run() {
 			continue;
 
 
+		// Update and render implemented by derived class
 		VeFrameInfo frame_info = update();
 		render(frame_info);
 

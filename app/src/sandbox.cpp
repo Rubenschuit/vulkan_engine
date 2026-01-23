@@ -60,7 +60,8 @@ VeFrameInfo Sandbox::update() {
 		.game_objects = ui_actions.current_scene == 1 ? m_simple_scene->getGameObjects() : m_sponza_scene->getGameObjects(),
 		.frame_time = m_frame_time,
 		.total_time = m_total_time,
-		.current_frame = current_frame
+		.current_frame = current_frame,
+		.post_process_push = { ui_actions.blur_radius, ui_actions.blur_strength }
 	};
 
 	// Updates camera state based on input and frame time. Returns actions for systems.
@@ -77,7 +78,7 @@ VeFrameInfo Sandbox::update() {
 	}
 
 	updateCamera();
-	updateParticles(frame_info, input_actions);
+	updateParticles(input_actions);
 	updateWindowTitle();
 
 	// update ubos
@@ -88,12 +89,19 @@ VeFrameInfo Sandbox::update() {
 	m_shadow_render_system->updateUniformBuffer(current_frame, ubo); // update internal shadow UBO with light data from main UBO
 	this->updateUniformBuffer(current_frame, ubo); // view/proj/camera location in application base class
 
+	// Record and submit compute work (two particle systems)
+	m_fireworks_system->recordComputeCommands(frame_info);
+	m_particle_system->recordComputeCommands(frame_info);
+
+	frame_info.compute_command_buffer.end();
+	m_ve_renderer.submitCompute(frame_info.compute_command_buffer);
+
 	return frame_info;
 }
 
 // Update particle system based on input actions and UI context
 // Consider moving this to the particle system class
-void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
+void Sandbox::updateParticles(InputActions& actions) {
 	// Apply input actions
 	if (actions.set_mode >= 1 && actions.set_mode <= 5) {
 		m_particle_system->setMode(actions.set_mode);
@@ -126,19 +134,6 @@ void Sandbox::updateParticles(VeFrameInfo& frame_info, InputActions& actions) {
 	if (actions.launch_firework) {
 		m_fireworks_system->launchRocket();
 	}
-
-	// Record and submit compute work (two particle systems)
-	frame_info.compute_command_buffer.reset();
-	vk::CommandBufferBeginInfo info{};
-	info.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
-	frame_info.compute_command_buffer.begin(info);
-
-	m_fireworks_system->update(frame_info);
-	m_particle_system->update(frame_info);
-
-	frame_info.compute_command_buffer.end();
-
-	m_ve_renderer.submitCompute(frame_info.compute_command_buffer);
 }
 
 // Renders the scene and draws the UI
@@ -170,6 +165,11 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 
 	m_ve_renderer.endSceneRender(command_buffer);
 
+	// Post-processing pass
+	m_ve_renderer.beginPostProcessRender(command_buffer);
+	m_post_process_system->render(command_buffer, frame_info.post_process_push);
+	m_ve_renderer.endPostProcessRender(command_buffer);
+
 	// Draw UI: begin frame, render app-specific windows, render engine windows, end frame
 	m_imgui_layer->beginFrame();
 	if (ui_actions.visible) {
@@ -195,6 +195,7 @@ void Sandbox::recreatePipelines() {
 	m_skybox_render_system->recreatePipeline(color_format, sample_count);
 	m_particle_system->recreatePipeline(color_format, sample_count);
 	m_fireworks_system->recreatePipeline(color_format, sample_count);
+	m_post_process_system->recreatePipeline(color_format, m_ve_renderer.getResolveTargetImageView());
 	// Shadow render system pipeline does not depend on swap chain MSAA
 }
 
@@ -357,6 +358,11 @@ void Sandbox::renderAppWindows() {
 				// Axes system visibility
 				ImGui::Separator();
 				ImGui::Checkbox("Show Axes", &ui_actions.show_axes);
+
+				ImGui::Separator();
+				ImGui::Text("Post Processing: ");
+				ImGui::SliderInt("Blur Radius", &ui_actions.blur_radius, 0, 10);
+				ImGui::SliderFloat("Blur Strength", &ui_actions.blur_strength, 0.0f, 5.0f);
 
 				ImGui::EndTabItem();
 			}
@@ -533,6 +539,12 @@ void Sandbox::initSystems() {
 		project_root / "models" / "cube.gltf"
 	);
 
+	m_post_process_system = std::make_unique<PostProcessSystem>(
+		m_ve_device,
+		m_ve_renderer.getSwapChainImageFormat(),
+		m_ve_renderer.getResolveTargetImageView(),
+		project_root / "shaders" / "post_process.spv"
+	);
 }
 
 void Sandbox::initUI() {
@@ -554,7 +566,9 @@ void Sandbox::initUI() {
 		.max_life = m_particle_system->getMaxLife(),
 		.should_respawn = m_particle_system->getShouldRespawn(),
 		.emit_burst = false,
-		.emit_count = 1000
+		.emit_count = 1000,
+		.blur_radius = 0,
+		.blur_strength = 1.0f
 	};
 }
 
@@ -828,7 +842,7 @@ void Sandbox::renderControlsWindow() {
 	}
 
 	if (ImGui::Begin("Controls", &ui_actions.show_controls, flags)) {
-		ImGui::Text("WASD: Move | Space/C: Up/Down");
+		ImGui::Text("WASD: Move | Space/C: Up/Down | Shift: Sprint");
 		ImGui::Separator();
 		ImGui::Text("Particle simulation mode: ");
 		const char* modes[] = { "Earth Gravity", "Cool Gravity", "Succ mode", "Stasis", "Galaxy" };

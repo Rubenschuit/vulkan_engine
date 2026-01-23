@@ -52,7 +52,7 @@ public:
         vk::Format color_format,
         std::filesystem::path shader_path);
 
-    void update(VeFrameInfo& frame_info);
+    void recordComputeCommands(VeFrameInfo& frame_info);
     void render(VeFrameInfo& frame_info) const;
 	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
 		m_particle_system->recreatePipeline(color_format, sample_count);

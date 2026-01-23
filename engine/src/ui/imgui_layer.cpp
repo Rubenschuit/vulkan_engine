@@ -104,7 +104,7 @@ void ImGuiLayer::beginFrame() {
 void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd) {
     ImGui::Render();
     ImDrawData* draw_data = ImGui::GetDrawData();
-    // Dynamic rendering: render on top of the current swapchain image view
+    // Fender on top of the current swapchain image view
     VkImageView color_view = static_cast<VkImageView>(*m_renderer.getSwapChainImageView(m_renderer.getCurrentImageIndex()));
     const vk::RenderingAttachmentInfo color_attachment{
         .imageView = color_view,

@@ -117,7 +117,7 @@ public:
 	ParticleSystem(const ParticleSystem&) = delete;
 	ParticleSystem& operator=(const ParticleSystem&) = delete;
 
-	void update(VeFrameInfo& frame_info);
+	void recordComputeCommands(VeFrameInfo& frame_info);
 	void render(VeFrameInfo& frame_info) const;
 	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
 		m_pipeline.reset();

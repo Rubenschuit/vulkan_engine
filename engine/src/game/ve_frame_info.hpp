@@ -45,6 +45,11 @@ enum Topology {
 	LINE_LIST = 1,
 };
 
+struct PostProcessPushConstant {
+	int blur_radius = 0; // 0 means no blur
+	float blur_strength = 1.0f;
+};
+
 struct UniformBufferObject {
 	glm::mat4 view;
 	glm::mat4 proj;
@@ -73,6 +78,7 @@ struct VeFrameInfo {
 	float frame_time;
 	float total_time;
 	uint32_t current_frame;
+	PostProcessPushConstant post_process_push;
 };
 
 }

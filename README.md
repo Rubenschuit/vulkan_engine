@@ -125,7 +125,7 @@ Then, in VS, right-click the VeApp target, set as startup project, build and the
 
 ## Controls
 
-- Camera: WASD/C/Space to move, arrow keys or mouse to look
+- Camera: WASD/C/Space and Shift to move, arrow keys or mouse to look
 - UI toggle: Tab
 - Particle modes: 1 / 2 / 3 / 4 / 5
 - Reset particles: E (explosion) or G (rotating disk)

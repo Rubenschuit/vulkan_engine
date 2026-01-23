@@ -52,6 +52,9 @@ struct VENGINE_API UIContext {
 	bool emit_burst;
 	int emit_count;
 
+	// post process
+	int blur_radius = 0;
+	float blur_strength = 1.0f;
 };
 
 class VENGINE_API ImGuiLayer {

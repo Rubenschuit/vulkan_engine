@@ -29,6 +29,7 @@ public:
 	vk::raii::CommandBuffer& getCurrentCommandBuffer();
 	vk::raii::CommandBuffer& getCurrentComputeCommandBuffer();
 	const vk::raii::ImageView& getSwapChainImageView(size_t index) const { return m_ve_swap_chain->getSwapChainImageViews()[index]; }
+	const vk::raii::ImageView& getResolveTargetImageView() const { return m_ve_swap_chain->getResolveTargetImageView(); }
 	bool isSwapChainOutOfDate() const { return m_swap_chain_needs_recreation; }
 
 	// Begin a new frame. Returns true if a frame was acquired and recording can start.
@@ -38,6 +39,11 @@ public:
 	void beginSceneRender(vk::raii::CommandBuffer& command_buffer);
 	// Ends dynamic rendering for the scene but does not transition to Present.
 	void endSceneRender(vk::raii::CommandBuffer& command_buffer);
+
+	// Start rendering to the swapchain image, sampling from the offscreen resolve target.
+	void beginPostProcessRender(vk::raii::CommandBuffer& command_buffer);
+	void endPostProcessRender(vk::raii::CommandBuffer& command_buffer);
+
 	// Transition the current swapchain image to PresentSrcKHR, submits and presents it,
 	// and advances the current frame.
 	void endFrame(vk::raii::CommandBuffer& command_buffer);

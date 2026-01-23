@@ -59,6 +59,7 @@ if (NOT Vulkan_FOUND)
 	message(FATAL_ERROR "Could not locate Vulkan SDK. Set VULKAN_SDK_PATH or install system Vulkan.")
 else()
 	message(STATUS "Vulkan include: ${Vulkan_INCLUDE_DIRS}")
+	message(STATUS "Vulkan version: ${Vulkan_VERSION}")
 endif()
 
 # GLFW

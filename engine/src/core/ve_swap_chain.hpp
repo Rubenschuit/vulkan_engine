@@ -35,6 +35,7 @@ public:
 	vk::PresentModeKHR getPresentMode() const { return m_present_mode; }
 	const vk::raii::ImageView& getImageView(size_t index) const { return m_swap_chain_image_views[index]; };
 	const vk::raii::ImageView& getColorImageView() const { return m_color_image->getImageView(); }
+	const vk::raii::ImageView& getResolveTargetImageView() const { return m_resolve_target_image->getImageView(); }
 	const vk::raii::ImageView& getDepthImageView() const { return m_depth_image->getImageView(); }
 	const std::vector<vk::Image>& getSwapChainImages() const { return m_swap_chain_images; }
 	const std::vector<vk::raii::ImageView>& getSwapChainImageViews() const { return m_swap_chain_image_views; }
@@ -51,6 +52,15 @@ public:
 	void transitionImageLayout(
 		vk::raii::CommandBuffer& command_buffer,
 		uint32_t image_index,
+		vk::ImageLayout old_layout,
+		vk::ImageLayout new_layout,
+		vk::AccessFlags2 src_access_mask,
+		vk::AccessFlags2 dst_access_mask,
+		vk::PipelineStageFlags2 src_stage,
+		vk::PipelineStageFlags2 dst_stage
+	);
+	void transitionResolveTargetLayout(
+		vk::raii::CommandBuffer& command_buffer,
 		vk::ImageLayout old_layout,
 		vk::ImageLayout new_layout,
 		vk::AccessFlags2 src_access_mask,
@@ -81,6 +91,7 @@ private:
 
 	//depth/color resources
 	std::unique_ptr<VeImage> m_color_image;
+	std::unique_ptr<VeImage> m_resolve_target_image;
 	std::unique_ptr<VeImage> m_depth_image;
 	vk::SampleCountFlagBits m_desired_num_samples;
 

@@ -88,8 +88,8 @@ bool VeRenderer::beginFrame() {
 	// Acquire an image from the swap chain
 	vk::Result result = m_ve_swap_chain->acquireNextImage(&m_current_image_index);
 	if (result == vk::Result::eErrorOutOfDateKHR) {
-		VE_LOGD("Result of acquireNextImage is eErrorOutOfDateKHR, recreating swap chain.");
-		recreateSwapChain();
+		VE_LOGD("Result of acquireNextImage is eErrorOutOfDateKHR, setting flag.");
+		m_swap_chain_needs_recreation = true;
 		return false;
 	}
 	if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) {
@@ -111,6 +111,11 @@ bool VeRenderer::beginFrame() {
 	info.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
 	command_buffer.begin(info);
 
+	// Also begin compute command buffer
+	auto& compute_command_buffer = getCurrentComputeCommandBuffer();
+	compute_command_buffer.reset();
+	compute_command_buffer.begin(info);
+
 	return true;
 }
 
@@ -126,12 +131,12 @@ void VeRenderer::endFrame(vk::raii::CommandBuffer& command_buffer) {
 	// Submit the command buffer, present the image in accordance with the timeline semaphore values
 	auto result = m_ve_swap_chain->submitAndPresent(*command_buffer, &m_current_image_index);
 	if (result == vk::Result::eErrorOutOfDateKHR) {
-		VE_LOGD("Result of present is eErrorOutOfDateKHR, recreating swap chain.");
-		recreateSwapChain();
+		VE_LOGD("Result of present is eErrorOutOfDateKHR, setting flag.");
+		m_swap_chain_needs_recreation = true;
 	}
 	else if (result == vk::Result::eSuboptimalKHR) {
-		VE_LOGD("Result of present is eSuboptimalKHR, recreating swap chain.");
-		recreateSwapChain();
+		VE_LOGD("Result of present is eSuboptimalKHR, setting flag.");
+		m_swap_chain_needs_recreation = true;
 	}
 	if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR && result != vk::Result::eErrorOutOfDateKHR) {
 		throw std::runtime_error("failed to present swap chain image!");
@@ -152,15 +157,14 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer) {
 	auto height = extent.height;
 	auto width = extent.width;
 
-	// Transition the swap chain image to eColorAttachmentOptimal
-	m_ve_swap_chain->transitionImageLayout(
+	// Transition the resolve target to eColorAttachmentOptimal
+	m_ve_swap_chain->transitionResolveTargetLayout(
 		command_buffer,
-		m_current_image_index,
 		vk::ImageLayout::eUndefined,
 		vk::ImageLayout::eColorAttachmentOptimal,
-		{},
+		vk::AccessFlagBits2::eShaderRead,
 		vk::AccessFlagBits2::eColorAttachmentWrite,
-		vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		vk::PipelineStageFlagBits2::eFragmentShader,
 		vk::PipelineStageFlagBits2::eColorAttachmentOutput
 	);
 
@@ -172,7 +176,7 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer) {
 			.imageView = *m_ve_swap_chain->getColorImageView(),
 			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
 			.resolveMode = vk::ResolveModeFlagBits::eAverage,
-			.resolveImageView = *m_ve_swap_chain->getSwapChainImageViews()[m_current_image_index],
+			.resolveImageView = *m_ve_swap_chain->getResolveTargetImageView(),
 			.resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
 			.loadOp = vk::AttachmentLoadOp::eClear,
 			.storeOp = vk::AttachmentStoreOp::eDontCare,
@@ -181,7 +185,7 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer) {
 	} else {
 		color_attachment_info = {
 			.sType = vk::StructureType::eRenderingAttachmentInfo,
-			.imageView = *m_ve_swap_chain->getSwapChainImageViews()[m_current_image_index],
+			.imageView = *m_ve_swap_chain->getResolveTargetImageView(),
 			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
 			.loadOp = vk::AttachmentLoadOp::eClear,
 			.storeOp = vk::AttachmentStoreOp::eStore,
@@ -214,6 +218,63 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer) {
 void VeRenderer::endSceneRender(vk::raii::CommandBuffer& command_buffer) {
 	assert(m_is_frame_started && "Can't call endRender while frame is not in progress");
 	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end render on command buffer from a different frame");
+
+	command_buffer.endRendering();
+
+	// Transition the resolve target to eShaderReadOnlyOptimal for post-processing
+	m_ve_swap_chain->transitionResolveTargetLayout(
+		command_buffer,
+		vk::ImageLayout::eColorAttachmentOptimal,
+		vk::ImageLayout::eShaderReadOnlyOptimal,
+		vk::AccessFlagBits2::eColorAttachmentWrite,
+		vk::AccessFlagBits2::eShaderRead,
+		vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		vk::PipelineStageFlagBits2::eFragmentShader
+	);
+}
+
+void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer) {
+	assert(m_is_frame_started && "Can't call beginPostProcessRender while frame is not in progress");
+	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin post-process on command buffer from a different frame");
+
+	auto extent = m_ve_swap_chain->getSwapChainExtent();
+
+	// Transition the swap chain image to eColorAttachmentOptimal
+	m_ve_swap_chain->transitionImageLayout(
+		command_buffer,
+		m_current_image_index,
+		vk::ImageLayout::eUndefined,
+		vk::ImageLayout::eColorAttachmentOptimal,
+		{},
+		vk::AccessFlagBits2::eColorAttachmentWrite,
+		vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		vk::PipelineStageFlagBits2::eColorAttachmentOutput
+	);
+
+	vk::RenderingAttachmentInfo color_attachment_info = {
+		.sType = vk::StructureType::eRenderingAttachmentInfo,
+		.imageView = *m_ve_swap_chain->getSwapChainImageViews()[m_current_image_index],
+		.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+		.loadOp = vk::AttachmentLoadOp::eClear,
+		.storeOp = vk::AttachmentStoreOp::eStore,
+		.clearValue = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f)
+	};
+
+	vk::RenderingInfo rendering_info = {
+		.renderArea = { .offset = { 0, 0 }, .extent = extent },
+		.layerCount = 1,
+		.colorAttachmentCount = 1,
+		.pColorAttachments = &color_attachment_info
+	};
+
+	command_buffer.beginRendering(rendering_info);
+	command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f));
+	command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), extent));
+}
+
+void VeRenderer::endPostProcessRender(vk::raii::CommandBuffer& command_buffer) {
+	assert(m_is_frame_started && "Can't call endPostProcessRender while frame is not in progress");
+	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end post-process on command buffer from a different frame");
 
 	command_buffer.endRendering();
 }
