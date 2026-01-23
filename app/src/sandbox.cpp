@@ -334,6 +334,15 @@ void Sandbox::renderAppWindows() {
 				if (ImGui::Checkbox("Enable HDR", &ui_actions.hdr_enabled)) {
 					m_ve_renderer.setHdrEnabled(ui_actions.hdr_enabled);
 				}
+				if (hdr_supported && ui_actions.hdr_enabled) {
+					auto color_space = m_ve_renderer.getSwapChainColorSpace();
+					std::string mode_str = "Selected Mode: ";
+					if (color_space == vk::ColorSpaceKHR::eHdr10St2084EXT) mode_str += "HDR10 (PQ)";
+					else if (color_space == vk::ColorSpaceKHR::eExtendedSrgbLinearEXT) mode_str += "Extended sRGB (scRGB)";
+					else mode_str += "Standard (SDR)";
+					ImGui::SameLine();
+					ImGui::TextDisabled("| %s", mode_str.c_str());
+				}
 				if (!hdr_supported) {
 					ImGui::EndDisabled();
 					ImGui::SameLine();

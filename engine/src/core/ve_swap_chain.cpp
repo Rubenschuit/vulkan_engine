@@ -324,23 +324,37 @@ void VeSwapChain::createSyncObjects() {
 // Choose the surface format, which is a combination of color depth and color space.
 // Prefer 8-bit BGRA and SRGB nonlinear color space for now.
 vk::SurfaceFormatKHR VeSwapChain::chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& available_formats) {
-	// Priority 1: HDR Color Spaces (Extended SRGB Linear preferred)
-	// ONLY if the VK_EXT_swapchain_colorspace extension is supported and enabled, AND user has enabled HDR.
+	// print all available formats and color spaces
+
 	if (m_ve_device.hasHdrColorSpaceExtension() && m_hdr_enabled) {
-		// First try Extended SRGB Linear
-		for (const auto& format : available_formats) {
-			if (format.format == vk::Format::eR16G16B16A16Sfloat &&
-				format.colorSpace == vk::ColorSpaceKHR::eExtendedSrgbLinearEXT) {
-				VE_LOGI("Selected HDR (Linear) Swapchain Format: " << vk::to_string(format.format) << " ColorSpace: " << vk::to_string(format.colorSpace));
-				return format;
-			}
-		}
-		// Fallback to HDR10 (PQ curve)
-		for (const auto& format : available_formats) {
-			if ((format.format == vk::Format::eR16G16B16A16Sfloat || format.format == vk::Format::eA2B10G10R10UnormPack32) &&
-				format.colorSpace == vk::ColorSpaceKHR::eHdr10St2084EXT) {
-				VE_LOGI("Selected HDR (PQ) Swapchain Format: " << vk::to_string(format.format) << " ColorSpace: " << vk::to_string(format.colorSpace));
-				return format;
+#if defined(__APPLE__)
+		// macOS: Extended SRGB Linear
+		std::vector<vk::ColorSpaceKHR> preferred_spaces = {
+			vk::ColorSpaceKHR::eExtendedSrgbLinearEXT,
+			vk::ColorSpaceKHR::eHdr10St2084EXT
+		};
+#else
+		// Windows/Linux: HDR10 (PQ)
+		std::vector<vk::ColorSpaceKHR> preferred_spaces = {
+			vk::ColorSpaceKHR::eHdr10St2084EXT,
+			vk::ColorSpaceKHR::eExtendedSrgbLinearEXT
+		};
+#endif
+
+		for (auto space : preferred_spaces) {
+			for (const auto& format : available_formats) {
+				if (space == vk::ColorSpaceKHR::eHdr10St2084EXT) {
+					if ((format.format == vk::Format::eA2B10G10R10UnormPack32 || format.format == vk::Format::eR16G16B16A16Sfloat) &&
+						format.colorSpace == space) {
+						VE_LOGI("Selected HDR (PQ) Swapchain Format: " << vk::to_string(format.format) << " ColorSpace: " << vk::to_string(format.colorSpace));
+						return format;
+					}
+				} else if (space == vk::ColorSpaceKHR::eExtendedSrgbLinearEXT) {
+					if (format.format == vk::Format::eR16G16B16A16Sfloat && format.colorSpace == space) {
+						VE_LOGI("Selected HDR (Linear) Swapchain Format: " << vk::to_string(format.format) << " ColorSpace: " << vk::to_string(format.colorSpace));
+						return format;
+					}
+				}
 			}
 		}
 	}
