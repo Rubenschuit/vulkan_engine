@@ -10,12 +10,13 @@ PostProcessSystem::PostProcessSystem(
 	VeDevice& device,
 	vk::Format color_format,
 	const vk::raii::ImageView& resolve_target_view,
+	const vk::raii::ImageView& bloom_texture_view,
 	std::filesystem::path shader_path)
 	: m_ve_device(device), m_shader_path(std::move(shader_path)) {
 
 	createDescriptorSetLayout();
 	createDescriptorPool();
-	createDescriptorSet(resolve_target_view);
+	createDescriptorSet(resolve_target_view, bloom_texture_view);
 	createPipelineLayout();
 	createPipeline(color_format);
 }
@@ -25,18 +26,19 @@ PostProcessSystem::~PostProcessSystem() = default;
 void PostProcessSystem::createDescriptorSetLayout() {
 	m_descriptor_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
+		.addBinding(1, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
 		.build();
 }
 
 void PostProcessSystem::createDescriptorPool() {
 	m_descriptor_pool = VeDescriptorPool::Builder(m_ve_device)
 		.setMaxSets(1)
-		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 1)
+		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 2)
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
 		.build();
 }
 
-void PostProcessSystem::createDescriptorSet(const vk::raii::ImageView& resolve_target_view) {
+void PostProcessSystem::createDescriptorSet(const vk::raii::ImageView& resolve_target_view, const vk::raii::ImageView& bloom_texture_view) {
 	if (!m_sampler) {
 		vk::SamplerCreateInfo sampler_info{
 			.magFilter = vk::Filter::eLinear,
@@ -65,8 +67,15 @@ void PostProcessSystem::createDescriptorSet(const vk::raii::ImageView& resolve_t
 		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
 	};
 
+	vk::DescriptorImageInfo bloom_info{
+		.sampler = **m_sampler,
+		.imageView = *bloom_texture_view,
+		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
+	};
+
 	VeDescriptorWriter(*m_descriptor_set_layout, *m_descriptor_pool)
 		.writeImage(0, &image_info)
+		.writeImage(1, &bloom_info)
 		.build(m_descriptor_set);
 }
 
@@ -130,11 +139,11 @@ void PostProcessSystem::render(vk::raii::CommandBuffer& command_buffer, const Po
 	command_buffer.draw(3, 1, 0, 0);
 }
 
-void PostProcessSystem::recreatePipeline(vk::Format color_format, const vk::raii::ImageView& resolve_target_view) {
+void PostProcessSystem::recreatePipeline(vk::Format color_format, const vk::raii::ImageView& resolve_target_view, const vk::raii::ImageView& bloom_texture_view) {
 	m_ve_pipeline.reset();
 	m_descriptor_set = nullptr;
 	m_descriptor_pool->resetPool();
-	createDescriptorSet(resolve_target_view);
+	createDescriptorSet(resolve_target_view, bloom_texture_view);
 	createPipeline(color_format);
 }
 

@@ -25,38 +25,43 @@ struct VENGINE_API UIContext {
 	int current_scene = 1;
 	RenderMode render_mode = RenderMode::BRDF_MICROFACET;
 
+	// sponza settings
+	float sun_intensity = 2000.0f;
+
 	// graphics settings
 	int shadow_mode = ShadowMode::REGULAR;
 	int topology = Topology::TRIANGLE_LIST;
 	bool hdr_enabled = false;
 
 	// particle system
-	int current_mode = ParticleMode::COOL;
+	int current_mode = 1;
 	float speed = 1.0f;
 
 	// particle count
-	uint32_t pending_particle_count;
-	bool apply_particle_count;
-	bool reset_particle_count;
+	uint32_t pending_particle_count = 10000;
+	bool apply_particle_count = false;
+	bool reset_particle_count = false;
 
 	// particle explosion normal dist
-	float particle_velocity_mean;
-	float particle_velocity_stddev;
-	bool apply_velocity_params;
+	float particle_velocity_mean = 0.0f;
+	float particle_velocity_stddev = 1.0f;
+	bool apply_velocity_params = false;
 
 	// lifetime
-	float min_life;
-	float max_life;
-	bool should_respawn;
+	float min_life = 1.0f;
+	float max_life = 3.0f;
+	bool should_respawn = true;
 
 	// emission
-	bool emit_burst;
-	int emit_count;
+	bool emit_burst = false;
+	int emit_count = 1000;
 
 	// post process
 	int blur_radius = 0;
 	float blur_strength = 1.0f;
 	float exposure = 1.0f;
+	bool bloom_enabled = true;
+	float bloom_strength = 0.01f;
 };
 
 class VENGINE_API ImGuiLayer {

@@ -62,6 +62,16 @@ public:
 		vk::PipelineStageFlags2 dst_stage
 	);
 
+	void transitionImageLayout(
+		vk::raii::CommandBuffer& command_buffer,
+		vk::ImageLayout old_layout,
+		vk::ImageLayout new_layout,
+		vk::AccessFlags2 src_access_mask,
+		vk::AccessFlags2 dst_access_mask,
+		vk::PipelineStageFlags2 src_stage,
+		vk::PipelineStageFlags2 dst_stage
+	);
+
 private:
 	void createImage();
 	void createImageView();

@@ -2,7 +2,7 @@
 
 ![PBR Rendering](screenshots/sponza.png)
 
-Small modern cross-platform C++20 Vulkan 1.3+ renderer using GLFW and Slang. Produces a shared library (`VEngineLib`) and an app (`VeApp`). The goal of this project is for me to learn more about graphics programming, but also for fun!
+Small modern cross-platform C++20 Vulkan 1.3+ renderer using GLFW and Slang. Produces a shared library (`VEngineLib`) and an app (`VeApp`). The goal of this project is for me to have fun and to learn more about graphics programming!
 
 
 ## Table of Contents
@@ -33,6 +33,8 @@ Small modern cross-platform C++20 Vulkan 1.3+ renderer using GLFW and Slang. Pro
 - PBR for textured .gltf models
 - Point lights
 - Shadow mapping
+- Bloom
+- Basic HDR
 - Dear ImGui overlay with settings
 - Skybox
 - FPS-style camera
@@ -57,11 +59,11 @@ Small modern cross-platform C++20 Vulkan 1.3+ renderer using GLFW and Slang. Pro
 Besides git, cmake and a c++20 compiler, two dependencies will have to be installed manually: Vulkan SDK and KTX.
 
 - Vulkan SDK (LunarG): https://vulkan.lunarg.com/sdk/home
-	- macOS and Windows:Check 'System global installation' component in the installer
+	- macOS and Windows: Check 'System global installation' component in the installer
 	- Linux: Consult https://vulkan.lunarg.com/doc/sdk/1.4.328.1/linux/getting_started.html (1.4.328) for instructions to install the tar file.
 
 - KTX: https://github.com/KhronosGroup/KTX-Software/releases
-	- macOS and Windows: Ceck 'add to path' and the 'Development' package in the installer
+	- macOS and Windows: Check 'add to path' and the 'Development' package in the installer
 	- Linux: Download the .deb file and install with `sudo apt install ./filename.deb`
 
 - Extra:

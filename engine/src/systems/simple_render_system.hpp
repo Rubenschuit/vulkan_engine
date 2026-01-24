@@ -33,7 +33,7 @@ public:
 	void renderObjects(VeFrameInfo& frame_info) const;
 	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count ) {
 		m_ve_pipeline.reset();
-		VE_LOGI("SimpleRenderSystem::recreatePipeline with topology: " << (m_topology == vk::PrimitiveTopology::eTriangleList ? "Triangle List" : "Line List") << "and sample count: " << static_cast<int>(sample_count));
+		VE_LOGI("SimpleRenderSystem::recreatePipeline with topology: " << (m_topology == vk::PrimitiveTopology::eTriangleList ? "Triangle List" : "Line List") << ", and sample count: " << static_cast<int>(sample_count));
 		createPipeline(color_format, sample_count);
 	}
 	void setTopology(vk::PrimitiveTopology topology) {

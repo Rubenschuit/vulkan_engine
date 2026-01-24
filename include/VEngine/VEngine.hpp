@@ -38,4 +38,5 @@
 #include "systems/shadow_render_system.hpp"
 #include "systems/pbr_render_system.hpp"
 #include "systems/fireworks_system.hpp"
+#include "systems/bloom_system.hpp"
 #include "systems/post_process_system.hpp"

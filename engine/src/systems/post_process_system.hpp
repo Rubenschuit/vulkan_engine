@@ -17,6 +17,7 @@ public:
 		VeDevice& device,
 		vk::Format color_format,
 		const vk::raii::ImageView& resolve_target_view,
+		const vk::raii::ImageView& bloom_texture_view,
 		std::filesystem::path shader_path);
 	~PostProcessSystem();
 
@@ -24,12 +25,12 @@ public:
 	PostProcessSystem& operator=(const PostProcessSystem&) = delete;
 
 	void render(vk::raii::CommandBuffer& command_buffer, const PostProcessPushConstant& push);
-	void recreatePipeline(vk::Format color_format, const vk::raii::ImageView& resolve_target_view);
+	void recreatePipeline(vk::Format color_format, const vk::raii::ImageView& resolve_target_view, const vk::raii::ImageView& bloom_texture_view);
 
 private:
 	void createDescriptorSetLayout();
 	void createDescriptorPool();
-	void createDescriptorSet(const vk::raii::ImageView& resolve_target_view);
+	void createDescriptorSet(const vk::raii::ImageView& resolve_target_view, const vk::raii::ImageView& bloom_texture_view);
 	void createPipelineLayout();
 	void createPipeline(vk::Format color_format);
 

@@ -50,6 +50,15 @@ struct PostProcessPushConstant {
 	float blur_strength = 1.0f;
 	float exposure = 1.0f;
 	int color_space = 0; // 0: SRGB, 1: Extended Linear, 2: HDR10 ST2084
+	float bloom_strength = 0.01f;
+};
+
+struct BloomDownsamplePushConstant {
+	int is_first_pass;
+};
+
+struct BloomUpsamplePushConstant {
+	float filter_radius;
 };
 
 struct UniformBufferObject {

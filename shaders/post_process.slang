@@ -1,11 +1,14 @@
 [vk::binding(0, 0)]
 Sampler2D input_texture;
+[vk::binding(1, 0)]
+Sampler2D bloom_texture;
 
 struct PostProcessPushConstant {
     int blur_radius;
     float blur_strength;
     float exposure;
     int color_space; // 0: SRGB, 1: Extended Linear, 2: HDR10 ST2084
+    float bloom_strength;
 };
 
 [vk::push_constant]
@@ -88,6 +91,13 @@ float4 fragMain(VertexOutput input) : SV_Target {
 
     // Exposure
     color *= push.exposure;
+
+    // Bloom
+	if (push.bloom_strength > 0.0) {
+    	float3 bloom = bloom_texture.Sample(input.uv).rgb;
+        //color = lerp(color, bloom, push.bloom_strength);
+        color += bloom * push.bloom_strength;
+    }
 
     if (push.color_space == 0) {
         // SDR (SRGB Nonlinear)

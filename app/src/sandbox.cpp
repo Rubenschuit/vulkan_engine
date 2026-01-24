@@ -69,7 +69,13 @@ VeFrameInfo Sandbox::update() {
 		.frame_time = m_frame_time,
 		.total_time = m_total_time,
 		.current_frame = current_frame,
-		.post_process_push = { ui_actions.blur_radius, ui_actions.blur_strength, ui_actions.exposure, color_space_type }
+		.post_process_push = {
+			ui_actions.blur_radius,
+			ui_actions.blur_strength,
+			ui_actions.exposure,
+			color_space_type,
+			ui_actions.bloom_enabled ? ui_actions.bloom_strength : 0.0f
+		}
 	};
 
 	// Updates camera state based on input and frame time. Returns actions for systems.
@@ -88,6 +94,14 @@ VeFrameInfo Sandbox::update() {
 	updateCamera();
 	updateParticles(input_actions);
 	updateWindowTitle();
+
+	// update sponza sun intensity
+	if (ui_actions.current_scene == 2) {
+		auto& sponza_objects = m_sponza_scene->getGameObjects();
+		if (sponza_objects.contains(sun_id)) {
+			sponza_objects.at(sun_id).point_light_component->intensity = ui_actions.sun_intensity;
+		}
+	}
 
 	// update ubos
 	UniformBufferObject ubo{};
@@ -173,6 +187,11 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 
 	m_ve_renderer.endSceneRender(command_buffer);
 
+	// Bloom pass
+	if (ui_actions.bloom_enabled) {
+		m_bloom_system->render(command_buffer);
+	}
+
 	// Post-processing pass
 	m_ve_renderer.beginPostProcessRender(command_buffer);
 	m_post_process_system->render(command_buffer, frame_info.post_process_push);
@@ -197,6 +216,9 @@ void Sandbox::recreatePipelines() {
 	auto color_format = m_ve_renderer.getSwapChainImageFormat();
 	auto offscreen_format = m_ve_renderer.getOffscreenImageFormat();
 	auto sample_count = m_ve_renderer.getSampleCount();
+	auto extent = m_ve_renderer.getExtent();
+
+	m_bloom_system->recreateResources(extent, m_ve_renderer.getResolveTargetImageView());
 
 	m_simple_render_system->recreatePipeline(offscreen_format, sample_count);
 	m_point_light_system->recreatePipeline(offscreen_format, sample_count);
@@ -206,7 +228,7 @@ void Sandbox::recreatePipelines() {
 	m_particle_system->recreatePipeline(offscreen_format, sample_count);
 	m_fireworks_system->recreatePipeline(offscreen_format, sample_count);
 
-	m_post_process_system->recreatePipeline(color_format, m_ve_renderer.getResolveTargetImageView());
+	m_post_process_system->recreatePipeline(color_format, m_ve_renderer.getResolveTargetImageView(), m_bloom_system->getBloomTexture());
 	m_imgui_layer->recreatePipeline();
 	// Shadow render system pipeline does not depend on swap chain MSAA
 }
@@ -225,6 +247,12 @@ void Sandbox::renderAppWindows() {
 					ui_actions.current_scene = 1;
 				if (ImGui::RadioButton("Sponza", &s_current_scene, 2))
 					ui_actions.current_scene = 2;
+
+				if (ui_actions.current_scene == 2) {
+					ImGui::Separator();
+					ImGui::Text("Sponza Settings");
+					ImGui::SliderFloat("Sun Intensity", &ui_actions.sun_intensity, 0.0f, 1000000.0f);
+				}
 
 
 				ImGui::EndTabItem();
@@ -399,6 +427,11 @@ void Sandbox::renderAppWindows() {
 				ImGui::SliderInt("Blur Radius", &ui_actions.blur_radius, 0, 10);
 				ImGui::SliderFloat("Blur Strength", &ui_actions.blur_strength, 0.0f, 5.0f);
 				ImGui::SliderFloat("Exposure", &ui_actions.exposure, 0.0f, 5.0f);
+
+				ImGui::Text("Bloom");
+				ImGui::Separator();
+				ImGui::Checkbox("Bloom Enabled", &ui_actions.bloom_enabled);
+				ImGui::DragFloat("Bloom Strength", &ui_actions.bloom_strength, 0.001f, 0.0f, 0.4f);
 
 				ImGui::EndTabItem();
 			}
@@ -575,10 +608,19 @@ void Sandbox::initSystems() {
 		project_root / "models" / "cube.gltf"
 	);
 
+	m_bloom_system = std::make_unique<BloomSystem>(
+		m_ve_device,
+		m_ve_renderer.getExtent(),
+		m_ve_renderer.getResolveTargetImageView(),
+		project_root / "shaders" / "bloom_downsample.spv",
+		project_root / "shaders" / "bloom_upsample.spv"
+	);
+
 	m_post_process_system = std::make_unique<PostProcessSystem>(
 		m_ve_device,
 		m_ve_renderer.getSwapChainImageFormat(),
 		m_ve_renderer.getResolveTargetImageView(),
+		m_bloom_system->getBloomTexture(),
 		project_root / "shaders" / "post_process.spv"
 	);
 }
@@ -587,27 +629,15 @@ void Sandbox::initUI() {
 	VE_LOGD("Initialising UI");
 	m_imgui_layer = std::make_unique<ImGuiLayer>(m_ve_window, m_ve_device, m_ve_renderer);
 
-	ui_actions = {
-		.visible = false,
-		.show_performance = true,
-		.show_controls = true,
-		.hdr_enabled = m_ve_renderer.hasHdrSupport() && m_ve_renderer.isHdrEnabled(),
-		.speed = m_particle_system->getSpeed(),
-		.pending_particle_count = m_particle_system->getPendingParticleCount(),
-		.apply_particle_count = false,
-		.reset_particle_count = false,
-		.particle_velocity_mean = m_particle_system->getMean(),
-		.particle_velocity_stddev = m_particle_system->getStddev(),
-		.apply_velocity_params = false,
-		.min_life = m_particle_system->getMinLife(),
-		.max_life = m_particle_system->getMaxLife(),
-		.should_respawn = m_particle_system->getShouldRespawn(),
-		.emit_burst = false,
-		.emit_count = 1000,
-		.blur_radius = 0,
-		.blur_strength = 1.0f,
-		.exposure = 1.0f
-	};
+	ui_actions = UIContext{};
+	ui_actions.hdr_enabled = m_ve_renderer.hasHdrSupport() && m_ve_renderer.isHdrEnabled();
+	ui_actions.speed = m_particle_system->getSpeed();
+	ui_actions.pending_particle_count = m_particle_system->getPendingParticleCount();
+	ui_actions.particle_velocity_mean = m_particle_system->getMean();
+	ui_actions.particle_velocity_stddev = m_particle_system->getStddev();
+	ui_actions.min_life = m_particle_system->getMinLife();
+	ui_actions.max_life = m_particle_system->getMaxLife();
+	ui_actions.should_respawn = m_particle_system->getShouldRespawn();
 }
 
 // Loads the game objects for the scene
@@ -636,43 +666,40 @@ void Sandbox::loadGameObjects() {
 
 
 	// sponza sun light
-	VeGameObject sun = VeGameObject::createPointLight(200.0f, 4.0f, glm::vec3(1.0f, 1.0f, 1.0f));
+	VeGameObject sun = VeGameObject::createPointLight(2000.0f, 4.0f, glm::vec3(1.0f, 1.0f, 1.0f));
 	sun.transform.translation = glm::vec3{0.0f, 50.0f, -140.0f} + sponza_translation;
 	sun.point_light_component->rotates = true;
+	sun_id = sun.getId();
 	m_sponza_scene->getGameObjects().emplace(sun.getId(), std::move(sun));
 
 	// sponza fire lights
 	{
-		VeGameObject fire = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
+		VeGameObject fire = VeGameObject::createPointLight(100.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
 		fire.transform.translation = glm::vec3{-62.0f, -22.0f, -336.0f} + sponza_translation;
-		fire.point_light_component->intensity = 1.5f;
 		fire.point_light_component->rotates = false;
 		fire.point_light_component->casts_shadow = false;
 		fire.has_shadow = false;
 		m_sponza_scene->getGameObjects().emplace(fire.getId(), std::move(fire));
 	}
 	{
-		VeGameObject fire = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
+		VeGameObject fire = VeGameObject::createPointLight(100.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
 		fire.transform.translation = glm::vec3{-62.0f, 14.0f, -336.0f} + sponza_translation;
-		fire.point_light_component->intensity = 1.5f;
 		fire.point_light_component->rotates = false;
 		fire.point_light_component->casts_shadow = false;
 		fire.has_shadow = false;
 		m_sponza_scene->getGameObjects().emplace(fire.getId(), std::move(fire));
 	}
 	{
-		VeGameObject fire = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
+		VeGameObject fire = VeGameObject::createPointLight(100.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
 		fire.transform.translation = glm::vec3{49.0f, 14.0f, -336.0f} + sponza_translation;
-		fire.point_light_component->intensity = 1.5f;
 		fire.point_light_component->rotates = false;
 		fire.point_light_component->casts_shadow = false;
 		fire.has_shadow = false;
 		m_sponza_scene->getGameObjects().emplace(fire.getId(), std::move(fire));
 	}
 	{
-		VeGameObject fire = VeGameObject::createPointLight(1.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
+		VeGameObject fire = VeGameObject::createPointLight(100.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
 		fire.transform.translation = glm::vec3{49.0f, -22.0f, -336.0f} + sponza_translation;
-		fire.point_light_component->intensity = 1.5f;
 		fire.point_light_component->rotates = false;
 		fire.point_light_component->casts_shadow = false;
 		fire.has_shadow = false;
@@ -681,20 +708,18 @@ void Sandbox::loadGameObjects() {
 
 	// lion eyes
 	{
-		VeGameObject green_eye = VeGameObject::createPointLight(2.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+		VeGameObject green_eye = VeGameObject::createPointLight(50.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
 		green_eye.transform.translation = glm::vec3{126.7f, -5.87f, -331.2f} + sponza_translation;
 		green_eye.transform.scale = {.3f, .3f, .3f};
-		green_eye.point_light_component->intensity = .1f;
 		green_eye.point_light_component->rotates = false;
 		green_eye.point_light_component->casts_shadow = false;
 		green_eye.has_shadow = false;
 		m_sponza_scene->getGameObjects().emplace(green_eye.getId(), std::move(green_eye));
 	}
 	{
-		VeGameObject green_eye = VeGameObject::createPointLight(2.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+		VeGameObject green_eye = VeGameObject::createPointLight(50.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
 		green_eye.transform.translation = glm::vec3{126.7f, -1.24f, -331.2f} + sponza_translation;
 		green_eye.transform.scale = {.3f, .3f, .3f};
-		green_eye.point_light_component->intensity = .1f;
 		green_eye.point_light_component->rotates = false;
 		green_eye.point_light_component->casts_shadow = false;
 		green_eye.has_shadow = false;

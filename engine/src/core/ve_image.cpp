@@ -134,6 +134,20 @@ void VeImage::transitionImageLayout(
 		kind = QueueKind::Transfer;
 	}
 	auto command_buffer = m_ve_device.beginSingleTimeCommands(kind);
+	transitionImageLayout(*command_buffer, old_layout, new_layout, src_access_mask, dst_access_mask, src_stage, dst_stage);
+	m_ve_device.endSingleTimeCommands(*command_buffer, kind);
+}
+
+void VeImage::transitionImageLayout(
+	vk::raii::CommandBuffer& command_buffer,
+	vk::ImageLayout old_layout,
+	vk::ImageLayout new_layout,
+	vk::AccessFlags2 src_access_mask,
+	vk::AccessFlags2 dst_access_mask,
+	vk::PipelineStageFlags2 src_stage,
+	vk::PipelineStageFlags2 dst_stage) {
+
+	assert(*m_image != VK_NULL_HANDLE && "Image must be valid when transitioning image layout");
 	vk::ImageMemoryBarrier2 barrier = {
 		.sType = vk::StructureType::eImageMemoryBarrier2,
 		.pNext = nullptr,
@@ -165,7 +179,6 @@ void VeImage::transitionImageLayout(
 		.imageMemoryBarrierCount = 1,
 		.pImageMemoryBarriers = &barrier
 	};
-	command_buffer->pipelineBarrier2(dependency_info);
-	m_ve_device.endSingleTimeCommands(*command_buffer, kind);
+	command_buffer.pipelineBarrier2(dependency_info);
 }
 } // namespace ve

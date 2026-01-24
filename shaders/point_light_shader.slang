@@ -52,7 +52,7 @@ Sampler2D smoke_texture;
 [shader("fragment")]
 float4 fragMain(VertexOutput in) : SV_Target {
 
-	// Sample particle texture
 	float4 col = glow_texture.Sample(in.offset);
-	return col * float4(push.color.rgb * push.color.a, 1.0f);
+	float intensity = clamp(push.color.a, 0.0f, 200.0f);
+	return col * float4(push.color.rgb * intensity, 1.0f);
 }

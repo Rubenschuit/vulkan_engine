@@ -310,7 +310,7 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 
 		// Calculate attenuation and radiance (intensity of the light)
 		float distance_sq = dot(light_dir, light_dir);
-		float attenuation = 1.0 / (0.01 * distance_sq + 0.1);
+		float attenuation = 1.0 / (distance_sq);
 		float3 radiance = ubo.point_lights[i].color.xyz * ubo.point_lights[i].color.w * attenuation;
 
 		// Calculate Fresnel

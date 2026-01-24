@@ -1,3 +1,8 @@
+// This shader file contains vertex and fragment shaders for the particle system.
+// It also contains the compute shader for the particle simulation.
+// The compute shader is compiled to its own spv file appended with c.spv.
+// TODO: This file has become large, consider splitting the vertex + fragment shaders into a separate file.
+
 // ------------- Graphics --------------
 
 struct UniformBuffer {
@@ -101,11 +106,10 @@ Sampler2D smoke_texture;
 float4 fragMain(VertexOutput in_vert) : SV_Target {
 	float4 col1, col2;
 	if (in_vert.type == ParticleType::TYPE_DEFAULT || in_vert.type == ParticleType::TYPE_EXPLOSION || in_vert.type == ParticleType::TYPE_TRAIL || in_vert.type == ParticleType::TYPE_STREAMER) {
-		// round mask with soft edges and bloom effect
-
+		// round mask with soft edges
 		float dot = dot(in_vert.uv0, in_vert.uv0);
 
-		// Bloom brightness: bright at center, smooth falloff
+		// bright at center, smooth falloff
 		float bloom_intensity = 1.0f - smoothstep(0.0f, 0.1f, dot);
 		float brightness = lerp(1.0f, 2.5f, bloom_intensity);
 		float edge_alpha = 1.0f - smoothstep(0.01f, 0.25f, dot);
@@ -117,7 +121,7 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 
 		// For additive blending, we must pre-multiply alpha to affect RGB intensity
 		// Apply bloom brightness to RGB
-		return float4(in_vert.color.rgb * 2.0f * brightness * alpha, alpha);
+		return float4(in_vert.color.rgb * 10.0f * brightness * alpha, alpha);
 	} else if (in_vert.type == ParticleType::TYPE_SMOKE) {
 		col1 = smoke_texture.Sample(in_vert.uv1);
 		col2 = smoke_texture.Sample(in_vert.uv2);
@@ -135,7 +139,6 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 
 
 // --------------- Compute shader------------------
-
 
 
 

@@ -56,6 +56,7 @@ private:
 	std::unique_ptr<VeScene> m_simple_scene;
 	std::unique_ptr<VeScene> m_sponza_scene;
 	uint32_t sponza_id;
+	uint32_t sun_id;
 
 	// UI context captured during renderUI(), consumed in updateParticles() for example.
 	UIContext ui_actions;
@@ -70,6 +71,7 @@ private:
 	std::unique_ptr<FireworksSystem> m_fireworks_system;
 	std::unique_ptr<ShadowRenderSystem> m_shadow_render_system;
 	std::unique_ptr<PostProcessSystem> m_post_process_system;
+	std::unique_ptr<BloomSystem> m_bloom_system;
 };
 
 }
