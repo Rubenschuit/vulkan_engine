@@ -13,14 +13,31 @@ VeGameObject VeGameObject::createGameObject() {
 }
 
 // Composes a model matrix from translation, rotation, and scale.
-glm::mat4 VeGameObject::getTransform() const {
+const glm::mat4& VeGameObject::getTransform() const {
+	updateMatrices();
+	return m_cached_transform;
+}
+
+const glm::mat3& VeGameObject::getNormalTransform() const {
+	updateMatrices();
+	return m_cached_normal_transform;
+}
+
+void VeGameObject::updateMatrices() const {
+	if (transform.translation == m_last_translation &&
+		transform.rotation == m_last_rotation &&
+		transform.scale == m_last_scale) {
+		return;
+	}
+
 	const float c3 = glm::cos(transform.rotation.z);
 	const float s3 = glm::sin(transform.rotation.z);
 	const float c2 = glm::cos(transform.rotation.x);
 	const float s2 = glm::sin(transform.rotation.x);
 	const float c1 = glm::cos(transform.rotation.y);
 	const float s1 = glm::sin(transform.rotation.y);
-	return glm::mat4{
+
+	m_cached_transform = glm::mat4{
 		{
 			transform.scale.x * (c1 * c3 + s1 * s2 * s3),
 			transform.scale.x * (c2 * s3),
@@ -40,18 +57,9 @@ glm::mat4 VeGameObject::getTransform() const {
 			0.0f,
 		},
 		{transform.translation.x, transform.translation.y, transform.translation.z, 1.0f}};
-}
 
-//
-glm::mat3 VeGameObject::getNormalTransform() const {
-	const float c3 = glm::cos(transform.rotation.z);
-	const float s3 = glm::sin(transform.rotation.z);
-	const float c2 = glm::cos(transform.rotation.x);
-	const float s2 = glm::sin(transform.rotation.x);
-	const float c1 = glm::cos(transform.rotation.y);
-	const float s1 = glm::sin(transform.rotation.y);
 	const glm::vec3 inverse_scale = 1.0f / transform.scale;
-	return glm::mat3{
+	m_cached_normal_transform = glm::mat3{
 		{
 			inverse_scale.x * (c1 * c3 + s1 * s2 * s3),
 			inverse_scale.x * (c2 * s3),
@@ -68,6 +76,10 @@ glm::mat3 VeGameObject::getNormalTransform() const {
 			inverse_scale.z * (c1 * c2)
 		}
 	};
+
+	m_last_translation = transform.translation;
+	m_last_rotation = transform.rotation;
+	m_last_scale = transform.scale;
 }
 
 VeGameObject VeGameObject::createPointLight(float intensity, float radius, glm::vec3 color) {

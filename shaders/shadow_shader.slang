@@ -8,6 +8,7 @@ struct VertexInput {
 struct UniformBuffer {
     float4x4 view;
     float4x4 proj;
+	float4x4 projection_view;
 };
 [vk::binding(0, 0)]
 ConstantBuffer<UniformBuffer> ubo;
@@ -33,7 +34,7 @@ VertexOutput vertMain(VertexInput input) {
 	float4 pos = float4(input.in_pos, 1.0); // homogeneous coordinates
 	float4 world_pos = mul(push_constants.transform, pos); // apply per-object transform
 
-	output.pos = mul(ubo.proj, mul(ubo.view, world_pos)); // view and projection from light's perspective
+	output.pos = mul(ubo.projection_view, world_pos); // pre-computed projection and view
 
 	return output;
 }

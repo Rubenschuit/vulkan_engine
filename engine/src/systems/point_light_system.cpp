@@ -118,9 +118,13 @@ void PointLightSystem::render(VeFrameInfo& frame_info) const {
 
 // Update UBO with point light data for global access in shaders
 void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObject& ubo) {
-	// Single pass: populate both point_lights and shadow_lights arrays
 	uint32_t num_lights = 0;
 	uint32_t num_shadow_lights = 0;
+
+	// Pre-multiply ambient light color by intensity
+	ubo.ambient_light_color.x *= ubo.ambient_light_color.w;
+	ubo.ambient_light_color.y *= ubo.ambient_light_color.w;
+	ubo.ambient_light_color.z *= ubo.ambient_light_color.w;
 
 	for (auto& [id, obj] : frame_info.game_objects) {
 		if (!obj.point_light_component)
@@ -138,7 +142,10 @@ void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBuffe
 
 		// Populate point light data
 		ubo.point_lights[num_lights].position = glm::vec4{obj.transform.translation, 1.0f};
-		ubo.point_lights[num_lights].color = glm::vec4{obj.color, obj.point_light_component->intensity};
+		ubo.point_lights[num_lights].color.x = obj.color.x * obj.point_light_component->intensity;
+		ubo.point_lights[num_lights].color.y = obj.color.y * obj.point_light_component->intensity;
+		ubo.point_lights[num_lights].color.z = obj.color.z * obj.point_light_component->intensity;
+		ubo.point_lights[num_lights].color.w = obj.point_light_component->intensity;
 
 		// If this light casts shadows, add it to shadow_lights array
 		if (obj.point_light_component->casts_shadow && num_shadow_lights < MAX_SHADOW_LIGHTS) {

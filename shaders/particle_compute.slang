@@ -851,16 +851,18 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 
 				// Random chance to spawn smoke
 				uint state = wang_hash(asuint(trail_index) ^ asuint(params.total_time) ^ uint(spawn_count));
-				if (rand01(state) < 0.3f) {
+				if (rand01(state) < 0.4f) {
 					uint smoke_index;
 					popDeadIndex(smoke_index);
 
 					Particle smoke;
-					smoke.position = float4(p.position.xyz, 5.0f);
-					smoke.velocity = float4(p.velocity.xyz * 0.02f, 7.0f);
+					float SMOKE_SCALE = 5.0f;
+					float SMOKE_LIFE = 7.0f;
+					smoke.position = float4(p.position.xyz, SMOKE_SCALE);
+					smoke.velocity = float4(p.velocity.xyz * 0.02f, SMOKE_LIFE);
 					smoke.color = float4(0.4f, 0.4f, 0.4f, 0.5f);
 					smoke.tex_coords = float4(0.0f);
-					smoke.extra_data = float4((float)ParticleType::TYPE_SMOKE, 7.0f, 0.0f, 0.0f);
+					smoke.extra_data = float4((float)ParticleType::TYPE_SMOKE, SMOKE_LIFE, 0.0f, 0.0f);
 					smoke.simulation_data = float4(0.0f, 0.0f, 0.0f, -1.0f);
 
 					particles_out[smoke_index] = smoke;

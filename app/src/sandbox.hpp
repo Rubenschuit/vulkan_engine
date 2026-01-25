@@ -1,5 +1,7 @@
 #pragma once
 #include "VEngine/VEngine.hpp"
+#include "scenes/simple_scene.hpp"
+#include "scenes/sponza_scene.hpp"
 #include <filesystem>
 #include <memory>
 
@@ -46,17 +48,11 @@ private:
 
 	// Textures
 	VeTexture m_skybox = VeTexture(m_ve_device, m_skybox_path);
-	std::unique_ptr<VeTexture> m_glow_texture;
-	std::unique_ptr<VeTexture> m_fire_texture;
-	std::unique_ptr<VeTexture> m_smoke_texture;
-
-	vk::raii::DescriptorSet m_texture_descriptor_set{nullptr};
 
 	// Scenes
-	std::unique_ptr<VeScene> m_simple_scene;
-	std::unique_ptr<VeScene> m_sponza_scene;
-	uint32_t sponza_id;
-	uint32_t sun_id;
+	std::unique_ptr<SimpleScene> m_simple_scene;
+	std::unique_ptr<SponzaScene> m_sponza_scene;
+	VeScene* m_active_scene = nullptr;
 
 	// UI context captured during renderUI(), consumed in updateParticles() for example.
 	UIContext ui_actions;

@@ -2,8 +2,8 @@
 
 namespace ve {
 
-VeScene::VeScene(const std::string& name)
-    : m_name(name), m_num_lights(0), m_num_shadow_casting_lights(0) {}
+VeScene::VeScene(VeDevice& device, const std::string& name)
+    : m_device(device), m_name(name), m_num_lights(0), m_num_shadow_casting_lights(0) {}
 
 VeScene::~VeScene() {}
 

@@ -17,6 +17,7 @@ struct PointLight {
 struct ShadowLight {
 	float4x4 light_view;
 	float4x4 light_proj;
+	float4x4 shadow_matrix;
 	float4 light_index_padding; // x = light_index, yzw = padding
 };
 
@@ -39,6 +40,7 @@ enum ShadowMode {
 struct UniformBuffer {
     float4x4 view;
     float4x4 proj;
+	float4x4 projection_view;
 	float4 camera_position;
 	float4 ambient_light_color;
 	PointLight point_lights[MAX_LIGHTS]; // MAX_LIGHTS TODO use specialization constant
@@ -84,7 +86,7 @@ VertexOutput vertMain(VertexInput input) {
 	float4 pos = float4(input.in_pos, 1.0); // homogeneous coordinates
 	float4 world_pos = mul(push_constants.transform, pos); // apply per-object transform
 
-	output.pos = mul(ubo.proj, mul(ubo.view, world_pos)); // view and projection
+	output.pos = mul(ubo.projection_view, world_pos); // pre-computed view and projection
 	output.frag_pos_world = world_pos.xyz;
 
 	// Transform normal and tangent to world space
@@ -100,7 +102,7 @@ VertexOutput vertMain(VertexInput input) {
 	 // calculate shadow coordinates only if shadows are enabled
 	if (ubo.shadow_mode != 0) {
 		for (uint32_t i = 0; i < ubo.num_shadow_lights; i++) {
-			output.shadow_coord[i] = mul(bias_matrix, mul(ubo.shadow_lights[i].light_proj, mul(ubo.shadow_lights[i].light_view, mul(push_constants.transform, float4(input.in_pos, 1.0)))));
+			output.shadow_coord[i] = mul(ubo.shadow_lights[i].shadow_matrix, world_pos);
 		}
 	}
     return output;
@@ -213,7 +215,7 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	}
 
 	// Apply lighting with shadows
-	float3 diffuse_light = ubo.ambient_light_color.xyz * ubo.ambient_light_color.w; // color * intensity
+	float3 diffuse_light = ubo.ambient_light_color.xyz; // already pre-multiplied by intensity on CPU
 	float3 specular_light = float3(0.0, 0.0, 0.0);
 	float3 view_dir = normalize(ubo.camera_position.xyz - in_vert.frag_pos_world);
 	for (uint32_t i = 0; i < ubo.num_lights; i++) {
@@ -225,7 +227,7 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 			continue;
 
 		float attenuation = 1.0 / (dot(light_dir, light_dir));
-		float3 light_color = ubo.point_lights[i].color.xyz * ubo.point_lights[i].color.w * attenuation;
+		float3 light_color = ubo.point_lights[i].color.xyz * attenuation; // color already contains intensity
 		diffuse_light += light_color * NdotL * shadow_terms[i];
 
 		float3 H = normalize(L + view_dir);

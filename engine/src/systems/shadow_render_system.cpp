@@ -228,7 +228,7 @@ void ShadowRenderSystem::createShadowTextureDescriptorSets(VeDescriptorPool& des
 }
 
 // Update the shadow UBO with the light data from the main UBO
-void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, const UniformBufferObject& ubo) {
+void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBufferObject& ubo) {
 	if (ubo.num_shadow_lights == 0) {
 		VE_LOGW("Shadow system: no shadow-casting lights in UBO!");
 		m_light_views[frame_index].clear();
@@ -239,6 +239,14 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, const Uniform
 	m_light_views[frame_index].resize(ubo.num_shadow_lights);
 	m_light_projs[frame_index].resize(ubo.num_shadow_lights);
 
+	// Bias matrix for shadow mapping (converts NDC to texture coordinates)
+	static const glm::mat4 bias_matrix(
+		0.5f, 0.0f, 0.0f, 0.0f,
+		0.0f, 0.5f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		0.5f, 0.5f, 0.0f, 1.0f
+	);
+
 	// Update each shadow light's cached data and write to its dedicated buffer
 	for (uint32_t shadow_idx = 0; shadow_idx < ubo.num_shadow_lights && shadow_idx < MAX_SHADOW_LIGHTS; shadow_idx++) {
 		m_light_views[frame_index][shadow_idx] = ubo.shadow_lights[shadow_idx].light_view;
@@ -247,6 +255,12 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, const Uniform
 		UniformBufferObject shadow_ubo{};
 		shadow_ubo.view = ubo.shadow_lights[shadow_idx].light_view;
 		shadow_ubo.proj = ubo.shadow_lights[shadow_idx].light_proj;
+		shadow_ubo.projection_view = shadow_ubo.proj * shadow_ubo.view;
+		shadow_ubo.shadow_lights[shadow_idx].shadow_matrix = bias_matrix * shadow_ubo.projection_view;
+
+		// update main ubo too
+		ubo.shadow_lights[shadow_idx].shadow_matrix = shadow_ubo.shadow_lights[shadow_idx].shadow_matrix;
+
 		m_shadow_ubos[frame_index][shadow_idx]->writeToBuffer(&shadow_ubo);
 	}
 }

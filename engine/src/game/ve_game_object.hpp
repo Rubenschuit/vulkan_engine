@@ -37,10 +37,14 @@ public:
 	VeGameObject& operator=(VeGameObject&&) = default;
 
 	uint32_t getId() const { return m_id; }
+
 	// Composes a transformation matrix from translation, rotation, and scale.
-	glm::mat4 getTransform() const;
+	// Uses cached values if the transform hasn't changed.
+	const glm::mat4& getTransform() const;
+
 	// Computes the normal matrix (inverse transpose of the model matrix).
-	glm::mat3 getNormalTransform() const;
+	// Uses cached values if the transform hasn't changed.
+	const glm::mat3& getNormalTransform() const;
 
 	TransformComponent transform{};
 	glm::vec3 color{1.0f};
@@ -53,6 +57,15 @@ public:
 private:
 	VeGameObject(uint32_t id) : m_id(id) {}
 
+	void updateMatrices() const;
+
 	uint32_t m_id;
+
+	// Caching system (mutable to allow lazy updates in const methods)
+	mutable glm::mat4 m_cached_transform{1.0f};
+	mutable glm::mat3 m_cached_normal_transform{1.0f};
+	mutable glm::vec3 m_last_translation{std::numeric_limits<float>::infinity()};
+	mutable glm::vec3 m_last_rotation{std::numeric_limits<float>::infinity()};
+	mutable glm::vec3 m_last_scale{std::numeric_limits<float>::infinity()};
 };
 }

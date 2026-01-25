@@ -17,6 +17,7 @@ struct PointLight {
 struct ShadowLight {
 	float4x4 light_view;
 	float4x4 light_proj;
+	float4x4 shadow_matrix;
 	float4 light_index_padding; // x = light_index, yzw = padding
 };
 
@@ -39,6 +40,7 @@ enum ShadowMode {
 struct UniformBuffer {
     float4x4 view;
     float4x4 proj;
+	float4x4 projection_view;
 	float4 camera_position; // .w unused
 	float4 ambient_light_color;
 	PointLight point_lights[20]; // constant must be equal to ve::MAX_LIGHTS, TODO use specialization constant
@@ -89,8 +91,7 @@ VertexOutput vertMain(VertexInput input) {
 	float4 pos = float4(input.in_pos, 1.0); // homogeneous coordinates
 	float4 world_pos = mul(push_constants.transform, pos); // apply per-object transform
 
-	// TODO: precompute view and projection matrices?
-	output.pos = mul(ubo.proj, mul(ubo.view, world_pos)); // view and projection
+	output.pos = mul(ubo.projection_view, world_pos);
 	output.frag_pos_world = world_pos.xyz;
 
 	// Transform normal and tangent to world space
@@ -116,10 +117,9 @@ VertexOutput vertMain(VertexInput input) {
 	output.frag_material_index = input.in_material_index;
 
     // calculate shadow coordinates only if shadows are enabled
-	// TODO: precompute bias matrix * light_proj * light_view ?
 	if (ubo.shadow_mode != ShadowMode::DISABLED) {
 		for (uint32_t i = 0; i < ubo.num_shadow_lights; i++) {
-			output.shadow_coord[i] = mul(bias_matrix, mul(ubo.shadow_lights[i].light_proj, mul(ubo.shadow_lights[i].light_view, mul(push_constants.transform, float4(input.in_pos, 1.0)))));
+			output.shadow_coord[i] = mul(ubo.shadow_lights[i].shadow_matrix, world_pos);
 		}
 	}
 
@@ -311,7 +311,7 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		// Calculate attenuation and radiance (intensity of the light)
 		float distance_sq = dot(light_dir, light_dir);
 		float attenuation = 1.0 / (distance_sq);
-		float3 radiance = ubo.point_lights[i].color.xyz * ubo.point_lights[i].color.w * attenuation;
+		float3 radiance = ubo.point_lights[i].color.xyz * attenuation; // color already contains intensity
 
 		// Calculate Fresnel
 		float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0);
@@ -333,7 +333,7 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	}
 
 	// Ambient lighting
-	float3 ambient = ubo.ambient_light_color.xyz * ubo.ambient_light_color.w * albedo.rgb;
+	float3 ambient = ubo.ambient_light_color.xyz * albedo.rgb; // ambient already contains intensity
 
 	// Final color
 	c.rgb = Lo + ambient;

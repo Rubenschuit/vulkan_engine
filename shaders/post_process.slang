@@ -9,6 +9,8 @@ struct PostProcessPushConstant {
     float exposure;
     int color_space; // 0: SRGB, 1: Extended Linear, 2: HDR10 ST2084
     float bloom_strength;
+	float padding[3];
+    float2 texel_size;
 };
 
 [vk::push_constant]
@@ -23,7 +25,7 @@ struct VertexOutput {
 VertexOutput vertMain(uint vertexIndex : SV_VertexID) {
     VertexOutput output;
 
-    // Fullscreen triangle to cover the screen [-1, 1] X [-1, 1]:
+    // Fullscreen triangle to cover the screen coordinates in range [-1, 1] X [-1, 1]:
 	// Anything outside the viewport is discarded and will not reach the fragment shader.
     // Index 0: (-1, -1) and UV (0, 0)
     // Index 1: ( 3, -1) and UV (2, 0)
@@ -68,9 +70,7 @@ float4 fragMain(VertexOutput input) : SV_Target {
         color = input_texture.Sample(input.uv).rgb;
     } else {
 	    // blur
-        uint width, height;
-        input_texture.GetDimensions(width, height);
-        float2 texel_size = 1.0 / float2(width, height);
+        float2 texel_size = push.texel_size;
 
         float3 result = 0.0;
         float total_weight = 0.0;

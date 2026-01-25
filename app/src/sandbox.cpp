@@ -13,17 +13,16 @@ namespace ve {
 
 // First a window, device and swap chain are initialised in the base class
 Sandbox::Sandbox(const std::filesystem::path& working_dir) : project_root(working_dir) {
-	// Initialize scenes
-	m_simple_scene = std::make_unique<VeScene>("Simple Scene");
-	m_sponza_scene = std::make_unique<VeScene>("Sponza Scene");
-
 	createUniformBuffers();
 	createDescriptors();
 
 	initSystems();
 	initUI();
 
-	loadGameObjects();
+	// Initialize scenes after descriptors and systems
+	m_simple_scene = std::make_unique<SimpleScene>(m_ve_device, *m_global_pool, *m_material_set_layout, project_root);
+	m_sponza_scene = std::make_unique<SponzaScene>(m_ve_device, *m_global_pool, *m_material_set_layout, project_root);
+	m_active_scene = m_simple_scene.get();
 
 	m_camera.setPerspective(m_fov, m_last_aspect, m_near_plane, m_far_plane);
 }
@@ -40,11 +39,10 @@ VeFrameInfo Sandbox::update() {
 	auto& compute_command_buffer = m_ve_renderer.getCurrentComputeCommandBuffer();
 	auto current_frame = m_ve_renderer.getCurrentFrame();
 
-	// TODO move to scene class
-	vk::raii::DescriptorSet& material_descriptor_set =
-		(ui_actions.current_scene == 2)
-			? m_sponza_scene->getGameObjects().at(sponza_id).ve_model->getMaterialDescriptorSet()
-			: m_texture_descriptor_set;
+	// Update active scene
+	m_active_scene = (ui_actions.current_scene == 2) ? static_cast<VeScene*>(m_sponza_scene.get()) : static_cast<VeScene*>(m_simple_scene.get());
+
+	vk::raii::DescriptorSet& material_descriptor_set = m_active_scene->getDescriptorSet();
 
 	vk::raii::DescriptorSet& shadow_desc_set = m_shadow_render_system->getShadowDescriptorSet(current_frame);
 
@@ -56,16 +54,19 @@ VeFrameInfo Sandbox::update() {
 		color_space_type = 2;
 	}
 
+	auto extent = m_ve_renderer.getExtent();
+	glm::vec2 texel_size = {1.0f / static_cast<float>(extent.width), 1.0f / static_cast<float>(extent.height)};
+
 	VeFrameInfo frame_info = {
 		.global_descriptor_set = m_global_descriptor_sets[current_frame],
-		.texture_descriptor_set = m_texture_descriptor_set,
+		.texture_descriptor_set = m_simple_scene->getDescriptorSet(), // Textures for particles, TODO: consider moving these from simple scene.
 		.material_descriptor_set = material_descriptor_set,
 		.cubemap_descriptor_set = m_cubemap_descriptor_set,
 		.shadow_descriptor_set = shadow_desc_set,
 		.command_buffer = command_buffer,
 		.compute_command_buffer = compute_command_buffer,
 		.camera = m_camera,
-		.game_objects = ui_actions.current_scene == 1 ? m_simple_scene->getGameObjects() : m_sponza_scene->getGameObjects(),
+		.game_objects = m_active_scene->getGameObjects(),
 		.frame_time = m_frame_time,
 		.total_time = m_total_time,
 		.current_frame = current_frame,
@@ -74,7 +75,9 @@ VeFrameInfo Sandbox::update() {
 			ui_actions.blur_strength,
 			ui_actions.exposure,
 			color_space_type,
-			ui_actions.bloom_enabled ? ui_actions.bloom_strength : 0.0f
+			ui_actions.bloom_enabled ? ui_actions.bloom_strength : 0.0f,
+			{0.0f, 0.0f, 0.0f}, // padding
+			texel_size
 		}
 	};
 
@@ -97,11 +100,10 @@ VeFrameInfo Sandbox::update() {
 
 	// update sponza sun intensity
 	if (ui_actions.current_scene == 2) {
-		auto& sponza_objects = m_sponza_scene->getGameObjects();
-		if (sponza_objects.contains(sun_id)) {
-			sponza_objects.at(sun_id).point_light_component->intensity = ui_actions.sun_intensity;
-		}
+		m_sponza_scene->setSunIntensity(ui_actions.sun_intensity);
 	}
+
+	m_active_scene->update(m_frame_time);
 
 	// update ubos
 	UniformBufferObject ubo{};
@@ -172,7 +174,7 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 
 	// systems
 	m_skybox_render_system->render(frame_info);
-	if (ui_actions.current_scene == 1) { // only render particles in simple scene TODO: make enum for scenes
+	if (m_active_scene->getType() == VeScene::Type::SIMPLE) {
 		m_simple_render_system->renderObjects(frame_info);
 		if (ui_actions.show_axes) {
 			m_axes_render_system->render(frame_info);
@@ -343,15 +345,13 @@ void Sandbox::renderAppWindows() {
 				ImGui::Separator();
 
 				// MSAA toggle
-				static bool s_msaa_enabled = true;
-				if (ImGui::Checkbox("Enable MSAA (device maximum sample count)", &s_msaa_enabled)) {
-					m_ve_renderer.setMSAAEnabled(s_msaa_enabled);
+				if (ImGui::Checkbox("Enable MSAA (device maximum sample count)", &ui_actions.msaa)) {
+					m_ve_renderer.setMSAAEnabled(ui_actions.msaa);
 				}
 
 				// VSync toggle (eMailbox instead of eImmediate)
-				static bool s_vsync_enabled = false;
-				if (ImGui::Checkbox("Enable VSync", &s_vsync_enabled)) {
-					m_ve_renderer.setPresentMode(s_vsync_enabled ? vk::PresentModeKHR::eFifo : vk::PresentModeKHR::eImmediate);
+				if (ImGui::Checkbox("Enable VSync", &ui_actions.vsync)) {
+					m_ve_renderer.setPresentMode(ui_actions.vsync ? vk::PresentModeKHR::eFifo : vk::PresentModeKHR::eImmediate);
 				}
 
 				// HDR toggle
@@ -511,21 +511,6 @@ void Sandbox::createDescriptors() {
 		m_global_descriptor_sets.push_back(std::move(set));
 	}
 
-	// Create simple scene material descriptor set for texture
-	// TODO: maybe scene classes should own these descriptor sets?
-	m_glow_texture = std::make_unique<VeTexture>(m_ve_device, m_glow_texture_path);
-	m_fire_texture = std::make_unique<VeTexture>(m_ve_device, m_fire_texture_path);
-	m_smoke_texture = std::make_unique<VeTexture>(m_ve_device, m_smoke_texture_path);
-	auto glow_texture_info = m_glow_texture->getDescriptorInfo();
-	auto fire_texture_info = m_fire_texture->getDescriptorInfo();
-	auto smoke_texture_info = m_smoke_texture->getDescriptorInfo();
-	m_texture_descriptor_set = vk::raii::DescriptorSet{nullptr};
-	VeDescriptorWriter(*m_material_set_layout, *m_global_pool)
-		.writeImage(0, &glow_texture_info)
-		.writeImage(1, &fire_texture_info)
-		.writeImage(2, &smoke_texture_info)
-		.build(m_texture_descriptor_set);
-
 	// Create one cubemap descriptor set for skybox
 	auto cubemap_image_info = m_skybox.getDescriptorInfo();
 	m_cubemap_descriptor_set = vk::raii::DescriptorSet{nullptr};
@@ -638,258 +623,6 @@ void Sandbox::initUI() {
 	ui_actions.min_life = m_particle_system->getMinLife();
 	ui_actions.max_life = m_particle_system->getMaxLife();
 	ui_actions.should_respawn = m_particle_system->getShouldRespawn();
-}
-
-// Loads the game objects for the scene
-// dont be scared of all the numbers
-// Loads 2 scenes:
-// 	1) A floor with simple objects in a grid and some rotating colored lights
-// 	2) The sponza palace with materials and textures
-void Sandbox::loadGameObjects() {
-
-	// --------------------------------------------------------------- //
-	// ----------------- Sponza scene -------------------------------- //
-	// --------------------------------------------------------------- //
-
-	glm::vec3 sponza_translation = {0.0f, 0.0f, 300.0f};
-
-	VeGameObject sponza = VeGameObject::createGameObject();
-	std::filesystem::path sponza_model_path = project_root / "models" / "sponza" / "glTF" / "Sponza.gltf";
-	auto sponza_model = std::make_shared<VeModel>(m_ve_device, sponza_model_path);
-	sponza_model->createDescriptorSet(*m_global_pool, *m_material_set_layout);
-	sponza.ve_model = sponza_model;
-	sponza_id = sponza.getId();
-	sponza.transform.translation = glm::vec3{0.0f, 0.0f, -350.0f} + sponza_translation;
-	sponza.transform.scale = {0.1f, 0.1f, 0.1f};
-	sponza.has_texture = 1.0f;
-	m_sponza_scene->getGameObjects().emplace(sponza.getId(), std::move(sponza));
-
-
-	// sponza sun light
-	VeGameObject sun = VeGameObject::createPointLight(2000.0f, 4.0f, glm::vec3(1.0f, 1.0f, 1.0f));
-	sun.transform.translation = glm::vec3{0.0f, 50.0f, -140.0f} + sponza_translation;
-	sun.point_light_component->rotates = true;
-	sun_id = sun.getId();
-	m_sponza_scene->getGameObjects().emplace(sun.getId(), std::move(sun));
-
-	// sponza fire lights
-	{
-		VeGameObject fire = VeGameObject::createPointLight(100.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
-		fire.transform.translation = glm::vec3{-62.0f, -22.0f, -336.0f} + sponza_translation;
-		fire.point_light_component->rotates = false;
-		fire.point_light_component->casts_shadow = false;
-		fire.has_shadow = false;
-		m_sponza_scene->getGameObjects().emplace(fire.getId(), std::move(fire));
-	}
-	{
-		VeGameObject fire = VeGameObject::createPointLight(100.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
-		fire.transform.translation = glm::vec3{-62.0f, 14.0f, -336.0f} + sponza_translation;
-		fire.point_light_component->rotates = false;
-		fire.point_light_component->casts_shadow = false;
-		fire.has_shadow = false;
-		m_sponza_scene->getGameObjects().emplace(fire.getId(), std::move(fire));
-	}
-	{
-		VeGameObject fire = VeGameObject::createPointLight(100.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
-		fire.transform.translation = glm::vec3{49.0f, 14.0f, -336.0f} + sponza_translation;
-		fire.point_light_component->rotates = false;
-		fire.point_light_component->casts_shadow = false;
-		fire.has_shadow = false;
-		m_sponza_scene->getGameObjects().emplace(fire.getId(), std::move(fire));
-	}
-	{
-		VeGameObject fire = VeGameObject::createPointLight(100.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
-		fire.transform.translation = glm::vec3{49.0f, -22.0f, -336.0f} + sponza_translation;
-		fire.point_light_component->rotates = false;
-		fire.point_light_component->casts_shadow = false;
-		fire.has_shadow = false;
-		m_sponza_scene->getGameObjects().emplace(fire.getId(), std::move(fire));
-	}
-
-	// lion eyes
-	{
-		VeGameObject green_eye = VeGameObject::createPointLight(50.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
-		green_eye.transform.translation = glm::vec3{126.7f, -5.87f, -331.2f} + sponza_translation;
-		green_eye.transform.scale = {.3f, .3f, .3f};
-		green_eye.point_light_component->rotates = false;
-		green_eye.point_light_component->casts_shadow = false;
-		green_eye.has_shadow = false;
-		m_sponza_scene->getGameObjects().emplace(green_eye.getId(), std::move(green_eye));
-	}
-	{
-		VeGameObject green_eye = VeGameObject::createPointLight(50.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
-		green_eye.transform.translation = glm::vec3{126.7f, -1.24f, -331.2f} + sponza_translation;
-		green_eye.transform.scale = {.3f, .3f, .3f};
-		green_eye.point_light_component->rotates = false;
-		green_eye.point_light_component->casts_shadow = false;
-		green_eye.has_shadow = false;
-		m_sponza_scene->getGameObjects().emplace(green_eye.getId(), std::move(green_eye));
-	}
-
-	// -------------------------------------------------------------- //
-	// ----------------- Simple scene ------------------------------- //
-	// -------------------------------------------------------------- //
-
-	// stationary light
-	{
-		auto l = VeGameObject::createPointLight(100.0f, 2.0f, glm::vec3(1.0f, 1.0f, 1.0f));
-		glm::vec3 pos = {0.0f, 0.0f, 20.0f};
-		l.transform.translation = pos;
-		l.point_light_component->rotates = false;
-		m_simple_scene->getGameObjects().emplace(l.getId(), std::move(l));
-	}
-
-	// Create some lights with ranging colors
-	constexpr uint32_t num_lights = 7; // max 100 see config
-	constexpr float intensity = 100.0f;
-	constexpr float radius = 1.0f;
-	const glm::vec3 colors[10] = {
-		{0.0f, 1.0f, 1.0f}, //cyan
-		{1.0f, 0.0f, 0.0f}, //red
-		{1.0f, 0.5f, 0.0f}, //orange
-		{1.0f, 1.0f, 0.0f}, //yellow
-		{0.0f, 1.0f, 0.0f}, //green
-		{0.0f, 1.0f, 0.5f}, //turquoise
-		{1.0f, 1.0f, 1.0f}, //white
-		{0.0f, 0.5f, 1.0f}, //light-blue
-		{0.0f, 0.0f, 1.0f}, //blue
-		{0.5f, 0.0f, 1.0f}  //purple
-	};
-	constexpr float pos_radius = 28.0f;
-	constexpr float height = 20.0f;
-
-	// Create point lights evenly distributed in a circle
-	for (uint32_t i = 0; i < num_lights; i += 1) {
-		auto point_light = VeGameObject::createPointLight(intensity, radius, colors[i % 10]);
-		glm::vec3 pos = {
-			pos_radius * cos(glm::two_pi<float>() / num_lights * (float)i),
-			pos_radius * sin(glm::two_pi<float>() / num_lights * (float)i),
-			height
-		};
-		point_light.point_light_component->casts_shadow = false;
-		point_light.has_shadow = false;
-		point_light.transform.translation = pos;
-		m_simple_scene->getGameObjects().emplace(point_light.getId(), std::move(point_light));
-	}
-
-	// 'black hole' light
-	{
-		auto black_hole = VeGameObject::createPointLight(1.0f, 4.0f, glm::vec3(0.0f, 0.0f, 0.0f));
-		glm::vec3 pos = {0.0f, -300.0f, 10.0f};
-		black_hole.transform.translation = pos;
-		black_hole.point_light_component->rotates = false;
-		black_hole.point_light_component->casts_shadow = false;
-		black_hole.has_shadow = false;
-		m_simple_scene->getGameObjects().emplace(black_hole.getId(), std::move(black_hole));
-		m_sponza_scene->getGameObjects().emplace(black_hole.getId(), std::move(black_hole));
-	}
-
-
-
-
-	// --------------------------------------------------------------
-	// floor
-	// --------------------------------------------------------------
-
-	VeGameObject floor = VeGameObject::createGameObject();
-	auto quad = std::make_shared<VeModel>(m_ve_device, m_quad_model_path);
-	floor.ve_model = quad;
-	floor.has_texture = 0.0f;
-	floor.transform = {
-		.translation = {0.0f, 0.0f, 0.0f},
-		.rotation = {glm::radians(90.0f), 0.0f, 0.0f},
-		.scale = {80.0f, 1.0f, 80.0f}
-	};
-	floor.has_shadow = false;
-	m_simple_scene->getGameObjects().emplace(floor.getId(), std::move(floor));
-
-
-	// --------------------------------------------------------------
-	// textured quad to display certain textures or shadow maps
-	// --------------------------------------------------------------
-
-	/*
-	VeGameObject textured_quad = VeGameObject::createGameObject();
-	auto textured_quad_model = std::make_shared<VeModel>(m_ve_device, m_quad_model_path);
-	textured_quad.ve_model = quad;
-	textured_quad.has_texture = 1.0f;
-	textured_quad.has_shadow = false;
-	textured_quad.transform = {
-		.translation = {-30.0f, -30.0f, 40.0f},
-		.rotation = {0.0f, 0.0f, glm::radians(-45.0f)},
-		.scale = {20.0f, 1.0f, 20.0f}
-	};
-	m_simple_scene->getGameObjects().emplace(textured_quad.getId(), std::move(textured_quad));
-	*/
-	// --------------------------------------------------------------
-	// Spheres
-	// --------------------------------------------------------------
-
-	// Spheres in a grid
-	std::shared_ptr<VeModel> model = std::make_shared<VeModel>(m_ve_device, m_sphere_model_path);
-	for (int j = 0; j < 5; j++) {
-		for (int i = 0; i < 5; i++) {
-			VeGameObject obj = VeGameObject::createGameObject();
-			obj.ve_model = model;
-			obj.transform.rotation = {0.0f, 0.0f, 0.0f};
-			obj.transform.translation = {(float)i * 4.0f, (float)j * 4.0f, 1.0f};
-			obj.transform.scale = {1.0f, 1.0f, 1.0f};
-			obj.has_texture = 0.0f;
-			m_simple_scene->getGameObjects().emplace(obj.getId(), std::move(obj));
-		}
-	}
-
-	// --------------------------------------------------------------
-	// Cubes
-	// --------------------------------------------------------------
-
-	// Cubes in a grid
-	std::shared_ptr<VeModel> model2 = std::make_shared<VeModel>(m_ve_device, m_cube_model_path);
-	for (int j = 0; j < 5; j++) {
-		for (int i = 0; i < 5; i++) {
-			VeGameObject obj = VeGameObject::createGameObject();
-			obj.ve_model = model2;
-			obj.transform.translation = {-1.0 * (float)i * 4.0f - 4.0f, (float)j * 4.0f, 1.0f};
-			obj.transform.scale = {1.0f, 1.0f, 1.0f};
-			obj.has_texture = 0.0f;
-			m_simple_scene->getGameObjects().emplace(obj.getId(), std::move(obj));
-		}
-	}
-
-	// --------------------------------------------------------------
-	// Vases
-	// --------------------------------------------------------------
-
-	// Flat vases (bad normals) in a grid
-	std::shared_ptr<VeModel> model3 = std::make_shared<VeModel>(m_ve_device, m_flat_vase_model_path);
-	for (int j = 0; j < 5; j++) {
-		for (int i = 0; i < 5; i++) {
-			VeGameObject obj = VeGameObject::createGameObject();
-			obj.ve_model = model3;
-			obj.transform = {
-				.translation = {-1.0 * (float)i * 4.0f - 4.0f, (float)j * -4.0f - 4.0f, 0.f},
-				.rotation = {glm::radians(-180.0f), 0.0f, 0.0f},
-				.scale = {6.0f, 6.0f, 3.0f}
-			};
-			obj.has_texture = 0.0f;
-			m_simple_scene->getGameObjects().emplace(obj.getId(), std::move(obj));
-		}
-	}
-	// Smooth vases (interpolated normals) in a grid
-	std::shared_ptr<VeModel> model4 = std::make_shared<VeModel>(m_ve_device, m_smooth_vase_model_path);
-	for (int j = 0; j < 5; j++) {
-		for (int i = 0; i < 5; i++) {
-			VeGameObject obj = VeGameObject::createGameObject();
-			obj.ve_model = model4;
-			obj.transform = {
-				.translation = {(float)i * 4.0f , (float)j * -4.0f - 4.0f, 0.f},
-				.rotation = {glm::radians(-180.0f), 0.0f, 0.0f},
-				.scale = {6.0f, 6.0f, 3.0f}
-			};
-			m_simple_scene->getGameObjects().emplace(obj.getId(), std::move(obj));
-		}
-	}
-
 }
 
 

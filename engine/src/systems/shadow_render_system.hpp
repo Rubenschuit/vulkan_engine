@@ -31,7 +31,7 @@ public:
 	ShadowRenderSystem& operator=(const ShadowRenderSystem&) = delete;
 
 	// Update shadow UBO with light data from main UBO
-	void updateUniformBuffer(uint32_t frame_index, const UniformBufferObject& ubo);
+	void updateUniformBuffer(uint32_t frame_index, UniformBufferObject& ubo);
 
 	// Render all shadow maps for all lights
 	void renderShadowMaps(VeFrameInfo& frame_info);

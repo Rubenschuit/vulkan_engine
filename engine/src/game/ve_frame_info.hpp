@@ -22,6 +22,7 @@ struct PointLight {
 struct ShadowLight {
 	glm::mat4 light_view;
 	glm::mat4 light_proj;
+	glm::mat4 shadow_matrix;        // pre-computed bias * light_proj * light_view
 	glm::vec4 light_index_padding;  // x = light_index, yzw = padding (ensures 16-byte alignment)
 };
 
@@ -51,6 +52,8 @@ struct PostProcessPushConstant {
 	float exposure = 1.0f;
 	int color_space = 0; // 0: SRGB, 1: Extended Linear, 2: HDR10 ST2084
 	float bloom_strength = 0.01f;
+	float padding[3];
+	glm::vec2 texel_size;
 };
 
 struct BloomDownsamplePushConstant {
@@ -64,6 +67,7 @@ struct BloomUpsamplePushConstant {
 struct UniformBufferObject {
 	glm::mat4 view;
 	glm::mat4 proj;
+	glm::mat4 projection_view;
 	glm::vec4 camera_position;
 	glm::vec4 ambient_light_color = DEFAULT_AMBIENT_LIGHT_COLOR;
 	PointLight point_lights[ve::MAX_LIGHTS]; // reserved for MAX_LIGHTS point lights
@@ -73,7 +77,6 @@ struct UniformBufferObject {
 	uint32_t render_mode = RenderMode::BRDF;
 	uint32_t shadow_mode = ShadowMode::REGULAR;
 	float shadow_bias = ve::SHADOW_BIAS;
-	// reminder: alignment
 };
 
 struct VeFrameInfo {

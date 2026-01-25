@@ -32,6 +32,8 @@ struct VENGINE_API UIContext {
 	int shadow_mode = ShadowMode::REGULAR;
 	int topology = Topology::TRIANGLE_LIST;
 	bool hdr_enabled = false;
+	bool msaa = false;
+	bool vsync = false;
 
 	// particle system
 	int current_mode = 1;
