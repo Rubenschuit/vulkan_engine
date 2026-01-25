@@ -79,9 +79,9 @@ private:
 	bool m_is_frame_started = false;
 	bool m_swap_chain_needs_recreation = false;
 
-	bool m_msaa_enabled = false;
+	bool m_msaa_enabled = true;
 	bool m_hdr_enabled = false;
-	vk::SampleCountFlagBits m_desired_num_samples = vk::SampleCountFlagBits::e1;
+	vk::SampleCountFlagBits m_desired_num_samples = m_ve_device.getSampleCount();
 };
 }
 
