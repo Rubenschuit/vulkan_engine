@@ -50,6 +50,7 @@ public:
         const vk::raii::DescriptorSetLayout& global_set_layout,
         const vk::raii::DescriptorSetLayout& texture_set_layout,
         vk::Format color_format,
+        vk::SampleCountFlagBits sample_count,
         std::filesystem::path shader_path);
 
     void recordComputeCommands(VeFrameInfo& frame_info);

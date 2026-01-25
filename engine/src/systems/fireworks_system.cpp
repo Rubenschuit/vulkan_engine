@@ -12,6 +12,7 @@ FireworksSystem::FireworksSystem(
     const vk::raii::DescriptorSetLayout& global_set_layout,
     const vk::raii::DescriptorSetLayout& texture_set_layout,
     vk::Format color_format,
+    vk::SampleCountFlagBits sample_count,
     std::filesystem::path shader_path) {
 
     m_particle_system = std::make_unique<ParticleSystem>(
@@ -20,6 +21,7 @@ FireworksSystem::FireworksSystem(
         global_set_layout,
         texture_set_layout,
         color_format,
+        sample_count,
         m_config.max_particles, // Dedicated particle count for fireworks
         glm::vec3(0.0f), // origin
         shader_path,

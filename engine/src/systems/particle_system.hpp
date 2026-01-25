@@ -108,6 +108,7 @@ public:
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		const vk::raii::DescriptorSetLayout& texture_set_layout,
 		vk::Format color_format,
+		vk::SampleCountFlagBits sample_count,
 		uint32_t particle_count,
 		glm::vec3 origin,
 		std::filesystem::path shader_path,

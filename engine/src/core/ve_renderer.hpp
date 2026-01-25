@@ -52,7 +52,15 @@ public:
 
 	// only max or none MSAA supported for now
 	void setMSAAEnabled(bool enabled) { m_msaa_enabled = enabled; m_desired_num_samples = enabled ? m_ve_device.getSampleCount() : vk::SampleCountFlagBits::e1; m_swap_chain_needs_recreation = true; }
+	void setSampleCount(vk::SampleCountFlagBits sample_count) { 
+		// Clamp to device max
+		vk::SampleCountFlagBits max_samples = m_ve_device.getSampleCount();
+		m_desired_num_samples = (sample_count > max_samples) ? max_samples : sample_count;
+		m_msaa_enabled = (m_desired_num_samples != vk::SampleCountFlagBits::e1);
+		m_swap_chain_needs_recreation = true;
+	}
 	vk::SampleCountFlagBits getSampleCount() const { return m_desired_num_samples; }
+	vk::SampleCountFlagBits getMaxSampleCount() const { return m_ve_device.getSampleCount(); }
 	void setPresentMode(vk::PresentModeKHR present_mode) {
 		m_present_mode = present_mode;
 		m_swap_chain_needs_recreation = true;
@@ -79,9 +87,9 @@ private:
 	bool m_is_frame_started = false;
 	bool m_swap_chain_needs_recreation = false;
 
-	bool m_msaa_enabled = true;
+	bool m_msaa_enabled = false;
 	bool m_hdr_enabled = false;
-	vk::SampleCountFlagBits m_desired_num_samples = m_ve_device.getSampleCount();
+	vk::SampleCountFlagBits m_desired_num_samples = vk::SampleCountFlagBits::e1;
 };
 }
 

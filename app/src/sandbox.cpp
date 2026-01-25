@@ -1,3 +1,4 @@
+#include <cmath>
 #include <glm/glm.hpp>
 #define GLM_FORCE_RADIANS
 #define GLM_ENABLE_EXPERIMENTAL
@@ -318,8 +319,11 @@ void Sandbox::renderAppWindows() {
 				ImGui::Separator();
 				ImGui::Text("Explosion");
 				ImGui::SliderInt("Particle Count", &config.explosion_particle_count, 5, 3000);
-				ImGui::SliderFloat("Explosion Size", &config.explosion_size, 0.1f, 5.0f);
+				ImGui::SliderFloat("Particle Size", &config.explosion_size, 0.1f, 5.0f);
 				ImGui::SliderFloat("Trail Interval", &config.trail_interval, 0.0001f, 0.1f, "%.4f");
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Interval at which to emit smoke/trail particles.");
+				}
 
 				ImGui::Separator();
 				ImGui::Text("Environment");
@@ -344,14 +348,12 @@ void Sandbox::renderAppWindows() {
 				ImGui::Text("Graphics Settings");
 				ImGui::Separator();
 
-				// MSAA toggle
-				if (ImGui::Checkbox("Enable MSAA (device maximum sample count)", &ui_actions.msaa)) {
-					m_ve_renderer.setMSAAEnabled(ui_actions.msaa);
-				}
-
 				// VSync toggle (eMailbox instead of eImmediate)
 				if (ImGui::Checkbox("Enable VSync", &ui_actions.vsync)) {
 					m_ve_renderer.setPresentMode(ui_actions.vsync ? vk::PresentModeKHR::eFifo : vk::PresentModeKHR::eImmediate);
+				}
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Synchronizes frame rate with display refresh rate.\nEliminates screen tearing but may increase input latency.");
 				}
 
 				// HDR toggle
@@ -376,12 +378,85 @@ void Sandbox::renderAppWindows() {
 					ImGui::SameLine();
 					ImGui::TextDisabled("(Not supported by device)");
 				}
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("High Dynamic Range.\nRequires compatible HDR display.");
+				}
 
-				// Shadow mode selection
-				ImGui::Text("Shadows: ");
+
+				// MSAA slider with discrete sample counts
+				{
+					ImGui::Text("MSAA:");
+					
+					// Get device max and current sample count
+					vk::SampleCountFlagBits max_samples = m_ve_renderer.getMaxSampleCount();
+					vk::SampleCountFlagBits current_samples = m_ve_renderer.getSampleCount();
+					
+					// Build list of available sample counts (powers of 2 up to device max)
+					std::vector<vk::SampleCountFlagBits> available_samples;
+					std::vector<std::string> sample_labels;
+					available_samples.push_back(vk::SampleCountFlagBits::e1);
+					sample_labels.push_back("Off");
+					
+					for (int i = 2; i <= 64; i *= 2) {
+						vk::SampleCountFlagBits sample_flag = static_cast<vk::SampleCountFlagBits>(i);
+						if (sample_flag <= max_samples) {
+							available_samples.push_back(sample_flag);
+							sample_labels.push_back(std::to_string(i) + "x");
+						}
+					}
+					
+					// Find current index
+					size_t current_index = 0;
+					for (size_t i = 0; i < available_samples.size(); i++) {
+						if (available_samples[i] == current_samples) {
+							current_index = i;
+							break;
+						}
+					}
+					
+					// Slider
+					int slider_value = static_cast<int>(current_index);
+					ImGui::PushItemWidth(200.0f);
+					if (ImGui::SliderInt("##msaa_slider", &slider_value, 0, static_cast<int>(available_samples.size()) - 1, "")) {
+						slider_value = std::clamp(slider_value, 0, static_cast<int>(available_samples.size()) - 1);
+						m_ve_renderer.setSampleCount(available_samples[static_cast<size_t>(slider_value)]);
+					}
+					ImGui::PopItemWidth();
+					ImGui::SameLine();
+					ImGui::Text("%s", sample_labels[current_index].c_str());
+					if (ImGui::IsItemHovered()) {
+						ImGui::BeginTooltip();
+						ImGui::Text("Multi-Sample Anti-Aliasing");
+						ImGui::Separator();
+						ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Smooths jagged edges on geometry.");
+						ImGui::Text("Off (1x): No MSAA, best performance");
+						ImGui::Text("2x-4x: Balanced quality/performance");
+						ImGui::Text("8x+: High quality, significant cost");
+						ImGui::EndTooltip();
+					}
+				}
+
+				// Shadow mode selection - slider with discrete positions
+				ImGui::Text("Shadows:");
+				ImGui::PushItemWidth(200.0f);
+				if (ImGui::SliderInt("##shadow_slider", &ui_actions.shadow_mode, 0, 2, "")) {
+					// Ensure it snaps to discrete values
+					ui_actions.shadow_mode = std::clamp(ui_actions.shadow_mode, 0, 2);
+				}
+				ImGui::PopItemWidth();
 				ImGui::SameLine();
-				const char* shadow_options[] = { "Disabled", "Regular", "PCF" };
-				ImGui::Combo(" ", &ui_actions.shadow_mode, shadow_options, 3);
+				const char* shadow_labels[] = { "Off", "Normal", "PCF" };
+				ImGui::Text("%s", shadow_labels[ui_actions.shadow_mode]);
+				if (ImGui::IsItemHovered()) {
+					ImGui::BeginTooltip();
+					ImGui::Text("Shadow Rendering Mode");
+					ImGui::Separator();
+					ImGui::Text("Off: No shadows, best performance");
+					ImGui::Text("Normal: Hard shadows, good performance");
+					ImGui::Text("PCF: Percentage Closer Filtering");
+					ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "     Soft shadow edges, higher cost");
+					ImGui::EndTooltip();
+				}
 
 				// Topology selection. Requires pipeline recreation
 				ImGui::Text("Topology: ");
@@ -411,26 +486,53 @@ void Sandbox::renderAppWindows() {
 					ui_actions.render_mode = RenderMode::BRDF;
 				if (ImGui::RadioButton("Normal vector", &s_render_mode, 1))
 					ui_actions.render_mode = RenderMode::NORMAL_VECTOR;
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Visualize surface normals (RGB = XYZ)");
+				}
 				if (ImGui::RadioButton("Tangent vector", &s_render_mode, 2))
 					ui_actions.render_mode = RenderMode::TANGENT_VECTOR;
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Visualize tangent vectors for normal mapping");
+				}
 				if (ImGui::RadioButton("Bitangent vector", &s_render_mode, 3))
 					ui_actions.render_mode = RenderMode::BITANGENT_VECTOR;
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Visualize bitangent vectors for normal mapping");
+				}
 				if (ImGui::RadioButton("Normal map", &s_render_mode, 4))
 					ui_actions.render_mode = RenderMode::NORMAL_MAP;
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Display normal map texture data directly");
+				}
 
 				// Axes system visibility
 				ImGui::Separator();
 				ImGui::Checkbox("Show Axes", &ui_actions.show_axes);
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Display XYZ coordinate axes in the scene.\nRed=X, Green=Y, Blue=Z");
+				}
 
 				ImGui::Separator();
 				ImGui::Text("Post Processing: ");
 				ImGui::SliderInt("Blur Radius", &ui_actions.blur_radius, 0, 10);
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Gaussian blur kernel size.\n0 = No blur, higher values = stronger blur effect");
+				}
 				ImGui::SliderFloat("Blur Strength", &ui_actions.blur_strength, 0.0f, 5.0f);
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Intensity of the blur effect");
+				}
 				ImGui::SliderFloat("Exposure", &ui_actions.exposure, 0.0f, 5.0f);
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Tone mapping exposure adjustment.\n< 1.0: Darker, > 1.0: Brighter");
+				}
 
 				ImGui::Text("Bloom");
 				ImGui::Separator();
 				ImGui::Checkbox("Bloom Enabled", &ui_actions.bloom_enabled);
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Bloom effect creates glow around bright areas.\nSimulates light bleeding in cameras");
+				}
 				ImGui::DragFloat("Bloom Strength", &ui_actions.bloom_strength, 0.001f, 0.0f, 0.4f);
 
 				ImGui::EndTabItem();
@@ -538,6 +640,7 @@ void Sandbox::initSystems() {
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_shadow_render_system->getShadowSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
+		m_ve_renderer.getSampleCount(),
 		project_root / "shaders" / "simple_shader.spv"
 	);
 	VE_LOGD("pbr system: " << project_root / "shaders" / "pbr_shader.spv");
@@ -547,6 +650,7 @@ void Sandbox::initSystems() {
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_shadow_render_system->getShadowSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
+		m_ve_renderer.getSampleCount(),
 		project_root / "shaders" / "pbr_shader.spv"
 	);
 	VE_LOGD("axes system: " << project_root / "shaders" / "axes_shader.spv");
@@ -554,6 +658,7 @@ void Sandbox::initSystems() {
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
+		m_ve_renderer.getSampleCount(),
 		project_root / "shaders" / "axes_shader.spv"
 	);
 	VE_LOGD("pl system: " << project_root / "shaders" / "point_light_shader.spv");
@@ -562,6 +667,7 @@ void Sandbox::initSystems() {
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
+		m_ve_renderer.getSampleCount(),
 		project_root / "shaders" / "point_light_shader.spv"
 	);
 	VE_LOGD("particle system: " << project_root / "shaders" / "particle_compute.spv");
@@ -571,6 +677,7 @@ void Sandbox::initSystems() {
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
+		m_ve_renderer.getSampleCount(),
 		50000, // number of particles
 		glm::vec3{0.0f, -300.0f, 50.0f},
 		project_root / "shaders" / "particle_compute.spv"
@@ -581,6 +688,7 @@ void Sandbox::initSystems() {
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
+		m_ve_renderer.getSampleCount(),
 		project_root / "shaders" / "particle_compute.spv"
 	);
 	VE_LOGD("skybox system: " << project_root / "shaders" / "skybox_shader.spv");
@@ -589,6 +697,7 @@ void Sandbox::initSystems() {
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
+		m_ve_renderer.getSampleCount(),
 		project_root / "shaders" / "skybox_shader.spv",
 		project_root / "models" / "cube.gltf"
 	);

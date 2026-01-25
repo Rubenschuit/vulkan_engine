@@ -23,8 +23,9 @@ SimpleRenderSystem::SimpleRenderSystem(
 	const vk::raii::DescriptorSetLayout& material_set_layout,
 	const vk::raii::DescriptorSetLayout& shadow_set_layout,
 	vk::Format color_format,
+	vk::SampleCountFlagBits sample_count,
 	std::filesystem::path shader_path)
-	: m_ve_device(device), m_shader_path(shader_path), m_color_format(color_format), m_sample_count(m_ve_device.getSampleCount()) {
+	: m_ve_device(device), m_shader_path(shader_path), m_color_format(color_format), m_sample_count(sample_count) {
 
 	createPipelineLayout(global_set_layout, material_set_layout, shadow_set_layout);
 	createPipeline(m_color_format, m_sample_count);

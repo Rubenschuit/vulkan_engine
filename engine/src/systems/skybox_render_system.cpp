@@ -20,12 +20,13 @@ SkyboxRenderSystem::SkyboxRenderSystem(
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	const vk::raii::DescriptorSetLayout& material_set_layout,
 	vk::Format color_format,
+	vk::SampleCountFlagBits sample_count,
 	std::filesystem::path shader_path,
 	const std::filesystem::path& cube_model_path)
 	: m_ve_device(device), m_shader_path(shader_path) {
 
 	createPipelineLayout(global_set_layout, material_set_layout);
-	createPipeline(color_format, m_ve_device.getSampleCount());
+	createPipeline(color_format, sample_count);
 	loadCubeModel(cube_model_path);
 }
 

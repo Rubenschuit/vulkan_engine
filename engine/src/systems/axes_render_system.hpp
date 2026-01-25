@@ -23,6 +23,7 @@ AxesRenderSystem(
 		VeDevice& device,
 		const vk::raii::DescriptorSetLayout& descriptor_set_layout,
 		vk::Format color_format,
+		vk::SampleCountFlagBits sample_count,
 		std::filesystem::path shader_path);
 	~AxesRenderSystem();
 

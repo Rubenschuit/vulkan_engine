@@ -12,6 +12,7 @@ ParticleSystem::ParticleSystem(
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	const vk::raii::DescriptorSetLayout& texture_set_layout,
 	vk::Format color_format,
+	vk::SampleCountFlagBits sample_count,
 	uint32_t particle_count,
 	glm::vec3 origin,
 	std::filesystem::path shader_path,
@@ -31,7 +32,7 @@ ParticleSystem::ParticleSystem(
 	createComputePipelineLayout();
 	createComputePipeline();
 	createPipelineLayout(global_set_layout, texture_set_layout);
-	createPipeline(color_format, m_ve_device.getSampleCount());
+	createPipeline(color_format, sample_count);
 	if (start_active) {
 		scheduleRestart();
 	}
