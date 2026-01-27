@@ -81,6 +81,8 @@ ImGuiLayer::ImGuiLayer(VeWindow& window, VeDevice& device, VeRenderer& renderer)
     init_info.PipelineInfoMain.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
     init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
     init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &m_color_format;
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 
     ImGui_ImplVulkan_Init(&init_info);
 }
@@ -137,17 +139,27 @@ void ImGuiLayer::renderEngineWindows(UIContext& context) {
 	static int frame_count = 0;
 	static float fps = 0.0f;
 	static float frame_time_ms = 0.0f;
+	static float cpu_time_ms = 0.0f;
+	static float gpu_time_ms = 0.0f;
+	static float cpu_time_sum = 0.0f;
+	static float gpu_time_sum = 0.0f;
 	static float fps_history[120] = {};
 	static int history_offset = 0;
 	static float graph_update_timer = 0.0f;
 	static int graph_frames = 0;
 
 	// Text display updates (every 60 frames)
+	cpu_time_sum += context.cpu_time;
+	gpu_time_sum += context.gpu_time;
 	frame_count++;
 	if (frame_count >= 60) {
-		frame_count = 0;
 		fps = (time_elapsed > 0.0f) ? (1.0f / time_elapsed) : 0.0f;
 		frame_time_ms = time_elapsed * 1000.0f;
+		cpu_time_ms = cpu_time_sum / 60.0f;
+		gpu_time_ms = gpu_time_sum / 60.0f;
+		frame_count = 0;
+		cpu_time_sum = 0.0f;
+		gpu_time_sum = 0.0f;
 	}
 
 	// Graph updates
@@ -170,6 +182,8 @@ void ImGuiLayer::renderEngineWindows(UIContext& context) {
 	if (ImGui::Begin("Performance", &context.show_performance, flags)) {
 		ImGui::Text("FPS: %.1f", fps);
 		ImGui::Text("Frame Time: %.2f ms", frame_time_ms);
+		ImGui::Text("CPU Time:   %.2f ms", cpu_time_ms);
+		ImGui::Text("GPU Time:   %.2f ms", gpu_time_ms);
 
 		float max_fps = 0.0f;
 		for (float f : fps_history) if (f > max_fps) max_fps = f;
@@ -227,6 +241,8 @@ void ImGuiLayer::recreatePipeline() {
 	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
 	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
 	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &m_color_format;
+	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 
 	ImGui_ImplVulkan_Init(&init_info);
 }

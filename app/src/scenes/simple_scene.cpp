@@ -73,17 +73,6 @@ void SimpleScene::loadGameObjects(const std::filesystem::path& project_root) {
         m_game_objects.emplace(point_light.getId(), std::move(point_light));
     }
 
-    // 'black hole' light
-    {
-        auto black_hole = VeGameObject::createPointLight(1.0f, 4.0f, glm::vec3(0.0f, 0.0f, 0.0f));
-        glm::vec3 pos = {0.0f, -300.0f, 10.0f};
-        black_hole.transform.translation = pos;
-        black_hole.point_light_component->rotates = false;
-        black_hole.point_light_component->casts_shadow = false;
-        black_hole.has_shadow = false;
-        m_game_objects.emplace(black_hole.getId(), std::move(black_hole));
-    }
-
     // floor
     {
         VeGameObject floor = VeGameObject::createGameObject();

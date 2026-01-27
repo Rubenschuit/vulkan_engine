@@ -52,7 +52,7 @@ public:
 
 	// only max or none MSAA supported for now
 	void setMSAAEnabled(bool enabled) { m_msaa_enabled = enabled; m_desired_num_samples = enabled ? m_ve_device.getSampleCount() : vk::SampleCountFlagBits::e1; m_swap_chain_needs_recreation = true; }
-	void setSampleCount(vk::SampleCountFlagBits sample_count) { 
+	void setSampleCount(vk::SampleCountFlagBits sample_count) {
 		// Clamp to device max
 		vk::SampleCountFlagBits max_samples = m_ve_device.getSampleCount();
 		m_desired_num_samples = (sample_count > max_samples) ? max_samples : sample_count;
@@ -67,6 +67,8 @@ public:
 		VE_LOGI("Present mode set to " + std::to_string(static_cast<int>(present_mode)) + " with MSAA " + std::to_string(static_cast<int>(m_desired_num_samples))); }
 	void recreateSwapChain();
 	void setSwapChainNeedsRecreation() { m_swap_chain_needs_recreation = true; }
+
+	float getGpuTime() const { return m_gpu_time; }
 
 	bool hasHdrSupport() const { return m_ve_device.hasHdrColorSpaceExtension(); }
 	void setHdrEnabled(bool enabled) { m_hdr_enabled = hasHdrSupport() && enabled; m_swap_chain_needs_recreation = true; }
@@ -90,6 +92,10 @@ private:
 	bool m_msaa_enabled = false;
 	bool m_hdr_enabled = false;
 	vk::SampleCountFlagBits m_desired_num_samples = vk::SampleCountFlagBits::e1;
+
+	vk::raii::QueryPool m_query_pool = nullptr;
+	float m_gpu_time = 0.0f;
+	std::vector<bool> m_query_active;
 };
 }
 

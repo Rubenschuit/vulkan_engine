@@ -9,6 +9,15 @@ namespace ve {
 VeRenderer::VeRenderer(VeDevice& device, VeWindow& window) : m_ve_device(device), m_ve_window(window) {
 	m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, m_ve_window.getExtent(), m_desired_num_samples, m_present_mode, m_hdr_enabled);
 	createCommandBuffers();
+
+	// Create query pool for GPU timing
+	vk::QueryPoolCreateInfo query_pool_info{
+		.sType = vk::StructureType::eQueryPoolCreateInfo,
+		.queryType = vk::QueryType::eTimestamp,
+		.queryCount = 2 * ve::MAX_FRAMES_IN_FLIGHT
+	};
+	m_query_pool = vk::raii::QueryPool(m_ve_device.getDevice(), query_pool_info);
+	m_query_active.resize(ve::MAX_FRAMES_IN_FLIGHT, false);
 }
 
 VeRenderer::~VeRenderer() {}
@@ -104,6 +113,22 @@ bool VeRenderer::beginFrame() {
 
 	// Begin command buffer for recording commands
 	auto& command_buffer = getCurrentCommandBuffer();
+	uint32_t frame_index = m_ve_swap_chain->getCurrentFrame();
+
+	// Retrieve results from the previous time this frame slot was used (N-2 or N-3 frames ago)
+	if (m_query_active[frame_index]) {
+		std::array<uint64_t, 2> timestamps;
+		vk::Result query_result = (*m_ve_device.getDevice()).getQueryPoolResults(
+			*m_query_pool, frame_index * 2, 2, timestamps.size() * sizeof(uint64_t),
+			timestamps.data(), sizeof(uint64_t), vk::QueryResultFlagBits::e64
+		);
+
+		if (query_result == vk::Result::eSuccess) {
+			float timestamp_period = m_ve_device.getDeviceProperties().limits.timestampPeriod;
+			m_gpu_time = static_cast<float>(timestamps[1] - timestamps[0]) * timestamp_period / 1000000.0f;
+		}
+	}
+
 	command_buffer.reset();
 	vk::CommandBufferBeginInfo info{};
 	info.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
@@ -114,6 +139,11 @@ bool VeRenderer::beginFrame() {
 	compute_command_buffer.reset();
 	compute_command_buffer.begin(info);
 
+	// Reset query pool for this frame and write start timestamp
+	command_buffer.resetQueryPool(*m_query_pool, frame_index * 2, 2);
+	command_buffer.writeTimestamp(vk::PipelineStageFlagBits::eAllGraphics, *m_query_pool, frame_index * 2);
+	m_query_active[frame_index] = true;
+
 	return true;
 }
 
@@ -122,12 +152,18 @@ void VeRenderer::endFrame(vk::raii::CommandBuffer& command_buffer) {
 	assert(m_is_frame_started && "Can't call endFrame while frame is not in progress");
 	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end frame on command buffer from a different frame");
 
+	uint32_t frame_index = m_ve_swap_chain->getCurrentFrame();
+
+	// Write end timestamp
+	command_buffer.writeTimestamp(vk::PipelineStageFlagBits::eAllGraphics, *m_query_pool, frame_index * 2 + 1);
+
 	transitionToPresent(command_buffer);
 	command_buffer.end();
 
 	// submit graphics and present
 	// Submit the command buffer, present the image in accordance with the timeline semaphore values
 	auto result = m_ve_swap_chain->submitAndPresent(*command_buffer, &m_current_image_index);
+
 	if (result == vk::Result::eErrorOutOfDateKHR) {
 		VE_LOGD("Result of present is eErrorOutOfDateKHR, setting flag.");
 		m_swap_chain_needs_recreation = true;

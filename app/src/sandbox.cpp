@@ -31,6 +31,8 @@ Sandbox::Sandbox(const std::filesystem::path& working_dir) : project_root(workin
 Sandbox::~Sandbox() {}
 
 VeFrameInfo Sandbox::update() {
+	m_cpu_start = std::chrono::steady_clock::now();
+
 	// Get frame time
 	updateFrameTime();
 	m_total_time += m_frame_time;
@@ -97,7 +99,6 @@ VeFrameInfo Sandbox::update() {
 
 	updateCamera();
 	updateParticles(input_actions);
-	updateWindowTitle();
 
 	// update sponza sun intensity
 	if (ui_actions.current_scene == 2) {
@@ -199,6 +200,13 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	m_ve_renderer.beginPostProcessRender(command_buffer);
 	m_post_process_system->render(command_buffer, frame_info.post_process_push);
 	m_ve_renderer.endPostProcessRender(command_buffer);
+
+	// Record CPU time before UI rendering
+	auto cpu_end = std::chrono::steady_clock::now();
+	ui_actions.cpu_time = std::chrono::duration<float, std::chrono::milliseconds::period>(cpu_end - m_cpu_start).count();
+
+	// Update GPU time from renderer
+	ui_actions.gpu_time = m_ve_renderer.getGpuTime();
 
 	// Draw UI: begin frame, render app-specific windows, render engine windows, end frame
 	m_imgui_layer->beginFrame();
@@ -382,21 +390,20 @@ void Sandbox::renderAppWindows() {
 					ImGui::SetTooltip("High Dynamic Range.\nRequires compatible HDR display.");
 				}
 
-
 				// MSAA slider with discrete sample counts
 				{
 					ImGui::Text("MSAA:");
-					
+
 					// Get device max and current sample count
 					vk::SampleCountFlagBits max_samples = m_ve_renderer.getMaxSampleCount();
 					vk::SampleCountFlagBits current_samples = m_ve_renderer.getSampleCount();
-					
+
 					// Build list of available sample counts (powers of 2 up to device max)
 					std::vector<vk::SampleCountFlagBits> available_samples;
 					std::vector<std::string> sample_labels;
 					available_samples.push_back(vk::SampleCountFlagBits::e1);
 					sample_labels.push_back("Off");
-					
+
 					for (int i = 2; i <= 64; i *= 2) {
 						vk::SampleCountFlagBits sample_flag = static_cast<vk::SampleCountFlagBits>(i);
 						if (sample_flag <= max_samples) {
@@ -404,7 +411,7 @@ void Sandbox::renderAppWindows() {
 							sample_labels.push_back(std::to_string(i) + "x");
 						}
 					}
-					
+
 					// Find current index
 					size_t current_index = 0;
 					for (size_t i = 0; i < available_samples.size(); i++) {
@@ -413,7 +420,7 @@ void Sandbox::renderAppWindows() {
 							break;
 						}
 					}
-					
+
 					// Slider
 					int slider_value = static_cast<int>(current_index);
 					ImGui::PushItemWidth(200.0f);

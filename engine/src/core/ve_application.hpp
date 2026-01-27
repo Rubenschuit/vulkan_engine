@@ -39,7 +39,6 @@ public:
 protected:
 	void updateCamera();
 	void updateUniformBuffer(uint32_t current_frame, UniformBufferObject& ubo);
-	void updateWindowTitle();
 	void updateFrameTime();
 
 	VeWindow m_ve_window;
@@ -71,19 +70,14 @@ protected:
 	// FPS/frametime tracking
 	using clock = std::chrono::steady_clock;
 	clock::time_point m_last_frame_time{clock::now()};
-	clock::time_point m_fps_window_start{clock::now()};
 	float m_total_time{0.0f};
 	uint32_t m_fps_frame_count{0};
 	double m_sum_frame_ms{0.0};
 	float m_frame_time{0.0f};
 
-	// Window title update settings
-	static constexpr std::chrono::milliseconds WINDOW_TITLE_UPDATE_INTERVAL{100};
-
 private:
+	void setWindowTitle();
 	void updateFPSStats();
-	bool shouldUpdateWindowTitle() const;
-	std::string formatWindowTitle(double fps, double avg_ms) const;
 
 };
 

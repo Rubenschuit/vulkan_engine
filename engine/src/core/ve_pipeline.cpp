@@ -161,13 +161,16 @@ void VePipeline::createGraphicsPipeline(
 		.pVertexAttributeDescriptions = config_info.attribute_descriptions.data()
 	};
 	// Use provided depth format, or query for one if not specified
-	vk::Format depth_format = (config_info.depth_format != vk::Format::eUndefined)
+	vk::Format depth_format = vk::Format::eUndefined;
+	if (config_info.depth_stencil_info.depthTestEnable || config_info.depth_stencil_info.depthWriteEnable) {
+		depth_format = (config_info.depth_format != vk::Format::eUndefined)
 		? config_info.depth_format
 		: m_ve_device.findSupportedFormat(
 			{vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint},
 			vk::ImageTiling::eOptimal,
 			vk::FormatFeatureFlagBits::eDepthStencilAttachment
 		);
+	}
 	uint32_t color_attachment_count = (config_info.color_format == vk::Format::eUndefined) ? 0U : 1U;
 	vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo{
 		.sType = vk::StructureType::ePipelineRenderingCreateInfo,

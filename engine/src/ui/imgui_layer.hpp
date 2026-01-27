@@ -38,6 +38,8 @@ struct VENGINE_API UIContext {
 	// particle system
 	int current_mode = 1;
 	float speed = 1.0f;
+	float cpu_time = 0.0f;
+	float gpu_time = 0.0f;
 
 	// particle count
 	uint32_t pending_particle_count = 10000;

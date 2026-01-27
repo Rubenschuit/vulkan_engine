@@ -56,6 +56,7 @@ private:
 
 	// UI context captured during renderUI(), consumed in updateParticles() for example.
 	UIContext ui_actions;
+	std::chrono::steady_clock::time_point m_cpu_start;
 
 	// Render systems
 	std::unique_ptr<SkyboxRenderSystem> m_skybox_render_system;

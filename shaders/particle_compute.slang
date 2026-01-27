@@ -600,6 +600,19 @@ void resetFromEvent(uint i, SpawnEvent e) {
 }
 
 void appendToRenderBuffer(Particle p) {
+	// Only write to render buffer if visible (alpha > 0 or size > 0) AND alive
+	const float MIN_VISIBLE_SIZE = 0.001f;
+	const float MIN_VISIBLE_ALPHA = 0.001f;
+
+	if (p.velocity.w < 0.0f || p.position.w < MIN_VISIBLE_SIZE || p.color.a < MIN_VISIBLE_ALPHA) {
+		return;
+	}
+
+	// Check frustum culling before appending to render buffer
+	const float CULL_RADIUS_MULTIPLIER = 2.0f;
+	if (!isVisible(p.position.xyz, p.position.w * CULL_RADIUS_MULTIPLIER)) {
+		return;
+	}
 	uint index;
 	// Atomic increment to get unique index in render buffer
 	InterlockedAdd(indirect_command[0].instanceCount, 1, index);
@@ -984,15 +997,5 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 
 	particles_out[i] = p;
 
-	// Only write to render buffer if visible (alpha > 0 or size > 0) AND alive
-	const float MIN_VISIBLE_SIZE = 0.001f;
-	const float MIN_VISIBLE_ALPHA = 0.001f;
-
-	if (p.velocity.w > 0.0f && p.position.w > MIN_VISIBLE_SIZE && p.color.a > MIN_VISIBLE_ALPHA) {
-		// Check frustum culling
-		const float CULL_RADIUS_MULTIPLIER = 2.0f;
-		if (isVisible(p.position.xyz, p.position.w * CULL_RADIUS_MULTIPLIER)) {
-			appendToRenderBuffer(p);
-		}
-	}
+	appendToRenderBuffer(p);
 }

@@ -24,6 +24,8 @@ VeApplication::VeApplication()
 void VeApplication::run() {
 	VE_LOGI("VeApplication::run starting. Window=" + std::to_string(m_ve_window.getWidth()) + "x" + std::to_string(m_ve_window.getHeight()));
 
+	setWindowTitle();
+
 	// Main loop
 	while (!m_ve_window.shouldClose()) {
 		m_ve_window.pollEvents();
@@ -85,25 +87,15 @@ void VeApplication::updateUniformBuffer(uint32_t current_frame, UniformBufferObj
 	// No flush required with MEMORY_PROPERTY_HOST_COHERENT
 }
 
-// Print FPS and frame time to window title every 100 ms
-void VeApplication::updateWindowTitle() {
-	updateFPSStats();
-
-	if (shouldUpdateWindowTitle()) {
-		auto now = clock::now();
-		auto window_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_fps_window_start).count();
-
-		double fps = (window_ms > 0) ? (1000.0 * static_cast<double>(m_fps_frame_count) / static_cast<double>(window_ms)) : 0.0;
-		double avg_ms = (m_fps_frame_count > 0) ? (m_sum_frame_ms / static_cast<double>(m_fps_frame_count)) : 0.0;
-
-		std::string title = formatWindowTitle(fps, avg_ms);
-		glfwSetWindowTitle(m_ve_window.getGLFWwindow(), title.c_str());
-
-		// Reset window counters
-		m_fps_frame_count = 0;
-		m_sum_frame_ms = 0.0;
-		m_fps_window_start = now;
-	}
+// Set window title once at startup (static info only)
+void VeApplication::setWindowTitle() {
+#ifdef NDEBUG
+	const char* mode_str = "Release";
+#else
+	const char* mode_str = "Debug";
+#endif
+	std::string title = std::format("Vulkan Engine -- {} mode", mode_str);
+	glfwSetWindowTitle(m_ve_window.getGLFWwindow(), title.c_str());
 }
 
 void VeApplication::updateFrameTime() {
@@ -122,27 +114,6 @@ void VeApplication::updateFrameTime() {
 void VeApplication::updateFPSStats() {
 	m_sum_frame_ms += m_frame_time * 1000.0; // Convert to milliseconds
 	m_fps_frame_count++;
-}
-
-bool VeApplication::shouldUpdateWindowTitle() const {
-	auto now = clock::now();
-	auto window_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_fps_window_start);
-	return window_ms >= WINDOW_TITLE_UPDATE_INTERVAL;
-}
-
-std::string VeApplication::formatWindowTitle(double fps, double avg_ms) const {
-
-#ifdef NDEBUG
-	const char* mode_str = "Release";
-#else
-	const char* mode_str = "Debug";
-#endif
-
-	// add current camera position to window title
-	std::string camera_position = std::format("Camera: {:.2f}, {:.2f}, {:.2f}",
-		m_camera.getPosition().x, m_camera.getPosition().y, m_camera.getPosition().z);
-	return std::format("Vulkan Engine! -- {} mode          FPS {}   {:.2f} ms      {}",
-		mode_str, static_cast<int>(fps), avg_ms, camera_position);
 }
 
 } // namespace ve
