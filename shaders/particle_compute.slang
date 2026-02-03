@@ -119,9 +119,9 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 			discard;
 		}
 
-		// For additive blending, we must pre-multiply alpha to affect RGB intensity
-		// Apply bloom brightness to RGB
-		return float4(in_vert.color.rgb * 10.0f * brightness * alpha, alpha);
+		// For additive blending, we pre-multiply by alpha to affect RGB intensity
+		float more_brightness = 2.0f;
+		return float4(in_vert.color.rgb * more_brightness * brightness * alpha, alpha);
 	} else if (in_vert.type == ParticleType::TYPE_SMOKE) {
 		col1 = smoke_texture.Sample(in_vert.uv1);
 		col2 = smoke_texture.Sample(in_vert.uv2);

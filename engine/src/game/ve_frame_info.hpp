@@ -26,7 +26,7 @@ struct ShadowLight {
 	glm::vec4 light_index_padding;  // x = light_index, yzw = padding (ensures 16-byte alignment)
 };
 
-enum RenderMode {
+enum class RenderMode : uint32_t {
 	BRDF = 0,
 	NORMAL_VECTOR = 1,
 	TANGENT_VECTOR = 2,
@@ -35,13 +35,13 @@ enum RenderMode {
 	BRDF_MICROFACET = 5,
 };
 
-enum ShadowMode {
+enum class ShadowMode : uint32_t {
 	DISABLED = 0,
 	REGULAR = 1,
 	PCF = 2,
 };
 
-enum Topology {
+enum class Topology : uint32_t {
 	TRIANGLE_LIST = 0,
 	LINE_LIST = 1,
 };
@@ -74,8 +74,8 @@ struct UniformBufferObject {
 	ShadowLight shadow_lights[ve::MAX_SHADOW_LIGHTS]; // reserved for MAX_SHADOW_LIGHTS shadow-casting lights
 	uint32_t num_lights = 0; // actual number of point lights ( <= MAX_LIGHTS)
 	uint32_t num_shadow_lights = 0; // actual number of shadow-casting lights ( <= MAX_SHADOW_LIGHTS)
-	uint32_t render_mode = RenderMode::BRDF;
-	uint32_t shadow_mode = ShadowMode::REGULAR;
+	RenderMode render_mode = RenderMode::BRDF;
+	ShadowMode shadow_mode = ShadowMode::REGULAR;
 	float shadow_bias = ve::SHADOW_BIAS;
 };
 

@@ -34,6 +34,7 @@ public:
 	vk::ColorSpaceKHR getSwapChainColorSpace() const { return m_surface_format.colorSpace; }
 	vk::Format getOffscreenImageFormat() const { return m_offscreen_image_format; }
 	vk::Extent2D getSwapChainExtent() const { return m_swap_chain_extent; }
+	vk::SampleCountFlagBits getSwapChainSampleCount() const { return m_desired_num_samples; }
 	vk::PresentModeKHR getPresentMode() const { return m_present_mode; }
 	const vk::raii::ImageView& getImageView(size_t index) const { return m_swap_chain_image_views[index]; };
 	const vk::raii::ImageView& getColorImageView() const { return m_color_image->getImageView(); }

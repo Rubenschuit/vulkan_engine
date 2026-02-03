@@ -515,7 +515,7 @@ void ParticleSystem::emitParticles(uint32_t count) {
 		.position_scale = glm::vec4(m_origin, 1.0f),
 		.velocity_life = glm::vec4(0.0f),
 		.color = glm::vec4(1.0f),
-		.info = {0, count, TYPE_DEFAULT, 0}
+		.info = {0, count, static_cast<uint32_t>(ParticleType::DEFAULT), 0}
 	};
 	emitParticles(e);
 }

@@ -50,7 +50,6 @@ void VeApplication::run() {
 		if (!m_ve_renderer.beginFrame())
 			continue;
 
-
 		// Update and render implemented by derived class
 		VeFrameInfo frame_info = update();
 		render(frame_info);
@@ -67,12 +66,21 @@ void VeApplication::run() {
 
 // Updates the camera view and projection matrices if state changed
 void VeApplication::updateCamera() {
+	updateCamera(m_fov);
+}
+
+void VeApplication::updateCamera(float fov_radians) {
 	// Recompute camera view once per frame if needed
 	m_camera.updateIfDirty();
-	// If swapchain aspect changed (window resize), refresh camera projection
+
+	// If swapchain aspect changed (window resize) or FOV changed, refresh camera projection
 	float aspect = m_ve_renderer.getExtentAspectRatio();
-	if (aspect > 0.0f && std::abs(aspect - m_last_aspect) > std::numeric_limits<float>::epsilon()) {
+	bool aspect_changed = aspect > 0.0f && std::abs(aspect - m_last_aspect) > std::numeric_limits<float>::epsilon();
+	bool fov_changed = std::abs(fov_radians - m_fov) > 1e-4f;
+
+	if (aspect_changed || fov_changed) {
 		m_last_aspect = aspect;
+		m_fov = fov_radians;
 		m_camera.setPerspective(m_fov, m_last_aspect, m_near_plane, m_far_plane);
 	}
 }

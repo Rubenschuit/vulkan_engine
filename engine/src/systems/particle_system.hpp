@@ -16,12 +16,12 @@
 namespace ve {
 
 // not enum class because we pass to shader
-enum ParticleResetKind : uint32_t {
+enum class ParticleResetKind : uint32_t {
 	POINT = 1,
 	DISC = 2
 };
 
-enum ParticleMode : int32_t {
+enum class ParticleMode : int32_t {
 	GRAVITY_EARTH = 1,
 	COOL = 2,
 	SUCC = 3,
@@ -29,14 +29,14 @@ enum ParticleMode : int32_t {
 	GALAXY_MASSIVE = 5,
 };
 
-enum ParticleType : uint32_t {
-	TYPE_DEFAULT = 0,
-	TYPE_SMOKE = 1,
-	TYPE_SPARK = 2,
-	TYPE_ROCKET = 3,
-	TYPE_EXPLOSION = 4,
-	TYPE_TRAIL = 5,
-	TYPE_STREAMER = 6
+enum class ParticleType : uint32_t {
+	DEFAULT = 0,
+	SMOKE = 1,
+	SPARK = 2,
+	ROCKET = 3,
+	EXPLOSION = 4,
+	TRAIL = 5,
+	STREAMER = 6
 };
 
 struct SpawnEvent {
@@ -125,11 +125,12 @@ public:
 		createPipeline(color_format, sample_count);
 	}
 	void scheduleRestart(); // schedule GPU reset of particle positions
-	void setMode(uint32_t mode) { m_mode = mode; }
+	void setMode(ParticleMode mode) { m_mode = static_cast<uint32_t>(mode); }
+	ParticleMode getMode() const { return static_cast<ParticleMode>(m_mode); }
 	void setSpeed(float speed) { m_speed = speed; }
 	void setOrigin(const glm::vec3& origin) { m_origin = origin; }
-	void resetPoint() { m_reset_kind = 1u; scheduleRestart(); }
-	void resetDisc() { m_reset_kind = 2u; scheduleRestart(); }
+	void resetPoint() { m_reset_kind = static_cast<uint32_t>(ParticleResetKind::POINT); scheduleRestart(); }
+	void resetDisc() { m_reset_kind = static_cast<uint32_t>(ParticleResetKind::DISC); scheduleRestart(); }
 
 	// getters/setters
 	void setParticleCount(uint32_t count, bool reset = true);
@@ -190,8 +191,8 @@ private:
 	glm::vec3 m_origin{0.0f, 0.0f, 10.0f};
 	std::atomic<bool> m_pending_reset{false}; // atomic not necessary (no multi-threading yet)
 	uint32_t m_reset_seed{0};
-	uint32_t m_reset_kind{ParticleResetKind::POINT}; // see ParticleResetKind enum
-	uint32_t m_mode{ParticleMode::COOL}; // see ParticleMode enum
+	uint32_t m_reset_kind{static_cast<uint32_t>(ParticleResetKind::POINT)}; // see ParticleResetKind enum
+	uint32_t m_mode{static_cast<uint32_t>(ParticleMode::COOL)}; // see ParticleMode enum
 	float m_speed{1.0f};
 	float m_gravity{9.81f};
 	float m_trail_interval{0.004f};

@@ -67,7 +67,7 @@ void FireworksSystem::launchRocket(glm::vec3 pos, glm::vec3 vel, glm::vec4 color
 		.position_scale = glm::vec4(pos, 0.0f),
 		.velocity_life = glm::vec4(vel, r.timer),
 		.color = color,
-		.info = {0, 1, TYPE_ROCKET, 0}
+		.info = {0, 1, static_cast<uint32_t>(ParticleType::ROCKET), 0}
 	};
     m_particle_system->emitParticles(event);
 }
@@ -122,7 +122,7 @@ void FireworksSystem::recordComputeCommands(VeFrameInfo& frame_info) {
                     .position_scale = glm::vec4(r.pos, 5.0f),
                     .velocity_life = glm::vec4(r.vel * 0.02f, 7.0f),
                     .color = m_config.smoke_color,
-                    .info = {0, 2, TYPE_SMOKE, 0}
+                    .info = {0, 2, static_cast<uint32_t>(ParticleType::SMOKE), 0}
                 };
                 m_particle_system->emitParticles(smoke);
 
@@ -130,7 +130,7 @@ void FireworksSystem::recordComputeCommands(VeFrameInfo& frame_info) {
                     .position_scale = glm::vec4(r.pos, 0.2f),
                     .velocity_life = glm::vec4(-r.vel * 0.0f, 0.34f),
                     .color = glm::vec4(1.0f, 0.8f, 0.1f, 1.0f),
-                    .info = {0, 5, TYPE_SPARK, 0}
+                    .info = {0, 5, static_cast<uint32_t>(ParticleType::SPARK), 0}
                 };
                 m_particle_system->emitParticles(spark);
             }
@@ -150,7 +150,7 @@ void FireworksSystem::recordComputeCommands(VeFrameInfo& frame_info) {
                     .position_scale = glm::vec4(r.pos, m_config.explosion_size),
                     .velocity_life = glm::vec4(0.0f, 0.0f, 0.0f, 2.5f),
                     .color = r.color,
-                    .info = {0, streamer_count, TYPE_STREAMER, 0}
+                    .info = {0, streamer_count, static_cast<uint32_t>(ParticleType::STREAMER), 0}
                 };
                 m_particle_system->emitParticles(streamers);
             }

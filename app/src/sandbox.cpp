@@ -37,13 +37,18 @@ VeFrameInfo Sandbox::update() {
 	updateFrameTime();
 	m_total_time += m_frame_time;
 
+	if (ui_actions.apply_particle_count) {
+		m_particle_system->applyStagedParticleCount();
+		ui_actions.apply_particle_count = false;
+	}
+
 	// Setup frame info
 	auto& command_buffer = m_ve_renderer.getCurrentCommandBuffer();
 	auto& compute_command_buffer = m_ve_renderer.getCurrentComputeCommandBuffer();
 	auto current_frame = m_ve_renderer.getCurrentFrame();
 
 	// Update active scene
-	m_active_scene = (ui_actions.current_scene == 2) ? static_cast<VeScene*>(m_sponza_scene.get()) : static_cast<VeScene*>(m_simple_scene.get());
+	m_active_scene = (ui_actions.current_scene == SandboxUIContext::SceneType::SPONZA) ? static_cast<VeScene*>(m_sponza_scene.get()) : static_cast<VeScene*>(m_simple_scene.get());
 
 	vk::raii::DescriptorSet& material_descriptor_set = m_active_scene->getDescriptorSet();
 
@@ -97,11 +102,11 @@ VeFrameInfo Sandbox::update() {
 		ui_actions.show_controls = !ui_actions.show_controls;
 	}
 
-	updateCamera();
+	updateCamera(glm::radians(ui_actions.fov));
 	updateParticles(input_actions);
 
 	// update sponza sun intensity
-	if (ui_actions.current_scene == 2) {
+	if (ui_actions.current_scene == SandboxUIContext::SceneType::SPONZA) {
 		m_sponza_scene->setSunIntensity(ui_actions.sun_intensity);
 	}
 
@@ -109,8 +114,8 @@ VeFrameInfo Sandbox::update() {
 
 	// update ubos
 	UniformBufferObject ubo{};
-	ubo.render_mode = static_cast<uint32_t>(ui_actions.render_mode);
-	ubo.shadow_mode = static_cast<uint32_t>(ui_actions.shadow_mode);
+	ubo.render_mode = ui_actions.render_mode;
+	ubo.shadow_mode = ui_actions.shadow_mode;
 	m_point_light_system->updateUniformBuffer(frame_info, ubo); // update UBO with point light data
 	m_shadow_render_system->updateUniformBuffer(current_frame, ubo); // update internal shadow UBO with light data from main UBO
 	this->updateUniformBuffer(current_frame, ubo); // view/proj/camera location in application base class
@@ -130,8 +135,9 @@ VeFrameInfo Sandbox::update() {
 void Sandbox::updateParticles(InputActions& actions) {
 	// Apply input actions
 	if (actions.set_mode >= 1 && actions.set_mode <= 5) {
-		m_particle_system->setMode(actions.set_mode);
-		ui_actions.current_mode = static_cast<int>(actions.set_mode);
+		ParticleMode mode = static_cast<ParticleMode>(actions.set_mode);
+		m_particle_system->setMode(mode);
+		ui_actions.current_mode = mode;
 	}
 	if (actions.reset_particles) {
 		m_particle_system->setOrigin(m_camera.getForward() * 100.0f + m_camera.getPosition());
@@ -209,13 +215,10 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	ui_actions.gpu_time = m_ve_renderer.getGpuTime();
 
 	// Draw UI: begin frame, render app-specific windows, render engine windows, end frame
-	m_imgui_layer->beginFrame();
-	if (ui_actions.visible) {
-		renderAppWindows();
-	}
-	m_imgui_layer->renderEngineWindows(ui_actions);
-	renderControlsWindow();
-	m_imgui_layer->endFrame(m_ve_renderer.getCurrentCommandBuffer());
+	m_imgui_layer->renderUI(ui_actions, [this](UIContext&) {
+		this->renderAppWindows();
+		this->renderControlsWindow();
+	});
 }
 
 void Sandbox::onSwapChainRecreated() {
@@ -253,13 +256,15 @@ void Sandbox::renderAppWindows() {
 				ImGui::Text("Scene selection");
 				ImGui::Separator();
 				// Select exactly 1 scene
-				static int s_current_scene = ui_actions.current_scene;
-				if (ImGui::RadioButton("Simple", &s_current_scene, 1))
-					ui_actions.current_scene = 1;
-				if (ImGui::RadioButton("Sponza", &s_current_scene, 2))
-					ui_actions.current_scene = 2;
+				int current_scene_int = static_cast<int>(ui_actions.current_scene);
+				if (ImGui::RadioButton("Simple", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::SIMPLE))) {
+					ui_actions.current_scene = SandboxUIContext::SceneType::SIMPLE;
+				}
+				if (ImGui::RadioButton("Sponza", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::SPONZA))) {
+					ui_actions.current_scene = SandboxUIContext::SceneType::SPONZA;
+				}
 
-				if (ui_actions.current_scene == 2) {
+				if (ui_actions.current_scene == SandboxUIContext::SceneType::SPONZA) {
 					ImGui::Separator();
 					ImGui::Text("Sponza Settings");
 					ImGui::SliderFloat("Sun Intensity", &ui_actions.sun_intensity, 0.0f, 1000000.0f);
@@ -352,8 +357,18 @@ void Sandbox::renderAppWindows() {
 
 				ImGui::EndTabItem();
 			}
-			if (ImGui::BeginTabItem("Graphics")) {
-				ImGui::Text("Graphics Settings");
+			if (ImGui::BeginTabItem("Display")) {
+				ImGui::Text("Display & Camera Settings");
+				ImGui::Separator();
+
+				// FOV slider
+				ImGui::Text("Field of View");
+				if (ImGui::SliderFloat("Degrees", &ui_actions.fov, 30.0f, 120.0f, "%.1f")) {
+					// Handled in update()
+				}
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Field of View in degrees.");
+				}
 				ImGui::Separator();
 
 				// VSync toggle (eMailbox instead of eImmediate)
@@ -389,6 +404,16 @@ void Sandbox::renderAppWindows() {
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("High Dynamic Range.\nRequires compatible HDR display.");
 				}
+
+				ImGui::Separator();
+				auto extent = m_ve_renderer.getExtent();
+				ImGui::Text("Resolution: %d x %d", extent.width, extent.height);
+
+				ImGui::EndTabItem();
+			}
+			if (ImGui::BeginTabItem("Graphics")) {
+				ImGui::Text("Graphics Quality Settings");
+				ImGui::Separator();
 
 				// MSAA slider with discrete sample counts
 				{
@@ -446,14 +471,15 @@ void Sandbox::renderAppWindows() {
 				// Shadow mode selection - slider with discrete positions
 				ImGui::Text("Shadows:");
 				ImGui::PushItemWidth(200.0f);
-				if (ImGui::SliderInt("##shadow_slider", &ui_actions.shadow_mode, 0, 2, "")) {
+				int shadow_mode_int = static_cast<int>(ui_actions.shadow_mode);
+				if (ImGui::SliderInt("##shadow_slider", &shadow_mode_int, 0, 2, "")) {
 					// Ensure it snaps to discrete values
-					ui_actions.shadow_mode = std::clamp(ui_actions.shadow_mode, 0, 2);
+					ui_actions.shadow_mode = static_cast<ShadowMode>(std::clamp(shadow_mode_int, 0, 2));
 				}
 				ImGui::PopItemWidth();
 				ImGui::SameLine();
 				const char* shadow_labels[] = { "Off", "Normal", "PCF" };
-				ImGui::Text("%s", shadow_labels[ui_actions.shadow_mode]);
+				ImGui::Text("%s", shadow_labels[static_cast<uint32_t>(ui_actions.shadow_mode)]);
 				if (ImGui::IsItemHovered()) {
 					ImGui::BeginTooltip();
 					ImGui::Text("Shadow Rendering Mode");
@@ -468,14 +494,15 @@ void Sandbox::renderAppWindows() {
 				// Topology selection. Requires pipeline recreation
 				ImGui::Text("Topology: ");
 				ImGui::SameLine();
-				if (ImGui::RadioButton("Triangle List", &ui_actions.topology, 0)) {
+				int topology_int = static_cast<int>(ui_actions.topology);
+				if (ImGui::RadioButton("Triangle List", &topology_int, static_cast<int>(Topology::TRIANGLE_LIST))) {
 					ui_actions.topology = Topology::TRIANGLE_LIST;
 					m_simple_render_system->setTopology(vk::PrimitiveTopology::eTriangleList);
 					m_pbr_render_system->setTopology(vk::PrimitiveTopology::eTriangleList);
 					m_ve_renderer.setSwapChainNeedsRecreation();
 				}
 				ImGui::SameLine();
-				if (ImGui::RadioButton("Line List", &ui_actions.topology, 1)) {
+				if (ImGui::RadioButton("Line List", &topology_int, static_cast<int>(Topology::LINE_LIST))) {
 					ui_actions.topology = Topology::LINE_LIST;
 					m_simple_render_system->setTopology(vk::PrimitiveTopology::eLineList);
 					m_pbr_render_system->setTopology(vk::PrimitiveTopology::eLineList);
@@ -485,28 +512,28 @@ void Sandbox::renderAppWindows() {
 
 				ImGui::Separator();
 				ImGui::Text("Render mode (sponza): ");
-				static int s_render_mode = static_cast<int>(ui_actions.render_mode);
-				if (ImGui::RadioButton("BRDF Microfacets", &s_render_mode, 5))
+				int current_render_mode = static_cast<int>(ui_actions.render_mode);
+				if (ImGui::RadioButton("BRDF Microfacets", &current_render_mode, static_cast<int>(RenderMode::BRDF_MICROFACET)))
 					ui_actions.render_mode = RenderMode::BRDF_MICROFACET;
 				ImGui::SameLine();
-				if (ImGui::RadioButton("BRDF Smooth", &s_render_mode, 0))
+				if (ImGui::RadioButton("BRDF Smooth", &current_render_mode, static_cast<int>(RenderMode::BRDF)))
 					ui_actions.render_mode = RenderMode::BRDF;
-				if (ImGui::RadioButton("Normal vector", &s_render_mode, 1))
+				if (ImGui::RadioButton("Normal vector", &current_render_mode, static_cast<int>(RenderMode::NORMAL_VECTOR)))
 					ui_actions.render_mode = RenderMode::NORMAL_VECTOR;
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Visualize surface normals (RGB = XYZ)");
 				}
-				if (ImGui::RadioButton("Tangent vector", &s_render_mode, 2))
+				if (ImGui::RadioButton("Tangent vector", &current_render_mode, static_cast<int>(RenderMode::TANGENT_VECTOR)))
 					ui_actions.render_mode = RenderMode::TANGENT_VECTOR;
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Visualize tangent vectors for normal mapping");
 				}
-				if (ImGui::RadioButton("Bitangent vector", &s_render_mode, 3))
+				if (ImGui::RadioButton("Bitangent vector", &current_render_mode, static_cast<int>(RenderMode::BITANGENT_VECTOR)))
 					ui_actions.render_mode = RenderMode::BITANGENT_VECTOR;
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Visualize bitangent vectors for normal mapping");
 				}
-				if (ImGui::RadioButton("Normal map", &s_render_mode, 4))
+				if (ImGui::RadioButton("Normal map", &current_render_mode, static_cast<int>(RenderMode::NORMAL_MAP)))
 					ui_actions.render_mode = RenderMode::NORMAL_MAP;
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Display normal map texture data directly");
@@ -730,8 +757,9 @@ void Sandbox::initUI() {
 	VE_LOGD("Initialising UI");
 	m_imgui_layer = std::make_unique<ImGuiLayer>(m_ve_window, m_ve_device, m_ve_renderer);
 
-	ui_actions = UIContext{};
 	ui_actions.hdr_enabled = m_ve_renderer.hasHdrSupport() && m_ve_renderer.isHdrEnabled();
+	ui_actions.fov = glm::degrees(m_fov);
+	ui_actions.current_mode = m_particle_system->getMode();
 	ui_actions.speed = m_particle_system->getSpeed();
 	ui_actions.pending_particle_count = m_particle_system->getPendingParticleCount();
 	ui_actions.particle_velocity_mean = m_particle_system->getMean();
@@ -756,9 +784,11 @@ void Sandbox::renderControlsWindow() {
 		ImGui::Text("WASD: Move | Space/C: Up/Down | Shift: Sprint");
 		ImGui::Separator();
 		ImGui::Text("Particle simulation mode: ");
+		// Modes correspond to the ParticleMode enum in particle_system.hpp
 		const char* modes[] = { "Earth Gravity", "Cool Gravity", "Succ mode", "Stasis", "Galaxy" };
 		for (int i = 0; i < 5; i++) {
-			bool is_active = (ui_actions.current_mode == (i + 1));
+			ParticleMode mode = static_cast<ParticleMode>(i + 1);
+			bool is_active = (ui_actions.current_mode == mode);
 			if (is_active) ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "> %d: %s", i + 1, modes[i]);
 			else ImGui::Text("  %d: %s", i + 1, modes[i]);
 		}

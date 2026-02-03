@@ -55,7 +55,39 @@ private:
 	VeScene* m_active_scene = nullptr;
 
 	// UI context captured during renderUI(), consumed in updateParticles() for example.
-	UIContext ui_actions;
+	struct SandboxUIContext : public UIContext {
+		enum class SceneType { SIMPLE = 1, SPONZA = 2 };
+		SceneType current_scene = SceneType::SIMPLE;
+		RenderMode render_mode = RenderMode::BRDF_MICROFACET;
+
+		// sponza settings
+		float sun_intensity = 2000.0f;
+
+		// particle system
+		ParticleMode current_mode = ParticleMode::COOL;
+		float speed = 1.0f;
+
+		// particle count
+		uint32_t pending_particle_count = 10000;
+		bool apply_particle_count = false;
+		bool reset_particle_count = false;
+
+		// particle explosion normal dist
+		float particle_velocity_mean = 0.0f;
+		float particle_velocity_stddev = 1.0f;
+		bool apply_velocity_params = false;
+
+		// lifetime
+		float min_life = 1.0f;
+		float max_life = 3.0f;
+		bool should_respawn = true;
+
+		// emission
+		bool emit_burst = false;
+		int emit_count = 1000;
+	};
+
+	SandboxUIContext ui_actions;
 	std::chrono::steady_clock::time_point m_cpu_start;
 
 	// Render systems

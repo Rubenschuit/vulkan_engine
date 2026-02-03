@@ -38,6 +38,7 @@ public:
 
 protected:
 	void updateCamera();
+	void updateCamera(float fov_radians);
 	void updateUniformBuffer(uint32_t current_frame, UniformBufferObject& ubo);
 	void updateFrameTime();
 

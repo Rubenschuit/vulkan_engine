@@ -1,3 +1,6 @@
+// Class to handle input and pass actions to the application.
+// TODO: Move application specific input handling to the application class.
+// TODO: look into using a callback for input handling.
 #pragma once
 #include "ve_export.hpp"
 #include "game/ve_game_object.hpp"

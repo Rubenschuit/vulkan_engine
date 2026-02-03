@@ -204,7 +204,9 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer) {
 
 	// Setup dynamic rendering attachments
 	vk::RenderingAttachmentInfo color_attachment_info;
-	if (m_msaa_enabled) {
+	bool msaa_active = m_ve_swap_chain->getSwapChainSampleCount() != vk::SampleCountFlagBits::e1;
+
+	if (msaa_active) {
 		color_attachment_info = {
 			.sType = vk::StructureType::eRenderingAttachmentInfo,
 			.imageView = *m_ve_swap_chain->getColorImageView(),

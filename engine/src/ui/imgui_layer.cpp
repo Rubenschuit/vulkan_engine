@@ -131,10 +131,10 @@ void ImGuiLayer::renderEngineWindows(UIContext& context) {
 
 	if (!context.show_performance) return;
 
-	// crude performance window
-	static auto s_time_start = std::chrono::high_resolution_clock::now();
+	static auto s_last_time = std::chrono::high_resolution_clock::now();
 	auto now = std::chrono::high_resolution_clock::now();
-	auto time_elapsed = std::chrono::duration<float, std::chrono::seconds::period>(now - s_time_start).count();
+	float dt = std::chrono::duration<float, std::chrono::seconds::period>(now - s_last_time).count();
+	s_last_time = now;
 
 	static int frame_count = 0;
 	static float fps = 0.0f;
@@ -143,6 +143,7 @@ void ImGuiLayer::renderEngineWindows(UIContext& context) {
 	static float gpu_time_ms = 0.0f;
 	static float cpu_time_sum = 0.0f;
 	static float gpu_time_sum = 0.0f;
+	static float accumulated_dt = 0.0f;
 	static float fps_history[120] = {};
 	static int history_offset = 0;
 	static float graph_update_timer = 0.0f;
@@ -151,19 +152,22 @@ void ImGuiLayer::renderEngineWindows(UIContext& context) {
 	// Text display updates (every 60 frames)
 	cpu_time_sum += context.cpu_time;
 	gpu_time_sum += context.gpu_time;
+	accumulated_dt += dt;
 	frame_count++;
+
 	if (frame_count >= 60) {
-		fps = (time_elapsed > 0.0f) ? (1.0f / time_elapsed) : 0.0f;
-		frame_time_ms = time_elapsed * 1000.0f;
+		fps = (accumulated_dt > 0.0f) ? (60.0f / accumulated_dt) : 0.0f;
+		frame_time_ms = (accumulated_dt / 60.0f) * 1000.0f;
 		cpu_time_ms = cpu_time_sum / 60.0f;
 		gpu_time_ms = gpu_time_sum / 60.0f;
 		frame_count = 0;
 		cpu_time_sum = 0.0f;
 		gpu_time_sum = 0.0f;
+		accumulated_dt = 0.0f;
 	}
 
-	// Graph updates
-	graph_update_timer += time_elapsed;
+	// Graph updates (every 0.1 seconds)
+	graph_update_timer += dt;
 	graph_frames++;
 	if (graph_update_timer >= 0.1f) {
 		fps_history[history_offset] = (float)graph_frames / graph_update_timer;
@@ -205,13 +209,15 @@ void ImGuiLayer::renderEngineWindows(UIContext& context) {
 		ImGui::Text("Resolution: %d x %d", extent.width, extent.height);
 	}
 	ImGui::End();
-	s_time_start = now;
 }
 
-void ImGuiLayer::renderUI(UIContext& context) {
+void ImGuiLayer::renderUI(UIContext& context, std::function<void(UIContext&)> appUiCallback) {
 	beginFrame();
+	renderEngineWindows(context);
 	if (context.visible) {
-		renderEngineWindows(context);
+		if (appUiCallback) {
+			appUiCallback(context);
+		}
 	}
 	endFrame(m_renderer.getCurrentCommandBuffer());
 }
