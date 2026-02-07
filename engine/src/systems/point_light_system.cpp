@@ -2,6 +2,7 @@
 #include "systems/point_light_system.hpp"
 #include "core/ve_device.hpp"
 #include "core/ve_pipeline.hpp"
+#include "game/ve_component.hpp"
 #include "utils/ve_log.hpp"
 
 #define GLM_FORCE_RADIANS
@@ -100,12 +101,15 @@ void PointLightSystem::render(VeFrameInfo& frame_info) const {
 	);
 
 	for (auto& [id, obj] : frame_info.game_objects) {
-		if (!obj.point_light_component)
+		auto* pl = obj.getComponent<PointLightComponent>();
+		auto* transform = obj.getComponent<TransformComponent>();
+		auto* material = obj.getComponent<MaterialComponent>();
+		if (!pl || !transform)
 			continue;
 		SimplePushConstantData push{};
-		push.position = glm::vec4{obj.transform.translation, 1.0f};
-		push.scale = obj.transform.scale.x;
-		push.color = glm::vec4{obj.color, obj.point_light_component->intensity};
+		push.position = glm::vec4{transform->translation, 1.0f};
+		push.scale = transform->scale.x;
+		push.color = glm::vec4{material ? material->color : glm::vec3(1.0f), pl->intensity};
 		// push constant provided as raw bytes to avoid MSVC debug mode corruption with push across dll boundaries
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
@@ -128,29 +132,34 @@ void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBuffe
 	ubo.ambient_light_color.z *= ubo.ambient_light_color.w;
 
 	for (auto& [id, obj] : frame_info.game_objects) {
-		if (!obj.point_light_component)
+		auto* pl = obj.getComponent<PointLightComponent>();
+		auto* transform = obj.getComponent<TransformComponent>();
+		auto* material = obj.getComponent<MaterialComponent>();
+		if (!pl || !transform)
 			continue;
 		assert(num_lights < MAX_LIGHTS && "Number of point lights exceeds MAX_LIGHTS");
 
+		glm::vec3 color = material ? material->color : glm::vec3(1.0f);
+
 		// Rotate point lights in circle
-		if (obj.point_light_component->rotates) {
+		if (pl->rotates) {
 			auto speed = 0.04f;
 			auto rotate_matrix = glm::rotate(glm::mat4(1.0f), speed * frame_info.frame_time, glm::vec3(0.0f, 0.0f, 1.0f));
-			auto pos = glm::vec4{obj.transform.translation, 1.0f};
+			auto pos = glm::vec4{transform->translation, 1.0f};
 			pos = rotate_matrix * pos;
-			obj.transform.translation = glm::vec3{pos};
+			transform->translation = glm::vec3{pos};
 		}
 
 		// Populate point light data
-		ubo.point_lights[num_lights].position = glm::vec4{obj.transform.translation, 1.0f};
-		ubo.point_lights[num_lights].color.x = obj.color.x * obj.point_light_component->intensity;
-		ubo.point_lights[num_lights].color.y = obj.color.y * obj.point_light_component->intensity;
-		ubo.point_lights[num_lights].color.z = obj.color.z * obj.point_light_component->intensity;
-		ubo.point_lights[num_lights].color.w = obj.point_light_component->intensity;
+		ubo.point_lights[num_lights].position = glm::vec4{transform->translation, 1.0f};
+		ubo.point_lights[num_lights].color.x = color.x * pl->intensity;
+		ubo.point_lights[num_lights].color.y = color.y * pl->intensity;
+		ubo.point_lights[num_lights].color.z = color.z * pl->intensity;
+		ubo.point_lights[num_lights].color.w = pl->intensity;
 
 		// If this light casts shadows, add it to shadow_lights array
-		if (obj.point_light_component->casts_shadow && num_shadow_lights < MAX_SHADOW_LIGHTS) {
-			glm::vec3 light_pos = obj.transform.translation;
+		if (pl->casts_shadow && num_shadow_lights < MAX_SHADOW_LIGHTS) {
+			glm::vec3 light_pos = transform->translation;
 			glm::vec3 scene_center = glm::vec3(0.0f, 0.0f, 0.0f);
 			glm::vec3 view_up = glm::vec3(0.0f, 1.0f, 0.0f);
 			glm::mat4 light_view = glm::lookAt(light_pos, scene_center, view_up);

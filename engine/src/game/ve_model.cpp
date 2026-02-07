@@ -90,7 +90,6 @@ VeModel::VeModel(VeDevice& device, const std::filesystem::path& model_path) : m_
 			}
 		}
 	}
-
 	// Log
 	/*
 	VE_LOGD("Albedo paths: " << albedo_paths.size());

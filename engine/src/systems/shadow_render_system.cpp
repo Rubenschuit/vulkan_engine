@@ -6,6 +6,7 @@
 #include "core/ve_descriptors.hpp"
 #include "core/ve_image.hpp"
 #include "core/ve_texture.hpp"
+#include "game/ve_component.hpp"
 #include "game/ve_frame_info.hpp"
 #include "utils/ve_log.hpp"
 
@@ -369,25 +370,30 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 	);
 
 	for (auto& [id, obj] : frame_info.game_objects) {
-		if (!obj.ve_model || !obj.has_shadow)
+		auto* model = obj.getComponent<ModelComponent>();
+		auto* transform = obj.getComponent<TransformComponent>();
+		auto* material = obj.getComponent<MaterialComponent>();
+		if (!model || !model->hasModel() || !transform)
+			continue;
+		if (material && !material->has_shadow)
 			continue;
 
 		SimplePushConstantData push{};
-		const glm::mat3 nrm = obj.getNormalTransform();
+		const glm::mat3 nrm = transform->getNormalTransform();
 		push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
 		push.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
 		push.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
-		push.transform = obj.getTransform();
-		push.has_texture = obj.has_texture;
+		push.transform = transform->getTransform();
+		push.has_texture = material ? material->has_texture : 0.0f;
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 			0,
 			vk::ArrayProxy<const uint8_t>(sizeof(SimplePushConstantData), reinterpret_cast<const uint8_t*>(&push))
 		);
-		obj.ve_model->bindVertexBuffer(frame_info.command_buffer);
-		obj.ve_model->bindIndexBuffer(frame_info.command_buffer);
-		obj.ve_model->drawIndexed(frame_info.command_buffer);
+		model->model->bindVertexBuffer(frame_info.command_buffer);
+		model->model->bindIndexBuffer(frame_info.command_buffer);
+		model->model->drawIndexed(frame_info.command_buffer);
 	}
 }
 

@@ -1,30 +1,21 @@
-/* This file defines the VeGameObject class, it requires a unique ID for each instance.
-The user manually sets the object's properties (position, rotation, scale, etc.) after creation. */
+/* VeGameObject - Entity with component-based architecture.
+ * Based on:
+ * https://docs.vulkan.org/tutorial/latest/Building_a_Simple_Engine/Engine_Architecture/03_component_systems.html
+ *
+ * Game objects are entities in the scene that can have one or no component of each type.
+ * This class holds a map of component type IDs to component pointers and a vector of components.
+ * Use AddComponent<T>() to add components, GetComponent<T>() to retrieve them.
+ */
 #pragma once
 #include "ve_export.hpp"
+#include "ve_component.hpp"
 
-#include <glm/gtc/matrix_transform.hpp>
+#include <glm/glm.hpp>
 #include <memory>
-#include <optional>
+#include <unordered_map>
+#include <vector>
 
 namespace ve {
-    // Forward declaration
-    class VeModel;
-}
-
-namespace ve {
-
-struct TransformComponent {
-	glm::vec3 translation{0.0f};
-	glm::vec3 rotation{0.0f, 0.0f, 0.0f}; // in radians
-	glm::vec3 scale{1.0f};
-};
-
-struct PointLightComponent {
-	float intensity{1.0f};
-	bool rotates{ true };
-	bool casts_shadow{true};
-};
 
 class VENGINE_API VeGameObject {
 public:
@@ -38,34 +29,74 @@ public:
 
 	uint32_t getId() const { return m_id; }
 
-	// Composes a transformation matrix from translation, rotation, and scale.
-	// Uses cached values if the transform hasn't changed.
-	const glm::mat4& getTransform() const;
+	template <typename T, typename... Args>
+	T* addComponent(Args&&... args) {
+		static_assert(std::is_base_of_v<Component, T>, "T must derive from Component");
 
-	// Computes the normal matrix (inverse transpose of the model matrix).
-	// Uses cached values if the transform hasn't changed.
+		const size_t type_id = Component::getTypeID<T>();
+
+		// Check if component of this type already exists, if so return the existing component
+		auto it = m_component_map.find(type_id);
+		if (it != m_component_map.end()) {
+			return static_cast<T*>(it->second);
+		}
+
+		auto component = std::make_unique<T>(std::forward<Args>(args)...);
+		T* component_ptr = component.get();
+		component_ptr->setOwner(this);
+		m_component_map[type_id] = component_ptr;
+		m_components.push_back(std::move(component));
+		return component_ptr;
+	}
+
+	template <typename T>
+	T* getComponent() {
+		const size_t type_id = Component::getTypeID<T>();
+		auto it = m_component_map.find(type_id);
+		if (it != m_component_map.end()) {
+			return static_cast<T*>(it->second);
+		}
+		return nullptr;
+	}
+
+	template <typename T>
+	const T* getComponent() const {
+		const size_t type_id = Component::getTypeID<T>();
+		auto it = m_component_map.find(type_id);
+		if (it != m_component_map.end()) {
+			return static_cast<const T*>(it->second);
+		}
+		return nullptr;
+	}
+
+	template <typename T>
+	bool removeComponent() {
+		const size_t type_id = Component::getTypeID<T>();
+		auto it = m_component_map.find(type_id);
+		if (it != m_component_map.end()) {
+			Component* component_ptr = it->second;
+			m_component_map.erase(it);
+
+			for (auto comp_it = m_components.begin(); comp_it != m_components.end(); ++comp_it) {
+				if (comp_it->get() == component_ptr) {
+					m_components.erase(comp_it);
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	// Convenience functions:
+	const glm::mat4& getTransform() const;
 	const glm::mat3& getNormalTransform() const;
 
-	TransformComponent transform{};
-	glm::vec3 color{1.0f};
-	float has_texture{0.0f};
-	bool has_shadow{true};
-
-	// optional components can be nullptr
-	std::shared_ptr<VeModel> ve_model;
-	std::optional<PointLightComponent> point_light_component;
 private:
-	VeGameObject(uint32_t id) : m_id(id) {}
-
-	void updateMatrices() const;
+	explicit VeGameObject(uint32_t id) : m_id(id) {}
 
 	uint32_t m_id;
-
-	// Caching system (mutable to allow lazy updates in const methods)
-	mutable glm::mat4 m_cached_transform{1.0f};
-	mutable glm::mat3 m_cached_normal_transform{1.0f};
-	mutable glm::vec3 m_last_translation{std::numeric_limits<float>::infinity()};
-	mutable glm::vec3 m_last_rotation{std::numeric_limits<float>::infinity()};
-	mutable glm::vec3 m_last_scale{std::numeric_limits<float>::infinity()};
+	std::vector<std::unique_ptr<Component>> m_components;
+	std::unordered_map<size_t, Component*> m_component_map;
 };
-}
+
+} // namespace ve

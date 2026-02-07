@@ -2,6 +2,7 @@
 #include "systems/pbr_render_system.hpp"
 #include "core/ve_device.hpp"
 #include "core/ve_pipeline.hpp"
+#include "game/ve_component.hpp"
 #include "utils/ve_log.hpp"
 
 #define GLM_FORCE_RADIANS
@@ -82,16 +83,19 @@ void PbrRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 	);
 
 	for (auto& [id, obj] : frame_info.game_objects) {
-		if (!obj.ve_model)
+		auto* model = obj.getComponent<ModelComponent>();
+		auto* transform = obj.getComponent<TransformComponent>();
+		auto* material = obj.getComponent<MaterialComponent>();
+		if (!model || !model->hasModel() || !transform)
 			continue;
 
 		PbrPushConstantData push{};
-		const glm::mat3 nrm = obj.getNormalTransform();
+		const glm::mat3 nrm = transform->getNormalTransform();
 		push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
 		push.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
 		push.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
-		push.transform = obj.getTransform();
-		push.has_texture = obj.has_texture;
+		push.transform = transform->getTransform();
+		push.has_texture = material ? material->has_texture : 0.0f;
 
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
@@ -99,9 +103,9 @@ void PbrRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 			0,
 			vk::ArrayProxy<const uint8_t>(sizeof(PbrPushConstantData), reinterpret_cast<const uint8_t*>(&push))
 		);
-		obj.ve_model->bindVertexBuffer(frame_info.command_buffer);
-		obj.ve_model->bindIndexBuffer(frame_info.command_buffer);
-		obj.ve_model->drawIndexed(frame_info.command_buffer);
+		model->model->bindVertexBuffer(frame_info.command_buffer);
+		model->model->bindIndexBuffer(frame_info.command_buffer);
+		model->model->drawIndexed(frame_info.command_buffer);
 	}
 }
 

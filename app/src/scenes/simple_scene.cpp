@@ -1,5 +1,6 @@
 #include "simple_scene.hpp"
 #include "game/ve_model.hpp"
+#include "game/ve_component.hpp"
 #include <glm/gtc/constants.hpp>
 
 namespace ve {
@@ -36,8 +37,8 @@ void SimpleScene::loadGameObjects(const std::filesystem::path& project_root) {
     {
         auto l = VeGameObject::createPointLight(100.0f, 2.0f, glm::vec3(1.0f, 1.0f, 1.0f));
         glm::vec3 pos = {0.0f, 0.0f, 20.0f};
-        l.transform.translation = pos;
-        l.point_light_component->rotates = false;
+        l.getComponent<TransformComponent>()->translation = pos;
+        l.getComponent<PointLightComponent>()->rotates = false;
         m_game_objects.emplace(l.getId(), std::move(l));
     }
 
@@ -67,9 +68,9 @@ void SimpleScene::loadGameObjects(const std::filesystem::path& project_root) {
             pos_radius * sin(glm::two_pi<float>() / num_lights * (float)i),
             height
         };
-        point_light.point_light_component->casts_shadow = false;
-        point_light.has_shadow = false;
-        point_light.transform.translation = pos;
+        point_light.getComponent<PointLightComponent>()->casts_shadow = false;
+        point_light.getComponent<MaterialComponent>()->has_shadow = false;
+        point_light.getComponent<TransformComponent>()->translation = pos;
         m_game_objects.emplace(point_light.getId(), std::move(point_light));
     }
 
@@ -77,14 +78,14 @@ void SimpleScene::loadGameObjects(const std::filesystem::path& project_root) {
     {
         VeGameObject floor = VeGameObject::createGameObject();
         auto quad = std::make_shared<VeModel>(m_device, project_root / "models" / "quad.gltf");
-        floor.ve_model = quad;
-        floor.has_texture = 0.0f;
-        floor.transform = {
-            .translation = {0.0f, 0.0f, 0.0f},
-            .rotation = {glm::radians(90.0f), 0.0f, 0.0f},
-            .scale = {80.0f, 1.0f, 80.0f}
-        };
-        floor.has_shadow = false;
+        floor.addComponent<ModelComponent>(quad);
+        auto* mat = floor.addComponent<MaterialComponent>();
+        mat->has_texture = 0.0f;
+        mat->has_shadow = false;
+        auto* transform = floor.getComponent<TransformComponent>();
+        transform->translation = {0.0f, 0.0f, 0.0f};
+        transform->rotation = {glm::radians(90.0f), 0.0f, 0.0f};
+        transform->scale = {80.0f, 1.0f, 80.0f};
         m_game_objects.emplace(floor.getId(), std::move(floor));
     }
 
@@ -94,11 +95,13 @@ void SimpleScene::loadGameObjects(const std::filesystem::path& project_root) {
         for (int j = 0; j < 5; j++) {
             for (int i = 0; i < 5; i++) {
                 VeGameObject obj = VeGameObject::createGameObject();
-                obj.ve_model = model;
-                obj.transform.rotation = {0.0f, 0.0f, 0.0f};
-                obj.transform.translation = {(float)i * 4.0f, (float)j * 4.0f, 1.0f};
-                obj.transform.scale = {1.0f, 1.0f, 1.0f};
-                obj.has_texture = 0.0f;
+                obj.addComponent<ModelComponent>(model);
+                auto* mat = obj.addComponent<MaterialComponent>();
+                mat->has_texture = 0.0f;
+                auto* transform = obj.getComponent<TransformComponent>();
+                transform->rotation = {0.0f, 0.0f, 0.0f};
+                transform->translation = {(float)i * 4.0f, (float)j * 4.0f, 1.0f};
+                transform->scale = {1.0f, 1.0f, 1.0f};
                 m_game_objects.emplace(obj.getId(), std::move(obj));
             }
         }
@@ -110,10 +113,12 @@ void SimpleScene::loadGameObjects(const std::filesystem::path& project_root) {
         for (int j = 0; j < 5; j++) {
             for (int i = 0; i < 5; i++) {
                 VeGameObject obj = VeGameObject::createGameObject();
-                obj.ve_model = model2;
-                obj.transform.translation = {-1.0 * (float)i * 4.0f - 4.0f, (float)j * 4.0f, 1.0f};
-                obj.transform.scale = {1.0f, 1.0f, 1.0f};
-                obj.has_texture = 0.0f;
+                obj.addComponent<ModelComponent>(model2);
+                auto* mat = obj.addComponent<MaterialComponent>();
+                mat->has_texture = 0.0f;
+                auto* transform = obj.getComponent<TransformComponent>();
+                transform->translation = {-1.0 * (float)i * 4.0f - 4.0f, (float)j * 4.0f, 1.0f};
+                transform->scale = {1.0f, 1.0f, 1.0f};
                 m_game_objects.emplace(obj.getId(), std::move(obj));
             }
         }
@@ -125,13 +130,13 @@ void SimpleScene::loadGameObjects(const std::filesystem::path& project_root) {
         for (int j = 0; j < 5; j++) {
             for (int i = 0; i < 5; i++) {
                 VeGameObject obj = VeGameObject::createGameObject();
-                obj.ve_model = model3;
-                obj.transform = {
-                    .translation = {-1.0 * (float)i * 4.0f - 4.0f, (float)j * -4.0f - 4.0f, 0.f},
-                    .rotation = {glm::radians(-180.0f), 0.0f, 0.0f},
-                    .scale = {6.0f, 6.0f, 3.0f}
-                };
-                obj.has_texture = 0.0f;
+                obj.addComponent<ModelComponent>(model3);
+                auto* mat = obj.addComponent<MaterialComponent>();
+                mat->has_texture = 0.0f;
+                auto* transform = obj.getComponent<TransformComponent>();
+                transform->translation = {-1.0 * (float)i * 4.0f - 4.0f, (float)j * -4.0f - 4.0f, 0.f};
+                transform->rotation = {glm::radians(-180.0f), 0.0f, 0.0f};
+                transform->scale = {6.0f, 6.0f, 3.0f};
                 m_game_objects.emplace(obj.getId(), std::move(obj));
             }
         }
@@ -143,12 +148,11 @@ void SimpleScene::loadGameObjects(const std::filesystem::path& project_root) {
         for (int j = 0; j < 5; j++) {
             for (int i = 0; i < 5; i++) {
                 VeGameObject obj = VeGameObject::createGameObject();
-                obj.ve_model = model4;
-                obj.transform = {
-                    .translation = {(float)i * 4.0f , (float)j * -4.0f - 4.0f, 0.f},
-                    .rotation = {glm::radians(-180.0f), 0.0f, 0.0f},
-                    .scale = {6.0f, 6.0f, 3.0f}
-                };
+                obj.addComponent<ModelComponent>(model4);
+                auto* transform = obj.getComponent<TransformComponent>();
+                transform->translation = {(float)i * 4.0f , (float)j * -4.0f - 4.0f, 0.f};
+                transform->rotation = {glm::radians(-180.0f), 0.0f, 0.0f};
+                transform->scale = {6.0f, 6.0f, 3.0f};
                 m_game_objects.emplace(obj.getId(), std::move(obj));
             }
         }

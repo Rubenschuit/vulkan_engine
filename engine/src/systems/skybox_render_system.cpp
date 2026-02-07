@@ -2,6 +2,7 @@
 #include "systems/skybox_render_system.hpp"
 #include "core/ve_device.hpp"
 #include "core/ve_pipeline.hpp"
+#include "game/ve_component.hpp"
 #include "utils/ve_log.hpp"
 
 #define GLM_FORCE_RADIANS
@@ -34,8 +35,9 @@ SkyboxRenderSystem::~SkyboxRenderSystem() {}
 
 void SkyboxRenderSystem::loadCubeModel(const std::filesystem::path& cube_model_path) {
 	std::shared_ptr<VeModel> model = std::make_shared<VeModel>(m_ve_device, cube_model_path);
-	m_cube_object.ve_model = model;
-	m_cube_object.transform.scale = 4.0f * glm::vec3(1500.0f, 1500.0f, 1500.0f);
+	m_cube_object.addComponent<ModelComponent>(model);
+	auto* transform = m_cube_object.getComponent<TransformComponent>();
+	transform->scale = 4.0f * glm::vec3(1500.0f, 1500.0f, 1500.0f);
 }
 void SkyboxRenderSystem::createPipelineLayout(
 	const vk::raii::DescriptorSetLayout& global_set_layout,
@@ -95,13 +97,14 @@ void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 		{}
 	);
 	SimplePushConstantData push{};
-	assert (m_cube_object.ve_model != nullptr && "Cube model is null");
+	auto* model = m_cube_object.getComponent<ModelComponent>();
+	auto* transform = m_cube_object.getComponent<TransformComponent>();
+	assert(model && model->hasModel() && transform && "Cube must have Model and Transform components");
 	float speed = 0.004f;
-	m_cube_object.transform.rotation += glm::vec3{-speed * frame_info.frame_time, 0.2 * speed * frame_info.frame_time, 0.0f};
+	transform->rotation += glm::vec3{-speed * frame_info.frame_time, 0.2 * speed * frame_info.frame_time, 0.0f};
 
-	push.transform = m_cube_object.getTransform();
+	push.transform = transform->getTransform();
 
-	// push constant provided as raw bytes to avoid MSVC debug mode corruption with push across dll boundaries
 	frame_info.command_buffer.pushConstants(
 		*m_pipeline_layout,
 		vk::ShaderStageFlagBits::eVertex,
@@ -109,9 +112,9 @@ void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 		vk::ArrayProxy<const uint8_t>(sizeof(SimplePushConstantData), reinterpret_cast<const uint8_t*>(&push))
 	);
 
-	m_cube_object.ve_model->bindVertexBuffer(frame_info.command_buffer);
-	m_cube_object.ve_model->bindIndexBuffer(frame_info.command_buffer);
-	m_cube_object.ve_model->drawIndexed(frame_info.command_buffer);
+	model->model->bindVertexBuffer(frame_info.command_buffer);
+	model->model->bindIndexBuffer(frame_info.command_buffer);
+	model->model->drawIndexed(frame_info.command_buffer);
 }
 
 }

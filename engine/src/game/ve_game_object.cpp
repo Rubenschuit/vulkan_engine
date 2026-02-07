@@ -1,5 +1,5 @@
 #include "game/ve_game_object.hpp"
-#include "game/ve_model.hpp"
+#include "game/ve_component.hpp"
 #include <atomic>
 
 namespace ve {
@@ -8,88 +8,38 @@ namespace ve {
 static std::atomic<uint32_t> current_id{0};
 
 VeGameObject VeGameObject::createGameObject() {
-	VeGameObject game_object = VeGameObject(current_id.fetch_add(1));
+	VeGameObject game_object{current_id.fetch_add(1)};
+	game_object.addComponent<TransformComponent>();
 	return game_object;
-}
-
-// Composes a model matrix from translation, rotation, and scale.
-const glm::mat4& VeGameObject::getTransform() const {
-	updateMatrices();
-	return m_cached_transform;
-}
-
-const glm::mat3& VeGameObject::getNormalTransform() const {
-	updateMatrices();
-	return m_cached_normal_transform;
-}
-
-void VeGameObject::updateMatrices() const {
-	if (transform.translation == m_last_translation &&
-		transform.rotation == m_last_rotation &&
-		transform.scale == m_last_scale) {
-		return;
-	}
-
-	const float c3 = glm::cos(transform.rotation.z);
-	const float s3 = glm::sin(transform.rotation.z);
-	const float c2 = glm::cos(transform.rotation.x);
-	const float s2 = glm::sin(transform.rotation.x);
-	const float c1 = glm::cos(transform.rotation.y);
-	const float s1 = glm::sin(transform.rotation.y);
-
-	m_cached_transform = glm::mat4{
-		{
-			transform.scale.x * (c1 * c3 + s1 * s2 * s3),
-			transform.scale.x * (c2 * s3),
-			transform.scale.x * (c1 * s2 * s3 - c3 * s1),
-			0.0f,
-		},
-		{
-			transform.scale.y * (c3 * s1 * s2 - c1 * s3),
-			transform.scale.y * (c2 * c3),
-			transform.scale.y * (c1 * c3 * s2 + s1 * s3),
-			0.0f,
-		},
-		{
-			transform.scale.z * (c2 * s1),
-			transform.scale.z * (-s2),
-			transform.scale.z * (c1 * c2),
-			0.0f,
-		},
-		{transform.translation.x, transform.translation.y, transform.translation.z, 1.0f}};
-
-	const glm::vec3 inverse_scale = 1.0f / transform.scale;
-	m_cached_normal_transform = glm::mat3{
-		{
-			inverse_scale.x * (c1 * c3 + s1 * s2 * s3),
-			inverse_scale.x * (c2 * s3),
-			inverse_scale.x * (c1 * s2 * s3 - c3 * s1)
-		},
-		{
-			inverse_scale.y * (c3 * s1 * s2 - c1 * s3),
-			inverse_scale.y * (c2 * c3),
-			inverse_scale.y * (c1 * c3 * s2 + s1 * s3)
-		},
-		{
-			inverse_scale.z * (c2 * s1),
-			inverse_scale.z * (-s2),
-			inverse_scale.z * (c1 * c2)
-		}
-	};
-
-	m_last_translation = transform.translation;
-	m_last_rotation = transform.rotation;
-	m_last_scale = transform.scale;
 }
 
 VeGameObject VeGameObject::createPointLight(float intensity, float radius, glm::vec3 color) {
-	VeGameObject game_object = VeGameObject::createGameObject();
-	game_object.point_light_component = PointLightComponent{};
-	game_object.point_light_component->intensity = intensity;
-	game_object.color = color;
-	game_object.has_texture = 0.0f;
-	game_object.transform.scale = glm::vec3(radius); // uniform scale for point light quad size
+	VeGameObject game_object = createGameObject();
+	auto* pl = game_object.addComponent<PointLightComponent>();
+	pl->intensity = intensity;
+	pl->rotates = true;
+	pl->casts_shadow = true;
+
+	auto* mat = game_object.addComponent<MaterialComponent>();
+	mat->color = color;
+	mat->has_texture = 0.0f;
+	mat->has_shadow = true;
+
+	auto* transform = game_object.getComponent<TransformComponent>();
+	transform->scale = glm::vec3(radius);
 	return game_object;
 }
 
+const glm::mat4& VeGameObject::getTransform() const {
+	auto* transform = getComponent<TransformComponent>();
+	assert(transform && "VeGameObject must have TransformComponent");
+	return transform->getTransform();
 }
+
+const glm::mat3& VeGameObject::getNormalTransform() const {
+	auto* transform = getComponent<TransformComponent>();
+	assert(transform && "VeGameObject must have TransformComponent");
+	return transform->getNormalTransform();
+}
+
+} // namespace ve

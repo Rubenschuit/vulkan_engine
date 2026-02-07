@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <game/ve_game_object.hpp>
+#include <game/ve_component.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 // Helper to compare matrices
@@ -28,25 +29,25 @@ TEST_CASE("VeGameObject transform matrix calculation", "[gameobject][transform]"
 	}
 
 	SECTION("Translation only") {
-		obj.transform.translation = {1.0f, 2.0f, 3.0f};
+		obj.getComponent<ve::TransformComponent>()->translation = {1.0f, 2.0f, 3.0f};
 		glm::mat4 expected = glm::translate(glm::mat4(1.0f), {1.0f, 2.0f, 3.0f});
 		REQUIRE(mat4Equal(obj.getTransform(), expected));
 	}
 
 	SECTION("Scale only") {
-		obj.transform.scale = {2.0f, 2.0f, 2.0f};
+		obj.getComponent<ve::TransformComponent>()->scale = {2.0f, 2.0f, 2.0f};
 		glm::mat4 expected = glm::scale(glm::mat4(1.0f), {2.0f, 2.0f, 2.0f});
 		REQUIRE(mat4Equal(obj.getTransform(), expected));
 	}
 
 	SECTION("Rotation only (Y-axis)") {
-		obj.transform.rotation = {0.0f, glm::half_pi<float>(), 0.0f};
+		obj.getComponent<ve::TransformComponent>()->rotation = {0.0f, glm::half_pi<float>(), 0.0f};
 		glm::mat4 expected = glm::rotate(glm::mat4(1.0f), glm::half_pi<float>(), {0.0f, 1.0f, 0.0f});
 		REQUIRE(mat4Equal(obj.getTransform(), expected));
 	}
 
 	SECTION("Rotation order (YXZ intrinsic)") {
-		obj.transform.rotation = {0.5f, 0.5f, 0.5f}; // Radians
+		obj.getComponent<ve::TransformComponent>()->rotation = {0.5f, 0.5f, 0.5f}; // Radians
 
 		glm::mat4 ry = glm::rotate(glm::mat4(1.0f), 0.5f, {0.0f, 1.0f, 0.0f});
 		glm::mat4 rx = glm::rotate(glm::mat4(1.0f), 0.5f, {1.0f, 0.0f, 0.0f});
@@ -61,9 +62,12 @@ TEST_CASE("VeGameObject transform matrix calculation", "[gameobject][transform]"
 TEST_CASE("VeGameObject point light factory", "[gameobject][factory]") {
 	auto light = ve::VeGameObject::createPointLight(5.0f, 2.0f, {1.0f, 0.0f, 0.0f});
 
-	REQUIRE(light.point_light_component.has_value());
-	REQUIRE(light.point_light_component->intensity == 5.0f);
-	REQUIRE(light.transform.scale.x == 2.0f);
-	REQUIRE(light.color == glm::vec3(1.0f, 0.0f, 0.0f));
+	auto* pl = light.getComponent<ve::PointLightComponent>();
+	auto* transform = light.getComponent<ve::TransformComponent>();
+	auto* material = light.getComponent<ve::MaterialComponent>();
+	REQUIRE(pl != nullptr);
+	REQUIRE(pl->intensity == 5.0f);
+	REQUIRE(transform->scale.x == 2.0f);
+	REQUIRE(material->color == glm::vec3(1.0f, 0.0f, 0.0f));
 }
 

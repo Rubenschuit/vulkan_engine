@@ -1,5 +1,6 @@
 #include "sponza_scene.hpp"
 #include "game/ve_model.hpp"
+#include "game/ve_component.hpp"
 
 namespace ve {
 
@@ -9,12 +10,14 @@ SponzaScene::SponzaScene(VeDevice& device, VeDescriptorPool& pool, VeDescriptorS
 }
 
 vk::raii::DescriptorSet& SponzaScene::getDescriptorSet() {
-    return m_game_objects.at(m_sponza_id).ve_model->getMaterialDescriptorSet();
+    auto* model = m_game_objects.at(m_sponza_id).getComponent<ModelComponent>();
+    return model->model->getMaterialDescriptorSet();
 }
 
 void SponzaScene::setSunIntensity(float intensity) {
     if (m_game_objects.contains(m_sun_id)) {
-        m_game_objects.at(m_sun_id).point_light_component->intensity = intensity;
+        auto* pl = m_game_objects.at(m_sun_id).getComponent<PointLightComponent>();
+        if (pl) pl->intensity = intensity;
     }
 }
 
@@ -25,21 +28,24 @@ void SponzaScene::loadGameObjects(VeDescriptorPool& pool, VeDescriptorSetLayout&
     {
         VeGameObject sponza = VeGameObject::createGameObject();
         std::filesystem::path sponza_model_path = project_root / "models" / "sponza" / "glTF" / "Sponza.gltf";
+		//std::filesystem::path sponza_model_path = project_root / "models" / "bistro-master" / "bistro.gltf";
         auto sponza_model = std::make_shared<VeModel>(m_device, sponza_model_path);
         sponza_model->createDescriptorSet(pool, material_layout);
-        sponza.ve_model = sponza_model;
+        sponza.addComponent<ModelComponent>(sponza_model);
+        auto* mat = sponza.addComponent<MaterialComponent>();
+        mat->has_texture = 1.0f;
         m_sponza_id = sponza.getId();
-        sponza.transform.translation = glm::vec3{0.0f, 0.0f, -350.0f} + sponza_translation;
-        sponza.transform.scale = {0.1f, 0.1f, 0.1f};
-        sponza.has_texture = 1.0f;
+        auto* transform = sponza.getComponent<TransformComponent>();
+        transform->translation = glm::vec3{0.0f, 0.0f, -350.0f} + sponza_translation;
+        transform->scale = {0.1f, 0.1f, 0.1f};
         m_game_objects.emplace(sponza.getId(), std::move(sponza));
     }
 
     // sponza sun light
     {
         VeGameObject sun = VeGameObject::createPointLight(2000.0f, 4.0f, glm::vec3(1.0f, 1.0f, 1.0f));
-        sun.transform.translation = glm::vec3{0.0f, 50.0f, -140.0f} + sponza_translation;
-        sun.point_light_component->rotates = true;
+        sun.getComponent<TransformComponent>()->translation = glm::vec3{0.0f, 50.0f, -140.0f} + sponza_translation;
+        sun.getComponent<PointLightComponent>()->rotates = true;
         m_sun_id = sun.getId();
         m_game_objects.emplace(sun.getId(), std::move(sun));
     }
@@ -47,54 +53,56 @@ void SponzaScene::loadGameObjects(VeDescriptorPool& pool, VeDescriptorSetLayout&
     // sponza fire lights
     {
         VeGameObject fire = VeGameObject::createPointLight(100.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
-        fire.transform.translation = glm::vec3{-62.0f, -22.0f, -336.0f} + sponza_translation;
-        fire.point_light_component->rotates = false;
-        fire.point_light_component->casts_shadow = false;
-        fire.has_shadow = false;
+        fire.getComponent<TransformComponent>()->translation = glm::vec3{-62.0f, -22.0f, -336.0f} + sponza_translation;
+        fire.getComponent<PointLightComponent>()->rotates = false;
+        fire.getComponent<PointLightComponent>()->casts_shadow = false;
+        fire.getComponent<MaterialComponent>()->has_shadow = false;
         m_game_objects.emplace(fire.getId(), std::move(fire));
     }
     {
         VeGameObject fire = VeGameObject::createPointLight(100.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
-        fire.transform.translation = glm::vec3{-62.0f, 14.0f, -336.0f} + sponza_translation;
-        fire.point_light_component->rotates = false;
-        fire.point_light_component->casts_shadow = false;
-        fire.has_shadow = false;
+        fire.getComponent<TransformComponent>()->translation = glm::vec3{-62.0f, 14.0f, -336.0f} + sponza_translation;
+        fire.getComponent<PointLightComponent>()->rotates = false;
+        fire.getComponent<PointLightComponent>()->casts_shadow = false;
+        fire.getComponent<MaterialComponent>()->has_shadow = false;
         m_game_objects.emplace(fire.getId(), std::move(fire));
     }
     {
         VeGameObject fire = VeGameObject::createPointLight(100.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
-        fire.transform.translation = glm::vec3{49.0f, 14.0f, -336.0f} + sponza_translation;
-        fire.point_light_component->rotates = false;
-        fire.point_light_component->casts_shadow = false;
-        fire.has_shadow = false;
+        fire.getComponent<TransformComponent>()->translation = glm::vec3{49.0f, 14.0f, -336.0f} + sponza_translation;
+        fire.getComponent<PointLightComponent>()->rotates = false;
+        fire.getComponent<PointLightComponent>()->casts_shadow = false;
+        fire.getComponent<MaterialComponent>()->has_shadow = false;
         m_game_objects.emplace(fire.getId(), std::move(fire));
     }
     {
         VeGameObject fire = VeGameObject::createPointLight(100.0f, 1.0f, glm::vec3(1.0f, .1f, .02f));
-        fire.transform.translation = glm::vec3{49.0f, -22.0f, -336.0f} + sponza_translation;
-        fire.point_light_component->rotates = false;
-        fire.point_light_component->casts_shadow = false;
-        fire.has_shadow = false;
+        fire.getComponent<TransformComponent>()->translation = glm::vec3{49.0f, -22.0f, -336.0f} + sponza_translation;
+        fire.getComponent<PointLightComponent>()->rotates = false;
+        fire.getComponent<PointLightComponent>()->casts_shadow = false;
+        fire.getComponent<MaterialComponent>()->has_shadow = false;
         m_game_objects.emplace(fire.getId(), std::move(fire));
     }
 
     // lion eyes
     {
         VeGameObject green_eye = VeGameObject::createPointLight(50.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
-        green_eye.transform.translation = glm::vec3{126.7f, -5.87f, -331.2f} + sponza_translation;
-        green_eye.transform.scale = {.3f, .3f, .3f};
-        green_eye.point_light_component->rotates = false;
-        green_eye.point_light_component->casts_shadow = false;
-        green_eye.has_shadow = false;
+        auto* tr = green_eye.getComponent<TransformComponent>();
+        tr->translation = glm::vec3{126.7f, -5.87f, -331.2f} + sponza_translation;
+        tr->scale = {.3f, .3f, .3f};
+        green_eye.getComponent<PointLightComponent>()->rotates = false;
+        green_eye.getComponent<PointLightComponent>()->casts_shadow = false;
+        green_eye.getComponent<MaterialComponent>()->has_shadow = false;
         m_game_objects.emplace(green_eye.getId(), std::move(green_eye));
     }
     {
         VeGameObject green_eye = VeGameObject::createPointLight(50.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f));
-        green_eye.transform.translation = glm::vec3{126.7f, -1.24f, -331.2f} + sponza_translation;
-        green_eye.transform.scale = {.3f, .3f, .3f};
-        green_eye.point_light_component->rotates = false;
-        green_eye.point_light_component->casts_shadow = false;
-        green_eye.has_shadow = false;
+        auto* tr = green_eye.getComponent<TransformComponent>();
+        tr->translation = glm::vec3{126.7f, -1.24f, -331.2f} + sponza_translation;
+        tr->scale = {.3f, .3f, .3f};
+        green_eye.getComponent<PointLightComponent>()->rotates = false;
+        green_eye.getComponent<PointLightComponent>()->casts_shadow = false;
+        green_eye.getComponent<MaterialComponent>()->has_shadow = false;
         m_game_objects.emplace(green_eye.getId(), std::move(green_eye));
     }
 }

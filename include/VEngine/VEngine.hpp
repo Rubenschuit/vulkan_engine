@@ -21,6 +21,7 @@
 
 #include "game/ve_frame_info.hpp"
 #include "game/ve_game_object.hpp"
+#include "game/ve_component.hpp"
 #include "game/ve_camera.hpp"
 #include "game/ve_model.hpp"
 #include "game/ve_scene.hpp"
