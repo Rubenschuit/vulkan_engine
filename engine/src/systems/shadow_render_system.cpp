@@ -12,6 +12,8 @@
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <algorithm>
+#include <vector>
 
 namespace ve {
 
@@ -89,7 +91,7 @@ void ShadowRenderSystem::createPipeline(vk::Format depth_format) {
 	// Depth-only pipeline: no color output
 	pipeline_config.color_format = vk::Format::eUndefined;
 	pipeline_config.depth_format = depth_format;
-	pipeline_config.attribute_descriptions = VeModel::Vertex::getAttributeDescriptionsShadow();
+	pipeline_config.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptionsShadow();
 
 	pipeline_config.multisample_info.rasterizationSamples = vk::SampleCountFlagBits::e1;
 	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eFront;
@@ -361,29 +363,51 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 	const vk::raii::DescriptorSet& shadow_global_set = m_shadow_global_descriptor_sets[frame_info.current_frame][light_index];
 
 	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-	frame_info.command_buffer.bindDescriptorSets(
-		vk::PipelineBindPoint::eGraphics,
-		*m_pipeline_layout,
-		0,  // firstSet - bind starting at set 0
-		{*shadow_global_set, *frame_info.material_descriptor_set},
-		{}  // dynamicOffsets
-	);
 
+	struct Drawable {
+		VkDescriptorSet material_set;
+		VeGameObject* obj;
+	};
+	std::vector<Drawable> drawables;
+	drawables.reserve(frame_info.game_objects.size());
 	for (auto& [id, obj] : frame_info.game_objects) {
-		auto* model = obj.getComponent<ModelComponent>();
+		auto* mesh = obj.getComponent<MeshComponent>();
 		auto* transform = obj.getComponent<TransformComponent>();
 		auto* material = obj.getComponent<MaterialComponent>();
-		if (!model || !model->hasModel() || !transform)
+		if (!mesh || !mesh->hasMesh() || !transform)
 			continue;
 		if (material && !material->has_shadow)
 			continue;
+		vk::raii::DescriptorSet& mat_set = frame_info.active_scene
+			? frame_info.active_scene->getDescriptorSet(&obj)
+			: frame_info.material_descriptor_set;
+		drawables.push_back({*mat_set, &obj});
+	}
+	std::sort(drawables.begin(), drawables.end(),
+		[](const Drawable& a, const Drawable& b) { return a.material_set < b.material_set; });
 
+	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
+	for (const auto& d : drawables) {
+		if (d.material_set != bound_material_set) {
+			bound_material_set = d.material_set;
+			frame_info.command_buffer.bindDescriptorSets(
+				vk::PipelineBindPoint::eGraphics,
+				*m_pipeline_layout,
+				0,
+				{*shadow_global_set, bound_material_set},
+				{}
+			);
+		}
+
+		VeGameObject& obj = *d.obj;
+		auto* mesh = obj.getComponent<MeshComponent>();
+		auto* material = obj.getComponent<MaterialComponent>();
 		SimplePushConstantData push{};
-		const glm::mat3 nrm = transform->getNormalTransform();
+		const glm::mat3 nrm = obj.getNormalTransform();
 		push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
 		push.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
 		push.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
-		push.transform = transform->getTransform();
+		push.transform = obj.getTransform();
 		push.has_texture = material ? material->has_texture : 0.0f;
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
@@ -391,9 +415,9 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 			0,
 			vk::ArrayProxy<const uint8_t>(sizeof(SimplePushConstantData), reinterpret_cast<const uint8_t*>(&push))
 		);
-		model->model->bindVertexBuffer(frame_info.command_buffer);
-		model->model->bindIndexBuffer(frame_info.command_buffer);
-		model->model->drawIndexed(frame_info.command_buffer);
+		mesh->getMesh()->bindVertexBuffer(frame_info.command_buffer);
+		mesh->getMesh()->bindIndexBuffer(frame_info.command_buffer);
+		mesh->getMesh()->drawIndexed(frame_info.command_buffer);
 	}
 }
 

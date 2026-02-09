@@ -1,7 +1,7 @@
 #include "pch.hpp"
 #include "core/ve_pipeline.hpp"
 #include "core/ve_device.hpp"
-#include "game/ve_model.hpp"
+#include "game/ve_mesh.hpp"
 #include "core/ve_file_system.hpp"
 
 namespace ve {
@@ -97,8 +97,8 @@ void VePipeline::defaultPipelineConfigInfo(PipelineConfigInfo& config_info, VeDe
 		.attachmentCount = 1,
 		.pAttachments = &config_info.color_blend_attachment
 	};
-	config_info.attribute_descriptions = VeModel::Vertex::getAttributeDescriptionsSimple();
-	config_info.binding_descriptions = VeModel::Vertex::getBindingDescriptions();
+	config_info.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptionsSimple();
+	config_info.binding_descriptions = VeMesh::Vertex::getBindingDescriptions();
 }
 
 void VePipeline::createGraphicsPipeline(

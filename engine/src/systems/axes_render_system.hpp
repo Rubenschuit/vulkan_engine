@@ -3,6 +3,7 @@
 #include "ve_export.hpp"
 #include "ve_config.hpp"
 #include "game/ve_frame_info.hpp"
+#include "core/ve_resource_manager.hpp"
 
 #include <memory>
 #include <filesystem>
@@ -11,7 +12,8 @@ namespace ve {
     // Forward declarations
     class VeDevice;
     class VePipeline;
-    class VeModel;
+    class VeMesh;
+    class VeResourceManager;
 }
 
 namespace ve {
@@ -21,6 +23,7 @@ public:
 
 AxesRenderSystem(
 		VeDevice& device,
+		VeResourceManager& resource_manager,
 		const vk::raii::DescriptorSetLayout& descriptor_set_layout,
 		vk::Format color_format,
 		vk::SampleCountFlagBits sample_count,
@@ -42,9 +45,10 @@ private:
 	void createAxesModel();
 
 	VeDevice& m_ve_device;
+	VeResourceManager* m_resource_manager = nullptr;
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_ve_pipeline;
-	std::unique_ptr<VeModel> m_axes_model;
+	ResourceHandle<VeMesh> m_axes_mesh;
 	std::filesystem::path m_shader_path;
 };
 

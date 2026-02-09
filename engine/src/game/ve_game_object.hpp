@@ -91,10 +91,20 @@ public:
 	const glm::mat4& getTransform() const;
 	const glm::mat3& getNormalTransform() const;
 
+	// Scene graph hierarchy
+	void setParent(VeGameObject* parent);
+	void addChild(VeGameObject* child);
+	VeGameObject* getParent() const { return m_parent; }
+	const std::vector<VeGameObject*>& getChildren() const { return m_children; }
+
 private:
 	explicit VeGameObject(uint32_t id) : m_id(id) {}
 
 	uint32_t m_id;
+	VeGameObject* m_parent = nullptr;
+	std::vector<VeGameObject*> m_children;
+	mutable glm::mat4 m_cached_world_transform{1.0f};
+	mutable glm::mat3 m_cached_world_normal{1.0f};
 	std::vector<std::unique_ptr<Component>> m_components;
 	std::unordered_map<size_t, Component*> m_component_map;
 };

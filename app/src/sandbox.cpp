@@ -13,25 +13,61 @@
 namespace ve {
 
 // First a window, device and swap chain are initialised in the base class
-Sandbox::Sandbox(const std::filesystem::path& working_dir) : project_root(working_dir) {
+Sandbox::Sandbox(const std::filesystem::path& working_dir) : m_paths(working_dir) {
+	m_resource_manager = std::make_unique<VeResourceManager>(m_ve_device);
 	createUniformBuffers();
 	createDescriptors();
 
 	initSystems();
 	initUI();
 
-	// Initialize scenes after descriptors and systems
-	m_simple_scene = std::make_unique<SimpleScene>(m_ve_device, *m_global_pool, *m_material_set_layout, project_root);
-	m_sponza_scene = std::make_unique<SponzaScene>(m_ve_device, *m_global_pool, *m_material_set_layout, project_root);
-	m_active_scene = m_simple_scene.get();
+	// Load initial scene
+	loadScene(ui_actions.current_scene);
 
 	m_camera.setPerspective(m_fov, m_last_aspect, m_near_plane, m_far_plane);
+}
+
+void Sandbox::loadScene(SandboxUIContext::SceneType scene_type) {
+	if (scene_type == SandboxUIContext::SceneType::NONE)
+		return;
+	if (m_loaded_scene_type == scene_type)
+		return;
+	unloadScene();
+	switch (scene_type) {
+		case SandboxUIContext::SceneType::SIMPLE:
+			VE_LOGD("Loading SimpleScene...");
+			m_active_scene = std::make_unique<SimpleScene>(m_ve_device, *m_resource_manager, *m_global_pool, *m_material_set_layout, m_paths, &m_particle_texture_descriptor_set);
+			break;
+		case SandboxUIContext::SceneType::SPONZA:
+			VE_LOGD("Loading SponzaScene (UASTC)...");
+			m_active_scene = std::make_unique<SponzaScene>(m_ve_device, *m_resource_manager, *m_global_pool, *m_material_set_layout, m_paths, "sponza");
+			break;
+		case SandboxUIContext::SceneType::SPONZA_LOW:
+			VE_LOGD("Loading SponzaScene (ETC1S)...");
+			m_active_scene = std::make_unique<SponzaScene>(m_ve_device, *m_resource_manager, *m_global_pool, *m_material_set_layout, m_paths, "sponza_low");
+			break;
+		default:
+			return;
+	}
+	m_loaded_scene_type = scene_type;
+}
+
+void Sandbox::unloadScene() {
+	if (!m_active_scene)
+		return;
+	// Wait for GPU to finish all submitted work before freeing scene resources
+	// (buffers, descriptor sets) - otherwise validation errors and crashes occur
+	m_ve_device.getDevice().waitIdle();
+	m_active_scene.reset();
+	m_loaded_scene_type = SandboxUIContext::SceneType::NONE;
 }
 
 Sandbox::~Sandbox() {}
 
 VeFrameInfo Sandbox::update() {
 	m_cpu_start = std::chrono::steady_clock::now();
+
+	assert(m_active_scene && "No scene loaded, this should not happen.");
 
 	// Get frame time
 	updateFrameTime();
@@ -47,8 +83,13 @@ VeFrameInfo Sandbox::update() {
 	auto& compute_command_buffer = m_ve_renderer.getCurrentComputeCommandBuffer();
 	auto current_frame = m_ve_renderer.getCurrentFrame();
 
-	// Update active scene
-	m_active_scene = (ui_actions.current_scene == SandboxUIContext::SceneType::SPONZA) ? static_cast<VeScene*>(m_sponza_scene.get()) : static_cast<VeScene*>(m_simple_scene.get());
+	// Dynamically load/unload scenes when selection changes (defer by one frame to show "Loading...")
+	if (m_pending_scene_load != SandboxUIContext::SceneType::NONE) {
+		loadScene(m_pending_scene_load);
+		m_pending_scene_load = SandboxUIContext::SceneType::NONE;
+	} else if (ui_actions.current_scene != m_loaded_scene_type) {
+		m_pending_scene_load = ui_actions.current_scene;
+	}
 
 	vk::raii::DescriptorSet& material_descriptor_set = m_active_scene->getDescriptorSet();
 
@@ -67,9 +108,10 @@ VeFrameInfo Sandbox::update() {
 
 	VeFrameInfo frame_info = {
 		.global_descriptor_set = m_global_descriptor_sets[current_frame],
-		.texture_descriptor_set = m_simple_scene->getDescriptorSet(), // Textures for particles, TODO: consider moving these from simple scene.
+		.texture_descriptor_set = m_particle_texture_descriptor_set,
 		.material_descriptor_set = material_descriptor_set,
-		.cubemap_descriptor_set = m_cubemap_descriptor_set,
+		.active_scene = m_active_scene.get(),
+		.cubemap_descriptor_set = m_skybox_render_system->getCubemapDescriptorSet(), // currently only consumed by skybox render system itself.
 		.shadow_descriptor_set = shadow_desc_set,
 		.command_buffer = command_buffer,
 		.compute_command_buffer = compute_command_buffer,
@@ -106,8 +148,9 @@ VeFrameInfo Sandbox::update() {
 	updateParticles(input_actions);
 
 	// update sponza sun intensity
-	if (ui_actions.current_scene == SandboxUIContext::SceneType::SPONZA) {
-		m_sponza_scene->setSunIntensity(ui_actions.sun_intensity);
+	if (m_loaded_scene_type == SandboxUIContext::SceneType::SPONZA ||
+		m_loaded_scene_type == SandboxUIContext::SceneType::SPONZA_LOW) {
+		static_cast<SponzaScene*>(m_active_scene.get())->setSunIntensity(ui_actions.sun_intensity);
 	}
 
 	m_active_scene->update(m_frame_time);
@@ -116,6 +159,7 @@ VeFrameInfo Sandbox::update() {
 	UniformBufferObject ubo{};
 	ubo.render_mode = ui_actions.render_mode;
 	ubo.shadow_mode = ui_actions.shadow_mode;
+	ubo.ambient_light_color = glm::vec4(ui_actions.ambient_light_color, ui_actions.ambient_light_intensity);
 	m_point_light_system->updateUniformBuffer(frame_info, ubo); // update UBO with point light data
 	m_shadow_render_system->updateUniformBuffer(current_frame, ubo); // update internal shadow UBO with light data from main UBO
 	this->updateUniformBuffer(current_frame, ubo); // view/proj/camera location in application base class
@@ -170,6 +214,9 @@ void Sandbox::updateParticles(InputActions& actions) {
 
 // Renders the scene and draws the UI
 void Sandbox::render(VeFrameInfo& frame_info) {
+	if (!m_active_scene)
+		return;
+
 	auto& command_buffer = frame_info.command_buffer;
 
 	// Shadow pass: render a shadow map for each light
@@ -184,12 +231,13 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	m_skybox_render_system->render(frame_info);
 	if (m_active_scene->getType() == VeScene::Type::SIMPLE) {
 		m_simple_render_system->renderObjects(frame_info);
-		if (ui_actions.show_axes) {
-			m_axes_render_system->render(frame_info);
-		}
+
 		m_particle_system->render(frame_info);
 	} else {
 		m_pbr_render_system->renderObjects(frame_info);
+	}
+	if (ui_actions.show_axes) {
+		m_axes_render_system->render(frame_info);
 	}
 	m_point_light_system->render(frame_info);
 	m_fireworks_system->render(frame_info);
@@ -255,6 +303,9 @@ void Sandbox::renderAppWindows() {
 			if (ImGui::BeginTabItem("Scene")) {
 				ImGui::Text("Scene selection");
 				ImGui::Separator();
+				if (m_pending_scene_load != SandboxUIContext::SceneType::NONE) {
+					ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Loading...");
+				}
 				// Select exactly 1 scene
 				int current_scene_int = static_cast<int>(ui_actions.current_scene);
 				if (ImGui::RadioButton("Simple", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::SIMPLE))) {
@@ -263,13 +314,56 @@ void Sandbox::renderAppWindows() {
 				if (ImGui::RadioButton("Sponza", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::SPONZA))) {
 					ui_actions.current_scene = SandboxUIContext::SceneType::SPONZA;
 				}
-
-				if (ui_actions.current_scene == SandboxUIContext::SceneType::SPONZA) {
+				if (ImGui::RadioButton("Sponza (compressed textures)", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::SPONZA_LOW))) {
+					ui_actions.current_scene = SandboxUIContext::SceneType::SPONZA_LOW;
+				}
+				if (ui_actions.current_scene == SandboxUIContext::SceneType::SPONZA ||
+					ui_actions.current_scene == SandboxUIContext::SceneType::SPONZA_LOW) {
 					ImGui::Separator();
 					ImGui::Text("Sponza Settings");
 					ImGui::SliderFloat("Sun Intensity", &ui_actions.sun_intensity, 0.0f, 1000000.0f);
 				}
 
+				ImGui::Separator();
+				ImGui::Text("Skybox");
+				ImGui::Separator();
+				auto& skybox = *m_skybox_render_system;
+				auto& skybox_settings = skybox.getSettings();
+				if (skybox.isLoading()) {
+					ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Loading...");
+				}
+				const auto& available = skybox.getAvailableSkyboxes();
+				if (!available.empty()) {
+					int current_idx = static_cast<int>(skybox.getCurrentSkyboxIndex());
+					for (size_t i = 0; i < available.size(); i++) {
+						if (ImGui::RadioButton(available[i].display_name.c_str(), &current_idx, static_cast<int>(i))) {
+							skybox.setSkybox(i);
+						}
+					}
+				} else {
+					ImGui::TextDisabled("No skybox textures found (.ktx, .ktx2)");
+				}
+				ImGui::Checkbox("Rotate", &skybox_settings.rotate);
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Disable for skyboxes with a horizon (e.g. clouds).");
+				}
+				ImGui::SliderFloat("Exposure", &skybox_settings.exposure, 0.1f, 5.0f, "%.2f");
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Skybox brightness (independent of post-process exposure).");
+				}
+				ImGui::Checkbox("Day", &skybox_settings.is_day);
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Day: warm tint, Night: cool tint.");
+				}
+
+				ImGui::Separator();
+				ImGui::Text("Ambient Light");
+				ImGui::Separator();
+				ImGui::ColorEdit3("Color", &ui_actions.ambient_light_color.r);
+				ImGui::SliderFloat("Intensity", &ui_actions.ambient_light_intensity, 0.0f, 0.5f, "%.4f");
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Global ambient light intensity applied to all surfaces.");
+				}
 
 				ImGui::EndTabItem();
 			}
@@ -620,12 +714,12 @@ void Sandbox::createDescriptors() {
 
 	// Create descriptor pool
 	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
-		// Global sets (per-frame) + shadow global sets (per-frame, per-light) + compute sets (per-frame) + material set (3) + shadow sets (per-frame) + slack (7)
-		.setMaxSets(4 * MAX_FRAMES_IN_FLIGHT + (MAX_LIGHTS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT)
+		// Global sets + shadow global + compute + material sets (SimpleScene ~3 + Sponza ~170) + shadow + slack
+		.setMaxSets(4 * MAX_FRAMES_IN_FLIGHT + (MAX_LIGHTS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT + 200)
 		// Uniform buffers: global (per frame) + shadow global (per frame, per light) + compute (2x per frame)
 		.addPoolSize(vk::DescriptorType::eUniformBuffer, 4 * MAX_FRAMES_IN_FLIGHT + (MAX_LIGHTS * MAX_FRAMES_IN_FLIGHT))
-		// Combined image samplers for material sets (3 textures per set)
-		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 3 * 3)
+		// Combined image samplers: SimpleScene (~3) + Sponza per-material (~170 * 3) + skybox (3)
+		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 3 * 3 + 200 * 3)
 		// Samplers: shadow sampler (1 per frame) + slack (7)
 		.addPoolSize(vk::DescriptorType::eSampler, MAX_FRAMES_IN_FLIGHT + 7)
 		// Sampled images: shadow map array (1 per frame) + slack (7)
@@ -647,27 +741,36 @@ void Sandbox::createDescriptors() {
 		m_global_descriptor_sets.push_back(std::move(set));
 	}
 
-	// Create one cubemap descriptor set for skybox
-	auto cubemap_image_info = m_skybox.getDescriptorInfo();
-	m_cubemap_descriptor_set = vk::raii::DescriptorSet{nullptr};
+	// Cubemap descriptor set is owned by SkyboxRenderSystem (created in initSystems)
+
+	// Create shared particle/texture descriptor set (used by particles, point lights, and SimpleScene objects)
+	m_particle_texture_handle = m_resource_manager->load<VeTexture>(m_paths.particle_texture.lexically_normal().generic_string());
+	m_fire_texture_handle = m_resource_manager->load<VeTexture>(m_paths.fire_texture.lexically_normal().generic_string());
+	m_smoke_texture_handle = m_resource_manager->load<VeTexture>(m_paths.smoke_texture.lexically_normal().generic_string());
+	auto glow_info = m_particle_texture_handle.get()->getDescriptorInfo();
+	auto fire_info = m_fire_texture_handle.get()->getDescriptorInfo();
+	auto smoke_info = m_smoke_texture_handle.get()->getDescriptorInfo();
+	m_particle_texture_descriptor_set = vk::raii::DescriptorSet{nullptr};
 	VeDescriptorWriter(*m_material_set_layout, *m_global_pool)
-		.writeImage(0, &cubemap_image_info)
-		.build(m_cubemap_descriptor_set);
+		.writeImage(0, &glow_info)
+		.writeImage(1, &fire_info)
+		.writeImage(2, &smoke_info)
+		.build(m_particle_texture_descriptor_set);
 }
 
 void Sandbox::initSystems() {
 	VE_LOGD("Initialising systems");
 
 	// Create shadow system first (before other render systems that might need shadow descriptor set)
-	VE_LOGD("shadow system: " << project_root / "shaders" / "shadow_shader.spv");
+	VE_LOGD("shadow system: " << m_paths.shader("shadow_shader.spv"));
 	m_shadow_render_system = std::make_unique<ShadowRenderSystem>(
 		m_ve_device,
 		*m_global_pool,
 		m_material_set_layout->getDescriptorSetLayout(),
-		project_root / "shaders" / "shadow_shader.spv"
+		m_paths.shader("shadow_shader.spv")
 	);
 
-	VE_LOGD("simple system: " << project_root / "shaders" / "simple_shader.spv");
+	VE_LOGD("simple system: " << m_paths.shader("simple_shader.spv"));
 	m_simple_render_system = std::make_unique<SimpleRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
@@ -675,9 +778,9 @@ void Sandbox::initSystems() {
 		m_shadow_render_system->getShadowSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
-		project_root / "shaders" / "simple_shader.spv"
+		m_paths.shader("simple_shader.spv")
 	);
-	VE_LOGD("pbr system: " << project_root / "shaders" / "pbr_shader.spv");
+	VE_LOGD("pbr system: " << m_paths.shader("pbr_shader.spv"));
 	m_pbr_render_system = std::make_unique<PbrRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
@@ -685,26 +788,27 @@ void Sandbox::initSystems() {
 		m_shadow_render_system->getShadowSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
-		project_root / "shaders" / "pbr_shader.spv"
+		m_paths.shader("pbr_shader.spv")
 	);
-	VE_LOGD("axes system: " << project_root / "shaders" / "axes_shader.spv");
+	VE_LOGD("axes system: " << m_paths.shader("axes_shader.spv"));
 	m_axes_render_system = std::make_unique<AxesRenderSystem>(
 		m_ve_device,
+		*m_resource_manager,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
-		project_root / "shaders" / "axes_shader.spv"
+		m_paths.shader("axes_shader.spv")
 	);
-	VE_LOGD("pl system: " << project_root / "shaders" / "point_light_shader.spv");
+	VE_LOGD("pl system: " << m_paths.shader("point_light_shader.spv"));
 	m_point_light_system = std::make_unique<PointLightSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
-		project_root / "shaders" / "point_light_shader.spv"
+		m_paths.shader("point_light_shader.spv")
 	);
-	VE_LOGD("particle system: " << project_root / "shaders" / "particle_compute.spv");
+	VE_LOGD("particle system: " << m_paths.shader("particle_compute.spv"));
 	m_particle_system = std::make_unique<ParticleSystem>(
 		m_ve_device,
 		m_global_pool,
@@ -714,7 +818,7 @@ void Sandbox::initSystems() {
 		m_ve_renderer.getSampleCount(),
 		50000, // number of particles
 		glm::vec3{0.0f, -300.0f, 50.0f},
-		project_root / "shaders" / "particle_compute.spv"
+		m_paths.shader("particle_compute.spv")
 	);
 	m_fireworks_system = std::make_unique<FireworksSystem>(
 		m_ve_device,
@@ -723,25 +827,28 @@ void Sandbox::initSystems() {
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
-		project_root / "shaders" / "particle_compute.spv"
+		m_paths.shader("particle_compute.spv")
 	);
-	VE_LOGD("skybox system: " << project_root / "shaders" / "skybox_shader.spv");
+	VE_LOGD("skybox system: " << m_paths.shader("skybox_shader.spv"));
 	m_skybox_render_system = std::make_unique<SkyboxRenderSystem>(
 		m_ve_device,
+		*m_resource_manager,
+		*m_global_pool,
+		*m_material_set_layout,
 		m_global_set_layout->getDescriptorSetLayout(),
-		m_material_set_layout->getDescriptorSetLayout(),
+		m_paths.skybox_dir,
+		m_paths.shader("skybox_shader.spv"),
+		m_paths.cube_model,
 		m_ve_renderer.getOffscreenImageFormat(),
-		m_ve_renderer.getSampleCount(),
-		project_root / "shaders" / "skybox_shader.spv",
-		project_root / "models" / "cube.gltf"
+		m_ve_renderer.getSampleCount()
 	);
 
 	m_bloom_system = std::make_unique<BloomSystem>(
 		m_ve_device,
 		m_ve_renderer.getExtent(),
 		m_ve_renderer.getResolveTargetImageView(),
-		project_root / "shaders" / "bloom_downsample.spv",
-		project_root / "shaders" / "bloom_upsample.spv"
+		m_paths.shader("bloom_downsample.spv"),
+		m_paths.shader("bloom_upsample.spv")
 	);
 
 	m_post_process_system = std::make_unique<PostProcessSystem>(
@@ -749,7 +856,7 @@ void Sandbox::initSystems() {
 		m_ve_renderer.getSwapChainImageFormat(),
 		m_ve_renderer.getResolveTargetImageView(),
 		m_bloom_system->getBloomTexture(),
-		project_root / "shaders" / "post_process.spv"
+		m_paths.shader("post_process.spv")
 	);
 }
 
@@ -767,6 +874,8 @@ void Sandbox::initUI() {
 	ui_actions.min_life = m_particle_system->getMinLife();
 	ui_actions.max_life = m_particle_system->getMaxLife();
 	ui_actions.should_respawn = m_particle_system->getShouldRespawn();
+	ui_actions.ambient_light_color = glm::vec3(DEFAULT_AMBIENT_LIGHT_COLOR);
+	ui_actions.ambient_light_intensity = DEFAULT_AMBIENT_LIGHT_COLOR.w;
 }
 
 

@@ -4,6 +4,7 @@ for each frame in the rendering process. */
 #include "ve_export.hpp"
 #include "ve_model.hpp"
 #include "ve_game_object.hpp"
+#include "ve_scene.hpp"
 #include "ve_config.hpp"
 #include "ve_camera.hpp"
 
@@ -83,6 +84,7 @@ struct VeFrameInfo {
 	vk::raii::DescriptorSet& global_descriptor_set;
 	vk::raii::DescriptorSet& texture_descriptor_set;
 	vk::raii::DescriptorSet& material_descriptor_set;
+	VeScene* active_scene = nullptr;  // For per-object descriptor set lookup
 	vk::raii::DescriptorSet& cubemap_descriptor_set;
 	vk::raii::DescriptorSet& shadow_descriptor_set;
 	vk::raii::CommandBuffer& command_buffer;

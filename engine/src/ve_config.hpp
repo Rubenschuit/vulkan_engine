@@ -7,7 +7,7 @@
 namespace ve {
 
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
-constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.006f); // w indicates light intensity
+constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.016f); // w indicates light intensity
 constexpr uint32_t MAX_LIGHTS = 20; // requirded for UBO alignment
 constexpr uint32_t MAX_SHADOW_LIGHTS = 3; // Maximum number of shadow-casting lights (independent of MAX_LIGHTS)
 

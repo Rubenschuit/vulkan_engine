@@ -1,5 +1,6 @@
 #include "game/ve_game_object.hpp"
 #include "game/ve_component.hpp"
+#include <algorithm>
 #include <atomic>
 
 namespace ve {
@@ -33,13 +34,41 @@ VeGameObject VeGameObject::createPointLight(float intensity, float radius, glm::
 const glm::mat4& VeGameObject::getTransform() const {
 	auto* transform = getComponent<TransformComponent>();
 	assert(transform && "VeGameObject must have TransformComponent");
-	return transform->getTransform();
+	const glm::mat4& local = transform->getTransform();
+	if (m_parent) {
+		m_cached_world_transform = m_parent->getTransform() * local;
+		return m_cached_world_transform;
+	}
+	return local;
 }
 
 const glm::mat3& VeGameObject::getNormalTransform() const {
 	auto* transform = getComponent<TransformComponent>();
 	assert(transform && "VeGameObject must have TransformComponent");
+	if (m_parent) {
+		// World normal = inverse(transpose(mat3(world_transform)))
+		const glm::mat4& world = getTransform();
+		m_cached_world_normal = glm::mat3(glm::inverse(glm::transpose(world)));
+		return m_cached_world_normal;
+	}
 	return transform->getNormalTransform();
+}
+
+void VeGameObject::setParent(VeGameObject* parent) {
+	if (m_parent == parent)
+		return;
+	if (m_parent) {
+		auto& siblings = m_parent->m_children;
+		siblings.erase(std::remove(siblings.begin(), siblings.end(), this), siblings.end());
+	}
+	m_parent = parent;
+	if (m_parent) {
+		m_parent->m_children.push_back(this);
+	}
+}
+
+void VeGameObject::addChild(VeGameObject* child) {
+	child->setParent(this);
 }
 
 } // namespace ve

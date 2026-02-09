@@ -18,6 +18,7 @@
 
 #include "core/ve_renderer.hpp"
 #include "core/ve_texture.hpp"
+#include "core/ve_resource_manager.hpp"
 
 #include "game/ve_frame_info.hpp"
 #include "game/ve_game_object.hpp"

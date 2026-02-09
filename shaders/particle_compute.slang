@@ -96,7 +96,7 @@ VertexOutput vertMain(VertexInput input, uint id : SV_VertexID) {
 }
 
 [vk::binding(0, 1)]
-Sampler2D glow_texture;
+Sampler2D glow_texture; // not used, instead a round mask is used
 [vk::binding(1, 1)]
 Sampler2D fire_texture;
 [vk::binding(2, 1)]

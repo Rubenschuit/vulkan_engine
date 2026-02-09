@@ -1,116 +1,104 @@
-/* VeModel is responsible for managing the vertex and index buffers
-for a model. It provides methods to create and bind these buffers and issue
-draw commands. */
+/* VeModel - scene graph container for glTF models.
+ * Not a Resource - owns nodes (VeGameObjects) that make up the hierarchy.
+ * Loads glTF, creates VeMesh resources for each primitive, builds node hierarchy.
+ */
 #pragma once
-#include "core/ve_descriptors.hpp"
 #include "ve_export.hpp"
 #include "core/ve_device.hpp"
 #include "core/ve_texture.hpp"
-#include "core/ve_buffer.hpp"
+#include "core/ve_descriptors.hpp"
+#include "core/ve_resource_manager.hpp"
+#include "game/ve_mesh.hpp"
+#include "game/ve_game_object.hpp"
 
-namespace ve {
-	class VeDescriptorSetLayout;
-	class VeDescriptorPool;
-}
-
-#define GLM_FORCE_RADIANS
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/glm.hpp>
-#include <glm/gtx/hash.hpp>
+#include "ve_scene.hpp"
 #include <filesystem>
+#include <glm/glm.hpp>
+#include <memory>
+#include <optional>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace ve {
+
+class VeDescriptorPool;
+class VeDescriptorSetLayout;
+
+struct Material {
+	ResourceHandle<VeTexture> albedo_texture;
+	ResourceHandle<VeTexture> normal_texture;
+	ResourceHandle<VeTexture> metallic_roughness_texture;
+	std::optional<vk::raii::DescriptorSet> descriptor_set;
+};
 
 class VENGINE_API VeModel {
 public:
-	struct Vertex {
-		glm::vec3 pos;
-		glm::vec3 color;
-		glm::vec3 normal;
-		glm::vec2 tex_coord{0.0f, 0.0f};
-		glm::vec4 tangent{0.0f, 0.0f, 0.0f, 0.0f};
-		uint32_t material_index{0}; // default to 0 for simple models
+	// Load glTF from path, create meshes and node hierarchy
+	// pool and material_layout can be null for models without textures (e.g. skybox cube)
+	static std::unique_ptr<VeModel> load(VeDevice& device, VeResourceManager& resource_manager,
+	                                    const std::filesystem::path& model_path,
+	                                    VeDescriptorPool* pool = nullptr,
+	                                    VeDescriptorSetLayout* material_layout = nullptr);
 
-		static std::vector<vk::VertexInputBindingDescription> getBindingDescriptions();
-		// for models with material index
-		static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptions();
-		// for simple models with no material index
-		static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptionsSimple();
-		// for shadow mapping (only position)
-		static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptionsShadow();
-		bool operator==(const Vertex& other) const {
-			return pos == other.pos &&
-			       color == other.color &&
-				   normal == other.normal &&
-				   tangent == other.tangent &&
-				   tex_coord == other.tex_coord &&
-				   material_index == other.material_index;
-		}
-	};
-
-	// Do these need to be shared ptr?
-	struct MaterialTextures {
-		std::shared_ptr<VeTexture> albedo_texture{nullptr};
-		std::shared_ptr<VeTexture> normal_texture{nullptr};
-		std::shared_ptr<VeTexture> metallic_roughness_texture{nullptr};
-	};
-
-
-	VeModel(VeDevice& device, const std::vector<Vertex>& vertices);
-	VeModel(VeDevice& device, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
-	VeModel(VeDevice& device, const std::filesystem::path& model_path);
 	~VeModel();
 
 	VeModel(const VeModel&) = delete;
 	VeModel& operator=(const VeModel&) = delete;
 
-	void bindVertexBuffer(vk::raii::CommandBuffer& commandBuffer);
-	void bindIndexBuffer(vk::raii::CommandBuffer& commandBuffer);
-	void draw(vk::raii::CommandBuffer& commandBuffer);
-	void drawIndexed(vk::raii::CommandBuffer& commandBuffer);
+	// Add all nodes to the scene (the unordered_map is used to store the game objects by their id)
+	void addToScene(std::unordered_map<uint32_t, VeGameObject>& game_objects,
+	                const glm::vec3& root_translation,
+	                const glm::vec3& root_rotation,
+	                const glm::vec3& root_scale);
 
-	void createDescriptorSet(VeDescriptorPool& pool, VeDescriptorSetLayout& set_layout);
-	// not safe yet
-	vk::raii::DescriptorSet& getMaterialDescriptorSet() { return m_material_descriptor_set; }
+	// Alternative: return a vector of objects instead of mutating a map. Caller can modify and merge.
+	std::vector<VeGameObject> addToScene(const glm::vec3& root_translation,
+	                                    const glm::vec3& root_rotation,
+	                                    const glm::vec3& root_scale);
+
+	// Load a simple single mesh model (quad, cube, etc.) and return a single GameObject with transform applied.
+	static VeGameObject loadAsSingleObject(VeDevice& device, VeResourceManager& resource_manager,
+	                                       const std::filesystem::path& model_path,
+	                                       const glm::vec3& translation,
+	                                       const glm::vec3& rotation,
+	                                       const glm::vec3& scale);
+
+	// Get all node IDs for iteration (e.g. to find root)
+	const std::vector<VeGameObject>& getNodes() const { return m_nodes; }
+
+	// Material descriptor set for PBR rendering (per-material)
+	vk::raii::DescriptorSet& getMaterialDescriptorSet(uint32_t material_index);
+	uint32_t getMaterialCount() const { return static_cast<uint32_t>(m_materials.size()); }
 	bool hasTexturedMaterials() const { return m_has_textured_materials; }
 
+	// Material alpha props from glTF (alphaMode, alphaCutoff, doubleSided). Returns default if index out of range.
+	MaterialAlphaProps getMaterialAlphaProps(uint32_t material_index) const;
+
+	// Root node ID (first root added to scene)
+	uint32_t getRootId() const { return m_root_id; }
+
+	VeModel(VeDevice& device);
+
 private:
-	void createVertexBuffers(const std::vector<Vertex>& vertices);
-	void createIndexBuffers(const std::vector<uint32_t>& indices);
-	void createMaterialTextures(
-		const std::vector<std::filesystem::path>& albedo_paths,
-		const std::vector<std::filesystem::path>& normal_paths,
-		const std::vector<std::filesystem::path>& metallic_roughness_paths
-	);
 
+	void loadFromGltf(const std::filesystem::path& model_path, VeResourceManager& resource_manager,
+	                  VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout);
+	void createPerMaterialTextures(VeResourceManager& resource_manager,
+	                              const std::vector<std::filesystem::path>& albedo_paths,
+	                              const std::vector<std::filesystem::path>& normal_paths,
+	                              const std::vector<std::filesystem::path>& metallic_roughness_paths);
+	void createPerMaterialDescriptorSets(VeDescriptorPool& pool, VeDescriptorSetLayout& set_layout);
 
-	VeDevice& m_ve_device; // not owned, must outlive model
+	VeDevice& m_ve_device;
+	std::vector<VeGameObject> m_nodes;
+	std::vector<std::pair<uint32_t, uint32_t>> m_parent_links;  // (child_id, parent_id)
+	std::unordered_set<uint32_t> m_root_ids;
+	uint32_t m_root_id{0};
 
-	// TODO: Consdider consolidating index and vertex buffer into single buffer and use offsets
-	std::unique_ptr<ve::VeBuffer> m_vertex_buffer;
-	uint32_t m_vertex_count;
-	std::unique_ptr<ve::VeBuffer> m_index_buffer;
-	uint32_t m_index_count;
-
-	// Material information
-	MaterialTextures m_material_textures;
-	vk::raii::DescriptorSet m_material_descriptor_set{nullptr};
+	std::vector<Material> m_materials;
+	std::vector<MaterialAlphaProps> m_material_alpha_props;
 	bool m_has_textured_materials{false};
 };
 
 } // namespace ve
-
-// Provide a hash function for Vertex so we can use it in unordered_map
-// Needs to be outside the ve namespace because std is not allowed to be extended inside another namespace
-template<> struct std::hash<ve::VeModel::Vertex> {
-	size_t operator()(ve::VeModel::Vertex const& v) const noexcept {
-		size_t seed = 0u;
-		seed ^= std::hash<glm::vec3>()(v.pos) + 0x9e3779b9 + (seed<<6) + (seed>>2);
-		seed ^= std::hash<glm::vec3>()(v.color) + 0x9e3779b9 + (seed<<6) + (seed>>2);
-		seed ^= std::hash<glm::vec3>()(v.normal) + 0x9e3779b9 + (seed<<6) + (seed>>2);
-		seed ^= std::hash<glm::vec2>()(v.tex_coord) + 0x9e3779b9 + (seed<<6) + (seed>>2);
-		seed ^= std::hash<glm::vec4>()(v.tangent) + 0x9e3779b9 + (seed<<6) + (seed>>2);
-		seed ^= std::hash<uint32_t>()(v.material_index) + 0x9e3779b9 + (seed<<6) + (seed>>2);
-		return seed;
-	}
-};

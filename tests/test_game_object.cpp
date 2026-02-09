@@ -71,3 +71,23 @@ TEST_CASE("VeGameObject point light factory", "[gameobject][factory]") {
 	REQUIRE(material->color == glm::vec3(1.0f, 0.0f, 0.0f));
 }
 
+TEST_CASE("VeGameObject parent-child hierarchy", "[gameobject][hierarchy]") {
+	auto parent = ve::VeGameObject::createGameObject();
+	auto child = ve::VeGameObject::createGameObject();
+
+	parent.getComponent<ve::TransformComponent>()->translation = {1.0f, 2.0f, 3.0f};
+	child.getComponent<ve::TransformComponent>()->translation = {0.0f, 1.0f, 0.0f};
+
+	parent.addChild(&child);
+
+	REQUIRE(child.getParent() == &parent);
+	REQUIRE(parent.getChildren().size() == 1);
+	REQUIRE(parent.getChildren()[0] == &child);
+
+	// World transform of child should include parent's translation
+	glm::mat4 child_world = child.getTransform();
+	REQUIRE(child_world[3][0] == 1.0f);
+	REQUIRE(child_world[3][1] == 3.0f);
+	REQUIRE(child_world[3][2] == 3.0f);
+}
+

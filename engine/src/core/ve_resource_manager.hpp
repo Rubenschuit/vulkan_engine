@@ -1,0 +1,95 @@
+/* Resource manager and handle for caching and lifetime management of resources
+ * such as models and textures. TODO: add support for other resource types suchh as audio and shaders.
+ * Based on:
+ * https://docs.vulkan.org/tutorial/latest/Building_a_Simple_Engine/Engine_Architecture/04_resource_management.html
+ */
+#pragma once
+#include "ve_export.hpp"
+#include "ve_resource.hpp"
+#include "ve_device.hpp"
+#include "game/ve_mesh.hpp"
+
+#include <memory>
+#include <string>
+#include <typeinfo>
+#include <unordered_map>
+
+namespace ve {
+
+// Forward declarations
+class VeResourceManager;
+class VeMesh;
+
+/* RAII handle that keeps a resource loaded.
+ * Copy increments ref count, destroy decrements. When ref count hits 0, resource is unloaded.
+ */
+template <typename T>
+class ResourceHandle {
+public:
+	ResourceHandle() = default;
+	ResourceHandle(const std::string& resource_id, VeResourceManager* manager);
+	~ResourceHandle();
+
+	ResourceHandle(const ResourceHandle& other);
+	ResourceHandle& operator=(const ResourceHandle& other);
+	ResourceHandle(ResourceHandle&& other) noexcept;
+	ResourceHandle& operator=(ResourceHandle&& other) noexcept;
+
+	T* get() const;
+	bool isValid() const;
+	const std::string& getId() const;
+
+	T* operator->() const { return get(); }
+	explicit operator bool() const { return isValid(); }
+
+private:
+	void addRef() const;
+	void release() const;
+
+	std::string m_resource_id;
+	mutable VeResourceManager* m_manager = nullptr;
+};
+
+
+
+class VENGINE_API VeResourceManager {
+public:
+	explicit VeResourceManager(VeDevice& device);
+
+	template <typename T>
+	ResourceHandle<T> load(const std::string& resource_id);
+
+	template <typename T>
+	T* getResource(const std::string& resource_id) const;
+
+	template <typename T>
+	bool hasResource(const std::string& resource_id) const;
+
+	template <typename T>
+	void addRef(const std::string& resource_id);
+
+	template <typename T>
+	void release(const std::string& resource_id);
+
+	// Create VeMesh from vertex data
+	ResourceHandle<VeMesh> createMesh(const std::string& resource_id,
+	                                  const std::vector<VeMesh::Vertex>& vertices,
+	                                  const std::vector<uint32_t>& indices);
+
+	// Not used yet. TODO: Add support for unloading scenes.
+	void unloadAll();
+
+private:
+	VeDevice& m_device;
+	// Map of resource type to map of resource id to resource.
+	// Used to store all resources.
+	std::unordered_map<size_t, std::unordered_map<std::string, std::shared_ptr<Resource>>> m_resources;
+	// Map of resource type to map of resource id to reference count.
+	// Used to track the number of references to each resource.
+	std::unordered_map<size_t, std::unordered_map<std::string, int>> m_ref_counts;
+
+	template <typename T>
+	friend class ResourceHandle;
+};
+
+} // namespace ve

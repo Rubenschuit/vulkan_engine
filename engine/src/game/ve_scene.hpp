@@ -11,6 +11,19 @@ namespace ve {
 
 class VeDevice;
 
+enum class AlphaMode : uint32_t {
+	OPAQUE = 0,
+	MASK = 1,
+	BLEND = 2,
+};
+
+// Add to Material class in ve_model.hpp?
+struct MaterialAlphaProps {
+	AlphaMode alpha_mode = AlphaMode::OPAQUE;
+	float alpha_cutoff = 0.5f;
+	bool double_sided = false;
+};
+
 class VENGINE_API VeScene {
 public:
     enum class Type { SIMPLE, PBR };
@@ -25,6 +38,10 @@ public:
     const std::unordered_map<uint32_t, VeGameObject>& getGameObjects() const;
 
     virtual vk::raii::DescriptorSet& getDescriptorSet() = 0;
+    // Per-object material descriptor set (for multi-material models). Returns scene default when obj is null or not applicable.
+    virtual vk::raii::DescriptorSet& getDescriptorSet(const VeGameObject* obj) { (void)obj; return getDescriptorSet(); }
+    // Per-object material alpha props (alphaMode, alphaCutoff, doubleSided from glTF). Returns default when obj is null.
+    virtual MaterialAlphaProps getMaterialAlphaProps(const VeGameObject* obj) const { (void)obj; return {}; }
     virtual Type getType() const = 0;
     virtual void update(float /*dt*/) {}
 

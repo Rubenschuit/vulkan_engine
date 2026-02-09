@@ -21,7 +21,8 @@ public:
 		vk::MemoryPropertyFlags properties,
 		vk::ImageAspectFlags aspect_flags,
 		bool is_cubemap,
-		uint32_t array_layers
+		uint32_t array_layers,
+		uint32_t mip_levels = 1
 	);
 	~VeImage();
 
@@ -34,6 +35,7 @@ public:
 	vk::Format getFormat() const { return m_format; }
 	uint32_t getWidth() const { return m_width; }
 	uint32_t getHeight() const { return m_height; }
+	uint32_t getMipLevels() const { return m_mip_levels; }
 	vk::ImageAspectFlags getAspectFlags() const { return m_aspect_flags; }
 	vk::Extent2D getExtent2D() const { return vk::Extent2D{ m_width, m_height }; }
 
@@ -86,6 +88,7 @@ private:
 	vk::MemoryPropertyFlags m_properties;
 	vk::ImageAspectFlags m_aspect_flags;
 	uint32_t m_array_layers;
+	uint32_t m_mip_levels;
 	vk::ImageCreateFlags m_image_create_flags{};
 	vk::ImageViewType m_image_view_type{vk::ImageViewType::e2D};
 

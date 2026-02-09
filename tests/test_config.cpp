@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "ve_config.hpp"
+#include <glm/glm.hpp>
 
 TEST_CASE("ve_config basic constants and lists", "[config]") {
     // Frames in flight reasonable
@@ -23,4 +24,31 @@ TEST_CASE("ve_config basic constants and lists", "[config]") {
         if (std::string(layer) == "VK_LAYER_KHRONOS_validation") hasValidation = true;
     }
     REQUIRE(hasValidation);
+}
+
+TEST_CASE("ve_config lighting and shadow constants", "[config]") {
+    REQUIRE(ve::MAX_LIGHTS >= 1);
+    REQUIRE(ve::MAX_SHADOW_LIGHTS >= 1);
+
+    REQUIRE(ve::SHADOW_MAP_RESOLUTION >= 256);
+    REQUIRE(ve::SHADOW_BIAS >= 0.0f);
+    REQUIRE(ve::SHADOW_BIAS < 0.01f);
+
+    auto ambient = ve::DEFAULT_AMBIENT_LIGHT_COLOR;
+    REQUIRE(ambient.r >= 0.0f);
+    REQUIRE(ambient.g >= 0.0f);
+    REQUIRE(ambient.b >= 0.0f);
+}
+
+TEST_CASE("ve_config portability extensions on macOS", "[config]") {
+#ifdef __APPLE__
+    bool hasPortability = false;
+    for (auto* ext : ve::REQUIRED_DEVICE_EXTENSIONS) {
+        if (std::string(ext) == VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME) {
+            hasPortability = true;
+            break;
+        }
+    }
+    REQUIRE(hasPortability);
+#endif
 }

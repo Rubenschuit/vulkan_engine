@@ -6,7 +6,6 @@ struct VertexInput {
 	float3 in_normal : NORMAL;
 	float2 in_tex_coord : TEXCOORD0;
 	float4 in_tangent : TANGENT; // xyz = tangent, w = bitangent sign
-	uint in_material_index : MATERIAL_INDEX;
 };
 
 struct PointLight {
@@ -55,11 +54,13 @@ struct UniformBuffer {
 ConstantBuffer<UniformBuffer> ubo;
 
 struct PushConstantData {
-	[vk::offset(0)]   float4x4 transform;      // 64
-	[vk::offset(64)]  float4   normal_col0;    // 16
-	[vk::offset(80)]  float4   normal_col1;    // 16
-	[vk::offset(96)]  float4   normal_col2;    // 16
-	[vk::offset(112)] float    has_texture;    // 4
+	[vk::offset(0)]   float4x4 transform;
+	[vk::offset(64)]  float4   normal_col0;
+	[vk::offset(80)]  float4   normal_col1;
+	[vk::offset(96)]  float4   normal_col2;
+	[vk::offset(112)] float    has_texture;
+	[vk::offset(116)] float    alpha_cutoff;
+	[vk::offset(120)] uint32_t alpha_flags;    // bits 0-1 = alpha_mode (0 OPAQUE, 1 MASK, 2 BLEND), bit 2 = double_sided
 };
 [push_constant]
 PushConstantData push_constants;
@@ -73,7 +74,6 @@ struct VertexOutput {
 	float3 frag_color;
 	float2 frag_tex_coord;
 	float4 shadow_coord[3]; // MAX_SHADOW_LIGHTS
-	uint frag_material_index;
 };
 
 // Transform x and y coordinates from [0,1] to [-1,1] and keep z and w coordinates unchanged
@@ -114,7 +114,6 @@ VertexOutput vertMain(VertexInput input) {
 	// pass through
     output.frag_color = input.in_color;
 	output.frag_tex_coord = input.in_tex_coord;
-	output.frag_material_index = input.in_material_index;
 
     // calculate shadow coordinates only if shadows are enabled
 	if (ubo.shadow_mode != ShadowMode::DISABLED) {
@@ -126,15 +125,15 @@ VertexOutput vertMain(VertexInput input) {
     return output;
 }
 
-// binding
+// Per-material textures (set 1)
 [vk::binding(0, 1)]
-Sampler2DArray albedo_textures;
+Sampler2D albedo_texture;
 
 [vk::binding(1, 1)]
-Sampler2DArray normal_textures;
+Sampler2D normal_texture;
 
 [vk::binding(2, 1)]
-Sampler2DArray metallic_roughness_textures;
+Sampler2D metallic_roughness_texture;
 
 // Shadow maps (set 2) - single 2D array texture
 // Note: On MoltenVK, comparison sampler is not available, so we use regular sampler
@@ -230,14 +229,16 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 
 	float4 c;
 
-	float3 tex_coord = float3(in_vert.frag_tex_coord, in_vert.frag_material_index);
-	float4 albedo = albedo_textures.Sample(tex_coord);
+	float2 tex_coord = in_vert.frag_tex_coord;
+	float4 albedo = albedo_texture.Sample(tex_coord);
 
-	if (albedo.a <= 0.001)
+	// glTF alphaMode: OPAQUE(0)=no discard, MASK(1)=discard below cutoff, BLEND(2)=no discard
+	uint32_t alpha_mode = push_constants.alpha_flags & 3u;
+	if (alpha_mode == 1 && albedo.a < push_constants.alpha_cutoff)
 		discard;
 
-	float4 mr = metallic_roughness_textures.Sample(tex_coord);
-	float4 normal_map = normal_textures.Sample(tex_coord);
+	float4 mr = metallic_roughness_texture.Sample(tex_coord);
+	float4 normal_map = normal_texture.Sample(tex_coord);
 
 	// Extract PBR properties
 	float metallic = mr.b;

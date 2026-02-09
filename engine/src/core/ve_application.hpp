@@ -56,7 +56,6 @@ protected:
 	std::unique_ptr<VeDescriptorSetLayout> m_material_set_layout{};
 
 	std::vector<vk::raii::DescriptorSet> m_global_descriptor_sets{};
-	vk::raii::DescriptorSet m_cubemap_descriptor_set{nullptr};
 
 	// Input handling
 	InputController m_input_controller;

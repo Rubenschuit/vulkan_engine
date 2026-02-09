@@ -64,7 +64,7 @@ elif [[ "$MODE" == 'leaks' ]]; then
 	if [[ "$(uname)" == "Darwin" ]]; then
 		./"$BUILD_DIR"/VeApp &
 		PID=$!
-		sleep 5 # Give the app a moment to run
+		sleep 40 # Give the app a moment to run
 
 		leaks $PID || true
 		kill $PID || true

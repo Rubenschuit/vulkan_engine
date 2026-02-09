@@ -2,37 +2,17 @@
 #include "game/ve_model.hpp"
 #include "game/ve_component.hpp"
 #include <glm/gtc/constants.hpp>
+#include <unordered_map>
 
 namespace ve {
 
-SimpleScene::SimpleScene(VeDevice& device, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const std::filesystem::path& project_root)
-    : VeScene(device, "Simple Scene") {
-    loadTextures(project_root);
-    createDescriptorSet(pool, material_layout);
-    loadGameObjects(project_root);
+SimpleScene::SimpleScene(VeDevice& device, VeResourceManager& resource_manager, VeDescriptorPool& /*pool*/, VeDescriptorSetLayout& /*material_layout*/, const AssetPaths& paths, vk::raii::DescriptorSet* shared_particle_descriptor_set)
+	: VeScene(device, "Simple Scene"), m_shared_particle_descriptor_set(shared_particle_descriptor_set) {
+	assert(m_shared_particle_descriptor_set && "Shared particle descriptor set must not be null");
+	loadGameObjects(resource_manager, paths);
 }
 
-// Loads textures for particles, TODO: consider moving these from simple scene.
-void SimpleScene::loadTextures(const std::filesystem::path& project_root) {
-    m_glow_texture = std::make_unique<VeTexture>(m_device, project_root / "textures" / "light.png");
-    m_fire_texture = std::make_unique<VeTexture>(m_device, project_root / "textures" / "fire_ball.ktx");
-    m_smoke_texture = std::make_unique<VeTexture>(m_device, project_root / "textures" / "smoke_atlas.png");
-}
-
-void SimpleScene::createDescriptorSet(VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout) {
-    auto glow_texture_info = m_glow_texture->getDescriptorInfo();
-    auto fire_texture_info = m_fire_texture->getDescriptorInfo();
-    auto smoke_texture_info = m_smoke_texture->getDescriptorInfo();
-
-    m_texture_descriptor_set = vk::raii::DescriptorSet{nullptr};
-    VeDescriptorWriter(material_layout, pool)
-        .writeImage(0, &glow_texture_info)
-        .writeImage(1, &fire_texture_info)
-        .writeImage(2, &smoke_texture_info)
-        .build(m_texture_descriptor_set);
-}
-
-void SimpleScene::loadGameObjects(const std::filesystem::path& project_root) {
+void SimpleScene::loadGameObjects(VeResourceManager& resource_manager, const AssetPaths& paths) {
     // stationary light
     {
         auto l = VeGameObject::createPointLight(100.0f, 2.0f, glm::vec3(1.0f, 1.0f, 1.0f));
@@ -76,87 +56,65 @@ void SimpleScene::loadGameObjects(const std::filesystem::path& project_root) {
 
     // floor
     {
-        VeGameObject floor = VeGameObject::createGameObject();
-        auto quad = std::make_shared<VeModel>(m_device, project_root / "models" / "quad.gltf");
-        floor.addComponent<ModelComponent>(quad);
-        auto* mat = floor.addComponent<MaterialComponent>();
-        mat->has_texture = 0.0f;
-        mat->has_shadow = false;
-        auto* transform = floor.getComponent<TransformComponent>();
-        transform->translation = {0.0f, 0.0f, 0.0f};
-        transform->rotation = {glm::radians(90.0f), 0.0f, 0.0f};
-        transform->scale = {80.0f, 1.0f, 80.0f};
-        m_game_objects.emplace(floor.getId(), std::move(floor));
+        auto floor = VeModel::loadAsSingleObject(m_device, resource_manager,
+            paths.quad_model,
+            {0.0f, 0.0f, 0.0f}, {glm::radians(90.0f), 0.0f, 0.0f}, {80.0f, 1.0f, 80.0f});
+        if (floor.getComponent<MeshComponent>()) {
+            auto* mat = floor.addComponent<MaterialComponent>();
+            mat->has_texture = 0.0f;
+            mat->has_shadow = false;
+            m_game_objects.emplace(floor.getId(), std::move(floor));
+        }
     }
+
+    // Helper to create grid instances from a single-mesh model
+	// TODO: do this better. What about ownership/lifetime management of these meshes?
+    auto addGridInstances = [&](const std::filesystem::path& model_path,
+                               int rows, int cols,
+                               glm::vec3 base_translation, glm::vec3 base_rotation, glm::vec3 base_scale,
+                               float spacing_x, float spacing_y, float z_offset) {
+        auto model = VeModel::load(m_device, resource_manager, model_path.lexically_normal(), nullptr, nullptr);
+        auto objects = model->addToScene({0, 0, 0}, {0, 0, 0}, {1, 1, 1});
+        VeGameObject* mesh_template = nullptr;
+        for (auto& obj : objects) {
+            if (obj.getComponent<MeshComponent>()) {
+                mesh_template = &obj;
+                break;
+            }
+        }
+        if (!mesh_template) return;
+        auto mesh_handle = mesh_template->getComponent<MeshComponent>()->getMeshHandle();
+        uint32_t mat_idx = mesh_template->getComponent<MeshComponent>()->getMaterialIndex();
+        for (int j = 0; j < rows; j++) {
+            for (int i = 0; i < cols; i++) {
+                VeGameObject obj = VeGameObject::createGameObject();
+                obj.addComponent<MeshComponent>(mesh_handle, mat_idx);
+                auto* mat = obj.addComponent<MaterialComponent>();
+                mat->has_texture = 0.0f;
+                auto* transform = obj.getComponent<TransformComponent>();
+                transform->translation = base_translation + glm::vec3{(float)i * spacing_x, (float)j * spacing_y, z_offset};
+                transform->rotation = base_rotation;
+                transform->scale = base_scale;
+                m_game_objects.emplace(obj.getId(), std::move(obj));
+            }
+        }
+    };
 
     // Spheres in a grid
-    {
-        std::shared_ptr<VeModel> model = std::make_shared<VeModel>(m_device, project_root / "models" / "sphere" / "scene.gltf");
-        for (int j = 0; j < 5; j++) {
-            for (int i = 0; i < 5; i++) {
-                VeGameObject obj = VeGameObject::createGameObject();
-                obj.addComponent<ModelComponent>(model);
-                auto* mat = obj.addComponent<MaterialComponent>();
-                mat->has_texture = 0.0f;
-                auto* transform = obj.getComponent<TransformComponent>();
-                transform->rotation = {0.0f, 0.0f, 0.0f};
-                transform->translation = {(float)i * 4.0f, (float)j * 4.0f, 1.0f};
-                transform->scale = {1.0f, 1.0f, 1.0f};
-                m_game_objects.emplace(obj.getId(), std::move(obj));
-            }
-        }
-    }
+    addGridInstances(paths.sphere_model, 5, 5,
+                    {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, 4.0f, 4.0f, 1.0f);
 
     // Cubes in a grid
-    {
-        std::shared_ptr<VeModel> model2 = std::make_shared<VeModel>(m_device, project_root / "models" / "cube.gltf");
-        for (int j = 0; j < 5; j++) {
-            for (int i = 0; i < 5; i++) {
-                VeGameObject obj = VeGameObject::createGameObject();
-                obj.addComponent<ModelComponent>(model2);
-                auto* mat = obj.addComponent<MaterialComponent>();
-                mat->has_texture = 0.0f;
-                auto* transform = obj.getComponent<TransformComponent>();
-                transform->translation = {-1.0 * (float)i * 4.0f - 4.0f, (float)j * 4.0f, 1.0f};
-                transform->scale = {1.0f, 1.0f, 1.0f};
-                m_game_objects.emplace(obj.getId(), std::move(obj));
-            }
-        }
-    }
+    addGridInstances(paths.cube_model, 5, 5,
+                    {-4.0f, 0, 0}, {0, 0, 0}, {1, 1, 1}, -4.0f, 4.0f, 1.0f);
 
     // Flat vases (bad normals) in a grid
-    {
-        std::shared_ptr<VeModel> model3 = std::make_shared<VeModel>(m_device, project_root / "models" / "flat_vase.gltf");
-        for (int j = 0; j < 5; j++) {
-            for (int i = 0; i < 5; i++) {
-                VeGameObject obj = VeGameObject::createGameObject();
-                obj.addComponent<ModelComponent>(model3);
-                auto* mat = obj.addComponent<MaterialComponent>();
-                mat->has_texture = 0.0f;
-                auto* transform = obj.getComponent<TransformComponent>();
-                transform->translation = {-1.0 * (float)i * 4.0f - 4.0f, (float)j * -4.0f - 4.0f, 0.f};
-                transform->rotation = {glm::radians(-180.0f), 0.0f, 0.0f};
-                transform->scale = {6.0f, 6.0f, 3.0f};
-                m_game_objects.emplace(obj.getId(), std::move(obj));
-            }
-        }
-    }
+    addGridInstances(paths.flat_vase_model, 5, 5,
+                    {-4.0f, -4.0f, 0}, {glm::radians(-180.0f), 0.0f, 0.0f}, {6.0f, 6.0f, 3.0f}, -4.0f, -4.0f, 0);
 
     // Smooth vases (interpolated normals) in a grid
-    {
-        std::shared_ptr<VeModel> model4 = std::make_shared<VeModel>(m_device, project_root / "models" / "smooth_vase.gltf");
-        for (int j = 0; j < 5; j++) {
-            for (int i = 0; i < 5; i++) {
-                VeGameObject obj = VeGameObject::createGameObject();
-                obj.addComponent<ModelComponent>(model4);
-                auto* transform = obj.getComponent<TransformComponent>();
-                transform->translation = {(float)i * 4.0f , (float)j * -4.0f - 4.0f, 0.f};
-                transform->rotation = {glm::radians(-180.0f), 0.0f, 0.0f};
-                transform->scale = {6.0f, 6.0f, 3.0f};
-                m_game_objects.emplace(obj.getId(), std::move(obj));
-            }
-        }
-    }
+    addGridInstances(paths.smooth_vase_model, 5, 5,
+                    {0, -4.0f, 0}, {glm::radians(-180.0f), 0.0f, 0.0f}, {6.0f, 6.0f, 3.0f}, 4.0f, -4.0f, 0);
 }
 
 } // namespace ve

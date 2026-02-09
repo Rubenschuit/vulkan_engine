@@ -14,10 +14,11 @@ VeImage::VeImage(
 	vk::MemoryPropertyFlags properties,
 	vk::ImageAspectFlags aspect_flags,
 	bool is_cubemap,
-	uint32_t array_layers)
+	uint32_t array_layers,
+	uint32_t mip_levels)
 	: m_ve_device(ve_device), m_width(width), m_height(height), m_num_samples(num_samples),
 		m_format(format), m_tiling(tiling), m_usage(usage), m_properties(properties),
-		m_aspect_flags(aspect_flags), m_array_layers(array_layers) {
+		m_aspect_flags(aspect_flags), m_array_layers(array_layers), m_mip_levels(mip_levels) {
 
 	if (is_cubemap) {
 		m_image_create_flags |= vk::ImageCreateFlagBits::eCubeCompatible;
@@ -37,7 +38,7 @@ VeImage::VeImage(
 VeImage::~VeImage() {}
 
 // Hardcoded:
-// imageType=2D, extent.z=1, mip=1, initlayout, sharingmode=excl
+// imageType=2D, extent.z=1, initlayout, sharingmode=excl
 void VeImage::createImage() {
 	assert(m_width > 0 && m_height > 0 && "Image width and height must be greater than zero");
 	assert(m_usage != static_cast<vk::ImageUsageFlags>(0) && "Image usage flags must not be empty");
@@ -49,7 +50,7 @@ void VeImage::createImage() {
 		.imageType = vk::ImageType::e2D,
 		.format = m_format,
 		.extent = vk::Extent3D{ m_width, m_height, 1 },
-		.mipLevels = 1,
+		.mipLevels = m_mip_levels,
 		.arrayLayers = m_array_layers,
 		.samples = m_num_samples,
 		.tiling = m_tiling,
@@ -88,7 +89,7 @@ void VeImage::createImageView() {
 		.subresourceRange = vk::ImageSubresourceRange {
 			.aspectMask = m_aspect_flags,
 			.baseMipLevel = 0,
-			.levelCount = 1,
+			.levelCount = m_mip_levels,
 			.baseArrayLayer = 0,
 			.layerCount = m_array_layers
 		}
@@ -163,7 +164,7 @@ void VeImage::transitionImageLayout(
 		.subresourceRange = {
 			.aspectMask = m_aspect_flags,
 			.baseMipLevel = 0,
-			.levelCount = 1,
+			.levelCount = m_mip_levels,
 			.baseArrayLayer = 0,
 			.layerCount = m_array_layers
 		}

@@ -542,7 +542,7 @@ void VeDevice::copyBufferToImage(vk::raii::Buffer& src_buffer, const vk::raii::I
 	assert(width > 0 && height > 0 && "Image width and height must be greater than zero");
 	assert(*src_buffer != VK_NULL_HANDLE && "Source buffer must be valid");
 	assert(*dst_image  != VK_NULL_HANDLE && "Destination image must be valid");
-	VE_LOGD("Copying buffer to image, width: " << width << ", height: " << height << ", array layers: " << array_layers);
+	//VE_LOGD("Copying buffer to image, width: " << width << ", height: " << height << ", array layers: " << array_layers);
 	auto cmd = beginSingleTimeCommands(QueueKind::Transfer);
 	vk::BufferImageCopy copy_region{
 		.bufferOffset = 0,
@@ -553,6 +553,28 @@ void VeDevice::copyBufferToImage(vk::raii::Buffer& src_buffer, const vk::raii::I
 		.imageExtent = { width, height, 1 }
 	};
 	cmd->copyBufferToImage(*src_buffer, *dst_image, vk::ImageLayout::eTransferDstOptimal, copy_region);
+	endSingleTimeCommands(*cmd, QueueKind::Transfer);
+}
+
+void VeDevice::copyBufferToImageWithMipmaps(vk::raii::Buffer& src_buffer, const vk::raii::Image& dst_image,
+	uint32_t array_layers, uint32_t mip_levels,
+	const std::vector<vk::DeviceSize>& buffer_offsets,
+	const std::vector<vk::Extent3D>& extents) {
+	assert(mip_levels > 0 && buffer_offsets.size() >= mip_levels && extents.size() >= mip_levels);
+	auto cmd = beginSingleTimeCommands(QueueKind::Transfer);
+	std::vector<vk::BufferImageCopy> copy_regions;
+	copy_regions.reserve(mip_levels);
+	for (uint32_t level = 0; level < mip_levels; level++) {
+		copy_regions.push_back({
+			.bufferOffset = buffer_offsets[level],
+			.bufferRowLength = 0,
+			.bufferImageHeight = 0,
+			.imageSubresource = { vk::ImageAspectFlagBits::eColor, level, 0, array_layers },
+			.imageOffset = { 0, 0, 0 },
+			.imageExtent = extents[level]
+		});
+	}
+	cmd->copyBufferToImage(*src_buffer, *dst_image, vk::ImageLayout::eTransferDstOptimal, copy_regions);
 	endSingleTimeCommands(*cmd, QueueKind::Transfer);
 }
 

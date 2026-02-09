@@ -1,17 +1,48 @@
 #include "sponza_scene.hpp"
 #include "game/ve_model.hpp"
 #include "game/ve_component.hpp"
+#include "game/ve_game_object.hpp"
 
 namespace ve {
 
-SponzaScene::SponzaScene(VeDevice& device, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const std::filesystem::path& project_root)
+SponzaScene::SponzaScene(VeDevice& device, VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths, const char* variant)
     : VeScene(device, "Sponza Scene") {
-    loadGameObjects(pool, material_layout, project_root);
+    loadGameObjects(resource_manager, pool, material_layout, paths, variant);
 }
 
 vk::raii::DescriptorSet& SponzaScene::getDescriptorSet() {
-    auto* model = m_game_objects.at(m_sponza_id).getComponent<ModelComponent>();
-    return model->model->getMaterialDescriptorSet();
+    return m_sponza_model->getMaterialDescriptorSet(0);
+}
+
+vk::raii::DescriptorSet& SponzaScene::getDescriptorSet(const VeGameObject* obj) {
+    if (!obj) {// return default descriptor set if no object is provided
+		VE_LOGW("No object provided to getDescriptorSet");
+		return getDescriptorSet();
+    }
+    const auto* mesh = obj->getComponent<MeshComponent>();
+    if (!mesh || !mesh->hasMesh()) {
+		VE_LOGW("Mesh not found in object");
+		return getDescriptorSet(); // return default descriptor set if mesh is not found
+	}
+    uint32_t mat_idx = mesh->getMaterialIndex();
+    if (mat_idx >= m_sponza_model->getMaterialCount()) {
+		VE_LOGW("Material index out of range");
+		return getDescriptorSet(); // return default descriptor set if material index is out of range
+	}
+    return m_sponza_model->getMaterialDescriptorSet(mat_idx);
+}
+
+MaterialAlphaProps SponzaScene::getMaterialAlphaProps(const VeGameObject* obj) const {
+    if (!obj) {// return default alpha props if no object is provided
+		VE_LOGW("No object provided to getMaterialAlphaProps");
+		return {};
+	}
+    const auto* mesh = obj->getComponent<MeshComponent>();
+    if (!mesh || !mesh->hasMesh()) {
+		VE_LOGW("Mesh not found in object");
+		return {};
+	}
+    return m_sponza_model->getMaterialAlphaProps(mesh->getMaterialIndex());
 }
 
 void SponzaScene::setSunIntensity(float intensity) {
@@ -21,24 +52,27 @@ void SponzaScene::setSunIntensity(float intensity) {
     }
 }
 
-void SponzaScene::loadGameObjects(VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const std::filesystem::path& project_root) {
+void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths, const char* variant) {
     glm::vec3 sponza_translation = {0.0f, 0.0f, 300.0f};
 
-    // Sponza model
+    // Sponza model (variant: sponza, sponza_low, sponza_high)
     {
-        VeGameObject sponza = VeGameObject::createGameObject();
-        std::filesystem::path sponza_model_path = project_root / "models" / "sponza" / "glTF" / "Sponza.gltf";
-		//std::filesystem::path sponza_model_path = project_root / "models" / "bistro-master" / "bistro.gltf";
-        auto sponza_model = std::make_shared<VeModel>(m_device, sponza_model_path);
-        sponza_model->createDescriptorSet(pool, material_layout);
-        sponza.addComponent<ModelComponent>(sponza_model);
-        auto* mat = sponza.addComponent<MaterialComponent>();
-        mat->has_texture = 1.0f;
-        m_sponza_id = sponza.getId();
-        auto* transform = sponza.getComponent<TransformComponent>();
-        transform->translation = glm::vec3{0.0f, 0.0f, -350.0f} + sponza_translation;
-        transform->scale = {0.1f, 0.1f, 0.1f};
-        m_game_objects.emplace(sponza.getId(), std::move(sponza));
+        std::filesystem::path sponza_model_path = paths.sponza_model(variant);
+        m_sponza_model = VeModel::load(m_device, resource_manager, sponza_model_path.lexically_normal(), &pool, &material_layout);
+        assert(m_sponza_model && "Failed to load Sponza model");
+
+        glm::vec3 root_translation = glm::vec3{0.0f, 0.0f, -350.0f} + sponza_translation;
+        glm::vec3 root_rotation = {0.0f, 0.0f, 0.0f};
+        glm::vec3 root_scale = {12.5f, 12.5f, 12.5f};
+        m_sponza_model->addToScene(m_game_objects, root_translation, root_rotation, root_scale);
+
+        // Add MaterialComponent to all mesh objects for textured materials
+        for (auto& [id, obj] : m_game_objects) {
+            if (obj.getComponent<MeshComponent>()) {
+                auto* mat = obj.addComponent<MaterialComponent>();
+                mat->has_texture = 1.0f;
+            }
+        }
     }
 
     // sponza sun light

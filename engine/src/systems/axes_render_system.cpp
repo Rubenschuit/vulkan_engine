@@ -2,7 +2,7 @@
 #include "systems/axes_render_system.hpp"
 #include "core/ve_device.hpp"
 #include "core/ve_pipeline.hpp"
-#include "game/ve_model.hpp"
+#include "game/ve_mesh.hpp"
 #include "utils/ve_log.hpp"
 #include "glm/gtc/constants.hpp"
 
@@ -10,11 +10,12 @@ namespace ve {
 
 AxesRenderSystem::AxesRenderSystem(
 	VeDevice& device,
+	VeResourceManager& resource_manager,
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	vk::Format color_format,
 	vk::SampleCountFlagBits sample_count,
 	std::filesystem::path shader_path)
-	: m_ve_device(device), m_shader_path(shader_path) {
+	: m_ve_device(device), m_resource_manager(&resource_manager), m_shader_path(shader_path) {
 	createPipelineLayout(global_set_layout);
 	createPipeline(color_format, sample_count);
 	createAxesModel();
@@ -51,7 +52,7 @@ void AxesRenderSystem::createPipeline(vk::Format color_format, vk::SampleCountFl
 
 void AxesRenderSystem::createAxesModel() {
 	// 3 axes as cylinders from origin to +L along each axis, colored RGB
-	std::vector<VeModel::Vertex> vertices;
+	std::vector<VeMesh::Vertex> vertices;
 	constexpr int SEGMENTS = 2400;           // circle segments per cylinder
 	constexpr float L = 5000.0f;            // cylinder length
 	constexpr float R = 0.05f;            // cylinder radius
@@ -115,7 +116,9 @@ void AxesRenderSystem::createAxesModel() {
 			push_tri(v2, v3, v0, col);
 		}
 	}
-	m_axes_model = std::make_unique<VeModel>(m_ve_device, vertices);
+	// Generate dummy indices for draw call. TODO add createMesh() with indices.
+	std::vector<uint32_t> indices(vertices.size());
+	m_axes_mesh = m_resource_manager->createMesh("__axes_mesh", vertices, indices);
 }
 
 // Performs one draw call for the coordinate axes model
@@ -128,8 +131,8 @@ void AxesRenderSystem::render(VeFrameInfo& frame_info) const {
 		{*frame_info.global_descriptor_set},
 		{}
 	);
-	m_axes_model->bindVertexBuffer(frame_info.command_buffer);
-	m_axes_model->draw(frame_info.command_buffer);
+	m_axes_mesh->bindVertexBuffer(frame_info.command_buffer);
+	m_axes_mesh->draw(frame_info.command_buffer);
 }
 
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include "VEngine/VEngine.hpp"
+#include "asset_paths.hpp"
 #include "scenes/simple_scene.hpp"
 #include "scenes/sponza_scene.hpp"
 #include <filesystem>
@@ -32,33 +33,15 @@ private:
 	void renderControlsWindow();
 	void recreatePipelines();
 
-	// model paths
-	const std::filesystem::path project_root;
-	std::filesystem::path m_cube_model_path = project_root / "models" / "cube.gltf";
-	std::filesystem::path m_viking_room_model_path = project_root / "models" / "viking_room.gltf";
-	std::filesystem::path m_quad_model_path = project_root / "models" / "quad.gltf";
-	std::filesystem::path m_flat_vase_model_path = project_root / "models" / "flat_vase.gltf";
-	std::filesystem::path m_smooth_vase_model_path = project_root / "models" / "smooth_vase.gltf";
-	std::filesystem::path m_sphere_model_path = project_root / "models" / "sphere" / "scene.gltf";
-	// texture paths
-	std::filesystem::path m_glow_texture_path = project_root / "textures" / "light.png";
-	std::filesystem::path m_fire_texture_path = project_root / "textures" / "fire_ball.ktx";
-	std::filesystem::path m_smoke_texture_path = project_root / "textures" / "smoke_atlas.png";
-	std::filesystem::path m_skybox_path = project_root / "textures" / "skybox" / "starfield_haze.ktx";
-
-	// Textures
-	VeTexture m_skybox = VeTexture(m_ve_device, m_skybox_path);
-
-	// Scenes
-	std::unique_ptr<SimpleScene> m_simple_scene;
-	std::unique_ptr<SponzaScene> m_sponza_scene;
-	VeScene* m_active_scene = nullptr;
-
 	// UI context captured during renderUI(), consumed in updateParticles() for example.
 	struct SandboxUIContext : public UIContext {
-		enum class SceneType { SIMPLE = 1, SPONZA = 2 };
-		SceneType current_scene = SceneType::SIMPLE;
+		enum class SceneType { NONE = 0, SIMPLE = 1, SPONZA = 2, SPONZA_LOW = 3 };
+		SceneType current_scene = SceneType::SPONZA;
 		RenderMode render_mode = RenderMode::BRDF_MICROFACET;
+
+		// ambient light (color RGB + intensity)
+		glm::vec3 ambient_light_color = glm::vec3(1.0f, 1.0f, 1.0f);
+		float ambient_light_intensity = 0.006f;
 
 		// sponza settings
 		float sun_intensity = 2000.0f;
@@ -86,6 +69,25 @@ private:
 		bool emit_burst = false;
 		int emit_count = 1000;
 	};
+
+	AssetPaths m_paths;
+
+	// Resource manager for models (and textures). Must outlive any ResourceHandles.
+	std::unique_ptr<VeResourceManager> m_resource_manager;
+
+	// Shared particle textures (used by particles, point lights, and SimpleScene; always loaded)
+	ResourceHandle<VeTexture> m_particle_texture_handle;
+	ResourceHandle<VeTexture> m_fire_texture_handle;
+	ResourceHandle<VeTexture> m_smoke_texture_handle;
+	vk::raii::DescriptorSet m_particle_texture_descriptor_set{nullptr};
+
+	// Scenes - dynamically loaded/unloaded based on active selection
+	std::unique_ptr<VeScene> m_active_scene;
+	SandboxUIContext::SceneType m_loaded_scene_type = SandboxUIContext::SceneType::NONE;
+	SandboxUIContext::SceneType m_pending_scene_load = SandboxUIContext::SceneType::NONE;
+
+	void loadScene(SandboxUIContext::SceneType scene_type);
+	void unloadScene();
 
 	SandboxUIContext ui_actions;
 	std::chrono::steady_clock::time_point m_cpu_start;

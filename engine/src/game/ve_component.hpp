@@ -2,6 +2,8 @@
  */
 #pragma once
 #include "ve_export.hpp"
+#include "core/ve_resource_manager.hpp"
+#include "game/ve_mesh.hpp"
 
 #include <glm/glm.hpp>
 #include <memory>
@@ -10,7 +12,7 @@
 
 namespace ve {
 
-// Forward declaration
+// Forward declarations
 class VeGameObject;
 class VeModel;
 
@@ -53,7 +55,7 @@ protected:
 };
 
 // ---------------------------------------------------------------------------
-// TransformComponent - position, rotation (Euler), scale
+// TransformComponent
 // ---------------------------------------------------------------------------
 class VENGINE_API TransformComponent : public Component {
 public:
@@ -61,7 +63,7 @@ public:
 	glm::vec3 rotation{0.0f, 0.0f, 0.0f}; // Euler angles in radians
 	glm::vec3 scale{1.0f};
 
-	const glm::mat4& getTransform() const;
+	const glm::mat4& getTransform() const;  // local transform
 	const glm::mat3& getNormalTransform() const;
 
 private:
@@ -75,7 +77,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// PointLightComponent - point light properties
+// PointLightComponent
 // ---------------------------------------------------------------------------
 class VENGINE_API PointLightComponent : public Component {
 public:
@@ -85,15 +87,25 @@ public:
 };
 
 // ---------------------------------------------------------------------------
-// ModelComponent - 3D mesh reference
+// MeshComponent
 // ---------------------------------------------------------------------------
-class VENGINE_API ModelComponent : public Component {
+class VENGINE_API MeshComponent : public Component {
 public:
-	explicit ModelComponent(std::shared_ptr<VeModel> model) : model(std::move(model)) {}
+	explicit MeshComponent(ResourceHandle<VeMesh> handle, uint32_t material_index = 0)
+		: mesh_handle(std::move(handle)), m_material_index(material_index) {}
 
-	std::shared_ptr<VeModel> model;
+	VeMesh* getMesh() const { return mesh_handle.get(); }
+	ResourceHandle<VeMesh> getMeshHandle() const { return mesh_handle; }
+	bool hasMesh() const { return mesh_handle.isValid(); }
+	uint32_t getMaterialIndex() const { return m_material_index; }
 
-	bool hasModel() const { return model != nullptr; }
+	void setModel(VeModel* model) { m_model = model; }
+	VeModel* getModel() const { return m_model; }
+
+private:
+	ResourceHandle<VeMesh> mesh_handle;
+	uint32_t m_material_index;
+	VeModel* m_model = nullptr;
 };
 
 // ---------------------------------------------------------------------------
@@ -105,5 +117,7 @@ public:
 	float has_texture{0.0f};
 	bool has_shadow{true};
 };
+
+// TODO: Add more components as needed (camera, animation, etc.)
 
 } // namespace ve

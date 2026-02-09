@@ -70,6 +70,11 @@ public:
 		vk::raii::DeviceMemory& buffer_memory);
 	void copyBuffer(vk::raii::Buffer& src_buffer, vk::raii::Buffer& dst_buffer, vk::DeviceSize size);
 	void copyBufferToImage(vk::raii::Buffer& src_buffer, const vk::raii::Image& dst_image, uint32_t width, uint32_t height, uint32_t array_layers = 1);
+	// Copy buffer to image with multiple mip levels. buffer_offsets and extents must have mip_levels entries.
+	void copyBufferToImageWithMipmaps(vk::raii::Buffer& src_buffer, const vk::raii::Image& dst_image,
+		uint32_t array_layers, uint32_t mip_levels,
+		const std::vector<vk::DeviceSize>& buffer_offsets,
+		const std::vector<vk::Extent3D>& extents);
 
 	const vk::PhysicalDeviceProperties getDeviceProperties() const { return m_physical_device.getProperties(); }
 	vk::SampleCountFlagBits getSampleCount() const { return m_max_msaa_samples; };
