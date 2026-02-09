@@ -32,5 +32,5 @@ VertexOutput vertMain(VertexInput input) {
 
 [shader("fragment")]
 float4 fragMain(VertexOutput inV) : SV_Target {
-    return float4(inV.color, 0.3f);
+    return float4(inV.color, 1.0f);
 }

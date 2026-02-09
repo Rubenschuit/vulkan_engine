@@ -248,6 +248,9 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	if (ui_actions.show_axes) {
 		m_axes_render_system->render(frame_info);
 	}
+	if (ui_actions.show_aabb_debug) {
+		m_aabb_debug_render_system->render(frame_info);
+	}
 	m_point_light_system->render(frame_info);
 	m_fireworks_system->render(frame_info);
 
@@ -294,6 +297,7 @@ void Sandbox::recreatePipelines() {
 	m_simple_render_system->recreatePipeline(offscreen_format, sample_count);
 	m_point_light_system->recreatePipeline(offscreen_format, sample_count);
 	m_pbr_render_system->recreatePipeline(offscreen_format, sample_count);
+	m_aabb_debug_render_system->recreatePipeline(offscreen_format, sample_count);
 	m_axes_render_system->recreatePipeline(offscreen_format, sample_count);
 	m_skybox_render_system->recreatePipeline(offscreen_format, sample_count);
 	m_particle_system->recreatePipeline(offscreen_format, sample_count);
@@ -648,6 +652,10 @@ void Sandbox::renderAppWindows() {
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Display XYZ coordinate axes in the scene.\nRed=X, Green=Y, Blue=Z");
 				}
+				ImGui::Checkbox("Show AABB Debug", &ui_actions.show_aabb_debug);
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Display wireframe bounding boxes for visible objects");
+				}
 
 				ImGui::Separator();
 				ImGui::Text("Post Processing: ");
@@ -800,6 +808,14 @@ void Sandbox::initSystems() {
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
 		m_paths.shader("pbr_shader.spv")
+	);
+	VE_LOGD("aabb debug system: " << m_paths.shader("axes_shader.spv"));
+	m_aabb_debug_render_system = std::make_unique<AabbDebugRenderSystem>(
+		m_ve_device,
+		m_global_set_layout->getDescriptorSetLayout(),
+		m_ve_renderer.getOffscreenImageFormat(),
+		m_ve_renderer.getSampleCount(),
+		m_paths.shader("axes_shader.spv")
 	);
 	VE_LOGD("axes system: " << m_paths.shader("axes_shader.spv"));
 	m_axes_render_system = std::make_unique<AxesRenderSystem>(
