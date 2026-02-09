@@ -134,7 +134,7 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 		else if (mat.alphaMode == "MASK")
 			props.alpha_mode = AlphaMode::MASK;
 		else
-			props.alpha_mode = AlphaMode::OPAQUE;
+			props.alpha_mode = AlphaMode::ALPHA_OPAQUE;
 		props.alpha_cutoff = static_cast<float>(mat.alphaCutoff);
 		props.double_sided = mat.doubleSided;
 		m_material_alpha_props.push_back(props);

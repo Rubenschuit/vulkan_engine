@@ -206,12 +206,12 @@ ResourceHandle<VeMesh> VeResourceManager::createMesh(const std::string& resource
 }
 
 // ---------------------------------------------------------------------------
-// Explicit instantiations
+// Explicit instantiations (VENGINE_API for DLL export)
 // ---------------------------------------------------------------------------
-template class ResourceHandle<VeMesh>;
-template class ResourceHandle<VeTexture>;
+template class VENGINE_API ResourceHandle<VeMesh>;
+template class VENGINE_API ResourceHandle<VeTexture>;
 
-template ResourceHandle<VeTexture> VeResourceManager::load<VeTexture>(const std::string&);
+template VENGINE_API ResourceHandle<VeTexture> VeResourceManager::load<VeTexture>(const std::string&);
 
 template VeTexture* VeResourceManager::getResource<VeTexture>(const std::string&) const;
 template VeMesh* VeResourceManager::getResource<VeMesh>(const std::string&) const;

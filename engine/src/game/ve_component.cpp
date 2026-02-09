@@ -4,6 +4,19 @@ namespace ve {
 
 size_t ComponentTypeIDSystem::m_next_type_id = 0;
 
+template <typename T>
+size_t ComponentTypeIDSystem::getTypeID() {
+	static size_t type_id = m_next_type_id++;
+	return type_id;
+}
+
+// Explicit instantiations ensure single definition across DLL boundary.
+// Without these, engine and app each instantiate the template with different static locals → type ID mismatch → getComponent returns nullptr.
+template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<TransformComponent>();
+template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<PointLightComponent>();
+template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MeshComponent>();
+template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MaterialComponent>();
+
 const glm::mat4& TransformComponent::getTransform() const {
 	updateMatrices();
 	return m_cached_transform;

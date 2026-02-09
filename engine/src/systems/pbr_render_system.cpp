@@ -89,7 +89,7 @@ void PbrRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		VkDescriptorSet material_set;
 		VeGameObject* obj;
 		float dist_sq = 0.0f;  // distance squared to camera (for transparent sort)
-		AlphaMode alpha_mode = AlphaMode::OPAQUE;
+		AlphaMode alpha_mode = AlphaMode::ALPHA_OPAQUE;
 	};
 	std::vector<Drawable> opaque_drawables;
 	std::vector<Drawable> transparent_drawables;

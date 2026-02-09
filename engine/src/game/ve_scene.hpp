@@ -12,14 +12,14 @@ namespace ve {
 class VeDevice;
 
 enum class AlphaMode : uint32_t {
-	OPAQUE = 0,
+	ALPHA_OPAQUE = 0, // OPAQUE is defined by some windows headers...
 	MASK = 1,
 	BLEND = 2,
 };
 
 // Add to Material class in ve_model.hpp?
 struct MaterialAlphaProps {
-	AlphaMode alpha_mode = AlphaMode::OPAQUE;
+	AlphaMode alpha_mode = AlphaMode::ALPHA_OPAQUE;
 	float alpha_cutoff = 0.5f;
 	bool double_sided = false;
 };

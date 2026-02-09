@@ -19,13 +19,10 @@ class VeModel;
 // ---------------------------------------------------------------------------
 // Component type ID system
 // ---------------------------------------------------------------------------
-class ComponentTypeIDSystem {
+class VENGINE_API ComponentTypeIDSystem {
 public:
 	template <typename T>
-	static size_t getTypeID() {
-		static size_t type_id = m_next_type_id++;
-		return type_id;
-	}
+	static size_t getTypeID();
 
 private:
 	static size_t m_next_type_id;

@@ -71,6 +71,7 @@ inline void log_line(int lvl, const char* file, int line, const std::string& msg
 
 	std::fprintf(stderr, "%s[%s]%s %s:%d: %s\n",
 			level_to_color(lvl), level_to_str(lvl), reset_color(), file, line, msg.c_str());
+	std::fflush(stderr);  // Flush immediately so logs appear before crash on Windows
 }
 
 }} // namespace ve { namespace detail {
