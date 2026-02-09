@@ -118,6 +118,7 @@ VeFrameInfo Sandbox::update() {
 		.compute_command_buffer = compute_command_buffer,
 		.camera = m_camera,
 		.game_objects = m_active_scene->getGameObjects(),
+		.visible_game_objects = m_culling_system->getVisibleGameObjectsRef(),
 		.frame_time = m_frame_time,
 		.total_time = m_total_time,
 		.current_frame = current_frame,
@@ -221,6 +222,11 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	}
 
 	auto& command_buffer = frame_info.command_buffer;
+
+	// Culling pass
+	m_culling_system->cullObjects(frame_info);
+	ui_actions.cull_total_objects = m_culling_system->getLastTotalMeshObjects();
+	ui_actions.cull_visible_objects = m_culling_system->getLastVisibleCount();
 
 	// Shadow pass: render a shadow map for each light
 	if (ui_actions.shadow_mode != ShadowMode::DISABLED) {
@@ -763,6 +769,8 @@ void Sandbox::createDescriptors() {
 
 void Sandbox::initSystems() {
 	VE_LOGD("Initialising systems");
+
+	m_culling_system = std::make_unique<CullingSystem>(m_camera);
 
 	// Create shadow system first (before other render systems that might need shadow descriptor set)
 	VE_LOGD("shadow system: " << m_paths.shader("shadow_shader.spv"));

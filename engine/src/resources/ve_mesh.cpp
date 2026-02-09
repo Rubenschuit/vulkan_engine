@@ -1,11 +1,31 @@
 #include "pch.hpp"
 #include "resources/ve_mesh.hpp"
 
+#include <glm/gtc/matrix_transform.hpp>
+
 namespace ve {
+
+VeMesh::AABB transformAABB(const VeMesh::AABB& local, const glm::mat4& model) {
+	const glm::vec3& mn = local.min;
+	const glm::vec3& mx = local.max;
+	glm::vec3 corners[8] = {
+	    {mn.x, mn.y, mn.z}, {mx.x, mn.y, mn.z}, {mx.x, mx.y, mn.z}, {mn.x, mx.y, mn.z},
+	    {mn.x, mn.y, mx.z}, {mx.x, mn.y, mx.z}, {mx.x, mx.y, mx.z}, {mn.x, mx.y, mx.z}
+	};
+	glm::vec3 min_v = glm::vec3(model * glm::vec4(corners[0], 1.0f));
+	glm::vec3 max_v = min_v;
+	for (int i = 1; i < 8; ++i) {
+		glm::vec3 p = glm::vec3(model * glm::vec4(corners[i], 1.0f));
+		min_v = glm::min(min_v, p);
+		max_v = glm::max(max_v, p);
+	}
+	return {min_v, max_v};
+}
 
 VeMesh::VeMesh(VeDevice& device, const std::string& resource_id,
                const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
 	: Resource(resource_id), m_ve_device(device) {
+	computeLocalAABB(vertices);
 	createVertexBuffers(vertices);
 	createIndexBuffers(indices);
 	setLoaded(true);
@@ -25,6 +45,21 @@ void VeMesh::doUnload() {
 	m_index_buffer.reset();
 	m_vertex_count = 0;
 	m_index_count = 0;
+}
+
+void VeMesh::computeLocalAABB(const std::vector<Vertex>& vertices) {
+	if (vertices.empty()) {
+		m_local_aabb = {glm::vec3{0.0f}, glm::vec3{0.0f}};
+		return;
+	}
+	glm::vec3 min_v = vertices[0].pos;
+	glm::vec3 max_v = vertices[0].pos;
+	for (size_t i = 1; i < vertices.size(); ++i) {
+		const glm::vec3& p = vertices[i].pos;
+		min_v = glm::min(min_v, p);
+		max_v = glm::max(max_v, p);
+	}
+	m_local_aabb = {min_v, max_v};
 }
 
 void VeMesh::createVertexBuffers(const std::vector<Vertex>& vertices) {

@@ -1,5 +1,8 @@
 #include "scene/ve_component.hpp"
 #include "scene/ve_game_object.hpp"
+#include "resources/ve_mesh.hpp"
+
+#include <cstring>
 
 #define GLM_FORCE_RADIANS
 #include <glm/gtc/matrix_transform.hpp>
@@ -112,9 +115,19 @@ void PointLightComponent::update(float delta_time) {
 // MeshComponent
 // ---------------------------------------------------------------------------
 
+VeMesh::AABB MeshComponent::getWorldAABB() const {
+	const glm::mat4& model = getOwner()->getTransform();
+	const bool transform_changed = std::memcmp(&m_last_model_matrix[0], &model[0], sizeof(glm::mat4)) != 0;
+	if (!m_world_aabb_valid || transform_changed) {
+		m_cached_world_aabb = transformAABB(getMesh()->getLocalAABB(), model);
+		m_last_model_matrix = model;
+		m_world_aabb_valid = true;
+	}
+	return m_cached_world_aabb;
+}
+
 void MeshComponent::render() {
 // unused
-
 }
 
 } // namespace ve

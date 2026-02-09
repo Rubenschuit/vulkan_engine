@@ -33,6 +33,10 @@ struct VENGINE_API UIContext {
 	float cpu_time = 0.0f;
 	float gpu_time = 0.0f;
 
+	// culling stats (total mesh objects)
+	uint32_t cull_total_objects = 0;
+	uint32_t cull_visible_objects = 0;
+
 	// post process
 	int blur_radius = 0;
 	float blur_strength = 1.0f;

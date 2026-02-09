@@ -72,7 +72,7 @@ void SimpleRenderSystem::createPipeline(vk::Format color_format, vk::SampleCount
 
 }
 
-// Renders all game objects in frame_info.game_objects. The objects are sorted by material set
+// Renders visible game objects from frame_info.visible_game_objects. The objects are sorted by material set
 // to reduce descriptor set changes.
 void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
@@ -82,8 +82,9 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		VeGameObject* obj;
 	};
 	std::vector<Drawable> drawables;
-	drawables.reserve(frame_info.game_objects.size());
-	for (auto& [id, obj] : frame_info.game_objects) {
+	drawables.reserve(frame_info.visible_game_objects.size());
+	for (auto& [id, obj_ptr] : frame_info.visible_game_objects) {
+		VeGameObject& obj = *obj_ptr;
 		auto* mesh = obj.getComponent<MeshComponent>();
 		auto* transform = obj.getComponent<TransformComponent>();
 		if (!mesh || !mesh->hasMesh() || !transform)
@@ -94,7 +95,7 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		vk::raii::DescriptorSet& mat_set = mat->hasDescriptorSet()
 			? mat->getDescriptorSet()
 			: frame_info.material_descriptor_set;
-		drawables.push_back({*mat_set, &obj});
+		drawables.push_back({*mat_set, obj_ptr});
 	}
 	std::sort(drawables.begin(), drawables.end(),
 		[](const Drawable& a, const Drawable& b) { return a.material_set < b.material_set; });

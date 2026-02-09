@@ -31,6 +31,7 @@
 
 #include "ui/imgui_layer.hpp"
 
+#include "rendering/culling_system.hpp"
 #include "rendering/simple_render_system.hpp"
 #include "rendering/axes_render_system.hpp"
 #include "rendering/point_light_system.hpp"

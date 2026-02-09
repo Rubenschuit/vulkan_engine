@@ -19,11 +19,15 @@ class VeGameObject;
 // ---------------------------------------------------------------------------
 // Component type ID system
 // ---------------------------------------------------------------------------
+
+// Assigns a unique ID to each different component type.
+// Each template instantiation gets its own static local, therefore each 
+// component type has its own unique ID.
 class VENGINE_API ComponentTypeIDSystem {
 public:
 	template <typename T>
 	static size_t getTypeID() {
-		static size_t type_id = m_next_type_id++; // Each template instantiation gets a unique type ID.
+		static size_t type_id = m_next_type_id++; // Each template instantiation gets its own static local
 		return type_id;
 	}
 
@@ -107,12 +111,18 @@ public:
 	bool hasMesh() const { return mesh_handle.isValid(); }
 	bool hasMaterial() const { return material_handle.isValid(); }
 
+	// Returns mesh local AABB transformed by owner's model matrix. Cached until transform changes.
+	VeMesh::AABB getWorldAABB() const;
+
 	float has_texture{0.0f};
 	bool has_shadow{true};
 
 private:
 	ResourceHandle<VeMesh> mesh_handle;
 	ResourceHandle<VeMaterial> material_handle;
+	mutable VeMesh::AABB m_cached_world_aabb;
+	mutable glm::mat4 m_last_model_matrix{1.0f};
+	mutable bool m_world_aabb_valid = false;
 };
 
 // TODO: Add more components as needed (camera, animation, etc.)

@@ -91,6 +91,7 @@ struct VeFrameInfo {
 	vk::raii::CommandBuffer& compute_command_buffer;
 	ve::VeCamera& camera;
 	std::unordered_map<uint32_t, VeGameObject>& game_objects;
+	std::unordered_map<uint32_t, VeGameObject*>& visible_game_objects;
 	float frame_time;
 	float total_time;
 	uint32_t current_frame;

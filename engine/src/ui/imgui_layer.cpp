@@ -204,6 +204,14 @@ void ImGuiLayer::renderEngineWindows(UIContext& context) {
 		ImGui::PlotLines("##FPS", fps_history, 120, history_offset, "FPS", 0.0f, max_fps * 1.1f, ImVec2(250, 80));
 
 		ImGui::Separator();
+		// Culling stats
+		uint32_t culled = (context.cull_total_objects >= context.cull_visible_objects)
+			? (context.cull_total_objects - context.cull_visible_objects)
+			: 0;
+		ImGui::Text("Objects: %u total, %u visible, %u culled",
+			context.cull_total_objects, context.cull_visible_objects, culled);
+
+		ImGui::Separator();
 		//resolution
 		auto extent = m_renderer.getExtent();
 		ImGui::Text("Resolution: %d x %d", extent.width, extent.height);

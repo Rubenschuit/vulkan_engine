@@ -21,6 +21,11 @@ namespace ve {
 
 class VENGINE_API VeMesh : public Resource {
 public:
+	struct AABB {
+		glm::vec3 min;
+		glm::vec3 max;
+	};
+
 	struct Vertex {
 		glm::vec3 pos;
 		glm::vec3 color;
@@ -55,6 +60,8 @@ public:
 	uint32_t getVertexCount() const { return m_vertex_count; }
 	uint32_t getIndexCount() const { return m_index_count; }
 
+	AABB getLocalAABB() const { return m_local_aabb; }
+
 protected:
 	bool doLoad() override;
 	void doUnload() override;
@@ -62,13 +69,18 @@ protected:
 private:
 	void createVertexBuffers(const std::vector<Vertex>& vertices);
 	void createIndexBuffers(const std::vector<uint32_t>& indices);
+	void computeLocalAABB(const std::vector<Vertex>& vertices);
 
 	VeDevice& m_ve_device;
 	std::unique_ptr<VeBuffer> m_vertex_buffer;
 	std::unique_ptr<VeBuffer> m_index_buffer;
 	uint32_t m_vertex_count{0};
 	uint32_t m_index_count{0};
+	AABB m_local_aabb{};
 };
+
+// Transform AABB by model matrix (transform 8 corners, take min/max of result).
+VENGINE_API VeMesh::AABB transformAABB(const VeMesh::AABB& local, const glm::mat4& model);
 
 } // namespace ve
 

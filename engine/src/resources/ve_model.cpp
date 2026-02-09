@@ -187,6 +187,7 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	}
 
 
+	// Create a VeMesh for a gltf primitive. Swaps y and z to convert from y-up to z-up.
 	auto createPrimitiveMesh = [&](const tinygltf::Primitive& primitive, const tinygltf::Model& m,
 	                              const std::string& mesh_id) -> ResourceHandle<VeMesh> {
 		std::vector<VeMesh::Vertex> vertices;

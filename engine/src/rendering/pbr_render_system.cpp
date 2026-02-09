@@ -95,7 +95,8 @@ void PbrRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 	std::vector<Drawable> transparent_drawables;
 	const glm::vec3 camera_pos = frame_info.camera.getPosition();
 
-	for (auto& [id, obj] : frame_info.game_objects) {
+	for (auto& [id, obj_ptr] : frame_info.visible_game_objects) {
+		VeGameObject& obj = *obj_ptr;
 		auto* mesh = obj.getComponent<MeshComponent>();
 		auto* transform = obj.getComponent<TransformComponent>();
 		if (!mesh || !mesh->hasMesh() || !transform)
@@ -109,7 +110,7 @@ void PbrRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		MaterialAlphaProps alpha_props = mat->getAlphaProps();
 		glm::vec3 obj_pos = obj.getTransform() * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		float dist_sq = glm::dot(obj_pos - camera_pos, obj_pos - camera_pos);
-		Drawable d{*mat_set, &obj, dist_sq, alpha_props.alpha_mode};
+		Drawable d{*mat_set, obj_ptr, dist_sq, alpha_props.alpha_mode};
 		if (alpha_props.alpha_mode == AlphaMode::BLEND)
 			transparent_drawables.push_back(d);
 		else
