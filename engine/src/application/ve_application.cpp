@@ -1,0 +1,127 @@
+#include "application/ve_application.hpp"
+#include "platform/ve_window.hpp"
+#include "vulkan/ve_device.hpp"
+#include "ui/imgui_layer.hpp"
+#include "vulkan/ve_buffer.hpp"
+#include "platform/input_controller.hpp"
+#include "scene/ve_camera.hpp"
+#include "utils/ve_log.hpp"
+
+#include <GLFW/glfw3.h>
+#include <glm/gtc/matrix_transform.hpp>
+#include <format>
+
+namespace ve {
+
+VeApplication::VeApplication()
+	: m_ve_window(WIDTH, HEIGHT, APP_NAME),
+	  m_ve_device(m_ve_window),
+	  m_ve_renderer(m_ve_device, m_ve_window),
+	  m_input_controller(m_ve_window),
+	  m_camera(glm::vec3{20.0f, 20.0f, 20.0f}, glm::vec3{0.0f, 0.0f, 1.0f}) {
+}
+
+void VeApplication::run() {
+	VE_LOGI("VeApplication::run starting. Window=" + std::to_string(m_ve_window.getWidth()) + "x" + std::to_string(m_ve_window.getHeight()));
+
+	setWindowTitle();
+
+	// Main loop
+	while (!m_ve_window.shouldClose()) {
+		m_ve_window.pollEvents();
+
+		// Check for window resize BEFORE starting frame
+		if (m_ve_window.wasWindowResized()) {
+			VE_LOGD("Window resize detected in main loop, recreating swap chain.");
+			m_ve_device.getDevice().waitIdle();
+			m_ve_window.resetWindowResizedFlag();
+			m_ve_renderer.recreateSwapChain();
+			onSwapChainRecreated();
+			continue;
+		}
+		else if (m_ve_renderer.isSwapChainOutOfDate()) {
+			VE_LOGD("Swap chain out of date detected in main loop, recreating swap chain.");
+			m_ve_device.getDevice().waitIdle();
+			m_ve_renderer.recreateSwapChain();
+			onSwapChainRecreated();
+			continue;
+		}
+
+		if (!m_ve_renderer.beginFrame())
+			continue;
+
+		// Update and render implemented by derived class
+		VeFrameInfo frame_info = update();
+		render(frame_info);
+
+		m_ve_renderer.endFrame(frame_info.command_buffer);
+	}
+
+	// Ensure device is idle before destroying resources
+	m_ve_device.getDevice().waitIdle();
+	// log average fps and frametime over entire run currently these get reset on window resize
+	VE_LOGI("VeApplication::run finished. Average FPS: " << (m_fps_frame_count / (m_sum_frame_ms / 1000.0f)));
+	VE_LOGI("VeApplication::run finished. Average Frame Time: " << (m_sum_frame_ms / m_fps_frame_count) << " ms");
+}
+
+// Updates the camera view and projection matrices if state changed
+void VeApplication::updateCamera() {
+	updateCamera(m_fov);
+}
+
+void VeApplication::updateCamera(float fov_radians) {
+	// Recompute camera view once per frame if needed
+	m_camera.updateIfDirty();
+
+	// If swapchain aspect changed (window resize) or FOV changed, refresh camera projection
+	float aspect = m_ve_renderer.getExtentAspectRatio();
+	bool aspect_changed = aspect > 0.0f && std::abs(aspect - m_last_aspect) > std::numeric_limits<float>::epsilon();
+	bool fov_changed = std::abs(fov_radians - m_fov) > 1e-4f;
+
+	if (aspect_changed || fov_changed) {
+		m_last_aspect = aspect;
+		m_fov = fov_radians;
+		m_camera.setPerspective(m_fov, m_last_aspect, m_near_plane, m_far_plane);
+	}
+}
+
+// Updates uniform buffer object once per frame with view and projection matrices
+void VeApplication::updateUniformBuffer(uint32_t current_frame, UniformBufferObject& ubo) {
+	ubo.view = m_camera.getView();
+	ubo.proj = m_camera.getProj();
+	ubo.projection_view = ubo.proj * ubo.view;
+	ubo.camera_position = glm::vec4{m_camera.getPosition(), 1.0f};
+	m_uniform_buffers[current_frame]->writeToBuffer(&ubo);
+	// No flush required with MEMORY_PROPERTY_HOST_COHERENT
+}
+
+// Set window title once at startup (static info only)
+void VeApplication::setWindowTitle() {
+#ifdef NDEBUG
+	const char* mode_str = "Release";
+#else
+	const char* mode_str = "Debug";
+#endif
+	std::string title = std::format("Vulkan Engine -- {} mode", mode_str);
+	glfwSetWindowTitle(m_ve_window.getGLFWwindow(), title.c_str());
+}
+
+void VeApplication::updateFrameTime() {
+	auto now = clock::now();
+	m_frame_time = std::chrono::duration<float, std::chrono::seconds::period>(now - m_last_frame_time).count();
+	m_last_frame_time = now;
+
+	// Clamp to avoid large physics steps after stalls (e.g., window resize)
+	const float max_dt = 1.0f / 10.0f; // 100ms
+	if (m_frame_time < 0.0f)
+		m_frame_time = 0.0f;
+	if (m_frame_time > max_dt)
+		m_frame_time = max_dt;
+}
+
+void VeApplication::updateFPSStats() {
+	m_sum_frame_ms += m_frame_time * 1000.0; // Convert to milliseconds
+	m_fps_frame_count++;
+}
+
+} // namespace ve

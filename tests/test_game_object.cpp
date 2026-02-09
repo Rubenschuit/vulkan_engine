@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
-#include <game/ve_game_object.hpp>
-#include <game/ve_component.hpp>
+#include <scene/ve_game_object.hpp>
+#include <scene/ve_component.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 // Helper to compare matrices

@@ -1,9 +1,9 @@
 #pragma once
 #include "ve_export.hpp"
-#include "game/ve_frame_info.hpp"
+#include "rendering/ve_frame_info.hpp"
 #include <cstdint>
 #include <vulkan/vulkan.hpp>
-#include "systems/particle_system.hpp"
+#include "rendering/particle_system.hpp"
 #define VULKAN_HPP_ENABLE_RAII
 #include <vulkan/vulkan_raii.hpp>
 #include <functional>

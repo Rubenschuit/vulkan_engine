@@ -1,9 +1,9 @@
-#include "game/ve_frame_info.hpp"
+#include "rendering/ve_frame_info.hpp"
 #include "pch.hpp"
 #include "ui/imgui_layer.hpp"
-#include "core/ve_window.hpp"
-#include "core/ve_device.hpp"
-#include "core/ve_renderer.hpp"
+#include "platform/ve_window.hpp"
+#include "vulkan/ve_device.hpp"
+#include "rendering/ve_renderer.hpp"
 
 #include <cmath>
 #include <chrono>

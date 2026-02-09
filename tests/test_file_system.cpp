@@ -1,6 +1,6 @@
 
 #include <catch2/catch_test_macros.hpp>
-#include <core/ve_file_system.hpp>
+#include <platform/ve_file_system.hpp>
 #include <filesystem>
 #include <fstream>
 #include <string>

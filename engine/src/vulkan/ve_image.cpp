@@ -1,0 +1,185 @@
+#include "pch.hpp"
+#include "vulkan/ve_image.hpp"
+
+namespace ve {
+
+VeImage::VeImage(
+	VeDevice& ve_device,
+	uint32_t width,
+	uint32_t height,
+	vk::SampleCountFlagBits num_samples,
+	vk::Format format,
+	vk::ImageTiling tiling,
+	vk::ImageUsageFlags usage,
+	vk::MemoryPropertyFlags properties,
+	vk::ImageAspectFlags aspect_flags,
+	bool is_cubemap,
+	uint32_t array_layers,
+	uint32_t mip_levels)
+	: m_ve_device(ve_device), m_width(width), m_height(height), m_num_samples(num_samples),
+		m_format(format), m_tiling(tiling), m_usage(usage), m_properties(properties),
+		m_aspect_flags(aspect_flags), m_array_layers(array_layers), m_mip_levels(mip_levels) {
+
+	if (is_cubemap) {
+		m_image_create_flags |= vk::ImageCreateFlagBits::eCubeCompatible;
+		m_image_view_type = vk::ImageViewType::eCube;
+	}
+	else if (array_layers > 1) {
+		m_image_view_type = vk::ImageViewType::e2DArray;
+	}
+	else {
+		assert(array_layers == 1 && "Array layers must be positve non zero integer");
+		m_image_view_type = vk::ImageViewType::e2D;
+	}
+	createImage();
+	createImageView();
+}
+
+VeImage::~VeImage() {}
+
+// Hardcoded:
+// imageType=2D, extent.z=1, initlayout, sharingmode=excl
+void VeImage::createImage() {
+	assert(m_width > 0 && m_height > 0 && "Image width and height must be greater than zero");
+	assert(m_usage != static_cast<vk::ImageUsageFlags>(0) && "Image usage flags must not be empty");
+	// Create image
+	vk::ImageCreateInfo image_info {
+		.sType = vk::StructureType::eImageCreateInfo,
+		.pNext = nullptr,
+		.flags = m_image_create_flags,
+		.imageType = vk::ImageType::e2D,
+		.format = m_format,
+		.extent = vk::Extent3D{ m_width, m_height, 1 },
+		.mipLevels = m_mip_levels,
+		.arrayLayers = m_array_layers,
+		.samples = m_num_samples,
+		.tiling = m_tiling,
+		.usage = m_usage,
+		.sharingMode = vk::SharingMode::eExclusive,
+		.queueFamilyIndexCount = 0,
+		.pQueueFamilyIndices = nullptr,
+		.initialLayout = vk::ImageLayout::eUndefined
+	};
+	m_image = vk::raii::Image(m_ve_device.getDevice(), image_info);
+	assert(*m_image != VK_NULL_HANDLE && "Failed to create image");
+
+	// Allocate and bind memory to image
+	vk::MemoryRequirements mem_requirements = m_image.getMemoryRequirements();
+	vk::MemoryAllocateInfo alloc_info {
+		.sType = vk::StructureType::eMemoryAllocateInfo,
+		.pNext = nullptr,
+		.allocationSize = mem_requirements.size,
+		.memoryTypeIndex = m_ve_device.findMemoryType(mem_requirements.memoryTypeBits, m_properties)
+	};
+	m_image_memory = vk::raii::DeviceMemory(m_ve_device.getDevice(), alloc_info);
+	assert(*m_image_memory != VK_NULL_HANDLE && "Failed to allocate image memory");
+	m_image.bindMemory(*m_image_memory, 0); // offset 0
+}
+
+void VeImage::createImageView() {
+	assert(*m_image != VK_NULL_HANDLE && "Image must be valid when creating image view");
+	vk::ImageViewCreateInfo view_info {
+		.sType = vk::StructureType::eImageViewCreateInfo,
+		.pNext = nullptr,
+		.flags = {},
+		.image = *m_image,
+		.viewType = m_image_view_type,
+		.format = m_format,
+		.components = {},
+		.subresourceRange = vk::ImageSubresourceRange {
+			.aspectMask = m_aspect_flags,
+			.baseMipLevel = 0,
+			.levelCount = m_mip_levels,
+			.baseArrayLayer = 0,
+			.layerCount = m_array_layers
+		}
+	};
+	m_image_view = vk::raii::ImageView(m_ve_device.getDevice(), view_info);
+	assert(*m_image_view != VK_NULL_HANDLE && "Failed to create image view");
+}
+
+vk::raii::ImageView VeImage::createLayerImageView(uint32_t layer) const {
+	assert(*m_image != VK_NULL_HANDLE && "Image must be valid when creating layer image view");
+	assert(layer < m_array_layers && "Layer index out of bounds");
+	vk::ImageViewCreateInfo view_info {
+		.sType = vk::StructureType::eImageViewCreateInfo,
+		.pNext = nullptr,
+		.flags = {},
+		.image = *m_image,
+		.viewType = vk::ImageViewType::e2D,  // Single layer view
+		.format = m_format,
+		.components = {},
+		.subresourceRange = vk::ImageSubresourceRange {
+			.aspectMask = m_aspect_flags,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = layer,
+			.layerCount = 1
+		}
+	};
+	return vk::raii::ImageView(m_ve_device.getDevice(), view_info);
+}
+
+// Hardcoded: src and dst queue family indices to ignored, mip levels = 1
+void VeImage::transitionImageLayout(
+	vk::ImageLayout old_layout,
+	vk::ImageLayout new_layout,
+	vk::AccessFlags2 src_access_mask,
+	vk::AccessFlags2 dst_access_mask,
+	vk::PipelineStageFlags2 src_stage,
+	vk::PipelineStageFlags2 dst_stage) {
+
+	assert(*m_image != VK_NULL_HANDLE && "Image must be valid when transitioning image layout");
+	QueueKind kind = QueueKind::Graphics;
+	if (m_usage & vk::ImageUsageFlagBits::eTransferSrc || m_usage & vk::ImageUsageFlagBits::eTransferDst) {
+		kind = QueueKind::Transfer;
+	}
+	auto command_buffer = m_ve_device.beginSingleTimeCommands(kind);
+	transitionImageLayout(*command_buffer, old_layout, new_layout, src_access_mask, dst_access_mask, src_stage, dst_stage);
+	m_ve_device.endSingleTimeCommands(*command_buffer, kind);
+}
+
+void VeImage::transitionImageLayout(
+	vk::raii::CommandBuffer& command_buffer,
+	vk::ImageLayout old_layout,
+	vk::ImageLayout new_layout,
+	vk::AccessFlags2 src_access_mask,
+	vk::AccessFlags2 dst_access_mask,
+	vk::PipelineStageFlags2 src_stage,
+	vk::PipelineStageFlags2 dst_stage) {
+
+	assert(*m_image != VK_NULL_HANDLE && "Image must be valid when transitioning image layout");
+	vk::ImageMemoryBarrier2 barrier = {
+		.sType = vk::StructureType::eImageMemoryBarrier2,
+		.pNext = nullptr,
+		.srcStageMask = src_stage,
+		.srcAccessMask = src_access_mask,
+		.dstStageMask = dst_stage,
+		.dstAccessMask = dst_access_mask,
+		.oldLayout = old_layout,
+		.newLayout = new_layout,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = *m_image,
+		.subresourceRange = {
+			.aspectMask = m_aspect_flags,
+			.baseMipLevel = 0,
+			.levelCount = m_mip_levels,
+			.baseArrayLayer = 0,
+			.layerCount = m_array_layers
+		}
+	};
+	vk::DependencyInfo dependency_info = {
+		.sType = vk::StructureType::eDependencyInfo,
+		.pNext = nullptr,
+		.dependencyFlags = {},
+		.memoryBarrierCount = 0,
+		.pMemoryBarriers = nullptr,
+		.bufferMemoryBarrierCount = 0,
+		.pBufferMemoryBarriers = nullptr,
+		.imageMemoryBarrierCount = 1,
+		.pImageMemoryBarriers = &barrier
+	};
+	command_buffer.pipelineBarrier2(dependency_info);
+}
+} // namespace ve

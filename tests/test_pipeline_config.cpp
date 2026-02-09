@@ -1,9 +1,9 @@
 // Tests for pipeline configuration defaults.
 // nothing of note here yet
 #include <catch2/catch_test_macros.hpp>
-#include <core/ve_pipeline.hpp>
-#include <core/ve_device.hpp>
-#include <core/ve_window.hpp>
+#include <vulkan/ve_pipeline.hpp>
+#include <vulkan/ve_device.hpp>
+#include <platform/ve_window.hpp>
 
 TEST_CASE("defaultPipelineConfigInfo sets sane Vulkan defaults", "[pipeline][config]") {
     ve::PipelineConfigInfo cfg{};

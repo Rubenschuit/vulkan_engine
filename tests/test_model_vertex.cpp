@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <game/ve_mesh.hpp>
+#include <resources/ve_mesh.hpp>
 #include <vulkan/vulkan.hpp>
 
 TEST_CASE("VeMesh::Vertex binding description", "[mesh][vertex]") {

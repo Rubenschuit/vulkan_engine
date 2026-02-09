@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
-#include <game/ve_component.hpp>
-#include <game/ve_game_object.hpp>
+#include <scene/ve_component.hpp>
+#include <scene/ve_game_object.hpp>
 #include <glm/glm.hpp>
 
 // Dummy component for testing type ID uniqueness

@@ -1,8 +1,8 @@
 #pragma once
 #include "../asset_paths.hpp"
-#include "game/ve_scene.hpp"
-#include "core/ve_descriptors.hpp"
-#include "core/ve_resource_manager.hpp"
+#include "scene/ve_scene.hpp"
+#include "vulkan/ve_descriptors.hpp"
+#include "resources/ve_resource_manager.hpp"
 #include <memory>
 #include <filesystem>
 

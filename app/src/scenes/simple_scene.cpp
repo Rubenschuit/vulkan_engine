@@ -1,6 +1,6 @@
 #include "simple_scene.hpp"
-#include "game/ve_model.hpp"
-#include "game/ve_component.hpp"
+#include "resources/ve_model.hpp"
+#include "scene/ve_component.hpp"
 #include <glm/gtc/constants.hpp>
 #include <unordered_map>
 
