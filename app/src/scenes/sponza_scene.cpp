@@ -11,39 +11,11 @@ SponzaScene::SponzaScene(VeDevice& device, VeResourceManager& resource_manager, 
 }
 
 vk::raii::DescriptorSet& SponzaScene::getDescriptorSet() {
-    return m_sponza_model->getMaterialDescriptorSet(0);
+    assert(m_default_material_handle.isValid() && m_default_material_handle.get()->hasDescriptorSet() && "SponzaScene requires at least one textured material");
+    return m_default_material_handle.get()->getDescriptorSet();
 }
 
-vk::raii::DescriptorSet& SponzaScene::getDescriptorSet(const VeGameObject* obj) {
-    if (!obj) {// return default descriptor set if no object is provided
-		VE_LOGW("No object provided to getDescriptorSet");
-		return getDescriptorSet();
-    }
-    const auto* mesh = obj->getComponent<MeshComponent>();
-    if (!mesh || !mesh->hasMesh()) {
-		VE_LOGW("Mesh not found in object");
-		return getDescriptorSet(); // return default descriptor set if mesh is not found
-	}
-    uint32_t mat_idx = mesh->getMaterialIndex();
-    if (mat_idx >= m_sponza_model->getMaterialCount()) {
-		VE_LOGW("Material index out of range");
-		return getDescriptorSet(); // return default descriptor set if material index is out of range
-	}
-    return m_sponza_model->getMaterialDescriptorSet(mat_idx);
-}
 
-MaterialAlphaProps SponzaScene::getMaterialAlphaProps(const VeGameObject* obj) const {
-    if (!obj) {// return default alpha props if no object is provided
-		VE_LOGW("No object provided to getMaterialAlphaProps");
-		return {};
-	}
-    const auto* mesh = obj->getComponent<MeshComponent>();
-    if (!mesh || !mesh->hasMesh()) {
-		VE_LOGW("Mesh not found in object");
-		return {};
-	}
-    return m_sponza_model->getMaterialAlphaProps(mesh->getMaterialIndex());
-}
 
 void SponzaScene::setSunIntensity(float intensity) {
     if (m_game_objects.contains(m_sun_id)) {
@@ -58,7 +30,7 @@ void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
     // Sponza model (variant: sponza, sponza_low, sponza_high)
     {
         std::filesystem::path sponza_model_path = paths.sponza_model(variant);
-        m_sponza_model = VeModel::load(m_device, resource_manager, sponza_model_path.lexically_normal(), &pool, &material_layout);
+        m_sponza_model = VeModel::load(resource_manager, sponza_model_path.lexically_normal(), &pool, &material_layout);
         assert(m_sponza_model && "Failed to load Sponza model");
 
         glm::vec3 root_translation = glm::vec3{0.0f, 0.0f, -350.0f} + sponza_translation;
@@ -66,11 +38,19 @@ void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
         glm::vec3 root_scale = {12.5f, 12.5f, 12.5f};
         m_sponza_model->addToScene(m_game_objects, root_translation, root_rotation, root_scale);
 
-        // Add MaterialComponent to all mesh objects for textured materials
+        // Store default material for getDescriptorSet() fallback
         for (auto& [id, obj] : m_game_objects) {
-            if (obj.getComponent<MeshComponent>()) {
-                auto* mat = obj.addComponent<MaterialComponent>();
-                mat->has_texture = 1.0f;
+            auto* mesh = obj.getComponent<MeshComponent>();
+            if (mesh && mesh->hasMaterial() && mesh->getMaterial()->hasDescriptorSet()) {
+                m_default_material_handle = mesh->getMaterialHandle();
+                break;
+            }
+        }
+
+        // Set has_texture for all mesh objects (textured Sponza materials)
+        for (auto& [id, obj] : m_game_objects) {
+            if (auto* mesh = obj.getComponent<MeshComponent>()) {
+                mesh->has_texture = 1.0f;
             }
         }
     }
@@ -90,7 +70,6 @@ void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
         fire.getComponent<TransformComponent>()->translation = glm::vec3{-62.0f, -22.0f, -336.0f} + sponza_translation;
         fire.getComponent<PointLightComponent>()->rotates = false;
         fire.getComponent<PointLightComponent>()->casts_shadow = false;
-        fire.getComponent<MaterialComponent>()->has_shadow = false;
         m_game_objects.emplace(fire.getId(), std::move(fire));
     }
     {
@@ -98,7 +77,6 @@ void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
         fire.getComponent<TransformComponent>()->translation = glm::vec3{-62.0f, 14.0f, -336.0f} + sponza_translation;
         fire.getComponent<PointLightComponent>()->rotates = false;
         fire.getComponent<PointLightComponent>()->casts_shadow = false;
-        fire.getComponent<MaterialComponent>()->has_shadow = false;
         m_game_objects.emplace(fire.getId(), std::move(fire));
     }
     {
@@ -106,7 +84,6 @@ void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
         fire.getComponent<TransformComponent>()->translation = glm::vec3{49.0f, 14.0f, -336.0f} + sponza_translation;
         fire.getComponent<PointLightComponent>()->rotates = false;
         fire.getComponent<PointLightComponent>()->casts_shadow = false;
-        fire.getComponent<MaterialComponent>()->has_shadow = false;
         m_game_objects.emplace(fire.getId(), std::move(fire));
     }
     {
@@ -114,7 +91,6 @@ void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
         fire.getComponent<TransformComponent>()->translation = glm::vec3{49.0f, -22.0f, -336.0f} + sponza_translation;
         fire.getComponent<PointLightComponent>()->rotates = false;
         fire.getComponent<PointLightComponent>()->casts_shadow = false;
-        fire.getComponent<MaterialComponent>()->has_shadow = false;
         m_game_objects.emplace(fire.getId(), std::move(fire));
     }
 
@@ -126,7 +102,6 @@ void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
         tr->scale = {.3f, .3f, .3f};
         green_eye.getComponent<PointLightComponent>()->rotates = false;
         green_eye.getComponent<PointLightComponent>()->casts_shadow = false;
-        green_eye.getComponent<MaterialComponent>()->has_shadow = false;
         m_game_objects.emplace(green_eye.getId(), std::move(green_eye));
     }
     {
@@ -136,7 +111,6 @@ void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
         tr->scale = {.3f, .3f, .3f};
         green_eye.getComponent<PointLightComponent>()->rotates = false;
         green_eye.getComponent<PointLightComponent>()->casts_shadow = false;
-        green_eye.getComponent<MaterialComponent>()->has_shadow = false;
         m_game_objects.emplace(green_eye.getId(), std::move(green_eye));
     }
 }

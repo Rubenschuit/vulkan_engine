@@ -2,6 +2,7 @@
 #include "ve_export.hpp"
 #include "vulkan/ve_device.hpp"
 #include "scene/ve_game_object.hpp"
+#include "resources/ve_material_properties.hpp"
 #include <string>
 #include <unordered_map>
 
@@ -9,19 +10,6 @@
 #include <vulkan/vulkan_raii.hpp>
 
 namespace ve {
-
-enum class AlphaMode : uint32_t {
-	ALPHA_OPAQUE = 0, // OPAQUE is defined by some windows headers...
-	MASK = 1,
-	BLEND = 2,
-};
-
-// Add to Material class in ve_model.hpp?
-struct MaterialAlphaProps {
-	AlphaMode alpha_mode = AlphaMode::ALPHA_OPAQUE;
-	float alpha_cutoff = 0.5f;
-	bool double_sided = false;
-};
 
 class VENGINE_API VeScene {
 public:
@@ -42,7 +30,7 @@ public:
     // Per-object material alpha props (alphaMode, alphaCutoff, doubleSided from glTF). Returns default when obj is null.
     virtual MaterialAlphaProps getMaterialAlphaProps(const VeGameObject* obj) const { (void)obj; return {}; }
     virtual Type getType() const = 0;
-    virtual void update(float /*dt*/) {}
+    virtual void update(float dt);
 
 protected:
     VeDevice& m_device;

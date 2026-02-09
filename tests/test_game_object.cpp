@@ -64,11 +64,10 @@ TEST_CASE("VeGameObject point light factory", "[gameobject][factory]") {
 
 	auto* pl = light.getComponent<ve::PointLightComponent>();
 	auto* transform = light.getComponent<ve::TransformComponent>();
-	auto* material = light.getComponent<ve::MaterialComponent>();
 	REQUIRE(pl != nullptr);
 	REQUIRE(pl->intensity == 5.0f);
+	REQUIRE(pl->color == glm::vec3(1.0f, 0.0f, 0.0f));
 	REQUIRE(transform->scale.x == 2.0f);
-	REQUIRE(material->color == glm::vec3(1.0f, 0.0f, 0.0f));
 }
 
 TEST_CASE("VeGameObject parent-child hierarchy", "[gameobject][hierarchy]") {

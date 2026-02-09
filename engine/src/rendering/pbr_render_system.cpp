@@ -100,12 +100,13 @@ void PbrRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		auto* transform = obj.getComponent<TransformComponent>();
 		if (!mesh || !mesh->hasMesh() || !transform)
 			continue;
-		vk::raii::DescriptorSet& mat_set = frame_info.active_scene
-			? frame_info.active_scene->getDescriptorSet(&obj)
+		if (!mesh->hasMaterial())
+			continue;
+		auto* mat = mesh->getMaterial();
+		vk::raii::DescriptorSet& mat_set = mat->hasDescriptorSet()
+			? mat->getDescriptorSet()
 			: frame_info.material_descriptor_set;
-		MaterialAlphaProps alpha_props = frame_info.active_scene
-			? frame_info.active_scene->getMaterialAlphaProps(&obj)
-			: MaterialAlphaProps{};
+		MaterialAlphaProps alpha_props = mat->getAlphaProps();
 		glm::vec3 obj_pos = obj.getTransform() * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		float dist_sq = glm::dot(obj_pos - camera_pos, obj_pos - camera_pos);
 		Drawable d{*mat_set, &obj, dist_sq, alpha_props.alpha_mode};
@@ -147,17 +148,14 @@ void PbrRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 
 			VeGameObject& obj = *d.obj;
 			auto* mesh = obj.getComponent<MeshComponent>();
-			auto* material = obj.getComponent<MaterialComponent>();
-			MaterialAlphaProps alpha_props = frame_info.active_scene
-				? frame_info.active_scene->getMaterialAlphaProps(&obj)
-				: MaterialAlphaProps{};
+			MaterialAlphaProps alpha_props = mesh->getMaterial() ? mesh->getMaterial()->getAlphaProps() : MaterialAlphaProps{};
 			PbrPushConstantData push{};
 			const glm::mat3 nrm = obj.getNormalTransform();
 			push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
 			push.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
 			push.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
 			push.transform = obj.getTransform();
-			push.has_texture = material ? material->has_texture : 0.0f;
+			push.has_texture = mesh->has_texture;
 			push.alpha_cutoff = alpha_props.alpha_cutoff;
 			push.alpha_flags = static_cast<uint32_t>(alpha_props.alpha_mode) | (alpha_props.double_sided ? 4u : 0u);
 

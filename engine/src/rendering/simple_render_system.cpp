@@ -88,8 +88,11 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		auto* transform = obj.getComponent<TransformComponent>();
 		if (!mesh || !mesh->hasMesh() || !transform)
 			continue;
-		vk::raii::DescriptorSet& mat_set = frame_info.active_scene
-			? frame_info.active_scene->getDescriptorSet(&obj)
+		if (!mesh->hasMaterial())
+			continue;
+		auto* mat = mesh->getMaterial();
+		vk::raii::DescriptorSet& mat_set = mat->hasDescriptorSet()
+			? mat->getDescriptorSet()
 			: frame_info.material_descriptor_set;
 		drawables.push_back({*mat_set, &obj});
 	}
@@ -98,6 +101,7 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 
 	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
 	for (const auto& d : drawables) {
+		// bind descriptor sets for each material set
 		if (d.material_set != bound_material_set) {
 			bound_material_set = d.material_set;
 			frame_info.command_buffer.bindDescriptorSets(
@@ -109,22 +113,26 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 			);
 		}
 
+		// render the object
 		VeGameObject& obj = *d.obj;
 		auto* mesh = obj.getComponent<MeshComponent>();
-		auto* material = obj.getComponent<MaterialComponent>();
+
+		// push constants
 		SimplePushConstantData push{};
 		const glm::mat3 nrm = obj.getNormalTransform();
 		push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
 		push.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
 		push.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
 		push.transform = obj.getTransform();
-		push.has_texture = material ? material->has_texture : 0.0f;
+		push.has_texture = mesh->has_texture;
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 			0,
 			vk::ArrayProxy<const uint8_t>(sizeof(SimplePushConstantData), reinterpret_cast<const uint8_t*>(&push))
 		);
+
+
 		mesh->getMesh()->bindVertexBuffer(frame_info.command_buffer);
 		mesh->getMesh()->bindIndexBuffer(frame_info.command_buffer);
 		mesh->getMesh()->drawIndexed(frame_info.command_buffer);

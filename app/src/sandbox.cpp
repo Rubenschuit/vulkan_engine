@@ -50,6 +50,7 @@ void Sandbox::loadScene(SandboxUIContext::SceneType scene_type) {
 			return;
 	}
 	m_loaded_scene_type = scene_type;
+	VE_LOGD("Scene loaded successfully.");
 }
 
 void Sandbox::unloadScene() {
@@ -214,8 +215,10 @@ void Sandbox::updateParticles(InputActions& actions) {
 
 // Renders the scene and draws the UI
 void Sandbox::render(VeFrameInfo& frame_info) {
-	if (!m_active_scene)
+	if (!m_active_scene) {
+		VE_LOGD("No scene loaded, this should not happen.");
 		return;
+	}
 
 	auto& command_buffer = frame_info.command_buffer;
 

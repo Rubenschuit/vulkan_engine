@@ -1,6 +1,8 @@
 #include "resources/ve_resource_manager.hpp"
 #include "resources/ve_mesh.hpp"
+#include "resources/ve_material.hpp"
 #include "resources/ve_texture.hpp"
+#include "vulkan/ve_descriptors.hpp"
 
 namespace ve {
 
@@ -95,6 +97,10 @@ void ResourceHandle<T>::release() const {
 // ---------------------------------------------------------------------------
 
 VeResourceManager::VeResourceManager(VeDevice& device) : m_device(device) {}
+
+VeResourceManager::~VeResourceManager() {
+    //unloadAll();
+}
 
 // Unload all resources managed by this manager.
 void VeResourceManager::unloadAll() {
@@ -205,24 +211,56 @@ ResourceHandle<VeMesh> VeResourceManager::createMesh(const std::string& resource
 	return ResourceHandle<VeMesh>(resource_id, this);
 }
 
+ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& resource_id,
+                                                             const std::filesystem::path& albedo_path,
+                                                             const std::filesystem::path& normal_path,
+                                                             const std::filesystem::path& metallic_roughness_path,
+                                                             MaterialAlphaProps alpha_props,
+                                                             VeDescriptorPool* pool,
+                                                             VeDescriptorSetLayout* layout) {
+	auto type_idx = typeid(VeMaterial).hash_code();
+	auto& type_resources = m_resources[type_idx];
+	auto it = type_resources.find(resource_id);
+
+	if (it != type_resources.end()) {
+		m_ref_counts[type_idx][resource_id]++;
+		return ResourceHandle<VeMaterial>(resource_id, this);
+	}
+
+	auto resource = std::make_shared<VeMaterial>(*this, resource_id,
+	                                            albedo_path, normal_path, metallic_roughness_path,
+	                                            alpha_props, pool, layout);
+	if (!resource->load()) {
+		return ResourceHandle<VeMaterial>();
+	}
+	type_resources[resource_id] = std::move(resource);
+	m_ref_counts[type_idx][resource_id] = 1;
+	return ResourceHandle<VeMaterial>(resource_id, this);
+}
+
 // ---------------------------------------------------------------------------
 // Explicit instantiations (VENGINE_API for DLL export)
 // ---------------------------------------------------------------------------
 template class VENGINE_API ResourceHandle<VeMesh>;
 template class VENGINE_API ResourceHandle<VeTexture>;
+template class VENGINE_API ResourceHandle<VeMaterial>;
 
 template VENGINE_API ResourceHandle<VeTexture> VeResourceManager::load<VeTexture>(const std::string&);
 
 template VeTexture* VeResourceManager::getResource<VeTexture>(const std::string&) const;
 template VeMesh* VeResourceManager::getResource<VeMesh>(const std::string&) const;
+template VeMaterial* VeResourceManager::getResource<VeMaterial>(const std::string&) const;
 
 template bool VeResourceManager::hasResource<VeTexture>(const std::string&) const;
 template bool VeResourceManager::hasResource<VeMesh>(const std::string&) const;
+template bool VeResourceManager::hasResource<VeMaterial>(const std::string&) const;
 
 template void VeResourceManager::addRef<VeTexture>(const std::string&);
 template void VeResourceManager::addRef<VeMesh>(const std::string&);
+template void VeResourceManager::addRef<VeMaterial>(const std::string&);
 
 template void VeResourceManager::release<VeTexture>(const std::string&);
 template void VeResourceManager::release<VeMesh>(const std::string&);
+template void VeResourceManager::release<VeMaterial>(const std::string&);
 
 } // namespace ve

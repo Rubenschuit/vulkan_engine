@@ -100,7 +100,7 @@ void SkyboxRenderSystem::setSkybox(size_t index) {
 
 void SkyboxRenderSystem::loadCubeModel(VeResourceManager& resource_manager, const std::filesystem::path& cube_model_path) {
 	constexpr float s = 4.0f * 1500.0f;
-	auto model = VeModel::load(m_ve_device, resource_manager, cube_model_path, nullptr, nullptr);
+	auto model = VeModel::load(resource_manager, cube_model_path, nullptr, nullptr);
 	std::unordered_map<uint32_t, VeGameObject> temp;
 	model->addToScene(temp, {0, 0, 0}, {0, 0, 0}, {s, s, s});
 	if (!temp.empty())

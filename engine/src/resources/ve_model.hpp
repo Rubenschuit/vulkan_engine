@@ -1,11 +1,10 @@
 /* VeModel - scene graph container for glTF models.
  * Not a Resource - owns nodes (VeGameObjects) that make up the hierarchy.
- * Loads glTF, creates VeMesh resources for each primitive, builds node hierarchy.
+ * Loads glTF, creates VeMesh and VeMaterial resources, builds node hierarchy.
  */
 #pragma once
 #include "ve_export.hpp"
-#include "vulkan/ve_device.hpp"
-#include "resources/ve_texture.hpp"
+#include "resources/ve_material.hpp"
 #include "vulkan/ve_descriptors.hpp"
 #include "resources/ve_resource_manager.hpp"
 #include "resources/ve_mesh.hpp"
@@ -14,7 +13,6 @@
 #include <filesystem>
 #include <glm/glm.hpp>
 #include <memory>
-#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -24,18 +22,11 @@ namespace ve {
 class VeDescriptorPool;
 class VeDescriptorSetLayout;
 
-struct Material {
-	ResourceHandle<VeTexture> albedo_texture;
-	ResourceHandle<VeTexture> normal_texture;
-	ResourceHandle<VeTexture> metallic_roughness_texture;
-	std::optional<vk::raii::DescriptorSet> descriptor_set;
-};
-
 class VENGINE_API VeModel {
 public:
 	// Load glTF from path, create meshes and node hierarchy
-	// pool and material_layout can be null for models without textures (e.g. skybox cube)
-	static std::unique_ptr<VeModel> load(VeDevice& device, VeResourceManager& resource_manager,
+	// pool and material_layout can be null for models without textures
+	static std::unique_ptr<VeModel> load(VeResourceManager& resource_manager,
 	                                    const std::filesystem::path& model_path,
 	                                    VeDescriptorPool* pool = nullptr,
 	                                    VeDescriptorSetLayout* material_layout = nullptr);
@@ -57,7 +48,8 @@ public:
 	                                    const glm::vec3& root_scale);
 
 	// Load a simple single mesh model (quad, cube, etc.) and return a single GameObject with transform applied.
-	static VeGameObject loadAsSingleObject(VeDevice& device, VeResourceManager& resource_manager,
+	// If no mesh found, create a new empty game object.
+	static VeGameObject loadAsSingleObject(VeResourceManager& resource_manager,
 	                                       const std::filesystem::path& model_path,
 	                                       const glm::vec3& translation,
 	                                       const glm::vec3& rotation,
@@ -66,38 +58,22 @@ public:
 	// Get all node IDs for iteration (e.g. to find root)
 	const std::vector<VeGameObject>& getNodes() const { return m_nodes; }
 
-	// Material descriptor set for PBR rendering (per-material)
-	vk::raii::DescriptorSet& getMaterialDescriptorSet(uint32_t material_index);
-	uint32_t getMaterialCount() const { return static_cast<uint32_t>(m_materials.size()); }
-	bool hasTexturedMaterials() const { return m_has_textured_materials; }
-
-	// Material alpha props from glTF (alphaMode, alphaCutoff, doubleSided). Returns default if index out of range.
-	MaterialAlphaProps getMaterialAlphaProps(uint32_t material_index) const;
-
 	// Root node ID (first root added to scene)
 	uint32_t getRootId() const { return m_root_id; }
 
-	VeModel(VeDevice& device);
+	VeModel();
 
 private:
 
 	void loadFromGltf(const std::filesystem::path& model_path, VeResourceManager& resource_manager,
 	                  VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout);
-	void createPerMaterialTextures(VeResourceManager& resource_manager,
-	                              const std::vector<std::filesystem::path>& albedo_paths,
-	                              const std::vector<std::filesystem::path>& normal_paths,
-	                              const std::vector<std::filesystem::path>& metallic_roughness_paths);
-	void createPerMaterialDescriptorSets(VeDescriptorPool& pool, VeDescriptorSetLayout& set_layout);
 
-	VeDevice& m_ve_device;
 	std::vector<VeGameObject> m_nodes;
 	std::vector<std::pair<uint32_t, uint32_t>> m_parent_links;  // (child_id, parent_id)
 	std::unordered_set<uint32_t> m_root_ids;
 	uint32_t m_root_id{0};
 
-	std::vector<Material> m_materials;
-	std::vector<MaterialAlphaProps> m_material_alpha_props;
-	bool m_has_textured_materials{false};
+	std::vector<ResourceHandle<VeMaterial>> m_material_handles;
 };
 
 } // namespace ve

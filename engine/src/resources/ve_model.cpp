@@ -1,6 +1,5 @@
 #include "pch.hpp"
 #include "resources/ve_model.hpp"
-#include "vulkan/ve_descriptors.hpp"
 #include "scene/ve_component.hpp"
 #include "utils/ve_log.hpp"
 
@@ -68,15 +67,15 @@ glm::vec3 quatToEuler(const glm::quat& q) {
 //----------------------------------
 // VeModel implementation
 //----------------------------------
-std::unique_ptr<VeModel> VeModel::load(VeDevice& device, VeResourceManager& resource_manager,
+std::unique_ptr<VeModel> VeModel::load(VeResourceManager& resource_manager,
                                        const std::filesystem::path& model_path,
                                        VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout) {
-	auto model = std::make_unique<VeModel>(device);
+	auto model = std::make_unique<VeModel>();
 	model->loadFromGltf(model_path, resource_manager, pool, material_layout);
 	return model;
 }
 
-VeModel::VeModel(VeDevice& device) : m_ve_device(device) {}
+VeModel::VeModel() = default;
 
 VeModel::~VeModel() = default;
 
@@ -110,10 +109,11 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	if (!warn.empty())
 		VE_LOGW("glTF warning: " << warn);
 
-	// Gather material texture paths
-	bool has_textured_materials = false;
+	// Parse material alpha props and texture paths from glTF
+	std::vector<MaterialAlphaProps> material_alpha_props;
 	std::vector<std::filesystem::path> albedo_paths, normal_paths, metallic_roughness_paths;
 	std::filesystem::path model_dir = model_path.parent_path();
+	bool has_textured_materials = false;
 
 	if (!gltf.materials.empty()) {
 		for (const auto& mat : gltf.materials) {
@@ -121,27 +121,18 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 			    mat.normalTexture.index >= 0 ||
 			    mat.pbrMetallicRoughness.metallicRoughnessTexture.index >= 0) {
 				has_textured_materials = true;
-				break;
 			}
-		}
-	}
-	// Always parse material alpha props from glTF (for models with or without textures)
-	m_material_alpha_props.reserve(gltf.materials.size());
-	for (const auto& mat : gltf.materials) {
-		MaterialAlphaProps props;
-		if (mat.alphaMode == "BLEND")
-			props.alpha_mode = AlphaMode::BLEND;
-		else if (mat.alphaMode == "MASK")
-			props.alpha_mode = AlphaMode::MASK;
-		else
-			props.alpha_mode = AlphaMode::ALPHA_OPAQUE;
-		props.alpha_cutoff = static_cast<float>(mat.alphaCutoff);
-		props.double_sided = mat.doubleSided;
-		m_material_alpha_props.push_back(props);
-	}
+			MaterialAlphaProps props;
+			if (mat.alphaMode == "BLEND")
+				props.alpha_mode = AlphaMode::BLEND;
+			else if (mat.alphaMode == "MASK")
+				props.alpha_mode = AlphaMode::MASK;
+			else
+				props.alpha_mode = AlphaMode::ALPHA_OPAQUE;
+			props.alpha_cutoff = static_cast<float>(mat.alphaCutoff);
+			props.double_sided = mat.doubleSided;
+			material_alpha_props.push_back(props);
 
-	if (has_textured_materials) {
-		for (const auto& mat : gltf.materials) {
 			if (mat.pbrMetallicRoughness.baseColorTexture.index >= 0) {
 				size_t tex_idx = static_cast<size_t>(mat.pbrMetallicRoughness.baseColorTexture.index);
 				size_t img_idx = static_cast<size_t>(gltf.textures[tex_idx].source);
@@ -164,11 +155,27 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 				metallic_roughness_paths.push_back(model_dir / "default_metallic_roughness.png");
 			}
 		}
-		createPerMaterialTextures(resource_manager, albedo_paths, normal_paths, metallic_roughness_paths);
-		if (pool && material_layout) {
-			createPerMaterialDescriptorSets(*pool, *material_layout);
+	} else {
+		// No materials in glTF: use single default material
+		material_alpha_props.push_back(MaterialAlphaProps{});
+		albedo_paths.push_back(model_dir / "default_albedo.png");
+		normal_paths.push_back(model_dir / "default_normal.png");
+		metallic_roughness_paths.push_back(model_dir / "default_metallic_roughness.png");
+	}
+
+	// Create VeMaterial resources
+	VeDescriptorPool* mat_pool = has_textured_materials ? pool : nullptr;
+	VeDescriptorSetLayout* mat_layout = has_textured_materials ? material_layout : nullptr;
+	for (size_t i = 0; i < albedo_paths.size(); i++) {
+		std::string mat_id = model_path.generic_string() + "::material_" + std::to_string(i);
+		auto mat_handle = resource_manager.createMaterial(mat_id, albedo_paths[i], normal_paths[i],
+		                                                  metallic_roughness_paths[i], material_alpha_props[i],
+		                                                  mat_pool, mat_layout);
+		if (!mat_handle.isValid()) {
+			VE_LOGE("Failed to create material " << i);
+			continue;
 		}
-		m_has_textured_materials = true;
+		m_material_handles.push_back(std::move(mat_handle));
 	}
 
 	std::vector<int> root_nodes;
@@ -297,16 +304,22 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 			const auto& mesh = gltf.meshes[static_cast<size_t>(node.mesh)];
 			for (size_t prim_idx = 0; prim_idx < mesh.primitives.size(); prim_idx++) {
 				const auto& primitive = mesh.primitives[prim_idx];
-				uint32_t mat_idx = primitive.material >= 0 ? static_cast<uint32_t>(primitive.material) : 0;
+				size_t mat_idx = (primitive.material >= 0 && static_cast<size_t>(primitive.material) < m_material_handles.size())
+				                    ? static_cast<size_t>(primitive.material) : 0;
 				std::string mesh_id = model_path.generic_string() + "::" + std::to_string(node.mesh) + "::" + std::to_string(prim_idx);
 				auto mesh_handle = createPrimitiveMesh(primitive, gltf, mesh_id);
-				if (prim_idx == 0) {
-					m_nodes[static_cast<size_t>(node_our_idx)].addComponent<MeshComponent>(std::move(mesh_handle), mat_idx);
-				} else {
-					VeGameObject prim_obj = VeGameObject::createGameObject();
-					prim_obj.addComponent<MeshComponent>(std::move(mesh_handle), mat_idx);
-					m_parent_links.emplace_back(prim_obj.getId(), node_id);
-					m_nodes.push_back(std::move(prim_obj));
+				ResourceHandle<VeMaterial> mat_handle = (mat_idx < m_material_handles.size())
+				                                           ? m_material_handles[mat_idx]
+				                                           : ResourceHandle<VeMaterial>{};
+				if (mat_handle.isValid()) {
+					if (prim_idx == 0) {
+						m_nodes[static_cast<size_t>(node_our_idx)].addComponent<MeshComponent>(std::move(mesh_handle), std::move(mat_handle));
+					} else {
+						VeGameObject prim_obj = VeGameObject::createGameObject();
+						prim_obj.addComponent<MeshComponent>(std::move(mesh_handle), m_material_handles[mat_idx]);
+						m_parent_links.emplace_back(prim_obj.getId(), node_id);
+						m_nodes.push_back(std::move(prim_obj));
+					}
 				}
 			}
 		}
@@ -329,47 +342,6 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	VE_LOGI("Loaded model " << model_path << " with " << m_nodes.size() << " nodes");
 }
 
-void VeModel::createPerMaterialTextures(VeResourceManager& resource_manager,
-                                        const std::vector<std::filesystem::path>& albedo_paths,
-                                        const std::vector<std::filesystem::path>& normal_paths,
-                                        const std::vector<std::filesystem::path>& metallic_roughness_paths) {
-	assert(albedo_paths.size() == normal_paths.size() && normal_paths.size() == metallic_roughness_paths.size());
-	m_materials.reserve(albedo_paths.size());
-	for (size_t i = 0; i < albedo_paths.size(); i++) {
-		Material mat;
-		mat.albedo_texture = VeTexture::loadOrDefault(resource_manager, albedo_paths[i], TextureType::ALBEDO, vk::Format::eR8G8B8A8Srgb);
-		mat.normal_texture = VeTexture::loadOrDefault(resource_manager, normal_paths[i], TextureType::NORMAL, vk::Format::eR8G8B8A8Unorm);
-		mat.metallic_roughness_texture = VeTexture::loadOrDefault(resource_manager, metallic_roughness_paths[i], TextureType::METALLIC_ROUGHNESS, vk::Format::eR8G8B8A8Unorm);
-		m_materials.push_back(std::move(mat));
-	}
-}
-
-void VeModel::createPerMaterialDescriptorSets(VeDescriptorPool& pool, VeDescriptorSetLayout& set_layout) {
-	for (auto& mat : m_materials) {
-		auto albedo_info = mat.albedo_texture.get()->getDescriptorInfo();
-		auto normal_info = mat.normal_texture.get()->getDescriptorInfo();
-		auto mr_info = mat.metallic_roughness_texture.get()->getDescriptorInfo();
-		vk::raii::DescriptorSet temp{nullptr};
-		VeDescriptorWriter(set_layout, pool)
-			.writeImage(0, &albedo_info)
-			.writeImage(1, &normal_info)
-			.writeImage(2, &mr_info)
-			.build(temp);
-		mat.descriptor_set = std::move(temp);
-	}
-}
-
-vk::raii::DescriptorSet& VeModel::getMaterialDescriptorSet(uint32_t material_index) {
-	assert(material_index < m_materials.size() && m_materials[material_index].descriptor_set && "Invalid material index or descriptor set not created");
-	return *m_materials[material_index].descriptor_set;
-}
-
-MaterialAlphaProps VeModel::getMaterialAlphaProps(uint32_t material_index) const {
-	if (material_index >= m_material_alpha_props.size())
-		return {};
-	return m_material_alpha_props[material_index];
-}
-
 void VeModel::addToScene(std::unordered_map<uint32_t, VeGameObject>& game_objects,
                          const glm::vec3& root_translation,
                          const glm::vec3& root_rotation,
@@ -381,8 +353,6 @@ void VeModel::addToScene(std::unordered_map<uint32_t, VeGameObject>& game_object
 			tr->rotation += root_rotation;
 			tr->scale *= root_scale;
 		}
-		if (auto* mesh_comp = node.getComponent<MeshComponent>())
-			mesh_comp->setModel(this);
 		game_objects.emplace(node.getId(), std::move(node));
 	}
 	m_nodes.clear();
@@ -402,29 +372,31 @@ std::vector<VeGameObject> VeModel::addToScene(const glm::vec3& root_translation,
 	std::vector<VeGameObject> result;
 	result.reserve(temp.size());
 	for (auto& [id, obj] : temp) {
-		// Clear model ref: caller may not keep the model (e.g. loadAsSingleObject)
-		if (auto* mesh = obj.getComponent<MeshComponent>())
-			mesh->setModel(nullptr);
 		result.push_back(std::move(obj));
 	}
 	return result;
 }
 
-VeGameObject VeModel::loadAsSingleObject(VeDevice& device, VeResourceManager& resource_manager,
+VeGameObject VeModel::loadAsSingleObject(VeResourceManager& resource_manager,
                                         const std::filesystem::path& model_path,
                                         const glm::vec3& translation,
                                         const glm::vec3& rotation,
                                         const glm::vec3& scale) {
-	auto model = load(device, resource_manager, model_path.lexically_normal(), nullptr, nullptr);
+	auto model = load(resource_manager, model_path.lexically_normal(), nullptr, nullptr);
 	auto objects = model->addToScene(translation, rotation, scale);
 	// Prefer first object with mesh (in case of transform-only root)
 	for (auto& obj : objects) {
-		if (obj.getComponent<MeshComponent>())
+		if (obj.getComponent<MeshComponent>()) {
+			obj.setParent(nullptr);  // parent is discarded, avoid dangling pointer as we will move the object
 			return std::move(obj);
+		}
 	}
 	// Fallback: first object
-	if (!objects.empty())
+	if (!objects.empty()) {
+		objects[0].setParent(nullptr);
 		return std::move(objects[0]);
+	}
+	// If no mesh found, create a new empty game object
 	return VeGameObject::createGameObject();
 }
 

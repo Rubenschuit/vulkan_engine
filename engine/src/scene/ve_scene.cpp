@@ -15,5 +15,11 @@ const std::unordered_map<uint32_t, VeGameObject>& VeScene::getGameObjects() cons
     return m_game_objects;
 }
 
+void VeScene::update(float dt) {
+    for (auto& [id, obj] : m_game_objects) {
+        obj.update(dt);
+    }
+}
+
 } // namespace ve
 

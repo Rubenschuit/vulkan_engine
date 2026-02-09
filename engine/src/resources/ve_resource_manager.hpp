@@ -8,17 +8,21 @@
 #include "resources/ve_resource.hpp"
 #include "vulkan/ve_device.hpp"
 #include "resources/ve_mesh.hpp"
+#include "resources/ve_material_properties.hpp"
 
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <typeinfo>
 #include <unordered_map>
+
 
 namespace ve {
 
 // Forward declarations
 class VeResourceManager;
 class VeMesh;
+class VeMaterial;
 
 /* RAII handle that keeps a resource loaded.
  * Copy increments ref count, destroy decrements. When ref count hits 0, resource is unloaded.
@@ -56,6 +60,8 @@ class VENGINE_API VeResourceManager {
 public:
 	explicit VeResourceManager(VeDevice& device);
 
+	~VeResourceManager();
+
 	template <typename T>
 	ResourceHandle<T> load(const std::string& resource_id);
 
@@ -76,7 +82,16 @@ public:
 	                                  const std::vector<VeMesh::Vertex>& vertices,
 	                                  const std::vector<uint32_t>& indices);
 
-	// Not used yet. TODO: Add support for unloading scenes.
+	// Create VeMaterial from texture paths. pool and layout can be null for untextured materials.
+	ResourceHandle<VeMaterial> createMaterial(const std::string& resource_id,
+	                                         const std::filesystem::path& albedo_path,
+	                                         const std::filesystem::path& normal_path,
+	                                         const std::filesystem::path& metallic_roughness_path,
+	                                         MaterialAlphaProps alpha_props,
+	                                         class VeDescriptorPool* pool = nullptr,
+	                                         class VeDescriptorSetLayout* layout = nullptr);
+
+	// Forcibly unload all resources regardless of reference count.
 	void unloadAll();
 
 private:

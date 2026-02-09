@@ -27,10 +27,14 @@ public:
 
 	VeGameObject(const VeGameObject&) = delete;
 	VeGameObject& operator=(const VeGameObject&) = delete;
-	VeGameObject(VeGameObject&&) = default;
-	VeGameObject& operator=(VeGameObject&&) = default;
+	VeGameObject(VeGameObject&& other) noexcept;
+	VeGameObject& operator=(VeGameObject&& other) noexcept;
 
 	uint32_t getId() const { return m_id; }
+
+	void render(); // unused
+	void update(float delta_time);
+	void initialize(); // unused
 
 	template <typename T, typename... Args>
 	T* addComponent(Args&&... args) {

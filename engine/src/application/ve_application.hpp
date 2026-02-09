@@ -6,7 +6,7 @@
 #include "ui/imgui_layer.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "vulkan/ve_descriptors.hpp"
-#include "platform/input_controller.hpp"
+#include "input/input_controller.hpp"
 #include "scene/ve_camera.hpp"
 #include "rendering/ve_frame_info.hpp"
 #include "scene/ve_game_object.hpp"

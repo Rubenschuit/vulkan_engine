@@ -103,13 +103,12 @@ void PointLightSystem::render(VeFrameInfo& frame_info) const {
 	for (auto& [id, obj] : frame_info.game_objects) {
 		auto* pl = obj.getComponent<PointLightComponent>();
 		auto* transform = obj.getComponent<TransformComponent>();
-		auto* material = obj.getComponent<MaterialComponent>();
 		if (!pl || !transform)
 			continue;
 		SimplePushConstantData push{};
 		push.position = glm::vec4{transform->translation, 1.0f};
 		push.scale = transform->scale.x;
-		push.color = glm::vec4{material ? material->color : glm::vec3(1.0f), pl->intensity};
+		push.color = glm::vec4{pl->color, pl->intensity};
 		// push constant provided as raw bytes to avoid MSVC debug mode corruption with push across dll boundaries
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
@@ -134,21 +133,11 @@ void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBuffe
 	for (auto& [id, obj] : frame_info.game_objects) {
 		auto* pl = obj.getComponent<PointLightComponent>();
 		auto* transform = obj.getComponent<TransformComponent>();
-		auto* material = obj.getComponent<MaterialComponent>();
 		if (!pl || !transform)
 			continue;
 		assert(num_lights < MAX_LIGHTS && "Number of point lights exceeds MAX_LIGHTS");
 
-		glm::vec3 color = material ? material->color : glm::vec3(1.0f);
-
-		// Rotate point lights in circle
-		if (pl->rotates) {
-			auto speed = 0.04f;
-			auto rotate_matrix = glm::rotate(glm::mat4(1.0f), speed * frame_info.frame_time, glm::vec3(0.0f, 0.0f, 1.0f));
-			auto pos = glm::vec4{transform->translation, 1.0f};
-			pos = rotate_matrix * pos;
-			transform->translation = glm::vec3{pos};
-		}
+		glm::vec3 color = pl->color;
 
 		// Populate point light data
 		ubo.point_lights[num_lights].position = glm::vec4{transform->translation, 1.0f};

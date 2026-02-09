@@ -1,15 +1,24 @@
 #include "scene/ve_component.hpp"
+#include "scene/ve_game_object.hpp"
+
+#define GLM_FORCE_RADIANS
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace ve {
 
 size_t ComponentTypeIDSystem::m_next_type_id = 0;
 
 // Explicit instantiations ensure single definition across DLL boundary.
-// Without these, engine and app each instantiate the template with different static locals → type ID mismatch → getComponent returns nullptr.
+// Without these, engine and app each implicitly instantiate the template with
+// different static locals so type ID mismatch and getComponent returns nullptr.
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<TransformComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<PointLightComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MeshComponent>();
-template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MaterialComponent>();
+
+
+// ---------------------------------------------------------------------------
+// TransformComponent
+// ---------------------------------------------------------------------------
 
 const glm::mat4& TransformComponent::getTransform() const {
 	updateMatrices();
@@ -78,6 +87,34 @@ void TransformComponent::updateMatrices() const {
 	m_last_translation = translation;
 	m_last_rotation = rotation;
 	m_last_scale = scale;
+}
+
+// ---------------------------------------------------------------------------
+// PointLightComponent
+// ---------------------------------------------------------------------------
+
+void PointLightComponent::update(float delta_time) {
+	if (!rotates)
+		return;
+
+	auto* transform = m_owner->getComponent<TransformComponent>();
+	if (!transform)
+		return;
+
+	const float speed = 0.04f;
+	const glm::mat4 rot = glm::rotate(glm::mat4(1.0f), speed * delta_time, glm::vec3(0.0f, 0.0f, 1.0f));
+	glm::vec4 pos{transform->translation, 1.0f};
+	pos = rot * pos;
+	transform->translation = glm::vec3(pos);
+}
+
+// ---------------------------------------------------------------------------
+// MeshComponent
+// ---------------------------------------------------------------------------
+
+void MeshComponent::render() {
+// unused
+
 }
 
 } // namespace ve

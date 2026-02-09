@@ -4,6 +4,7 @@
 #include "ve_export.hpp"
 #include "resources/ve_resource_manager.hpp"
 #include "resources/ve_mesh.hpp"
+#include "resources/ve_material.hpp"
 
 #include <glm/glm.hpp>
 #include <memory>
@@ -14,7 +15,6 @@ namespace ve {
 
 // Forward declarations
 class VeGameObject;
-class VeModel;  // in resources/ve_model.hpp
 
 // ---------------------------------------------------------------------------
 // Component type ID system
@@ -23,7 +23,7 @@ class VENGINE_API ComponentTypeIDSystem {
 public:
 	template <typename T>
 	static size_t getTypeID() {
-		static size_t type_id = m_next_type_id++;
+		static size_t type_id = m_next_type_id++; // Each template instantiation gets a unique type ID.
 		return type_id;
 	}
 
@@ -38,8 +38,9 @@ class VENGINE_API Component {
 public:
 	virtual ~Component() = default;
 
-	virtual void initialize() {}
+	virtual void initialize() {} // unused
 	virtual void update(float /*delta_time*/) {}
+	virtual void render() {} // unused
 
 	void setOwner(VeGameObject* entity) { m_owner = entity; }
 	VeGameObject* getOwner() const { return m_owner; }
@@ -82,8 +83,11 @@ private:
 class VENGINE_API PointLightComponent : public Component {
 public:
 	float intensity{1.0f};
+	glm::vec3 color{1.0f};
 	bool rotates{true};
 	bool casts_shadow{true};
+
+	void update(float delta_time) override;
 };
 
 // ---------------------------------------------------------------------------
@@ -91,39 +95,31 @@ public:
 // ---------------------------------------------------------------------------
 class VENGINE_API MeshComponent : public Component {
 public:
-	explicit MeshComponent(ResourceHandle<VeMesh> handle, uint32_t material_index = 0)
-		: mesh_handle(std::move(handle)), m_material_index(material_index) {}
+	MeshComponent(ResourceHandle<VeMesh> mesh_h, ResourceHandle<VeMaterial> material_h)
+		: mesh_handle(std::move(mesh_h)), material_handle(std::move(material_h)) {}
+
+	void render() override;
 
 	VeMesh* getMesh() const { return mesh_handle.get(); }
+	VeMaterial* getMaterial() const { return material_handle.get(); }
 	ResourceHandle<VeMesh> getMeshHandle() const { return mesh_handle; }
+	ResourceHandle<VeMaterial> getMaterialHandle() const { return material_handle; }
 	bool hasMesh() const { return mesh_handle.isValid(); }
-	uint32_t getMaterialIndex() const { return m_material_index; }
+	bool hasMaterial() const { return material_handle.isValid(); }
 
-	void setModel(VeModel* model) { m_model = model; }
-	VeModel* getModel() const { return m_model; }
+	float has_texture{0.0f};
+	bool has_shadow{true};
 
 private:
 	ResourceHandle<VeMesh> mesh_handle;
-	uint32_t m_material_index;
-	VeModel* m_model = nullptr;
-};
-
-// ---------------------------------------------------------------------------
-// MaterialComponent - color, texture flag, shadow flag
-// ---------------------------------------------------------------------------
-class VENGINE_API MaterialComponent : public Component {
-public:
-	glm::vec3 color{1.0f};
-	float has_texture{0.0f};
-	bool has_shadow{true};
+	ResourceHandle<VeMaterial> material_handle;
 };
 
 // TODO: Add more components as needed (camera, animation, etc.)
 
-// Explicit instantiations provided by engine; prevents duplicate symbols when tests use these
+// suppress implicit instantiation
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<TransformComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<PointLightComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MeshComponent>();
-extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MaterialComponent>();
 
 } // namespace ve

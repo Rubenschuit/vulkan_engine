@@ -12,13 +12,13 @@ TEST_CASE("ComponentTypeIDSystem assigns unique IDs per type", "[component][type
 	size_t id_b = ve::Component::getTypeID<TestComponentB>();
 	size_t id_transform = ve::Component::getTypeID<ve::TransformComponent>();
 	size_t id_point_light = ve::Component::getTypeID<ve::PointLightComponent>();
-	size_t id_material = ve::Component::getTypeID<ve::MaterialComponent>();
+	size_t id_mesh = ve::Component::getTypeID<ve::MeshComponent>();
 
 	REQUIRE(id_a != id_b);
 	REQUIRE(id_a != id_transform);
 	REQUIRE(id_b != id_transform);
 	REQUIRE(id_transform != id_point_light);
-	REQUIRE(id_point_light != id_material);
+	REQUIRE(id_point_light != id_mesh);
 
 	// Same type returns same ID
 	REQUIRE(ve::Component::getTypeID<TestComponentA>() == id_a);
@@ -40,7 +40,7 @@ TEST_CASE("VeGameObject getComponent returns nullptr for missing component", "[g
 	auto obj = ve::VeGameObject::createGameObject();
 
 	REQUIRE(obj.getComponent<ve::PointLightComponent>() == nullptr);
-	REQUIRE(obj.getComponent<ve::MaterialComponent>() == nullptr);
+	REQUIRE(obj.getComponent<ve::MeshComponent>() == nullptr);
 }
 
 TEST_CASE("VeGameObject removeComponent", "[gameobject][component]") {

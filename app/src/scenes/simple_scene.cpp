@@ -49,48 +49,43 @@ void SimpleScene::loadGameObjects(VeResourceManager& resource_manager, const Ass
             height
         };
         point_light.getComponent<PointLightComponent>()->casts_shadow = false;
-        point_light.getComponent<MaterialComponent>()->has_shadow = false;
         point_light.getComponent<TransformComponent>()->translation = pos;
         m_game_objects.emplace(point_light.getId(), std::move(point_light));
     }
 
     // floor
     {
-        auto floor = VeModel::loadAsSingleObject(m_device, resource_manager,
+        auto floor = VeModel::loadAsSingleObject(resource_manager,
             paths.quad_model,
             {0.0f, 0.0f, 0.0f}, {glm::radians(90.0f), 0.0f, 0.0f}, {80.0f, 1.0f, 80.0f});
-        if (floor.getComponent<MeshComponent>()) {
-            auto* mat = floor.addComponent<MaterialComponent>();
-            mat->has_texture = 0.0f;
-            mat->has_shadow = false;
+        if (auto* mesh = floor.getComponent<MeshComponent>()) {
+            mesh->has_texture = 0.0f;
+            mesh->has_shadow = false;
             m_game_objects.emplace(floor.getId(), std::move(floor));
         }
     }
 
     // Helper to create grid instances from a single-mesh model
-	// TODO: do this better. What about ownership/lifetime management of these meshes?
     auto addGridInstances = [&](const std::filesystem::path& model_path,
                                int rows, int cols,
                                glm::vec3 base_translation, glm::vec3 base_rotation, glm::vec3 base_scale,
                                float spacing_x, float spacing_y, float z_offset) {
-        auto model = VeModel::load(m_device, resource_manager, model_path.lexically_normal(), nullptr, nullptr);
-        auto objects = model->addToScene({0, 0, 0}, {0, 0, 0}, {1, 1, 1});
-        VeGameObject* mesh_template = nullptr;
-        for (auto& obj : objects) {
-            if (obj.getComponent<MeshComponent>()) {
-                mesh_template = &obj;
-                break;
-            }
-        }
-        if (!mesh_template) return;
-        auto mesh_handle = mesh_template->getComponent<MeshComponent>()->getMeshHandle();
-        uint32_t mat_idx = mesh_template->getComponent<MeshComponent>()->getMaterialIndex();
+        auto template_obj = VeModel::loadAsSingleObject(resource_manager, model_path.lexically_normal(),
+            {0, 0, 0}, {0, 0, 0}, {1, 1, 1});
+        auto* mesh_comp = template_obj.getComponent<MeshComponent>();
+        if (!mesh_comp) return;
+
+        auto mesh_handle = mesh_comp->getMeshHandle();
+        auto material_handle = mesh_comp->getMaterialHandle();
+        mesh_comp->has_texture = 0.0f;
+
         for (int j = 0; j < rows; j++) {
             for (int i = 0; i < cols; i++) {
-                VeGameObject obj = VeGameObject::createGameObject();
-                obj.addComponent<MeshComponent>(mesh_handle, mat_idx);
-                auto* mat = obj.addComponent<MaterialComponent>();
-                mat->has_texture = 0.0f;
+                VeGameObject obj = (i == 0 && j == 0) ? std::move(template_obj) : VeGameObject::createGameObject();
+                if (i != 0 || j != 0) {
+                    auto* m = obj.addComponent<MeshComponent>(mesh_handle, material_handle);
+                    m->has_texture = 0.0f;
+                }
                 auto* transform = obj.getComponent<TransformComponent>();
                 transform->translation = base_translation + glm::vec3{(float)i * spacing_x, (float)j * spacing_y, z_offset};
                 transform->rotation = base_rotation;
@@ -113,8 +108,7 @@ void SimpleScene::loadGameObjects(VeResourceManager& resource_manager, const Ass
                     {-4.0f, -4.0f, 0}, {glm::radians(-180.0f), 0.0f, 0.0f}, {6.0f, 6.0f, 3.0f}, -4.0f, -4.0f, 0);
 
     // Smooth vases (interpolated normals) in a grid
-    addGridInstances(paths.smooth_vase_model, 5, 5,
-                    {0, -4.0f, 0}, {glm::radians(-180.0f), 0.0f, 0.0f}, {6.0f, 6.0f, 3.0f}, 4.0f, -4.0f, 0);
+    addGridInstances(paths.smooth_vase_model, 5, 5, {0, -4.0f, 0}, {glm::radians(-180.0f), 0.0f, 0.0f}, {6.0f, 6.0f, 3.0f}, 4.0f, -4.0f, 0);
 }
 
 } // namespace ve

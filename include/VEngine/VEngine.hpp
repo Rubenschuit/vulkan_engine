@@ -27,7 +27,7 @@
 #include "scene/ve_scene.hpp"
 
 #include "utils/ve_log.hpp"
-#include "platform/input_controller.hpp"
+#include "input/input_controller.hpp"
 
 #include "ui/imgui_layer.hpp"
 

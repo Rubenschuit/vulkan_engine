@@ -1,5 +1,5 @@
 #include "pch.hpp"
-#include "platform/input_controller.hpp"
+#include "input/input_controller.hpp"
 #include "rendering/particle_system.hpp"
 
 

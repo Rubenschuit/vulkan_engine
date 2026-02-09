@@ -3,7 +3,7 @@
 #include "vulkan/ve_device.hpp"
 #include "ui/imgui_layer.hpp"
 #include "vulkan/ve_buffer.hpp"
-#include "platform/input_controller.hpp"
+#include "input/input_controller.hpp"
 #include "scene/ve_camera.hpp"
 #include "utils/ve_log.hpp"
 

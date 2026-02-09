@@ -373,13 +373,15 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 	for (auto& [id, obj] : frame_info.game_objects) {
 		auto* mesh = obj.getComponent<MeshComponent>();
 		auto* transform = obj.getComponent<TransformComponent>();
-		auto* material = obj.getComponent<MaterialComponent>();
 		if (!mesh || !mesh->hasMesh() || !transform)
 			continue;
-		if (material && !material->has_shadow)
+		if (!mesh->has_shadow)
 			continue;
-		vk::raii::DescriptorSet& mat_set = frame_info.active_scene
-			? frame_info.active_scene->getDescriptorSet(&obj)
+		if (!mesh->hasMaterial())
+			continue;
+		auto* mat = mesh->getMaterial();
+		vk::raii::DescriptorSet& mat_set = mat->hasDescriptorSet()
+			? mat->getDescriptorSet()
 			: frame_info.material_descriptor_set;
 		drawables.push_back({*mat_set, &obj});
 	}
@@ -401,14 +403,13 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 
 		VeGameObject& obj = *d.obj;
 		auto* mesh = obj.getComponent<MeshComponent>();
-		auto* material = obj.getComponent<MaterialComponent>();
 		SimplePushConstantData push{};
 		const glm::mat3 nrm = obj.getNormalTransform();
 		push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
 		push.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
 		push.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
 		push.transform = obj.getTransform();
-		push.has_texture = material ? material->has_texture : 0.0f;
+		push.has_texture = mesh->has_texture;
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
