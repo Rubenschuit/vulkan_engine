@@ -7,7 +7,7 @@
 
 namespace ve {
 
-class CullingSystem {
+class VENGINE_API CullingSystem {
 public:
 	explicit CullingSystem(VeCamera& camera);
 	void setCamera(VeCamera& camera) { m_camera = &camera; }
