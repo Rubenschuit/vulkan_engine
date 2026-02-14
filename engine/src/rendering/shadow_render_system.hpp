@@ -8,8 +8,10 @@
 #include <filesystem>
 
 namespace ve {
-    class VeDevice;
-    class VePipeline;
+	class VeGameObject;
+	class VeDevice;
+	class VePipeline;
+	class MeshComponent;
     class VeBuffer;
     class VeDescriptorPool;
     class VeDescriptorSetLayout;
@@ -46,6 +48,9 @@ public:
 		return m_shadow_set_layout->getDescriptorSetLayout();
 	}
 
+	// Invalidate cached shadow drawables (e.g. after scene switch); next render will rebuild.
+	void invalidateShadowDrawables();
+
 private:
 	void createShadowResources();
 	void createPipelineLayout(
@@ -81,6 +86,13 @@ private:
 	std::unique_ptr<VeDescriptorSetLayout> m_shadow_set_layout;
 	std::vector<vk::raii::DescriptorSet> m_shadow_descriptor_sets;  // per frame, for binding shadow maps
 	vk::Format m_shadow_depth_format;
+
+	struct ShadowDrawable {
+		VeGameObject* obj = nullptr;
+		MeshComponent* mesh = nullptr;
+	};
+	std::vector<ShadowDrawable> m_shadow_drawables;
+	bool m_shadow_drawables_dirty = true;
 };
 
 }

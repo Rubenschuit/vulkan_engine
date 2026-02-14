@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <vector>
 #include <ktx.h>
 #include <ktxvulkan.h>
 
@@ -12,11 +13,6 @@ namespace {
 	bool isBlockCompressed(vk::Format format) {
 		std::string s = vk::to_string(format);
 		return s.find("Block") != std::string::npos;
-	}
-	// Linear to sRGB conversion for float->uint8
-	uint8_t linearToSrgb(float linear) {
-		float srgb = linear <= 0.0031308f ? linear * 12.92f : 1.055f * std::pow(linear, 1.f / 2.4f) - 0.055f;
-		return static_cast<uint8_t>(std::clamp(srgb * 255.f + 0.5f, 0.f, 255.f));
 	}
 }
 
@@ -40,18 +36,25 @@ std::shared_ptr<VeTexture> VeTexture::createDefault(VeDevice& device, TextureTyp
 	return std::make_shared<VeTexture>(device, 4, 4, type);
 }
 
-ResourceHandle<VeTexture> VeTexture::loadOrDefault(VeResourceManager& resource_manager, const std::filesystem::path& path, TextureType fallback_type, vk::Format format) {
-	(void)format;  // format is encoded in resource_id for doLoad
+ResourceHandle<VeTexture> VeTexture::loadOrDefault(VeResourceManager& resource_manager, const std::filesystem::path& path, TextureType fallback_type) {
+	std::string key = path.lexically_normal().generic_string();
 	auto fn = path.filename().string();
-	bool is_default = (fn == "default_albedo.png" || fn == "default_normal.png" || fn == "default_metallic_roughness.png" || fn == "white.png" || fn == "black.png");
+	bool is_default = (fn == "default_albedo.png" || fn == "default_normal.png" || fn == "default_metallic_roughness.png" ||
+	                   fn == "default_occlusion.png" || fn == "default_emissive.png" || fn == "white.png" || fn == "black.png");
 	if (is_default || !std::filesystem::exists(path)) {
-		const char* default_id = (fallback_type == TextureType::ALBEDO) ? "default_albedo" :
-		                        (fallback_type == TextureType::NORMAL) ? "default_normal" : "default_metallic_roughness";
+		const char* default_id = "default_metallic_roughness";
+		if (fallback_type == TextureType::ALBEDO) default_id = "default_albedo";
+		else if (fallback_type == TextureType::NORMAL) default_id = "default_normal";
+		else if (fallback_type == TextureType::OCCLUSION) default_id = "default_occlusion";
+		else if (fallback_type == TextureType::EMISSIVE) default_id = "default_emissive";
 		return resource_manager.load<VeTexture>(default_id);
 	}
-	const char* suffix = (fallback_type == TextureType::ALBEDO) ? "|albedo" : (fallback_type == TextureType::NORMAL) ? "|normal" : "|mr";
-	std::string resource_id = path.lexically_normal().generic_string() + suffix;
-	return resource_manager.load<VeTexture>(resource_id);
+	const char* suffix = "|mr";
+	if (fallback_type == TextureType::ALBEDO) suffix = "|albedo";
+	else if (fallback_type == TextureType::NORMAL) suffix = "|normal";
+	else if (fallback_type == TextureType::OCCLUSION) suffix = "|occlusion";
+	else if (fallback_type == TextureType::EMISSIVE) suffix = "|emissive";
+	return resource_manager.load<VeTexture>(key + suffix);
 }
 
 VeTexture::~VeTexture() {
@@ -81,6 +84,20 @@ bool VeTexture::doLoad() {
 		createTextureSampler();
 		return true;
 	}
+	if (m_resource_id == "default_occlusion") {
+		stbi_uc* pixels = generateDefaultTexture(4, 4, TextureType::OCCLUSION);
+		createTextureImageFromPixels(4, 4, pixels, vk::Format::eR8G8B8A8Unorm);
+		free(pixels);
+		createTextureSampler();
+		return true;
+	}
+	if (m_resource_id == "default_emissive") {
+		stbi_uc* pixels = generateDefaultTexture(4, 4, TextureType::EMISSIVE);
+		createTextureImageFromPixels(4, 4, pixels, vk::Format::eR8G8B8A8Unorm);
+		free(pixels);
+		createTextureSampler();
+		return true;
+	}
 
 	// Path with format suffix (e.g. "path/to/tex.png|albedo") for explicit format
 	std::string path_str = m_resource_id;
@@ -89,7 +106,7 @@ bool VeTexture::doLoad() {
 	if (pipe != std::string::npos) {
 		std::string suffix = path_str.substr(pipe + 1);
 		path_str = path_str.substr(0, pipe);
-		if (suffix == "normal" || suffix == "mr")
+		if (suffix == "normal" || suffix == "mr" || suffix == "occlusion" || suffix == "emissive")
 			format = vk::Format::eR8G8B8A8Unorm;
 	}
 
@@ -121,7 +138,7 @@ const vk::raii::Sampler& VeTexture::getSampler() const {
 	return *m_texture_sampler;
 }
 
-// TODO: mip levels
+// TODO: generate mipmaps if not present
 // Loads a texture from a .ktx or .ktx2 file and creates a Vulkan image resources.
 // Also works for cubemaps.
 // format_hint: preferred format when converting R8G8B8->RGBA.
@@ -169,9 +186,7 @@ bool VeTexture::createTextureImage(const std::filesystem::path& texture_path, vk
 
 	uint32_t num_levels = k_texture->numLevels; // number of mip levels
 	ktx_uint8_t* data = ktxTexture_GetData(k_texture);
-	//VE_LOGD("Texture width: " << m_width);
-	//VE_LOGD("Texture height: " << m_height);
-	//VE_LOGD("Is cubemap: " << is_cubemap);
+	//VE_LOGD("Texture dimensions: " << m_width << "x" << m_height);
 	//VE_LOGD("Mip levels: " << num_levels);
 
 	vk::Format texture_format;
@@ -205,54 +220,7 @@ bool VeTexture::createTextureImage(const std::filesystem::path& texture_path, vk
 		VE_LOGD("Skipping format_hint for format " << vk::to_string(texture_format) << " (not R8G8B8/R8G8B8A8/R32G32B32A32Sfloat)");
 	}
 
-	// R8G8B8 unsupported on Apple Metal - convert to RGBA. Use only level 0 when converting.
-	// R32G32B32A32Sfloat: convert to R8G8B8A8 when format_hint requests it (particle shader expects 8-bit sRGB).
-	std::vector<ktx_uint8_t> rgba_data;
-	bool needs_rgb_to_rgba = (texture_format == vk::Format::eR8G8B8Srgb || texture_format == vk::Format::eR8G8B8Unorm);
-	bool needs_float_to_rgba = (texture_format == vk::Format::eR32G32B32A32Sfloat && has_format_hint);
-	if (needs_rgb_to_rgba) {
-		num_levels = 1;
-		texture_format = (texture_format == vk::Format::eR8G8B8Srgb) ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
-		if (format_hint == vk::Format::eR8G8B8A8Unorm)
-			texture_format = vk::Format::eR8G8B8A8Unorm;
-		VE_LOGD("Converting R8G8B8 to RGBA for device compatibility");
-		size_t pixel_count = static_cast<size_t>(m_width) * m_height * (is_cubemap ? 6 : 1);
-		rgba_data.resize(pixel_count * 4);
-		const ktx_uint8_t* src = data;
-		ktx_uint8_t* dst = rgba_data.data();
-		for (size_t i = 0; i < pixel_count; i++) {
-			dst[i * 4 + 0] = src[i * 3 + 0];
-			dst[i * 4 + 1] = src[i * 3 + 1];
-			dst[i * 4 + 2] = src[i * 3 + 2];
-			dst[i * 4 + 3] = 255;
-		}
-		data = rgba_data.data();
-	} else if (needs_float_to_rgba) {
-		num_levels = 1;
-		texture_format = (format_hint == vk::Format::eR8G8B8A8Srgb) ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
-		VE_LOGD("Converting R32G32B32A32Sfloat to R8G8B8A8 for particle shader compatibility");
-		size_t pixel_count = static_cast<size_t>(m_width) * m_height * (is_cubemap ? 6 : 1);
-		rgba_data.resize(pixel_count * 4);
-		const float* src = reinterpret_cast<const float*>(data);
-		ktx_uint8_t* dst = rgba_data.data();
-		for (size_t i = 0; i < pixel_count; i++) {
-			float r = std::clamp(src[i * 4 + 0], 0.f, 1.f);
-			float g = std::clamp(src[i * 4 + 1], 0.f, 1.f);
-			float b = std::clamp(src[i * 4 + 2], 0.f, 1.f);
-			float a = std::clamp(src[i * 4 + 3], 0.f, 1.f);
-			if (format_hint == vk::Format::eR8G8B8A8Srgb) {
-				dst[i * 4 + 0] = linearToSrgb(r);
-				dst[i * 4 + 1] = linearToSrgb(g);
-				dst[i * 4 + 2] = linearToSrgb(b);
-			} else {
-				dst[i * 4 + 0] = static_cast<uint8_t>(r * 255.f + 0.5f);
-				dst[i * 4 + 1] = static_cast<uint8_t>(g * 255.f + 0.5f);
-				dst[i * 4 + 2] = static_cast<uint8_t>(b * 255.f + 0.5f);
-			}
-			dst[i * 4 + 3] = static_cast<uint8_t>(a * 255.f + 0.5f);
-		}
-		data = rgba_data.data();
-	}
+
 
 	// Compute total size and copy regions. For cubemaps with mipmaps we use single-level path.
 	// Cubemap mipmap copy is not implemented - only level 0 is copied, so force num_levels=1 to avoid
@@ -277,8 +245,6 @@ bool VeTexture::createTextureImage(const std::filesystem::path& texture_path, vk
 		}
 	} else {
 		ktx_size_t image_size = ktxTexture_GetImageSize(k_texture, 0);
-		if (needs_rgb_to_rgba || needs_float_to_rgba)
-			image_size = static_cast<ktx_size_t>(m_width) * m_height * 4;
 		total_size = image_size * array_layers;
 		buffer_offsets.push_back(0);
 		extents.push_back({ m_width, m_height, 1 });
@@ -400,7 +366,6 @@ void VeTexture::createTextureImageFromPixels(uint32_t width, uint32_t height, co
 
 // Loads a texture from a file using stb_image.
 bool VeTexture::createTextureImageSTB(const std::filesystem::path& texture_path, vk::Format format) {
-	// Load image from file using stb_image (top-left origin, matches glTF)
 	int channels, width, height;
 	stbi_uc* pixels = stbi_load(texture_path.string().c_str(), &width, &height, &channels, STBI_rgb_alpha);
 
@@ -560,6 +525,22 @@ stbi_uc* VeTexture::generateDefaultTexture(int width, int height, TextureType ty
                 pixels[i * 4 + 0] = 0;
                 pixels[i * 4 + 1] = 255;  // Roughness = 1
                 pixels[i * 4 + 2] = 0;    // Metallic = 0
+                pixels[i * 4 + 3] = 255;
+                break;
+
+            case TextureType::OCCLUSION:
+                // White: no darkening of ambient
+                pixels[i * 4 + 0] = 255;
+                pixels[i * 4 + 1] = 255;
+                pixels[i * 4 + 2] = 255;
+                pixels[i * 4 + 3] = 255;
+                break;
+
+            case TextureType::EMISSIVE:
+                // Black: no emission
+                pixels[i * 4 + 0] = 0;
+                pixels[i * 4 + 1] = 0;
+                pixels[i * 4 + 2] = 0;
                 pixels[i * 4 + 3] = 255;
                 break;
         }

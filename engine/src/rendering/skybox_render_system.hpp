@@ -58,8 +58,11 @@ public:
 
 	// Slowly rotate the skybox over time and render it
 	void render(VeFrameInfo& frame_info);
+	/// Draw skybox only where depth buffer is still clear (1.0).
+	void renderAsBackground(VeFrameInfo& frame_info);
 	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
 		m_ve_pipeline.reset();
+		m_ve_pipeline_background.reset();
 		createPipeline(color_format, sample_count);
 	}
 
@@ -88,6 +91,7 @@ private:
 	void createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
 
 	VeDevice& m_ve_device;
+	std::unique_ptr<VePipeline> m_ve_pipeline_background;
 	VeResourceManager& m_resource_manager;
 	VeDescriptorPool& m_descriptor_pool;
 	VeDescriptorSetLayout& m_material_set_layout;

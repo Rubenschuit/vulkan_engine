@@ -25,10 +25,14 @@ public:
     vk::raii::DescriptorSet& getDescriptorSet() override;
     Type getType() const override { return Type::PBR; }
 
-    void setSunIntensity(float intensity);
+    void setSunIntensity(float intensity) override;
+    float getSunIntensity() const override;
+    uint32_t getSunId() const override { return m_sun_id; }
 
 private:
     void loadGameObjects(VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths, const char* variant);
+
+    static constexpr float DEFAULT_SUN_INTENSITY = 2000.0f;
 
     std::unique_ptr<VeModel> m_sponza_model;
     ResourceHandle<VeMaterial> m_default_material_handle;

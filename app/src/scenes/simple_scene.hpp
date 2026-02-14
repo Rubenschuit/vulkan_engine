@@ -10,16 +10,24 @@ namespace ve {
 
 class SimpleScene : public VeScene {
 public:
-	// shared_particle_descriptor_set: descriptor set for particles/point lights, owned by Sandbox
-	SimpleScene(VeDevice& device, VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths, vk::raii::DescriptorSet* shared_particle_descriptor_set);
 
-	vk::raii::DescriptorSet& getDescriptorSet() override { return *m_shared_particle_descriptor_set; }
+	SimpleScene(VeDevice& device, VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths, vk::raii::DescriptorSet* default_material_descriptor_set);
+
+	vk::raii::DescriptorSet& getDescriptorSet() override { return *m_default_material_descriptor_set; }
 	Type getType() const override { return Type::SIMPLE; }
 
-private:
-	void loadGameObjects(VeResourceManager& resource_manager, const AssetPaths& paths);
+	void setSunIntensity(float intensity) override;
+	float getSunIntensity() const override;
+	uint32_t getSunId() const override { return m_sun_id; }
 
-	vk::raii::DescriptorSet* m_shared_particle_descriptor_set = nullptr;
+private:
+	void loadGameObjects(VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths);
+
+	static constexpr float DEFAULT_SUN_INTENSITY = 100.0f;
+
+	vk::raii::DescriptorSet* m_default_material_descriptor_set = nullptr;
+
+	uint32_t m_sun_id;
 };
 
 }

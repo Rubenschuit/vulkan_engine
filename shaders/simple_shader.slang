@@ -1,5 +1,5 @@
 #define PI 3.1415926536
-#define MAX_LIGHTS 20
+#define MAX_LIGHTS 40
 #define MAX_SHADOW_LIGHTS 3
 
 struct VertexInput {
@@ -89,12 +89,12 @@ VertexOutput vertMain(VertexInput input) {
 	output.pos = mul(ubo.projection_view, world_pos); // pre-computed view and projection
 	output.frag_pos_world = world_pos.xyz;
 
-	// Transform normal and tangent to world space
-	float3 normal;
-	normal.x = dot(push_constants.normal_col0.xyz, input.in_normal);
-	normal.y = dot(push_constants.normal_col1.xyz, input.in_normal);
-	normal.z = dot(push_constants.normal_col2.xyz, input.in_normal);
-	output.frag_normal_world = normalize(normal);
+	// Transform normal to world space
+	output.frag_normal_world = normalize(float3(
+		dot(push_constants.normal_col0.xyz, input.in_normal),
+		dot(push_constants.normal_col1.xyz, input.in_normal),
+		dot(push_constants.normal_col2.xyz, input.in_normal)
+	));
 	// pass through
     output.frag_color = input.in_color;
 	output.frag_tex_coord = input.in_tex_coord;
@@ -108,7 +108,7 @@ VertexOutput vertMain(VertexInput input) {
     return output;
 }
 
-[vk::binding(2, 1)]
+[vk::binding(0, 1)]
 Sampler2D albedo_texture;
 
 // Shadow maps (set 2) - single 2D array texture

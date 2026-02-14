@@ -127,7 +127,7 @@ std::filesystem::path getProjectRoot(char** argv) {
 	while (search.has_parent_path() && search != search.root_path()) {
 		if (std::filesystem::exists(search / "models") &&
 		    std::filesystem::exists(search / "textures")) {
-			VE_LOGI("Found project root: " << search);
+			//VE_LOGI("Found project root: " << search);
 			return search;
 		}
 		search = search.parent_path();

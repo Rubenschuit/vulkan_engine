@@ -23,6 +23,7 @@ namespace ve {
 class VeResourceManager;
 class VeMesh;
 class VeMaterial;
+class VeTexture;
 
 /* RAII handle that keeps a resource loaded.
  * Copy increments ref count, destroy decrements. When ref count hits 0, resource is unloaded.
@@ -87,12 +88,19 @@ public:
 	                                         const std::filesystem::path& albedo_path,
 	                                         const std::filesystem::path& normal_path,
 	                                         const std::filesystem::path& metallic_roughness_path,
+	                                         const std::filesystem::path& occlusion_path,
+	                                         const std::filesystem::path& emissive_path,
 	                                         MaterialAlphaProps alpha_props,
+	                                         MaterialFactors factors,
 	                                         class VeDescriptorPool* pool = nullptr,
-	                                         class VeDescriptorSetLayout* layout = nullptr);
+	                                         class VeDescriptorSetLayout* layout = nullptr,
+	                                         bool flip_tex_coord_v = false);
 
 	// Forcibly unload all resources regardless of reference count.
 	void unloadAll();
+
+	VeDevice& getDevice() { return m_device; }
+	const VeDevice& getDevice() const { return m_device; }
 
 private:
 	VeDevice& m_device;

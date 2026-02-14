@@ -32,6 +32,13 @@ public:
     virtual Type getType() const = 0;
     virtual void update(float dt);
 
+    // Sun light intensity. Scenes without a sun return 0.
+    virtual float getSunIntensity() const { return 0.0f; }
+    // Set sun light intensity. Does nothing in scenes without a sun.
+    virtual void setSunIntensity(float intensity) { (void)intensity; }
+    // Game object id of the scene sun (for UI sync). 0 if no sun.
+    virtual uint32_t getSunId() const { return 0; }
+
 protected:
     VeDevice& m_device;
     std::string m_name;

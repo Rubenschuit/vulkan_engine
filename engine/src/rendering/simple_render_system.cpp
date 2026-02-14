@@ -60,6 +60,7 @@ void SimpleRenderSystem::createPipeline(vk::Format color_format, vk::SampleCount
 	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
 	pipeline_config.multisample_info.rasterizationSamples = sample_count;
 	pipeline_config.color_format = color_format;
+	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eFront;
 	pipeline_config.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptionsSimple();
 	pipeline_config.input_assembly_info.topology = m_topology;
 
@@ -80,22 +81,22 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 	struct Drawable {
 		VkDescriptorSet material_set;
 		VeGameObject* obj;
+		MeshComponent* mesh = nullptr;
 	};
 	std::vector<Drawable> drawables;
 	drawables.reserve(frame_info.visible_game_objects.size());
-	for (auto& [id, obj_ptr] : frame_info.visible_game_objects) {
-		VeGameObject& obj = *obj_ptr;
-		auto* mesh = obj.getComponent<MeshComponent>();
-		auto* transform = obj.getComponent<TransformComponent>();
-		if (!mesh || !mesh->hasMesh() || !transform)
+	for (auto& [id, entry] : frame_info.visible_game_objects) {
+		VeGameObject& obj = *entry.obj;
+		MeshComponent* mesh = entry.mesh;
+		if (!mesh || !mesh->getMesh() || !obj.getComponent<TransformComponent>())
 			continue;
-		if (!mesh->hasMaterial())
+		if (!mesh->getMaterial())
 			continue;
 		auto* mat = mesh->getMaterial();
 		vk::raii::DescriptorSet& mat_set = mat->hasDescriptorSet()
 			? mat->getDescriptorSet()
 			: frame_info.material_descriptor_set;
-		drawables.push_back({*mat_set, obj_ptr});
+		drawables.push_back({*mat_set, entry.obj, mesh});
 	}
 	std::sort(drawables.begin(), drawables.end(),
 		[](const Drawable& a, const Drawable& b) { return a.material_set < b.material_set; });
@@ -116,7 +117,7 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 
 		// render the object
 		VeGameObject& obj = *d.obj;
-		auto* mesh = obj.getComponent<MeshComponent>();
+		MeshComponent* mesh = d.mesh;
 
 		// push constants
 		SimplePushConstantData push{};

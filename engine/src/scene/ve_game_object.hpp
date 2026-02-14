@@ -6,7 +6,7 @@
  * This class holds a map of component type IDs to component pointers and a vector of components.
  * Use AddComponent<T>() to add components, GetComponent<T>() to retrieve them.
 
-  * TODO: consider a render virtual function. consider a is_active flag.
+  * TODO: consider a render virtual function.
  */
 #pragma once
 #include "ve_export.hpp"
@@ -95,6 +95,10 @@ public:
 	}
 
 	const std::string& getName() const { return m_name; }
+	void setName(std::string name) { m_name = std::move(name); }
+
+	bool isActive() const { return m_is_active; }
+	void setActive(bool active) { m_is_active = active; }
 
 	// Convenience functions:
 	const glm::mat4& getTransform() const;
@@ -106,15 +110,22 @@ public:
 	VeGameObject* getParent() const { return m_parent; }
 	const std::vector<VeGameObject*>& getChildren() const { return m_children; }
 
+	void invalidateMeshWorldAABBs();
+	/** Invalidates cached world transform (and normal) for this object and all descendants. Call when local transform or parent changes. */
+	void invalidateWorldTransform();
+
 private:
 	explicit VeGameObject(uint32_t id) : m_id(id) {}
 
 	std::string m_name;
 	uint32_t m_id;
+	bool m_is_active{true};
 	VeGameObject* m_parent = nullptr;
 	std::vector<VeGameObject*> m_children;
 	mutable glm::mat4 m_cached_world_transform{1.0f};
 	mutable glm::mat3 m_cached_world_normal{1.0f};
+	mutable bool m_world_transform_dirty{true};
+	mutable bool m_world_normal_dirty{true};
 	std::vector<std::unique_ptr<Component>> m_components;
 	std::unordered_map<size_t, Component*> m_component_map;
 };

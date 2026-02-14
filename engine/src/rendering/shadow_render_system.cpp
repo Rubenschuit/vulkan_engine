@@ -94,7 +94,7 @@ void ShadowRenderSystem::createPipeline(vk::Format depth_format) {
 	pipeline_config.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptionsShadow();
 
 	pipeline_config.multisample_info.rasterizationSamples = vk::SampleCountFlagBits::e1;
-	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eFront;
+	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eBack;
 	pipeline_config.rasterization_info.depthClampEnable = VK_TRUE;
 	pipeline_config.rasterization_info.depthBiasEnable = VK_TRUE;
 
@@ -233,7 +233,6 @@ void ShadowRenderSystem::createShadowTextureDescriptorSets(VeDescriptorPool& des
 // Update the shadow UBO with the light data from the main UBO
 void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBufferObject& ubo) {
 	if (ubo.num_shadow_lights == 0) {
-		VE_LOGW("Shadow system: no shadow-casting lights in UBO!");
 		m_light_views[frame_index].clear();
 		m_light_projs[frame_index].clear();
 		return;
@@ -268,6 +267,10 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBuffer
 	}
 }
 
+void ShadowRenderSystem::invalidateShadowDrawables() {
+	m_shadow_drawables_dirty = true;
+}
+
 void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 	const auto& light_views = m_light_views[frame_info.current_frame];
 
@@ -276,6 +279,23 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 		return;
 	}
 	assert(light_views.size() <= MAX_SHADOW_LIGHTS && "Number of shadow-casting lights exceeds MAX_SHADOW_LIGHTS");
+
+	// Build shadow draw list only when dirty (shared by all lights)
+	if (m_shadow_drawables_dirty) {
+		m_shadow_drawables.clear();
+		m_shadow_drawables.reserve(frame_info.game_objects.size());
+		for (auto& [id, obj] : frame_info.game_objects) {
+			auto* mesh = obj.getComponent<MeshComponent>();
+			auto* transform = obj.getComponent<TransformComponent>();
+			if (!mesh || !mesh->getMesh() || !transform)
+				continue;
+			if (!mesh->has_shadow)
+				continue;
+
+			m_shadow_drawables.emplace_back(&obj, mesh);
+		}
+		m_shadow_drawables_dirty = false;
+	}
 
 	auto& command_buffer = frame_info.command_buffer;
 	vk::Extent2D shadow_extent{SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION};
@@ -363,46 +383,17 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 	const vk::raii::DescriptorSet& shadow_global_set = m_shadow_global_descriptor_sets[frame_info.current_frame][light_index];
 
 	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	frame_info.command_buffer.bindDescriptorSets(
+		vk::PipelineBindPoint::eGraphics,
+		*m_pipeline_layout,
+		0,
+		{*shadow_global_set},
+		{}
+	);
 
-	struct Drawable {
-		VkDescriptorSet material_set;
-		VeGameObject* obj;
-	};
-	std::vector<Drawable> drawables;
-	drawables.reserve(frame_info.game_objects.size());
-	for (auto& [id, obj] : frame_info.game_objects) {
-		auto* mesh = obj.getComponent<MeshComponent>();
-		auto* transform = obj.getComponent<TransformComponent>();
-		if (!mesh || !mesh->hasMesh() || !transform)
-			continue;
-		if (!mesh->has_shadow)
-			continue;
-		if (!mesh->hasMaterial())
-			continue;
-		auto* mat = mesh->getMaterial();
-		vk::raii::DescriptorSet& mat_set = mat->hasDescriptorSet()
-			? mat->getDescriptorSet()
-			: frame_info.material_descriptor_set;
-		drawables.push_back({*mat_set, &obj});
-	}
-	std::sort(drawables.begin(), drawables.end(),
-		[](const Drawable& a, const Drawable& b) { return a.material_set < b.material_set; });
-
-	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
-	for (const auto& d : drawables) {
-		if (d.material_set != bound_material_set) {
-			bound_material_set = d.material_set;
-			frame_info.command_buffer.bindDescriptorSets(
-				vk::PipelineBindPoint::eGraphics,
-				*m_pipeline_layout,
-				0,
-				{*shadow_global_set, bound_material_set},
-				{}
-			);
-		}
-
+	for (const auto& d : m_shadow_drawables) {
 		VeGameObject& obj = *d.obj;
-		auto* mesh = obj.getComponent<MeshComponent>();
+		MeshComponent* mesh = d.mesh;
 		SimplePushConstantData push{};
 		const glm::mat3 nrm = obj.getNormalTransform();
 		push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);

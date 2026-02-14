@@ -11,6 +11,8 @@
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/euler_angles.hpp>
 #include <algorithm>
 
 namespace ve {
@@ -18,8 +20,9 @@ namespace ve {
 struct SkyboxPushConstantData {
 	alignas(16) glm::mat4 transform;
 	alignas(16) glm::vec4 params;  // x=exposure, yzw=tint
+	alignas(4)  float output_depth_one;  // 1.0 for background pass (fragment outputs depth 1.0 for eEqual test)
 };
-static_assert(sizeof(SkyboxPushConstantData) == 80, "SkyboxPushConstantData size mismatch");
+static_assert(sizeof(SkyboxPushConstantData) == 96, "SkyboxPushConstantData size mismatch");
 
 SkyboxRenderSystem::SkyboxRenderSystem(
 	VeDevice& device,
@@ -103,11 +106,23 @@ void SkyboxRenderSystem::loadCubeModel(VeResourceManager& resource_manager, cons
 	auto model = VeModel::load(resource_manager, cube_model_path, nullptr, nullptr);
 	std::unordered_map<uint32_t, VeGameObject> temp;
 	model->addToScene(temp, {0, 0, 0}, {0, 0, 0}, {s, s, s});
-	if (!temp.empty())
-		m_cube_object = std::move(temp.begin()->second);
+	// addToScene uses a wrapper (no mesh); take the first object that has a mesh
+	for (auto& [id, obj] : temp) {
+		if (obj.getComponent<MeshComponent>()) {
+			m_cube_object = std::move(obj);
+			break;
+		}
+	}
 	if (!m_cube_object.getComponent<MeshComponent>()) {
 		VE_LOGE("Failed to load cube model for skybox");
+		return;
 	}
+	// Clear parent (wrapper is destroyed when temp goes out of scope) and bake scale into local transform
+	m_cube_object.setParent(nullptr);
+	auto* tr = m_cube_object.getComponent<TransformComponent>();
+	tr->setTranslation({0.f, 0.f, 0.f});
+	tr->setRotationEuler({0.f, 0.f, 0.f});
+	tr->setScale({s, s, s});
 }
 
 void SkyboxRenderSystem::createPipelineLayout(
@@ -136,8 +151,7 @@ void SkyboxRenderSystem::createPipeline(vk::Format color_format, vk::SampleCount
 	pipeline_config.multisample_info.rasterizationSamples = sample_count;
 
 	pipeline_config.color_format = color_format;
-	// only inside faces need to be visible
-	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eFront;
+	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eBack;
 	pipeline_config.depth_stencil_info.depthWriteEnable = VK_TRUE;
 	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLessOrEqual;
 	auto attribute_descriptions = VeMesh::Vertex::getAttributeDescriptionsSimple();
@@ -150,6 +164,24 @@ void SkyboxRenderSystem::createPipeline(vk::Format color_format, vk::SampleCount
 		pipeline_config
 	);
 	assert(m_ve_pipeline && "Failed to create skybox pipeline");
+
+	// Background-only pipeline: only draw where depth is still clear (1.0). Used after opaque so transparent windows show geometry behind them.
+	PipelineConfigInfo bg_config{};
+	VePipeline::defaultPipelineConfigInfo(bg_config, m_ve_device);
+	bg_config.multisample_info.rasterizationSamples = sample_count;
+	bg_config.color_format = color_format;
+	bg_config.rasterization_info.cullMode = vk::CullModeFlagBits::eNone;
+	bg_config.depth_stencil_info.depthTestEnable = VK_TRUE;
+	bg_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eEqual;
+	bg_config.depth_stencil_info.depthWriteEnable = VK_FALSE;
+	bg_config.attribute_descriptions = {attribute_descriptions[0]};
+	bg_config.pipeline_layout = *m_pipeline_layout;
+	m_ve_pipeline_background = std::make_unique<VePipeline>(
+		m_ve_device,
+		m_shader_path,
+		bg_config
+	);
+	assert(m_ve_pipeline_background && "Failed to create skybox background pipeline");
 }
 
 // Draws a big cube and binds cubemap texture for shader
@@ -182,7 +214,8 @@ void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 
 	if (m_settings.rotate) {
 		float speed = 0.004f;
-		transform->rotation += glm::vec3{-speed * frame_info.frame_time, 0.2f * speed * frame_info.frame_time, 0.0f};
+		glm::vec3 euler_delta{-speed * frame_info.frame_time, 0.2f * speed * frame_info.frame_time, 0.0f};
+		transform->setRotation(transform->getRotation() * glm::quat_cast(glm::eulerAngleZYX(euler_delta.z, euler_delta.y, euler_delta.x)));
 	}
 
 	SkyboxPushConstantData push{};
@@ -192,6 +225,58 @@ void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 	push.params.y = m_settings.is_day ? 1.05f : 0.9f;   // R
 	push.params.z = m_settings.is_day ? 1.0f : 0.95f;   // G
 	push.params.w = m_settings.is_day ? 0.95f : 1.1f;   // B
+	push.output_depth_one = 0.0f;
+
+	frame_info.command_buffer.pushConstants(
+		*m_pipeline_layout,
+		vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+		0,
+		vk::ArrayProxy<const uint8_t>(sizeof(SkyboxPushConstantData), reinterpret_cast<const uint8_t*>(&push))
+	);
+
+	mesh->getMesh()->bindVertexBuffer(frame_info.command_buffer);
+	mesh->getMesh()->bindIndexBuffer(frame_info.command_buffer);
+	mesh->getMesh()->drawIndexed(frame_info.command_buffer);
+}
+
+void SkyboxRenderSystem::renderAsBackground(VeFrameInfo& frame_info) {
+	if (!m_has_cubemap_descriptor)
+		return;
+
+	if (m_pending_load.has_value()) {
+		m_ve_device.getDevice().waitIdle();
+		size_t idx = *m_pending_load;
+		loadSkyboxTexture(m_available_skyboxes[idx].path);
+		m_current_index = idx;
+		m_pending_load = std::nullopt;
+	}
+
+	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline_background->getPipeline());
+	frame_info.command_buffer.bindDescriptorSets(
+		vk::PipelineBindPoint::eGraphics,
+		*m_pipeline_layout,
+		{},
+		{*frame_info.global_descriptor_set, *frame_info.cubemap_descriptor_set},
+		{}
+	);
+
+	auto* mesh = m_cube_object.getComponent<MeshComponent>();
+	auto* transform = m_cube_object.getComponent<TransformComponent>();
+	assert(mesh && mesh->hasMesh() && transform && "Cube must have Mesh and Transform components");
+
+	if (m_settings.rotate) {
+		float speed = 0.004f;
+		glm::vec3 euler_delta{-speed * frame_info.frame_time, 0.2f * speed * frame_info.frame_time, 0.0f};
+		transform->setRotation(transform->getRotation() * glm::quat_cast(glm::eulerAngleZYX(euler_delta.z, euler_delta.y, euler_delta.x)));
+	}
+
+	SkyboxPushConstantData push{};
+	push.transform = transform->getTransform();
+	push.params.x = m_settings.exposure;
+	push.params.y = m_settings.is_day ? 1.05f : 0.9f;
+	push.params.z = m_settings.is_day ? 1.0f : 0.95f;
+	push.params.w = m_settings.is_day ? 0.95f : 1.1f;
+	push.output_depth_one = 1.0f;
 
 	frame_info.command_buffer.pushConstants(
 		*m_pipeline_layout,

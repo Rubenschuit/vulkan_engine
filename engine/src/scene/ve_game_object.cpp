@@ -13,10 +13,13 @@ static std::atomic<uint32_t> current_id{0};
 VeGameObject::VeGameObject(VeGameObject&& other) noexcept
 	: m_name(std::move(other.m_name)),
 	  m_id(other.m_id),
+	  m_is_active(other.m_is_active),
 	  m_parent(other.m_parent),
 	  m_children(std::move(other.m_children)),
 	  m_cached_world_transform(other.m_cached_world_transform),
 	  m_cached_world_normal(other.m_cached_world_normal),
+	  m_world_transform_dirty(true),
+	  m_world_normal_dirty(true),
 	  m_components(std::move(other.m_components)),
 	  m_component_map(std::move(other.m_component_map)) {
 	// Update parent's child pointer if we had a parent
@@ -44,10 +47,13 @@ VeGameObject& VeGameObject::operator=(VeGameObject&& other) noexcept {
 		return *this;
 	m_name = std::move(other.m_name);
 	m_id = other.m_id;
+	m_is_active = other.m_is_active;
 	m_parent = other.m_parent;
 	m_children = std::move(other.m_children);
 	m_cached_world_transform = other.m_cached_world_transform;
 	m_cached_world_normal = other.m_cached_world_normal;
+	m_world_transform_dirty = true;
+	m_world_normal_dirty = true;
 	m_components = std::move(other.m_components);
 	m_component_map = std::move(other.m_component_map);
 	// Update parent's child pointer if we had a parent
@@ -88,11 +94,11 @@ VeGameObject VeGameObject::createPointLight(float intensity, float radius, glm::
 	auto* pl = game_object.addComponent<PointLightComponent>();
 	pl->intensity = intensity;
 	pl->color = color;
-	pl->rotates = true;
-	pl->casts_shadow = true;
+	pl->rotates = false;
+	pl->casts_shadow = false;
 
 	auto* transform = game_object.getComponent<TransformComponent>();
-	transform->scale = glm::vec3(radius);
+	transform->setScale(glm::vec3(radius));
 	return game_object;
 }
 
@@ -120,7 +126,11 @@ const glm::mat4& VeGameObject::getTransform() const {
 	assert(transform && "VeGameObject must have TransformComponent");
 	const glm::mat4& local = transform->getTransform();
 	if (m_parent) {
-		m_cached_world_transform = m_parent->getTransform() * local;
+		if (m_world_transform_dirty) {
+			m_cached_world_transform = m_parent->getTransform() * local;
+			m_world_transform_dirty = false;
+			m_world_normal_dirty = true;
+		}
 		return m_cached_world_transform;
 	}
 	return local;
@@ -130,9 +140,11 @@ const glm::mat3& VeGameObject::getNormalTransform() const {
 	auto* transform = getComponent<TransformComponent>();
 	assert(transform && "VeGameObject must have TransformComponent");
 	if (m_parent) {
-		// World normal = inverse(transpose(mat3(world_transform)))
-		const glm::mat4& world = getTransform();
-		m_cached_world_normal = glm::mat3(glm::inverse(glm::transpose(world)));
+		if (m_world_normal_dirty) {
+			const glm::mat4& world = getTransform();
+			m_cached_world_normal = glm::mat3(glm::inverse(glm::transpose(world)));
+			m_world_normal_dirty = false;
+		}
 		return m_cached_world_normal;
 	}
 	return transform->getNormalTransform();
@@ -149,10 +161,25 @@ void VeGameObject::setParent(VeGameObject* parent) {
 	if (m_parent) {
 		m_parent->m_children.push_back(this);
 	}
+	invalidateWorldTransform();
 }
 
 void VeGameObject::addChild(VeGameObject* child) {
 	child->setParent(this);
+}
+
+void VeGameObject::invalidateMeshWorldAABBs() {
+	if (auto* mesh = getComponent<MeshComponent>())
+		mesh->invalidateWorldAABB();
+}
+
+void VeGameObject::invalidateWorldTransform() {
+	m_world_transform_dirty = true;
+	m_world_normal_dirty = true;
+	invalidateMeshWorldAABBs();
+	for (VeGameObject* child : m_children) {
+		child->invalidateWorldTransform();
+	}
 }
 
 } // namespace ve

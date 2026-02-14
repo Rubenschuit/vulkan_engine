@@ -42,7 +42,7 @@ struct UniformBuffer {
 	float4x4 projection_view;
 	float4 camera_position; // .w unused
 	float4 ambient_light_color;
-	PointLight point_lights[20]; // constant must be equal to ve::MAX_LIGHTS, TODO use specialization constant
+	PointLight point_lights[40]; // constant must be equal to ve::MAX_LIGHTS, TODO use specialization constant
 	ShadowLight shadow_lights[3]; // MAX_SHADOW_LIGHTS
 	uint32_t num_lights;
 	uint32_t num_shadow_lights;
@@ -60,7 +60,7 @@ struct PushConstantData {
 	[vk::offset(96)]  float4   normal_col2;
 	[vk::offset(112)] float    has_texture;
 	[vk::offset(116)] float    alpha_cutoff;
-	[vk::offset(120)] uint32_t alpha_flags;    // bits 0-1 = alpha_mode (0 OPAQUE, 1 MASK, 2 BLEND), bit 2 = double_sided
+	[vk::offset(120)] uint32_t material_flags;  // bits 0-1: alpha_mode, bit 2: double_sided, bit 3: flip_tex_coord_v, bit 4: use_spec_gloss_texture
 };
 [push_constant]
 PushConstantData push_constants;
@@ -95,15 +95,13 @@ VertexOutput vertMain(VertexInput input) {
 	output.frag_pos_world = world_pos.xyz;
 
 	// Transform normal and tangent to world space
-	float3 normal;
-	float3 tangent;
-	tangent.x = dot(push_constants.normal_col0.xyz, input.in_tangent.xyz);
-	tangent.y = dot(push_constants.normal_col1.xyz, input.in_tangent.xyz);
-	tangent.z = dot(push_constants.normal_col2.xyz, input.in_tangent.xyz);
-	normal.x = dot(push_constants.normal_col0.xyz, input.in_normal);
-	normal.y = dot(push_constants.normal_col1.xyz, input.in_normal);
-	normal.z = dot(push_constants.normal_col2.xyz, input.in_normal);
-	normal = normalize(normal);
+	float3x3 normal_matrix = float3x3(
+		float3(push_constants.normal_col0.x, push_constants.normal_col1.x, push_constants.normal_col2.x),
+		float3(push_constants.normal_col0.y, push_constants.normal_col1.y, push_constants.normal_col2.y),
+		float3(push_constants.normal_col0.z, push_constants.normal_col1.z, push_constants.normal_col2.z)
+	);
+	float3 tangent = mul(normal_matrix, input.in_tangent.xyz);
+	float3 normal = normalize(mul(normal_matrix, input.in_normal));
 
 	// Compute bitangent as cross product of normal and tangent with proper handedness ( *-1 or *1 )
 	float3 bitangent = normalize(cross(normal, tangent) * input.in_tangent.w);
@@ -113,7 +111,10 @@ VertexOutput vertMain(VertexInput input) {
 	output.frag_bitangent_world = bitangent;
 	// pass through
     output.frag_color = input.in_color;
-	output.frag_tex_coord = input.in_tex_coord;
+	float2 tex_coord = input.in_tex_coord;
+	if ((push_constants.material_flags & 8u) != 0u)  // flip_tex_coord_v (bit 3)
+		tex_coord.y = 1.0f - tex_coord.y;
+	output.frag_tex_coord = tex_coord;
 
     // calculate shadow coordinates only if shadows are enabled
 	if (ubo.shadow_mode != ShadowMode::DISABLED) {
@@ -134,6 +135,22 @@ Sampler2D normal_texture;
 
 [vk::binding(2, 1)]
 Sampler2D metallic_roughness_texture;
+
+[vk::binding(3, 1)]
+Sampler2D occlusion_texture;
+
+[vk::binding(4, 1)]
+Sampler2D emissive_texture;
+
+// Material PBR data
+struct MaterialConstants {
+	float4 base_color_factor;
+	float4 emissive_pad;   // xyz = emissive_factor, w = pad
+	float4 params;         // x = metallic, y = roughness, z = emissive_strength, w = transmission
+	float4 extra;          // xyz = dielectric F0 (KHR_materials_pbrSpecularGlossiness.specularFactor or IOR-derived), w = ior
+};
+[vk::binding(5, 1)]
+ConstantBuffer<MaterialConstants> material_constants;
 
 // Shadow maps (set 2) - single 2D array texture
 // Note: On MoltenVK, comparison sampler is not available, so we use regular sampler
@@ -233,16 +250,33 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	float4 albedo = albedo_texture.Sample(tex_coord);
 
 	// glTF alphaMode: OPAQUE(0)=no discard, MASK(1)=discard below cutoff, BLEND(2)=no discard
-	uint32_t alpha_mode = push_constants.alpha_flags & 3u;
+	uint32_t alpha_mode = push_constants.material_flags & 3u;
 	if (alpha_mode == 1 && albedo.a < push_constants.alpha_cutoff)
 		discard;
 
 	float4 mr = metallic_roughness_texture.Sample(tex_coord);
 	float4 normal_map = normal_texture.Sample(tex_coord);
+	float4 occlusion_sample = occlusion_texture.Sample(tex_coord);
+	float3 emissive_sample = emissive_texture.Sample(tex_coord).rgb;
 
-	// Extract PBR properties
-	float metallic = mr.b;
-	float roughness = mr.g;
+	// Apply material factors from glTF (baseColorFactor, metallicFactor, roughnessFactor, emissiveFactor, emissiveStrength)
+	albedo *= material_constants.base_color_factor;
+	float metallic;
+	float roughness;
+	float3 F0;
+	if ((push_constants.material_flags & 16u) != 0u) {
+		// Spec-gloss texture
+		metallic = 0.0;
+		roughness = (1.0 - mr.a) * material_constants.params.y;
+		F0 = material_constants.extra.xyz * mr.rgb;
+	} else {
+		// Metallic-roughness texture
+		metallic = mr.b * material_constants.params.x;
+		roughness = mr.g * material_constants.params.y;
+		F0 = lerp(material_constants.extra.xyz, albedo.rgb, metallic);
+	}
+	float transmission = material_constants.params.w;
+	emissive_sample = emissive_sample * material_constants.emissive_pad.xyz * material_constants.params.z;
 
 	float3 N = normalize(in_vert.frag_normal_world);
 	float3 T = normalize(in_vert.frag_tangent_world);
@@ -266,9 +300,6 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 
 	// View direction
 	float3 view_dir = normalize(ubo.camera_position.xyz - in_vert.frag_pos_world);
-
-	// Calculate Fresnel F0
-	float3 F0 = lerp(float3(0.04), albedo.rgb, metallic);
 
 	// Create mapping from light index to shadow term (defaults to 1.0 = no shadow)
 	float shadow_terms[20]; // MAX_LIGHTS
@@ -328,17 +359,27 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		// Energy conservation through diffuse coefficient
 		float3 kD = float3(1.0, 1.0, 1.0) - F;
 		kD *= 1.0 - metallic;
+		// Glass / high-transmission: reduce diffuse so surface is reflection-dominated, not matte
+		kD *= 1.0 - transmission;
 
 		// Add together the diffuse and specular, multiplied by shadow term
 		Lo += (kD * albedo.rgb / PI + specular) * radiance * NdotL * shadow_terms[i];
 	}
 
-	// Ambient lighting
-	float3 ambient = ubo.ambient_light_color.xyz * albedo.rgb; // ambient already contains intensity
 
-	// Final color
-	c.rgb = Lo + ambient;
-	c.a = albedo.a;
+
+	// Ambient lighting (scaled by occlusion: white = full ambient, black = no ambient)
+	float3 ambient = ubo.ambient_light_color.xyz * albedo.rgb * occlusion_sample.r;
+	// Glass / high-transmission: reduce ambient so it doesn't look flat
+	ambient *= 1.0 - transmission;
+
+	// Final color: lit + ambient + emissive
+	c.rgb = Lo + ambient + emissive_sample;
+	// High-transmission materials: enforce minimum alpha so glass/windows/bottles stay clearly visible.
+	// Threshold must match HIGH_TRANSMISSION_THRESHOLD in pbr_render_system.cpp.
+	static const float HIGH_TRANSMISSION_THRESHOLD = 0.5;
+	float raw_alpha = (1.0 - transmission) * albedo.a;
+	c.a = (transmission > HIGH_TRANSMISSION_THRESHOLD) ? max(raw_alpha, 0.45) : raw_alpha;
 
 	return c;
 }

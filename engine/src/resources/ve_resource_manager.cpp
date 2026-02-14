@@ -215,9 +215,13 @@ ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& 
                                                              const std::filesystem::path& albedo_path,
                                                              const std::filesystem::path& normal_path,
                                                              const std::filesystem::path& metallic_roughness_path,
+                                                             const std::filesystem::path& occlusion_path,
+                                                             const std::filesystem::path& emissive_path,
                                                              MaterialAlphaProps alpha_props,
+                                                             MaterialFactors factors,
                                                              VeDescriptorPool* pool,
-                                                             VeDescriptorSetLayout* layout) {
+                                                             VeDescriptorSetLayout* layout,
+                                                             bool flip_tex_coord_v) {
 	auto type_idx = typeid(VeMaterial).hash_code();
 	auto& type_resources = m_resources[type_idx];
 	auto it = type_resources.find(resource_id);
@@ -229,7 +233,8 @@ ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& 
 
 	auto resource = std::make_shared<VeMaterial>(*this, resource_id,
 	                                            albedo_path, normal_path, metallic_roughness_path,
-	                                            alpha_props, pool, layout);
+	                                            occlusion_path, emissive_path,
+	                                            alpha_props, factors, pool, layout, flip_tex_coord_v);
 	if (!resource->load()) {
 		return ResourceHandle<VeMaterial>();
 	}

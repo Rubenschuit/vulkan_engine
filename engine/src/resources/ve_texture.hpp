@@ -19,6 +19,8 @@ enum class TextureType {
 	ALBEDO,
 	NORMAL,
 	METALLIC_ROUGHNESS,
+	OCCLUSION,
+	EMISSIVE,
 };
 
 class VENGINE_API VeTexture : public Resource {
@@ -40,7 +42,7 @@ public:
 	// Create a default texture (4x4 placeholder for albedo/normal/metallic-roughness)
 	static std::shared_ptr<VeTexture> createDefault(VeDevice& device, TextureType type);
 	// Load texture via ResourceManager; returns default if path is placeholder or missing
-	static ResourceHandle<VeTexture> loadOrDefault(VeResourceManager& resource_manager, const std::filesystem::path& path, TextureType fallback_type, vk::Format format);
+	static ResourceHandle<VeTexture> loadOrDefault(VeResourceManager& resource_manager, const std::filesystem::path& path, TextureType fallback_type);
 
 	// For createDefault - constructs texture from generated pixel data
 	VeTexture(VeDevice& device, uint32_t width, uint32_t height, TextureType type);

@@ -46,7 +46,7 @@ protected:
 	VeDevice m_ve_device;
 	VeRenderer m_ve_renderer;
 	std::unique_ptr<ImGuiLayer> m_imgui_layer{}; // created in cpp
-	std::vector<std::unique_ptr<VeBuffer>> m_uniform_buffers{};
+	std::vector<std::unique_ptr<VeBuffer>> m_uniform_buffers{}; // one per frame in flight
 
 	// Descriptor pool, layouts, sets
 	std::shared_ptr<VeDescriptorPool> m_global_pool{};

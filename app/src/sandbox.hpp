@@ -1,6 +1,7 @@
 #pragma once
 #include "VEngine/VEngine.hpp"
 #include "asset_paths.hpp"
+#include "scenes/bistro_scene.hpp"
 #include "scenes/simple_scene.hpp"
 #include "scenes/sponza_scene.hpp"
 #include <filesystem>
@@ -33,18 +34,40 @@ private:
 	void renderControlsWindow();
 	void recreatePipelines();
 
+	AssetPaths m_paths;
+
+	// Resource manager for models (and textures). Must outlive any ResourceHandles.
+	std::unique_ptr<VeResourceManager> m_resource_manager;
+
+	// Default material UBO for untextured meshes (binding 5 of material layout).
+	std::unique_ptr<VeBuffer> m_default_material_ubo;
+	// Particle textures (glow, fire, smoke) for particle system and point lights.
+	ResourceHandle<VeTexture> m_particle_texture_handle;
+	ResourceHandle<VeTexture> m_fire_texture_handle;
+	ResourceHandle<VeTexture> m_smoke_texture_handle;
+	// Default PBR textures: must outlive descriptor sets that reference them.
+	ResourceHandle<VeTexture> m_default_albedo_handle;
+	ResourceHandle<VeTexture> m_default_normal_handle;
+	ResourceHandle<VeTexture> m_default_mr_handle;
+	ResourceHandle<VeTexture> m_default_occlusion_handle;
+	ResourceHandle<VeTexture> m_default_emissive_handle;
+	// Particle descriptor set: used by particle system and point light system. All scenes.
+	vk::raii::DescriptorSet m_particle_descriptor_set{nullptr};
+	// Default material descriptor set: untextured fallback
+	vk::raii::DescriptorSet m_default_material_descriptor_set{nullptr};
+
 	// UI context captured during renderUI(), consumed in updateParticles() for example.
 	struct SandboxUIContext : public UIContext {
-		enum class SceneType { NONE = 0, SIMPLE = 1, SPONZA = 2, SPONZA_LOW = 3 };
-		SceneType current_scene = SceneType::SPONZA;
+		enum class SceneType { NONE = 0, SIMPLE = 1, SPONZA = 2, SPONZA_LOW = 3, BISTRO = 4 };
+		SceneType current_scene = SceneType::BISTRO;
 		RenderMode render_mode = RenderMode::BRDF_MICROFACET;
 
 		// ambient light (color RGB + intensity)
 		glm::vec3 ambient_light_color = glm::vec3(1.0f, 1.0f, 1.0f);
 		float ambient_light_intensity = 0.006f;
 
-		// sponza settings
-		float sun_intensity = 2000.0f;
+		// Sun intensity (per scene; initialised from active scene in loadScene)
+		float sun_intensity = 0.0f;
 
 		// particle system
 		ParticleMode current_mode = ParticleMode::COOL;
@@ -69,17 +92,7 @@ private:
 		bool emit_burst = false;
 		int emit_count = 1000;
 	};
-
-	AssetPaths m_paths;
-
-	// Resource manager for models (and textures). Must outlive any ResourceHandles.
-	std::unique_ptr<VeResourceManager> m_resource_manager;
-
-	// Shared particle textures (used by particles, point lights, and SimpleScene; always loaded)
-	ResourceHandle<VeTexture> m_particle_texture_handle;
-	ResourceHandle<VeTexture> m_fire_texture_handle;
-	ResourceHandle<VeTexture> m_smoke_texture_handle;
-	vk::raii::DescriptorSet m_particle_texture_descriptor_set{nullptr};
+	SandboxUIContext ui_actions;
 
 	// Scenes - dynamically loaded/unloaded based on active selection
 	std::unique_ptr<VeScene> m_active_scene;
@@ -89,7 +102,6 @@ private:
 	void loadScene(SandboxUIContext::SceneType scene_type);
 	void unloadScene();
 
-	SandboxUIContext ui_actions;
 	std::chrono::steady_clock::time_point m_cpu_start;
 
 	// Render systems

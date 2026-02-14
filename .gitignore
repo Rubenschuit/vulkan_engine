@@ -22,7 +22,7 @@
 *.la
 *.lo
 
-# Shared objects (inc. Windows DLLs)
+# Shared objects
 *.dll
 *.so
 *.so.*
@@ -70,3 +70,5 @@ compile_commands.json
 # FetchContent dependencies (source only in external, builds go to build/)
 external/ktx-software/
 external/*-subbuild/
+
+*.blend

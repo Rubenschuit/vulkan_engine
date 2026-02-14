@@ -2,10 +2,10 @@
 #include "scene/ve_game_object.hpp"
 #include "resources/ve_mesh.hpp"
 
-#include <cstring>
-
 #define GLM_FORCE_RADIANS
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/euler_angles.hpp>
 
 namespace ve {
 
@@ -24,73 +24,55 @@ template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MeshComponent>();
 // ---------------------------------------------------------------------------
 
 const glm::mat4& TransformComponent::getTransform() const {
-	updateMatrices();
+	if (m_transform_dirty)
+		updateTransform();
 	return m_cached_transform;
 }
 
 const glm::mat3& TransformComponent::getNormalTransform() const {
-	updateMatrices();
+	if (m_transform_dirty)
+		updateTransform();
 	return m_cached_normal_transform;
 }
 
-void TransformComponent::updateMatrices() const {
-	if (translation == m_last_translation &&
-	    rotation == m_last_rotation &&
-	    scale == m_last_scale) {
-		return;
-	}
+void TransformComponent::setRotationEuler(glm::vec3 euler_rad) {
+	// Match previous Euler order: R = Rz(z) * Ry(y) * Rx(x)
+	rotation = glm::quat_cast(glm::eulerAngleZYX(euler_rad.z, euler_rad.y, euler_rad.x));
+	m_transform_dirty = true;
+}
 
-	const float c3 = glm::cos(rotation.z);
-	const float s3 = glm::sin(rotation.z);
-	const float c2 = glm::cos(rotation.x);
-	const float s2 = glm::sin(rotation.x);
-	const float c1 = glm::cos(rotation.y);
-	const float s1 = glm::sin(rotation.y);
+void TransformComponent::setTranslation(glm::vec3 pos) {
+	translation = pos;
+	m_transform_dirty = true;
+}
 
-	m_cached_transform = glm::mat4{
-	    {
-	        scale.x * (c1 * c3 + s1 * s2 * s3),
-	        scale.x * (c2 * s3),
-	        scale.x * (c1 * s2 * s3 - c3 * s1),
-	        0.0f,
-	    },
-	    {
-	        scale.y * (c3 * s1 * s2 - c1 * s3),
-	        scale.y * (c2 * c3),
-	        scale.y * (c1 * c3 * s2 + s1 * s3),
-	        0.0f,
-	    },
-	    {
-	        scale.z * (c2 * s1),
-	        scale.z * (-s2),
-	        scale.z * (c1 * c2),
-	        0.0f,
-	    },
-	    {translation.x, translation.y, translation.z, 1.0f}};
+void TransformComponent::setRotation(glm::quat q) {
+	rotation = q;
+	m_transform_dirty = true;
+}
+
+void TransformComponent::setScale(glm::vec3 s) {
+	scale = s;
+	m_transform_dirty = true;
+}
+
+// Updates mutable private members m_cached_transform, m_cached_normal_transform
+// and m_transform_dirty.
+void TransformComponent::updateTransform() const {
+	const glm::mat4 R = glm::mat4_cast(rotation);
+	const glm::mat4 S = glm::scale(glm::mat4(1.0f), scale);
+	const glm::mat4 T = glm::translate(glm::mat4(1.0f), translation);
+	m_cached_transform = T * R * S;
 
 	const glm::vec3 inverse_scale = 1.0f / scale;
-	m_cached_normal_transform = glm::mat3{
-	    {
-	        inverse_scale.x * (c1 * c3 + s1 * s2 * s3),
-	        inverse_scale.x * (c2 * s3),
-	        inverse_scale.x * (c1 * s2 * s3 - c3 * s1)
-	    },
-	    {
-	        inverse_scale.y * (c3 * s1 * s2 - c1 * s3),
-	        inverse_scale.y * (c2 * c3),
-	        inverse_scale.y * (c1 * c3 * s2 + s1 * s3)
-	    },
-	    {
-	        inverse_scale.z * (c2 * s1),
-	        inverse_scale.z * (-s2),
-	        inverse_scale.z * (c1 * c2)
-	    }
-	};
+	const glm::mat3 R3 = glm::mat3_cast(rotation);
+	const glm::mat3 S3(inverse_scale.x, 0.0f, 0.0f, 0.0f, inverse_scale.y, 0.0f, 0.0f, 0.0f, inverse_scale.z);
+	m_cached_normal_transform = R3 * S3;
 
-	m_last_translation = translation;
-	m_last_rotation = rotation;
-	m_last_scale = scale;
+	m_transform_dirty = false;
+	m_owner->invalidateWorldTransform();
 }
+
 
 // ---------------------------------------------------------------------------
 // PointLightComponent
@@ -106,28 +88,33 @@ void PointLightComponent::update(float delta_time) {
 
 	const float speed = 0.04f;
 	const glm::mat4 rot = glm::rotate(glm::mat4(1.0f), speed * delta_time, glm::vec3(0.0f, 0.0f, 1.0f));
-	glm::vec4 pos{transform->translation, 1.0f};
+	glm::vec4 pos{transform->getTranslation(), 1.0f};
 	pos = rot * pos;
-	transform->translation = glm::vec3(pos);
+	transform->setTranslation(glm::vec3(pos));
 }
 
 // ---------------------------------------------------------------------------
 // MeshComponent
 // ---------------------------------------------------------------------------
 
-VeMesh::AABB MeshComponent::getWorldAABB() const {
-	const glm::mat4& model = getOwner()->getTransform();
-	const bool transform_changed = std::memcmp(&m_last_model_matrix[0], &model[0], sizeof(glm::mat4)) != 0;
-	if (!m_world_aabb_valid || transform_changed) {
-		m_cached_world_aabb = transformAABB(getMesh()->getLocalAABB(), model);
-		m_last_model_matrix = model;
-		m_world_aabb_valid = true;
-	}
+const VeMesh::AABB& MeshComponent::getWorldAABB() const {
+	if (m_world_aabb_dirty)
+		updateWorldAABB();
 	return m_cached_world_aabb;
 }
 
+void MeshComponent::invalidateWorldAABB() {
+	m_world_aabb_dirty = true;
+}
+
+void MeshComponent::updateWorldAABB() const {
+	const glm::mat4& model = getOwner()->getTransform();
+	m_cached_world_aabb = transformAABB(getMesh()->getLocalAABB(), model);
+	m_world_aabb_dirty = false;
+}
+
 void MeshComponent::render() {
-// unused
+// unused, render systems handle this for now
 }
 
 } // namespace ve

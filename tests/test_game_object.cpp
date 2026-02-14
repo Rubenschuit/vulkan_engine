@@ -41,19 +41,18 @@ TEST_CASE("VeGameObject transform matrix calculation", "[gameobject][transform]"
 	}
 
 	SECTION("Rotation only (Y-axis)") {
-		obj.getComponent<ve::TransformComponent>()->rotation = {0.0f, glm::half_pi<float>(), 0.0f};
+		obj.getComponent<ve::TransformComponent>()->setRotationEuler({0.0f, glm::half_pi<float>(), 0.0f});
 		glm::mat4 expected = glm::rotate(glm::mat4(1.0f), glm::half_pi<float>(), {0.0f, 1.0f, 0.0f});
 		REQUIRE(mat4Equal(obj.getTransform(), expected));
 	}
 
-	SECTION("Rotation order (YXZ intrinsic)") {
-		obj.getComponent<ve::TransformComponent>()->rotation = {0.5f, 0.5f, 0.5f}; // Radians
+	SECTION("Rotation order (ZYX: Rz*Ry*Rx)") {
+		obj.getComponent<ve::TransformComponent>()->setRotationEuler({0.5f, 0.5f, 0.5f}); // Radians (x,y,z)
 
-		glm::mat4 ry = glm::rotate(glm::mat4(1.0f), 0.5f, {0.0f, 1.0f, 0.0f});
 		glm::mat4 rx = glm::rotate(glm::mat4(1.0f), 0.5f, {1.0f, 0.0f, 0.0f});
+		glm::mat4 ry = glm::rotate(glm::mat4(1.0f), 0.5f, {0.0f, 1.0f, 0.0f});
 		glm::mat4 rz = glm::rotate(glm::mat4(1.0f), 0.5f, {0.0f, 0.0f, 1.0f});
-
-		glm::mat4 expected = ry * rx * rz;
+		glm::mat4 expected = rz * ry * rx;
 
 		REQUIRE(mat4Equal(obj.getTransform(), expected));
 	}

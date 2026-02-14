@@ -17,12 +17,15 @@ struct AssetPaths {
 	std::filesystem::path particle_texture;
 	std::filesystem::path fire_texture;
 	std::filesystem::path smoke_texture;
+	std::filesystem::path mots_texture;
 	std::filesystem::path skybox_dir;
 	// shaders
 	std::filesystem::path shaders_dir;
 
 	std::filesystem::path shader(const char* name) const { return shaders_dir / name; }
-	std::filesystem::path sponza_model(const char* variant) const { return project_root / "models" / variant / "glTF" / "Sponza.gltf"; }
+	std::filesystem::path sponza_model(const char* variant = "") const { return project_root / "models" / variant / "glTF" / "Sponza.gltf"; }
+	std::filesystem::path bistro_model() const { return project_root / "models" / "bistro-master" / "bistro.gltf"; }
+	std::filesystem::path mybistro_model() const { return project_root / "models" / "mybistro" / "bistro.gltf"; }
 
 	explicit AssetPaths(const std::filesystem::path& root)
 		: project_root(root),
@@ -35,6 +38,7 @@ struct AssetPaths {
 		  particle_texture(root / "textures" / "light.ktx2"),
 		  fire_texture(root / "textures" / "fire_ball.ktx"),
 		  smoke_texture(root / "textures" / "smoke_atlas.ktx2"),
+		  mots_texture(root / "textures" / "mots.png"),
 		  skybox_dir(root / "textures" / "skybox"),
 		  shaders_dir(root / "shaders") {}
 };

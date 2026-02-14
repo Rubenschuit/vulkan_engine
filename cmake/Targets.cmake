@@ -82,6 +82,15 @@ if (IMGUI_DIR)
  	endif()
 endif()
 
+# MikkTSpace (vendored in external/mikktspace) for tangent generation when glTF has no TANGENT
+set(MIKKTSPACE_DIR "${PROJECT_SOURCE_DIR}/external/mikktspace")
+if(EXISTS "${MIKKTSPACE_DIR}/mikktspace.c")
+	target_sources(VEngineLib PRIVATE ${MIKKTSPACE_DIR}/mikktspace.c)
+	target_include_directories(VEngineLib SYSTEM PRIVATE ${MIKKTSPACE_DIR})
+	set_source_files_properties(${MIKKTSPACE_DIR}/mikktspace.c PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+	message(STATUS "MikkTSpace (vendored): ${MIKKTSPACE_DIR}")
+endif()
+
 if (APPLE)
 	target_link_libraries(VEngineLib PUBLIC
 		"-framework Cocoa" "-framework IOKit" "-framework CoreVideo" "-framework Metal"

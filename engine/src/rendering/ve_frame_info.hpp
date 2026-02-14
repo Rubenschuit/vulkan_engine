@@ -15,6 +15,15 @@ for each frame in the rendering process. */
 
 namespace ve {
 
+class MeshComponent;
+
+// Cached visible object to avoid repeated getComponent<MeshComponent>() when iterating.
+// Build once per frame in culling system.
+struct VisibleObject {
+	VeGameObject* obj = nullptr;
+	MeshComponent* mesh = nullptr;
+};
+
 struct PointLight {
 	glm::vec4 position;
 	glm::vec4 color; // w indicates light intensity
@@ -91,7 +100,7 @@ struct VeFrameInfo {
 	vk::raii::CommandBuffer& compute_command_buffer;
 	ve::VeCamera& camera;
 	std::unordered_map<uint32_t, VeGameObject>& game_objects;
-	std::unordered_map<uint32_t, VeGameObject*>& visible_game_objects;
+	std::unordered_map<uint32_t, VisibleObject>& visible_game_objects;
 	float frame_time;
 	float total_time;
 	uint32_t current_frame;

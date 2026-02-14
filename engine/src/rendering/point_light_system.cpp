@@ -101,13 +101,15 @@ void PointLightSystem::render(VeFrameInfo& frame_info) const {
 	);
 
 	for (auto& [id, obj] : frame_info.game_objects) {
+		if (!obj.isActive())
+			continue;
 		auto* pl = obj.getComponent<PointLightComponent>();
 		auto* transform = obj.getComponent<TransformComponent>();
 		if (!pl || !transform)
 			continue;
 		SimplePushConstantData push{};
-		push.position = glm::vec4{transform->translation, 1.0f};
-		push.scale = transform->scale.x;
+		push.position = glm::vec4{transform->getTranslation(), 1.0f};
+		push.scale = transform->getScale().x;
 		push.color = glm::vec4{pl->color, pl->intensity};
 		// push constant provided as raw bytes to avoid MSVC debug mode corruption with push across dll boundaries
 		frame_info.command_buffer.pushConstants(
@@ -131,6 +133,8 @@ void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBuffe
 	ubo.ambient_light_color.z *= ubo.ambient_light_color.w;
 
 	for (auto& [id, obj] : frame_info.game_objects) {
+		if (!obj.isActive())
+			continue;
 		auto* pl = obj.getComponent<PointLightComponent>();
 		auto* transform = obj.getComponent<TransformComponent>();
 		if (!pl || !transform)
@@ -140,7 +144,7 @@ void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBuffe
 		glm::vec3 color = pl->color;
 
 		// Populate point light data
-		ubo.point_lights[num_lights].position = glm::vec4{transform->translation, 1.0f};
+		ubo.point_lights[num_lights].position = glm::vec4{transform->getTranslation(), 1.0f};
 		ubo.point_lights[num_lights].color.x = color.x * pl->intensity;
 		ubo.point_lights[num_lights].color.y = color.y * pl->intensity;
 		ubo.point_lights[num_lights].color.z = color.z * pl->intensity;
@@ -148,9 +152,9 @@ void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBuffe
 
 		// If this light casts shadows, add it to shadow_lights array
 		if (pl->casts_shadow && num_shadow_lights < MAX_SHADOW_LIGHTS) {
-			glm::vec3 light_pos = transform->translation;
+			glm::vec3 light_pos = transform->getTranslation();
 			glm::vec3 scene_center = glm::vec3(0.0f, 0.0f, 0.0f);
-			glm::vec3 view_up = glm::vec3(0.0f, 1.0f, 0.0f);
+			glm::vec3 view_up = glm::vec3(0.0f, 1.0f, 0.0f); // shadow looks down z axis
 			glm::mat4 light_view = glm::lookAt(light_pos, scene_center, view_up);
 			float near_plane = 1.0f;
 			float far_plane = 400.0f;

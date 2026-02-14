@@ -103,9 +103,8 @@ void AabbDebugRenderSystem::render(VeFrameInfo& frame_info) const {
 
 	const glm::vec3 color(1.0f, 0.1f, 0.0f);
 
-	for (auto& [id, obj_ptr] : frame_info.visible_game_objects) {
-		VeGameObject& obj = *obj_ptr;
-		auto* mesh_comp = obj.getComponent<MeshComponent>();
+	for (auto& [id, entry] : frame_info.visible_game_objects) {
+		MeshComponent* mesh_comp = entry.mesh;
 		if (!mesh_comp || !mesh_comp->hasMesh())
 			continue;
 

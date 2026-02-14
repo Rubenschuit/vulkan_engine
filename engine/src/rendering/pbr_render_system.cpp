@@ -20,9 +20,15 @@ struct PbrPushConstantData {
 	alignas(16) glm::mat3x4 normal_transform;
 	alignas(4)  float has_texture;
 	alignas(4)  float alpha_cutoff;
-	alignas(4)  uint32_t alpha_flags;  // bits 0-1: alpha_mode, bit 2: double_sided
+	alignas(4)  uint32_t material_flags;  // bits 0-1: alpha_mode, bit 2: double_sided, bit 3: flip_tex_coord_v, bit 4: use_spec_gloss_texture
 };
 static_assert(sizeof(PbrPushConstantData) <= 128, "Push constants must be 128 bytes for stable layout");
+
+// Objects with any transmission (> 0) are sorted into the transparent pass for proper
+// alpha compositing after the skybox. Among those, only objects above this threshold
+// fully disable depth writes; low-transmission objects still write depth so they
+// properly occlude geometry behind them. Must match the threshold in pbr_shader.slang.
+static constexpr float HIGH_TRANSMISSION_THRESHOLD = 0.5f;
 
 PbrRenderSystem::PbrRenderSystem(
 	VeDevice& device,
@@ -82,45 +88,37 @@ void PbrRenderSystem::createPipeline(vk::Format color_format, vk::SampleCountFla
 	assert(m_ve_pipeline != VK_NULL_HANDLE && "Failed to create pipeline");
 }
 
-void PbrRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
-	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info) const {
+	m_opaque_drawables.clear();
+	m_transparent_drawables.clear();
+	const size_t visible_count = frame_info.visible_game_objects.size();
+	m_opaque_drawables.reserve(std::max(visible_count, m_opaque_drawables.capacity()));
+	m_transparent_drawables.reserve(std::max(visible_count, m_transparent_drawables.capacity()));
 
-	struct Drawable {
-		VkDescriptorSet material_set;
-		VeGameObject* obj;
-		float dist_sq = 0.0f;  // distance squared to camera (for transparent sort)
-		AlphaMode alpha_mode = AlphaMode::ALPHA_OPAQUE;
-	};
-	std::vector<Drawable> opaque_drawables;
-	std::vector<Drawable> transparent_drawables;
 	const glm::vec3 camera_pos = frame_info.camera.getPosition();
 
-	for (auto& [id, obj_ptr] : frame_info.visible_game_objects) {
-		VeGameObject& obj = *obj_ptr;
-		auto* mesh = obj.getComponent<MeshComponent>();
-		auto* transform = obj.getComponent<TransformComponent>();
-		if (!mesh || !mesh->hasMesh() || !transform)
-			continue;
-		if (!mesh->hasMaterial())
+	for (auto& [id, entry] : frame_info.visible_game_objects) {
+		VeGameObject& obj = *entry.obj;
+		MeshComponent* mesh = entry.mesh;
+		if (!mesh || !obj.getComponent<TransformComponent>())
 			continue;
 		auto* mat = mesh->getMaterial();
 		vk::raii::DescriptorSet& mat_set = mat->hasDescriptorSet()
 			? mat->getDescriptorSet()
 			: frame_info.material_descriptor_set;
 		MaterialAlphaProps alpha_props = mat->getAlphaProps();
+		float transmission = mat->getMaterialFactors().transmission_factor;
+		bool use_transparent_pass = (alpha_props.alpha_mode == AlphaMode::BLEND) || (transmission > 0.0f);
 		glm::vec3 obj_pos = obj.getTransform() * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		float dist_sq = glm::dot(obj_pos - camera_pos, obj_pos - camera_pos);
-		Drawable d{*mat_set, obj_ptr, dist_sq, alpha_props.alpha_mode};
-		if (alpha_props.alpha_mode == AlphaMode::BLEND)
-			transparent_drawables.push_back(d);
+		if (use_transparent_pass)
+			m_transparent_drawables.emplace_back(*mat_set, entry.obj, mesh, dist_sq, alpha_props.alpha_mode);
 		else
-			opaque_drawables.push_back(d);
+			m_opaque_drawables.emplace_back(*mat_set, entry.obj, mesh, dist_sq, alpha_props.alpha_mode);
 	}
 
-
-	std::sort(opaque_drawables.begin(), opaque_drawables.end(),
+	std::sort(m_opaque_drawables.begin(), m_opaque_drawables.end(),
 		[](const Drawable& a, const Drawable& b) {
-			// Sort by distance (far first)
 			if (a.dist_sq != b.dist_sq)
 				return a.dist_sq > b.dist_sq;
 			// Same distance: OPAQUE before MASK (pillar before vine)
@@ -129,59 +127,108 @@ void PbrRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 			// Same alpha mode: sort by material for batching.
 			return a.material_set < b.material_set;
 		});
-	// Transparent: sort by distance (far first)
-	std::sort(transparent_drawables.begin(), transparent_drawables.end(),
+	std::sort(m_transparent_drawables.begin(), m_transparent_drawables.end(),
 		[](const Drawable& a, const Drawable& b) { return a.dist_sq > b.dist_sq; });
+}
 
-	auto renderDrawables = [&](std::vector<Drawable>& drawables) {
-		VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
-		for (const auto& d : drawables) {
-			if (d.material_set != bound_material_set) {
-				bound_material_set = d.material_set;
-				frame_info.command_buffer.bindDescriptorSets(
-					vk::PipelineBindPoint::eGraphics,
-					*m_pipeline_layout,
-					0,
-					{*frame_info.global_descriptor_set, bound_material_set, *frame_info.shadow_descriptor_set},
-					{}
-				);
-			}
-
-			VeGameObject& obj = *d.obj;
-			auto* mesh = obj.getComponent<MeshComponent>();
-			MaterialAlphaProps alpha_props = mesh->getMaterial() ? mesh->getMaterial()->getAlphaProps() : MaterialAlphaProps{};
-			PbrPushConstantData push{};
-			const glm::mat3 nrm = obj.getNormalTransform();
-			push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
-			push.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
-			push.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
-			push.transform = obj.getTransform();
-			push.has_texture = mesh->has_texture;
-			push.alpha_cutoff = alpha_props.alpha_cutoff;
-			push.alpha_flags = static_cast<uint32_t>(alpha_props.alpha_mode) | (alpha_props.double_sided ? 4u : 0u);
-
-			if (alpha_props.double_sided) {
-				frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eNone);
-			} else {
-				frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eBack);
-			}
-			// BLEND: disable depth write so transparent objects don't occlude each other
-			frame_info.command_buffer.setDepthWriteEnable(alpha_props.alpha_mode != AlphaMode::BLEND);
-
-			frame_info.command_buffer.pushConstants(
+void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info) const {
+	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
+	for (const auto& d : m_opaque_drawables) {
+		if (d.material_set != bound_material_set) {
+			bound_material_set = d.material_set;
+			frame_info.command_buffer.bindDescriptorSets(
+				vk::PipelineBindPoint::eGraphics,
 				*m_pipeline_layout,
-				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 				0,
-				vk::ArrayProxy<const uint8_t>(sizeof(PbrPushConstantData), reinterpret_cast<const uint8_t*>(&push))
+				{*frame_info.global_descriptor_set, bound_material_set, *frame_info.shadow_descriptor_set},
+				{}
 			);
-			mesh->getMesh()->bindVertexBuffer(frame_info.command_buffer);
-			mesh->getMesh()->bindIndexBuffer(frame_info.command_buffer);
-			mesh->getMesh()->drawIndexed(frame_info.command_buffer);
 		}
-	};
+		VeGameObject& obj = *d.obj;
+		MeshComponent* mesh = d.mesh;
+		auto* mat_ptr = mesh->getMaterial();
+		MaterialAlphaProps alpha_props = mat_ptr ? mat_ptr->getAlphaProps() : MaterialAlphaProps{};
+		PbrPushConstantData push{};
+		const glm::mat3 nrm = obj.getNormalTransform();
+		push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
+		push.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
+		push.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
+		push.transform = obj.getTransform();
+		push.has_texture = mesh->has_texture;
+		push.alpha_cutoff = alpha_props.alpha_cutoff;
+		push.material_flags = static_cast<uint32_t>(alpha_props.alpha_mode) | (alpha_props.double_sided ? 4u : 0u)
+			| (mat_ptr && mat_ptr->getFlipTexCoordV() ? 8u : 0u)
+			| (alpha_props.use_spec_gloss_texture ? 16u : 0u);
+		if (alpha_props.double_sided)
+			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eNone);
+		else
+			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eFront);
+		frame_info.command_buffer.setDepthWriteEnable(VK_TRUE);
+		frame_info.command_buffer.pushConstants(
+			*m_pipeline_layout,
+			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+			0,
+			vk::ArrayProxy<const uint8_t>(sizeof(PbrPushConstantData), reinterpret_cast<const uint8_t*>(&push))
+		);
+		mesh->getMesh()->bindVertexBuffer(frame_info.command_buffer);
+		mesh->getMesh()->bindIndexBuffer(frame_info.command_buffer);
+		mesh->getMesh()->drawIndexed(frame_info.command_buffer);
+	}
+}
 
-	renderDrawables(opaque_drawables);
-	renderDrawables(transparent_drawables);
+void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
+	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
+	for (const auto& d : m_transparent_drawables) {
+		if (d.material_set != bound_material_set) {
+			bound_material_set = d.material_set;
+			frame_info.command_buffer.bindDescriptorSets(
+				vk::PipelineBindPoint::eGraphics,
+				*m_pipeline_layout,
+				0,
+				{*frame_info.global_descriptor_set, bound_material_set, *frame_info.shadow_descriptor_set},
+				{}
+			);
+		}
+		VeGameObject& obj = *d.obj;
+		MeshComponent* mesh = d.mesh;
+		auto* mat_ptr = mesh->getMaterial();
+		MaterialAlphaProps alpha_props = mat_ptr ? mat_ptr->getAlphaProps() : MaterialAlphaProps{};
+		float transmission = mat_ptr ? mat_ptr->getMaterialFactors().transmission_factor : 0.0f;
+		bool is_transparent = (alpha_props.alpha_mode == AlphaMode::BLEND) || (transmission > HIGH_TRANSMISSION_THRESHOLD);
+		PbrPushConstantData push{};
+		const glm::mat3 nrm = obj.getNormalTransform();
+		push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
+		push.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
+		push.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
+		push.transform = obj.getTransform();
+		push.has_texture = mesh->has_texture;
+		push.alpha_cutoff = alpha_props.alpha_cutoff;
+		push.material_flags = static_cast<uint32_t>(alpha_props.alpha_mode) | (alpha_props.double_sided ? 4u : 0u)
+			| (mat_ptr && mat_ptr->getFlipTexCoordV() ? 8u : 0u)
+			| (alpha_props.use_spec_gloss_texture ? 16u : 0u);
+		if (alpha_props.double_sided)
+			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eNone);
+		else
+			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eFront);
+		frame_info.command_buffer.setDepthWriteEnable(!is_transparent);
+		frame_info.command_buffer.pushConstants(
+			*m_pipeline_layout,
+			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+			0,
+			vk::ArrayProxy<const uint8_t>(sizeof(PbrPushConstantData), reinterpret_cast<const uint8_t*>(&push))
+		);
+		mesh->getMesh()->bindVertexBuffer(frame_info.command_buffer);
+		mesh->getMesh()->bindIndexBuffer(frame_info.command_buffer);
+		mesh->getMesh()->drawIndexed(frame_info.command_buffer);
+	}
+}
+
+void PbrRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
+	prepareFrame(frame_info);
+	renderOpaque(frame_info);
+	renderTransparent(frame_info);
 }
 
 } // namespace ve

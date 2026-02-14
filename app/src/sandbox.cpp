@@ -7,6 +7,8 @@
 #include "sandbox.hpp"
 #include "utils/ve_random.hpp"
 #include <imgui.h>
+#include <algorithm>
+#include <string>
 #include <vector>
 #include <cstdlib>
 
@@ -36,7 +38,7 @@ void Sandbox::loadScene(SandboxUIContext::SceneType scene_type) {
 	switch (scene_type) {
 		case SandboxUIContext::SceneType::SIMPLE:
 			VE_LOGD("Loading SimpleScene...");
-			m_active_scene = std::make_unique<SimpleScene>(m_ve_device, *m_resource_manager, *m_global_pool, *m_material_set_layout, m_paths, &m_particle_texture_descriptor_set);
+			m_active_scene = std::make_unique<SimpleScene>(m_ve_device, *m_resource_manager, *m_global_pool, *m_material_set_layout, m_paths, &m_default_material_descriptor_set);
 			break;
 		case SandboxUIContext::SceneType::SPONZA:
 			VE_LOGD("Loading SponzaScene (UASTC)...");
@@ -46,10 +48,16 @@ void Sandbox::loadScene(SandboxUIContext::SceneType scene_type) {
 			VE_LOGD("Loading SponzaScene (ETC1S)...");
 			m_active_scene = std::make_unique<SponzaScene>(m_ve_device, *m_resource_manager, *m_global_pool, *m_material_set_layout, m_paths, "sponza_low");
 			break;
+		case SandboxUIContext::SceneType::BISTRO:
+			VE_LOGD("Loading BistroScene...");
+			m_active_scene = std::make_unique<BistroScene>(m_ve_device, *m_resource_manager, *m_global_pool, *m_material_set_layout, m_paths);
+			break;
 		default:
 			return;
 	}
 	m_loaded_scene_type = scene_type;
+	m_shadow_render_system->invalidateShadowDrawables();
+	ui_actions.sun_intensity = m_active_scene->getSunIntensity();
 	VE_LOGD("Scene loaded successfully.");
 }
 
@@ -57,7 +65,6 @@ void Sandbox::unloadScene() {
 	if (!m_active_scene)
 		return;
 	// Wait for GPU to finish all submitted work before freeing scene resources
-	// (buffers, descriptor sets) - otherwise validation errors and crashes occur
 	m_ve_device.getDevice().waitIdle();
 	m_active_scene.reset();
 	m_loaded_scene_type = SandboxUIContext::SceneType::NONE;
@@ -109,7 +116,7 @@ VeFrameInfo Sandbox::update() {
 
 	VeFrameInfo frame_info = {
 		.global_descriptor_set = m_global_descriptor_sets[current_frame],
-		.texture_descriptor_set = m_particle_texture_descriptor_set,
+		.texture_descriptor_set = m_particle_descriptor_set,
 		.material_descriptor_set = material_descriptor_set,
 		.active_scene = m_active_scene.get(),
 		.cubemap_descriptor_set = m_skybox_render_system->getCubemapDescriptorSet(), // currently only consumed by skybox render system itself.
@@ -136,7 +143,7 @@ VeFrameInfo Sandbox::update() {
 	// Updates camera state based on input and frame time. Returns actions for systems.
 	auto input_actions = m_input_controller.processInput(m_frame_time, m_camera);
 
-	// Update state based on actions and ui_actions updated in previous renderUI
+	// Update UI state
 	// Tab toggles "UI Mode" (cursor visible). Settings window is ONLY visible in UI mode.
 	ui_actions.visible = input_actions.ui_visible;
 
@@ -149,12 +156,8 @@ VeFrameInfo Sandbox::update() {
 	updateCamera(glm::radians(ui_actions.fov));
 	updateParticles(input_actions);
 
-	// update sponza sun intensity
-	if (m_loaded_scene_type == SandboxUIContext::SceneType::SPONZA ||
-		m_loaded_scene_type == SandboxUIContext::SceneType::SPONZA_LOW) {
-		static_cast<SponzaScene*>(m_active_scene.get())->setSunIntensity(ui_actions.sun_intensity);
-	}
-
+	// update scene
+	m_active_scene->setSunIntensity(ui_actions.sun_intensity);
 	m_active_scene->update(m_frame_time);
 
 	// update ubos
@@ -224,6 +227,7 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	auto& command_buffer = frame_info.command_buffer;
 
 	// Culling pass
+	m_culling_system->setCullingEnabled(ui_actions.enable_frustum_culling);
 	m_culling_system->cullObjects(frame_info);
 	ui_actions.cull_total_objects = m_culling_system->getLastTotalMeshObjects();
 	ui_actions.cull_visible_objects = m_culling_system->getLastVisibleCount();
@@ -236,14 +240,16 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	// Main scene pass
 	m_ve_renderer.beginSceneRender(command_buffer);
 
-	// systems
-	m_skybox_render_system->render(frame_info);
 	if (m_active_scene->getType() == VeScene::Type::SIMPLE) {
+		m_skybox_render_system->render(frame_info);
 		m_simple_render_system->renderObjects(frame_info);
-
 		m_particle_system->render(frame_info);
 	} else {
-		m_pbr_render_system->renderObjects(frame_info);
+		//m_skybox_render_system->render(frame_info);
+		m_pbr_render_system->prepareFrame(frame_info);
+		m_pbr_render_system->renderOpaque(frame_info);
+		m_skybox_render_system->renderAsBackground(frame_info);
+		m_pbr_render_system->renderTransparent(frame_info);
 	}
 	if (ui_actions.show_axes) {
 		m_axes_render_system->render(frame_info);
@@ -330,11 +336,64 @@ void Sandbox::renderAppWindows() {
 				if (ImGui::RadioButton("Sponza (compressed textures)", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::SPONZA_LOW))) {
 					ui_actions.current_scene = SandboxUIContext::SceneType::SPONZA_LOW;
 				}
-				if (ui_actions.current_scene == SandboxUIContext::SceneType::SPONZA ||
-					ui_actions.current_scene == SandboxUIContext::SceneType::SPONZA_LOW) {
-					ImGui::Separator();
-					ImGui::Text("Sponza Settings");
-					ImGui::SliderFloat("Sun Intensity", &ui_actions.sun_intensity, 0.0f, 1000000.0f);
+				if (ImGui::RadioButton("Bistro", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::BISTRO))) {
+					ui_actions.current_scene = SandboxUIContext::SceneType::BISTRO;
+				}
+				ImGui::Separator();
+				ImGui::Text("Scene Settings");
+				ImGui::SliderFloat("Sun Intensity", &ui_actions.sun_intensity, 0.0f, 600000.0f);
+
+				ImGui::Separator();
+				if (ImGui::CollapsingHeader("Point Lights")) {
+					if (m_active_scene) {
+						auto& game_objects = m_active_scene->getGameObjects();
+						std::vector<std::pair<uint32_t, VeGameObject*>> lights;
+						for (auto& [id, obj] : game_objects) {
+							if (obj.getComponent<PointLightComponent>() && obj.getComponent<TransformComponent>())
+								lights.push_back({id, &obj});
+						}
+						std::sort(lights.begin(), lights.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+						if (!lights.empty()) {
+							if (ImGui::Button("All on")) {
+								for (auto& p : lights) p.second->setActive(true);
+							}
+							ImGui::SameLine();
+							if (ImGui::Button("All off")) {
+								for (auto& p : lights) p.second->setActive(false);
+							}
+						}
+						const uint32_t scene_sun_id = m_active_scene->getSunId();
+						for (size_t i = 0; i < lights.size(); i++) {
+							VeGameObject* obj = lights[i].second;
+							auto* pl = obj->getComponent<PointLightComponent>();
+							auto* transform = obj->getComponent<TransformComponent>();
+							if (!pl || !transform) continue;
+							ImGui::PushID(static_cast<int>(obj->getId()));
+							const std::string label = obj->getName().empty() ? ("Light " + std::to_string(static_cast<unsigned>(i))) : obj->getName();
+							if (ImGui::TreeNode(label.c_str())) {
+								bool active = obj->isActive();
+								ImGui::Checkbox("Active", &active);
+								obj->setActive(active);
+								ImGui::ColorEdit3("Color", &pl->color.r);
+								ImGui::SliderFloat("Intensity", &pl->intensity, 0.0f, 100000.0f);
+								if (scene_sun_id != 0 && obj->getId() == scene_sun_id)
+									ui_actions.sun_intensity = pl->intensity;
+								glm::vec3 pos = transform->getTranslation();
+								if (ImGui::DragFloat3("Position", &pos.x)) {
+									transform->setTranslation(pos);
+								}
+
+								static float size = transform->getScale().x;
+								if (ImGui::SliderFloat("Size", &size, 0.1f, 50.0f)) {
+									transform->setScale({size, size, size});
+								}
+								ImGui::Checkbox("Rotates", &pl->rotates);
+								ImGui::Checkbox("Casts shadow", &pl->casts_shadow);
+								ImGui::TreePop();
+							}
+							ImGui::PopID();
+						}
+					}
 				}
 
 				ImGui::Separator();
@@ -652,9 +711,13 @@ void Sandbox::renderAppWindows() {
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Display XYZ coordinate axes in the scene.\nRed=X, Green=Y, Blue=Z");
 				}
-				ImGui::Checkbox("Show AABB Debug", &ui_actions.show_aabb_debug);
+				ImGui::Checkbox("Show AABB outlines", &ui_actions.show_aabb_debug);
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Display wireframe bounding boxes for visible objects");
+				}
+				ImGui::Checkbox("Frustum culling", &ui_actions.enable_frustum_culling);
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Skip drawing objects outside the camera view");
 				}
 
 				ImGui::Separator();
@@ -711,6 +774,11 @@ void Sandbox::createUniformBuffers() {
 	}
 }
 
+// Creates descriptor set layouts, pool, and descriptor sets used by render systems.
+// - Global sets (per frame): UBO for view/proj, lights, etc.
+// - Material layout: 5 texture bindings (albedo, normal, metallic-roughness, occlusion, emissive) + 1 UBO.
+// - Particle descriptor set: glow/fire/smoke textures for particle system and point lights.
+// - Default material descriptor set: untextured fallback (default albedo/normal/MR/occlusion/emissive + UBO)
 void Sandbox::createDescriptors() {
 	VE_LOGD("Creating descriptors");
 
@@ -722,24 +790,29 @@ void Sandbox::createDescriptors() {
 #endif
 		.build();
 
-	// Material set layout for three texture samplers (albedo, normal, roughness for example)
+	// Material set layout: albedo, normal, metallic-roughness, occlusion, emissive
 	m_material_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
 		.addBinding(1, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
 		.addBinding(2, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
+		.addBinding(3, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
+		.addBinding(4, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
+		.addBinding(5, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eFragment)
 		.build();
 
 	// Create descriptor pool
+	// Material sets: SimpleScene ~3, Sponza ~170, Bistro 500+; allocate 4096 to avoid fragmentation / OUT_OF_POOL_MEMORY
+	constexpr uint32_t MAX_MATERIAL_SETS = 4096;
 	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
-		// Global sets + shadow global + compute + material sets (SimpleScene ~3 + Sponza ~170) + shadow + slack
-		.setMaxSets(4 * MAX_FRAMES_IN_FLIGHT + (MAX_LIGHTS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT + 200)
+		// Global sets + shadow global + compute + material sets + shadow + slack
+		.setMaxSets(4 * MAX_FRAMES_IN_FLIGHT + (MAX_LIGHTS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS)
 		// Uniform buffers: global (per frame) + shadow global (per frame, per light) + compute (2x per frame)
-		.addPoolSize(vk::DescriptorType::eUniformBuffer, 4 * MAX_FRAMES_IN_FLIGHT + (MAX_LIGHTS * MAX_FRAMES_IN_FLIGHT))
-		// Combined image samplers: SimpleScene (~3) + Sponza per-material (~170 * 3) + skybox (3)
-		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 3 * 3 + 200 * 3)
-		// Samplers: shadow sampler (1 per frame) + slack (7)
+		.addPoolSize(vk::DescriptorType::eUniformBuffer, 4 * MAX_FRAMES_IN_FLIGHT + (MAX_LIGHTS * MAX_FRAMES_IN_FLIGHT) + MAX_MATERIAL_SETS + 1)
+		// Combined image samplers: SimpleScene (~3) + per-material (5 per set) + skybox (3) + slack
+		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 3 * 3 + MAX_MATERIAL_SETS * 5)
+		// Samplers: shadow sampler (1 per frame) + slack
 		.addPoolSize(vk::DescriptorType::eSampler, MAX_FRAMES_IN_FLIGHT + 7)
-		// Sampled images: shadow map array (1 per frame) + slack (7)
+		// Sampled images: shadow map array (1 per frame) + slack
 		.addPoolSize(vk::DescriptorType::eSampledImage, MAX_FRAMES_IN_FLIGHT + 7)
 		// Compute storage buffers:
 		.addPoolSize(vk::DescriptorType::eStorageBuffer, 14 * MAX_FRAMES_IN_FLIGHT)
@@ -760,19 +833,57 @@ void Sandbox::createDescriptors() {
 
 	// Cubemap descriptor set is owned by SkyboxRenderSystem (created in initSystems)
 
-	// Create shared particle/texture descriptor set (used by particles, point lights, and SimpleScene objects)
+	// Default material UBO for untextured meshes (binding 5).
+	// Must match shader's MaterialConstants layout (4 × float4 = MATERIAL_UBO_SIZE bytes).
+	m_default_material_ubo = std::make_unique<VeBuffer>(m_ve_device, MATERIAL_UBO_SIZE, 1,
+		vk::BufferUsageFlagBits::eUniformBuffer,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	MaterialFactors defaults{};
+	float default_ubo[16];
+	writeMaterialUBO(default_ubo, defaults);
+	m_default_material_ubo->map();
+	m_default_material_ubo->writeToBuffer(default_ubo, MATERIAL_UBO_SIZE);
+	m_default_material_ubo->unmap();
+	auto default_material_ubo_info = m_default_material_ubo->getDescriptorInfo();
+
+	// Particle descriptor set: glow/fire/smoke + default occlusion/emissive for layout, UBO at 5. Used by particle system and point lights.
 	m_particle_texture_handle = m_resource_manager->load<VeTexture>(m_paths.particle_texture.lexically_normal().generic_string());
 	m_fire_texture_handle = m_resource_manager->load<VeTexture>(m_paths.fire_texture.lexically_normal().generic_string());
 	m_smoke_texture_handle = m_resource_manager->load<VeTexture>(m_paths.smoke_texture.lexically_normal().generic_string());
-	auto glow_info = m_particle_texture_handle.get()->getDescriptorInfo();
-	auto fire_info = m_fire_texture_handle.get()->getDescriptorInfo();
-	auto smoke_info = m_smoke_texture_handle.get()->getDescriptorInfo();
-	m_particle_texture_descriptor_set = vk::raii::DescriptorSet{nullptr};
+	m_default_occlusion_handle = m_resource_manager->load<VeTexture>("default_occlusion");
+	m_default_emissive_handle = m_resource_manager->load<VeTexture>("default_emissive");
+	auto particle_glow_info = m_particle_texture_handle.get()->getDescriptorInfo();
+	auto particle_fire_info = m_fire_texture_handle.get()->getDescriptorInfo();
+	auto particle_smoke_info = m_smoke_texture_handle.get()->getDescriptorInfo();
+	auto particle_occlusion_info = m_default_occlusion_handle.get()->getDescriptorInfo();
+	auto particle_emissive_info = m_default_emissive_handle.get()->getDescriptorInfo();
+	m_particle_descriptor_set = vk::raii::DescriptorSet{nullptr};
 	VeDescriptorWriter(*m_material_set_layout, *m_global_pool)
-		.writeImage(0, &glow_info)
-		.writeImage(1, &fire_info)
-		.writeImage(2, &smoke_info)
-		.build(m_particle_texture_descriptor_set);
+		.writeImage(0, &particle_glow_info)
+		.writeImage(1, &particle_fire_info)
+		.writeImage(2, &particle_smoke_info)
+		.writeImage(3, &particle_occlusion_info)
+		.writeImage(4, &particle_emissive_info)
+		.writeBuffer(5, &default_material_ubo_info)
+		.build(m_particle_descriptor_set);
+
+	// Default material descriptor set: untextured fallback for Simple scene (floor, vases). Full material layout with defaults.
+	// Must keep texture handles as members so they outlive the descriptor set (descriptors reference VkImageView/VkSampler).
+	m_default_albedo_handle = m_resource_manager->load<VeTexture>("default_albedo");
+	m_default_normal_handle = m_resource_manager->load<VeTexture>("default_normal");
+	m_default_mr_handle = m_resource_manager->load<VeTexture>("default_metallic_roughness");
+	auto default_albedo_info = m_default_albedo_handle.get()->getDescriptorInfo();
+	auto default_normal_info = m_default_normal_handle.get()->getDescriptorInfo();
+	auto default_mr_info = m_default_mr_handle.get()->getDescriptorInfo();
+	m_default_material_descriptor_set = vk::raii::DescriptorSet{nullptr};
+	VeDescriptorWriter(*m_material_set_layout, *m_global_pool)
+		.writeImage(0, &default_albedo_info)
+		.writeImage(1, &default_normal_info)
+		.writeImage(2, &default_mr_info)
+		.writeImage(3, &particle_occlusion_info)
+		.writeImage(4, &particle_emissive_info)
+		.writeBuffer(5, &default_material_ubo_info)
+		.build(m_default_material_descriptor_set);
 }
 
 void Sandbox::initSystems() {

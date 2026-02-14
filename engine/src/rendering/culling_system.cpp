@@ -63,11 +63,12 @@ void CullingSystem::cullObjects(VeFrameInfo& frame_info) {
 	m_last_total_mesh_objects = 0;
 	m_last_visible_count = 0;
 
-	m_camera->updateIfDirty();
-	const glm::mat4 view_proj = m_camera->getProj() * m_camera->getView();
-
 	FrustumPlane planes[6];
-	extractFrustumPlanes(view_proj, planes);
+	if (m_culling_enabled) {
+		m_camera->updateIfDirty();
+		const glm::mat4 view_proj = m_camera->getProj() * m_camera->getView();
+		extractFrustumPlanes(view_proj, planes);
+	}
 
 	for (auto& [id, obj] : frame_info.game_objects) {
 		auto* mesh_comp = obj.getComponent<MeshComponent>();
@@ -76,10 +77,15 @@ void CullingSystem::cullObjects(VeFrameInfo& frame_info) {
 
 		m_last_total_mesh_objects++;
 
-		const VeMesh::AABB world_aabb = mesh_comp->getWorldAABB();
-		if (isAABBInFrustum(world_aabb, planes)) {
-			m_visible_game_objects[id] = &obj;
+		if (!m_culling_enabled) {
+			m_visible_game_objects[id] = VisibleObject{&obj, mesh_comp};
 			m_last_visible_count++;
+		} else {
+			const VeMesh::AABB world_aabb = mesh_comp->getWorldAABB();
+			if (isAABBInFrustum(world_aabb, planes)) {
+				m_visible_game_objects[id] = VisibleObject{&obj, mesh_comp};
+				m_last_visible_count++;
+			}
 		}
 	}
 }

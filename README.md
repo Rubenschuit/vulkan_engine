@@ -1,5 +1,5 @@
 # Vulkan Engine
-
+![PBR Rendering](screenshots/bistro_1.png)
 ![PBR Rendering](screenshots/sponza.png)
 
 Small modern cross-platform C++20 Vulkan 1.3+ renderer using GLFW and Slang. Produces a shared library (`VEngineLib`) and an app (`VeApp`). The goal of this project is for me to have fun and to learn more about graphics programming!
@@ -28,17 +28,18 @@ Small modern cross-platform C++20 Vulkan 1.3+ renderer using GLFW and Slang. Pro
 ## Features
 - Modern Vulkan: dynamic rendering, Vulkan-Hpp RAII
 - Cross-platform builds: Windows (MSVC or MinGW), macOS, and Linux
+- PBR for .gltf models like Sponza and Bistro
 - Particle system with compute shaders
-- Fireworks using the particle system (wip)
-- PBR for textured .gltf models
+- Fireworks using the particle system
 - Point lights
 - Shadow mapping
-- Bloom
+- Post-processing effects like Bloom and Blur
 - Basic HDR
-- Dear ImGui overlay with settings
+- Dear ImGui overlay
 - Skybox
 - FPS-style camera
 - MSAA
+- Frustum culling
 
 
 ## Requirements
@@ -53,6 +54,7 @@ Small modern cross-platform C++20 Vulkan 1.3+ renderer using GLFW and Slang. Pro
 - GLM (automatically fetched if missing)
 - TinyGLTF (included in external)
 - Dear ImGui (included in external)
+- Mikktspace (included in external)
 
 
 #### Downloads:

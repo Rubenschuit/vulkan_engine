@@ -7,21 +7,24 @@
 
 namespace ve {
 
-class CullingSystem {
+class VENGINE_API CullingSystem {
 public:
 	explicit CullingSystem(VeCamera& camera);
 	void setCamera(VeCamera& camera) { m_camera = &camera; }
+	void setCullingEnabled(bool enabled) { m_culling_enabled = enabled; }
+	bool isCullingEnabled() const { return m_culling_enabled; }
 	// Cull objects in the scene and stores the references to the visible objects in the frame info.
 	void cullObjects(VeFrameInfo& frame_info);
 
-	std::unordered_map<uint32_t, VeGameObject*>& getVisibleGameObjectsRef() { return m_visible_game_objects; }
+	std::unordered_map<uint32_t, VisibleObject>& getVisibleGameObjectsRef() { return m_visible_game_objects; }
 
 	uint32_t getLastTotalMeshObjects() const { return m_last_total_mesh_objects; }
 	uint32_t getLastVisibleCount() const { return m_last_visible_count; }
 
 private:
 	VeCamera* m_camera;
-	std::unordered_map<uint32_t, VeGameObject*> m_visible_game_objects;
+	bool m_culling_enabled = true;
+	std::unordered_map<uint32_t, VisibleObject> m_visible_game_objects;
 	uint32_t m_last_total_mesh_objects = 0;
 	uint32_t m_last_visible_count = 0;
 };

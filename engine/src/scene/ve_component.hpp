@@ -21,7 +21,7 @@ class VeGameObject;
 // ---------------------------------------------------------------------------
 
 // Assigns a unique ID to each different component type.
-// Each template instantiation gets its own static local, therefore each 
+// Each template instantiation gets its own static local, therefore each
 // component type has its own unique ID.
 class VENGINE_API ComponentTypeIDSystem {
 public:
@@ -64,21 +64,29 @@ protected:
 // ---------------------------------------------------------------------------
 class VENGINE_API TransformComponent : public Component {
 public:
-	glm::vec3 translation{0.0f};
-	glm::vec3 rotation{0.0f, 0.0f, 0.0f}; // Euler angles in radians
-	glm::vec3 scale{1.0f};
-
 	const glm::mat4& getTransform() const;  // local transform
 	const glm::mat3& getNormalTransform() const;
 
+	const glm::vec3& getTranslation() const { return translation; }
+	const glm::quat& getRotation() const { return rotation; }
+	const glm::vec3& getScale() const { return scale; }
+
+	void setTranslation(glm::vec3 pos);
+	void setRotation(glm::quat q);
+	// Set rotation from Euler angles in radians (order: X, Y, Z applied as Rz*Ry*Rx)
+	void setRotationEuler(glm::vec3 euler_rad);
+	void setScale(glm::vec3 s);
+
 private:
-	void updateMatrices() const;
+	void updateTransform() const;
+
+	glm::vec3 translation{0.0f};
+	glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};  // identity
+	glm::vec3 scale{1.0f};
 
 	mutable glm::mat4 m_cached_transform{1.0f};
 	mutable glm::mat3 m_cached_normal_transform{1.0f};
-	mutable glm::vec3 m_last_translation{std::numeric_limits<float>::infinity()};
-	mutable glm::vec3 m_last_rotation{std::numeric_limits<float>::infinity()};
-	mutable glm::vec3 m_last_scale{std::numeric_limits<float>::infinity()};
+	mutable bool m_transform_dirty{true};
 };
 
 // ---------------------------------------------------------------------------
@@ -88,8 +96,8 @@ class VENGINE_API PointLightComponent : public Component {
 public:
 	float intensity{1.0f};
 	glm::vec3 color{1.0f};
-	bool rotates{true};
-	bool casts_shadow{true};
+	bool rotates{false};
+	bool casts_shadow{false};
 
 	void update(float delta_time) override;
 };
@@ -112,17 +120,19 @@ public:
 	bool hasMaterial() const { return material_handle.isValid(); }
 
 	// Returns mesh local AABB transformed by owner's model matrix. Cached until transform changes.
-	VeMesh::AABB getWorldAABB() const;
+	const VeMesh::AABB& getWorldAABB() const;
+	void invalidateWorldAABB();
 
 	float has_texture{0.0f};
 	bool has_shadow{true};
 
 private:
+	void updateWorldAABB() const;
+
 	ResourceHandle<VeMesh> mesh_handle;
 	ResourceHandle<VeMaterial> material_handle;
 	mutable VeMesh::AABB m_cached_world_aabb;
-	mutable glm::mat4 m_last_model_matrix{1.0f};
-	mutable bool m_world_aabb_valid = false;
+	mutable bool m_world_aabb_dirty{true};
 };
 
 // TODO: Add more components as needed (camera, animation, etc.)
