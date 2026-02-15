@@ -9,10 +9,33 @@
 #include <ktxvulkan.h>
 
 namespace {
-	// True for block-compressed formats (ETC2, BC, ASTC, etc.) - never override these with format_hint
 	bool isBlockCompressed(vk::Format format) {
 		std::string s = vk::to_string(format);
 		return s.find("Block") != std::string::npos;
+	}
+
+	// Convert a block-compressed format to its sRGB variant
+	vk::Format toSrgbBC(vk::Format f) {
+		switch (f) {
+			case vk::Format::eBc1RgbUnormBlock:  return vk::Format::eBc1RgbSrgbBlock;
+			case vk::Format::eBc1RgbaUnormBlock: return vk::Format::eBc1RgbaSrgbBlock;
+			case vk::Format::eBc3UnormBlock:     return vk::Format::eBc3SrgbBlock;
+			case vk::Format::eBc7UnormBlock:     return vk::Format::eBc7SrgbBlock;
+			case vk::Format::eAstc4x4UnormBlock: return vk::Format::eAstc4x4SrgbBlock;
+			default: return f;
+		}
+	}
+
+	// Convert a block-compressed format to its Unorm (linear) variant
+	vk::Format toUnormBC(vk::Format f) {
+		switch (f) {
+			case vk::Format::eBc1RgbSrgbBlock:  return vk::Format::eBc1RgbUnormBlock;
+			case vk::Format::eBc1RgbaSrgbBlock:  return vk::Format::eBc1RgbaUnormBlock;
+			case vk::Format::eBc3SrgbBlock:      return vk::Format::eBc3UnormBlock;
+			case vk::Format::eBc7SrgbBlock:      return vk::Format::eBc7UnormBlock;
+			case vk::Format::eAstc4x4SrgbBlock:  return vk::Format::eAstc4x4UnormBlock;
+			default: return f;
+		}
 	}
 }
 
@@ -170,12 +193,18 @@ bool VeTexture::createTextureImage(const std::filesystem::path& texture_path, vk
 		return false;
 	}
 
-    // Handle transcoding for compressed KTX2 textures
+    // Handle transcoding for compressed KTX2 textures (BasisLZ / UASTC)
+    // Transcode to GPU-compressed formats when supported to reduce VRAM usage ~4x
     if (k_texture->classId == ktxTexture2_c) {
         ktxTexture2* ktx2 = reinterpret_cast<ktxTexture2*>(k_texture);
         if (ktxTexture2_NeedsTranscoding(ktx2)) {
-            //VE_LOGD("Texture is compressed, transcoding to RGBA32");
-            result = ktxTexture2_TranscodeBasis(ktx2, KTX_TTF_RGBA32, 0);
+            ktx_transcode_fmt_e target = KTX_TTF_RGBA32;
+            if (m_ve_device.supportsBC()) {
+                target = KTX_TTF_BC7_RGBA;
+            } else if (m_ve_device.supportsASTC()) {
+                target = KTX_TTF_ASTC_4x4_RGBA;
+            }
+            result = ktxTexture2_TranscodeBasis(ktx2, target, 0);
             if (result != KTX_SUCCESS) {
                 VE_LOGE("KTX2 transcoding failed: " << texture_path << " (error " << static_cast<int>(result) << ")");
                 ktxTexture_Destroy(k_texture);
@@ -207,17 +236,16 @@ bool VeTexture::createTextureImage(const std::filesystem::path& texture_path, vk
 		texture_format = vk::Format::eR8G8B8A8Unorm;
 	}
 
-	// Use format_hint for uncompressed formats. Never override block-compressed formats (ETC2, BC, etc.).
+	// Apply format_hint (sRGB vs linear) to the transcoded format.
+	// For uncompressed 8-bit: override directly. For block-compressed: convert to sRGB/Unorm variant.
 	bool is_uncompressed_8bit = (texture_format == vk::Format::eR8G8B8Srgb || texture_format == vk::Format::eR8G8B8Unorm ||
 	                            texture_format == vk::Format::eR8G8B8A8Srgb || texture_format == vk::Format::eR8G8B8A8Unorm);
-	bool is_float_can_convert = (texture_format == vk::Format::eR32G32B32A32Sfloat);
 	bool has_format_hint = (format_hint == vk::Format::eR8G8B8A8Srgb || format_hint == vk::Format::eR8G8B8A8Unorm);
 	if (has_format_hint && is_uncompressed_8bit) {
 		texture_format = format_hint;
 	} else if (has_format_hint && isBlockCompressed(texture_format)) {
-		VE_LOGD("Skipping format_hint for block-compressed texture (format=" << vk::to_string(texture_format) << ")");
-	} else if (has_format_hint && !is_uncompressed_8bit && !is_float_can_convert) {
-		VE_LOGD("Skipping format_hint for format " << vk::to_string(texture_format) << " (not R8G8B8/R8G8B8A8/R32G32B32A32Sfloat)");
+		bool want_srgb = (format_hint == vk::Format::eR8G8B8A8Srgb);
+		texture_format = want_srgb ? toSrgbBC(texture_format) : toUnormBC(texture_format);
 	}
 
 

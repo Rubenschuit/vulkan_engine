@@ -287,6 +287,11 @@ void VeDevice::pickPhysicalDevice() {
 	// set the maximum msaa samples
 	m_max_msaa_samples = queryMaxUsableSampleCount();
 
+	// query texture compression support
+	auto dev_features = m_physical_device.getFeatures();
+	m_supports_bc   = dev_features.textureCompressionBC;
+	m_supports_astc = dev_features.textureCompressionASTC_LDR;
+
 	// print the name of the selected physical device
 	auto properties = m_physical_device.getProperties();
 	VE_LOGI("Using device: " << properties.deviceName);

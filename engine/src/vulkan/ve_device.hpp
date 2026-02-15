@@ -94,6 +94,8 @@ public:
 	const vk::PhysicalDeviceProperties getDeviceProperties() const { return m_physical_device.getProperties(); }
 	vk::SampleCountFlagBits getSampleCount() const { return m_max_msaa_samples; };
 	bool hasHdrColorSpaceExtension() const { return m_has_hdr_instance_extension; }
+	bool supportsBC() const { return m_supports_bc; }
+	bool supportsASTC() const { return m_supports_astc; }
 
 	// Single-time command buffer helpers (select queue/pool)
 	std::unique_ptr<vk::raii::CommandBuffer> beginSingleTimeCommands(QueueKind kind = QueueKind::Graphics);
@@ -138,6 +140,8 @@ private:
 	// MSAA samples
 	vk::SampleCountFlagBits m_max_msaa_samples = vk::SampleCountFlagBits::e1; // set in pickPhysicalDevice
 	bool m_has_hdr_instance_extension = false;
+	bool m_supports_bc = false;
+	bool m_supports_astc = false;
 
 	const std::vector<const char *> m_validation_layers = ve::VALIDATION_LAYERS;
 	std::vector<const char*> m_required_device_extensions = ve::REQUIRED_DEVICE_EXTENSIONS;

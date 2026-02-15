@@ -433,11 +433,13 @@ void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 
 
 	// Write compute start timestamp after the host→compute barrier.
-	// The barrier's dstStage=eComputeShader is gated by the submit-level semaphore wait,
-	// so this timestamp fires only after the semaphore is signaled — measuring actual work, not wait time.
+	// Null out the handle afterwards so that a second recordComputeCommands
+	// call in the same frame (e.g. fireworks' internal ParticleSystem) does
+	// not write the same query index again without a reset.
 	if (frame_info.compute_query_pool) {
 		frame_info.compute_command_buffer.writeTimestamp(
 			vk::PipelineStageFlagBits::eComputeShader, frame_info.compute_query_pool, frame_info.compute_start_query);
+		frame_info.compute_query_pool = VK_NULL_HANDLE;
 	}
 
 	frame_info.compute_command_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
