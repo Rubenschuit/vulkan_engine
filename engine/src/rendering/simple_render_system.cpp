@@ -3,6 +3,7 @@
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_pipeline.hpp"
 #include "scene/ve_component.hpp"
+#include "scene/ve_registry.hpp"
 #include "resources/ve_mesh.hpp"
 #include "utils/ve_log.hpp"
 
@@ -13,13 +14,14 @@
 
 namespace ve {
 
+// Push constants now only contain per-batch material flags.
+// Per-instance transforms are in the SSBO (binding 1, set 0).
 struct SimplePushConstantData {
-	alignas(16) glm::mat4 transform;
-	alignas(16) glm::mat3x4 normal_transform; // 3x4 matrix for allignment (could be done better)
-	alignas(4)  float has_texture;
-	alignas(4)  float padding[3];
+	alignas(4) float has_texture;
+	alignas(4) uint32_t instance_offset; // SSBO offset for this batch
+	alignas(4) float padding[2];
 };
-static_assert(sizeof(SimplePushConstantData) <= 128, "Push constants must be 128 bytes for stable layout");
+static_assert(sizeof(SimplePushConstantData) == 16, "Push constants must be 16 bytes");
 
 SimpleRenderSystem::SimpleRenderSystem(
 	VeDevice& device,
@@ -41,7 +43,7 @@ SimpleRenderSystem::~SimpleRenderSystem() {
 void SimpleRenderSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout, const vk::raii::DescriptorSetLayout& shadow_set_layout) {
 	vk::PushConstantRange push_constant_range{
 		.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
-		.offset = 0, // Used for indexing multiple push constant ranges
+		.offset = 0,
 		.size = sizeof(SimplePushConstantData)
 	};
 	vk::DescriptorSetLayout layouts[3] = {*global_set_layout, *material_set_layout, *shadow_set_layout};
@@ -60,7 +62,7 @@ void SimpleRenderSystem::createPipeline(vk::Format color_format, vk::SampleCount
 	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
 	pipeline_config.multisample_info.rasterizationSamples = sample_count;
 	pipeline_config.color_format = color_format;
-	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eFront;
+	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eBack;
 	pipeline_config.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptionsSimple();
 	pipeline_config.input_assembly_info.topology = m_topology;
 
@@ -73,22 +75,25 @@ void SimpleRenderSystem::createPipeline(vk::Format color_format, vk::SampleCount
 
 }
 
-// Renders visible game objects from frame_info.visible_game_objects. The objects are sorted by material set
-// to reduce descriptor set changes.
+// Renders visible objects from frame_info.visible_objects. Objects are grouped by
+// (mesh, material) for instanced draw calls.
 void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 
+	auto& registry = *frame_info.registry;
+	m_instance_groups.clear();
+
+	// Build sortable drawable list
 	struct Drawable {
 		VkDescriptorSet material_set;
-		VeGameObject* obj;
+		Entity entity;
 		MeshComponent* mesh = nullptr;
 	};
 	std::vector<Drawable> drawables;
-	drawables.reserve(frame_info.visible_game_objects.size());
-	for (auto& [id, entry] : frame_info.visible_game_objects) {
-		VeGameObject& obj = *entry.obj;
+	drawables.reserve(frame_info.visible_objects.size());
+	for (auto& entry : frame_info.visible_objects) {
 		MeshComponent* mesh = entry.mesh;
-		if (!mesh || !mesh->getMesh() || !obj.getComponent<TransformComponent>())
+		if (!mesh || !mesh->getMesh() || !registry.getComponent<TransformComponent>(entry.entity))
 			continue;
 		if (!mesh->getMaterial())
 			continue;
@@ -96,37 +101,82 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		vk::raii::DescriptorSet& mat_set = mat->hasDescriptorSet()
 			? mat->getDescriptorSet()
 			: frame_info.material_descriptor_set;
-		drawables.push_back({*mat_set, entry.obj, mesh});
+		drawables.push_back({*mat_set, entry.entity, mesh});
 	}
-	std::sort(drawables.begin(), drawables.end(),
-		[](const Drawable& a, const Drawable& b) { return a.material_set < b.material_set; });
 
+	// Sort by (mesh pointer, material set) for batching
+	std::sort(drawables.begin(), drawables.end(),
+		[](const Drawable& a, const Drawable& b) {
+			VeMesh* mesh_a = a.mesh->getMesh();
+			VeMesh* mesh_b = b.mesh->getMesh();
+			if (mesh_a != mesh_b)
+				return mesh_a < mesh_b;
+			return a.material_set < b.material_set;
+		});
+
+	// Write transforms to SSBO and build instance groups
+	for (size_t i = 0; i < drawables.size(); ++i) {
+		auto& d = drawables[i];
+		if (frame_info.instance_count >= frame_info.instance_capacity) {
+			VE_LOGW("Instance buffer full (" << frame_info.instance_capacity << " instances), skipping remaining simple objects");
+			break;
+		}
+
+		uint32_t idx = frame_info.instance_count++;
+		const glm::mat3 nrm = registry.getWorldNormal(d.entity);
+		frame_info.instance_data[idx].transform = registry.getWorldTransform(d.entity);
+		frame_info.instance_data[idx].normal_transform[0] = glm::vec4(nrm[0], 0.0f);
+		frame_info.instance_data[idx].normal_transform[1] = glm::vec4(nrm[1], 0.0f);
+		frame_info.instance_data[idx].normal_transform[2] = glm::vec4(nrm[2], 0.0f);
+
+		VeMesh* mesh_ptr = d.mesh->getMesh();
+		if (!m_instance_groups.empty()) {
+			auto& group = m_instance_groups.back();
+			if (group.mesh == mesh_ptr && group.material_set == d.material_set) {
+				group.instance_count++;
+				continue;
+			}
+		}
+
+		InstanceGroup group{
+			.mesh = mesh_ptr,
+			.material_set = d.material_set,
+			.first_instance = idx,
+			.instance_count = 1,
+			.has_texture = d.mesh->has_texture
+		};
+		m_instance_groups.push_back(group);
+	}
+
+	// Bind global (set 0) and shadow (set 2) once — they don't change between draws
+	frame_info.command_buffer.bindDescriptorSets(
+		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		0, {*frame_info.global_descriptor_set}, {});
+	frame_info.command_buffer.bindDescriptorSets(
+		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		2, {*frame_info.shadow_descriptor_set}, {});
+
+	// Render instance groups
 	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
-	for (const auto& d : drawables) {
-		// bind descriptor sets for each material set
-		if (d.material_set != bound_material_set) {
-			bound_material_set = d.material_set;
+	VeMesh* bound_mesh = nullptr;
+
+	for (const auto& group : m_instance_groups) {
+		// Bind material descriptor set (set 1) only when it changes
+		if (group.material_set != bound_material_set) {
+			bound_material_set = group.material_set;
 			frame_info.command_buffer.bindDescriptorSets(
 				vk::PipelineBindPoint::eGraphics,
 				*m_pipeline_layout,
-				0,
-				{*frame_info.global_descriptor_set, bound_material_set, *frame_info.shadow_descriptor_set},
+				1,
+				{bound_material_set},
 				{}
 			);
 		}
 
-		// render the object
-		VeGameObject& obj = *d.obj;
-		MeshComponent* mesh = d.mesh;
-
-		// push constants
-		SimplePushConstantData push{};
-		const glm::mat3 nrm = obj.getNormalTransform();
-		push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
-		push.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
-		push.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
-		push.transform = obj.getTransform();
-		push.has_texture = mesh->has_texture;
+		SimplePushConstantData push{
+				.has_texture = group.has_texture,
+				.instance_offset = group.first_instance
+		};
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
@@ -134,10 +184,13 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 			vk::ArrayProxy<const uint8_t>(sizeof(SimplePushConstantData), reinterpret_cast<const uint8_t*>(&push))
 		);
 
+		if (group.mesh != bound_mesh) {
+			bound_mesh = group.mesh;
+			bound_mesh->bindVertexBuffer(frame_info.command_buffer);
+			bound_mesh->bindIndexBuffer(frame_info.command_buffer);
+		}
 
-		mesh->getMesh()->bindVertexBuffer(frame_info.command_buffer);
-		mesh->getMesh()->bindIndexBuffer(frame_info.command_buffer);
-		mesh->getMesh()->drawIndexed(frame_info.command_buffer);
+		group.mesh->drawIndexed(frame_info.command_buffer, group.instance_count, 0);
 	}
 }
 

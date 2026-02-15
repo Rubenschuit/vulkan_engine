@@ -27,6 +27,7 @@ VeMesh::VeMesh(VeDevice& device, const std::string& resource_id,
 	: Resource(resource_id), m_ve_device(device) {
 	computeLocalAABB(vertices);
 	createVertexBuffers(vertices);
+	createShadowVertexBuffer(vertices);
 	createIndexBuffers(indices);
 	setLoaded(true);
 }
@@ -42,6 +43,7 @@ bool VeMesh::doLoad() {
 
 void VeMesh::doUnload() {
 	m_vertex_buffer.reset();
+	m_shadow_vertex_buffer.reset();
 	m_index_buffer.reset();
 	m_vertex_count = 0;
 	m_index_count = 0;
@@ -88,6 +90,35 @@ void VeMesh::createVertexBuffers(const std::vector<Vertex>& vertices) {
 	                       sizeof(vertices[0]) * m_vertex_count);
 }
 
+void VeMesh::createShadowVertexBuffer(const std::vector<Vertex>& vertices) {
+	// Position-only buffer for shadow passes (12 bytes/vertex vs 48 bytes/vertex)
+	std::vector<glm::vec3> positions(vertices.size());
+	for (size_t i = 0; i < vertices.size(); i++) {
+		positions[i] = vertices[i].pos;
+	}
+
+	VeBuffer staging_buffer(
+		m_ve_device,
+		sizeof(glm::vec3),
+		m_vertex_count,
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+	);
+	staging_buffer.map();
+	staging_buffer.writeToBuffer(positions.data());
+
+	m_shadow_vertex_buffer = std::make_unique<VeBuffer>(
+		m_ve_device,
+		sizeof(glm::vec3),
+		m_vertex_count,
+		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		1
+	);
+	m_ve_device.copyBuffer(staging_buffer.getBuffer(), m_shadow_vertex_buffer->getBuffer(),
+	                       sizeof(glm::vec3) * m_vertex_count);
+}
+
 void VeMesh::createIndexBuffers(const std::vector<uint32_t>& indices) {
 	m_index_count = static_cast<uint32_t>(indices.size());
 	assert(m_index_count >= 3 && "Index count must be at least 3");
@@ -120,6 +151,12 @@ void VeMesh::bindVertexBuffer(vk::raii::CommandBuffer& command_buffer) const {
 	command_buffer.bindVertexBuffers(0, buffers, offsets);
 }
 
+void VeMesh::bindShadowVertexBuffer(vk::raii::CommandBuffer& command_buffer) const {
+	vk::Buffer buffers[] = {*m_shadow_vertex_buffer->getBuffer()};
+	vk::DeviceSize offsets[] = {0};
+	command_buffer.bindVertexBuffers(0, buffers, offsets);
+}
+
 void VeMesh::bindIndexBuffer(vk::raii::CommandBuffer& command_buffer) const {
 	command_buffer.bindIndexBuffer(*m_index_buffer->getBuffer(), 0, vk::IndexType::eUint32);
 }
@@ -132,6 +169,10 @@ void VeMesh::drawIndexed(vk::raii::CommandBuffer& command_buffer) const {
 	command_buffer.drawIndexed(m_index_count, 1, 0, 0, 0);
 }
 
+void VeMesh::drawIndexed(vk::raii::CommandBuffer& command_buffer, uint32_t instance_count, uint32_t first_instance) const {
+	command_buffer.drawIndexed(m_index_count, instance_count, 0, 0, first_instance);
+}
+
 std::vector<vk::VertexInputBindingDescription> VeMesh::Vertex::getBindingDescriptions() {
 	return {vk::VertexInputBindingDescription{
 		.binding = 0,
@@ -140,28 +181,34 @@ std::vector<vk::VertexInputBindingDescription> VeMesh::Vertex::getBindingDescrip
 	}};
 }
 
+std::vector<vk::VertexInputBindingDescription> VeMesh::Vertex::getShadowBindingDescriptions() {
+	return {vk::VertexInputBindingDescription{
+		.binding = 0,
+		.stride = sizeof(glm::vec3),  // position-only (12 bytes)
+		.inputRate = vk::VertexInputRate::eVertex
+	}};
+}
+
 std::vector<vk::VertexInputAttributeDescription> VeMesh::Vertex::getAttributeDescriptionsSimple() {
 	return {
 		vk::VertexInputAttributeDescription{.location = 0, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, pos)},
-		vk::VertexInputAttributeDescription{.location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, color)},
-		vk::VertexInputAttributeDescription{.location = 2, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, normal)},
-		vk::VertexInputAttributeDescription{.location = 3, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof(Vertex, tex_coord)}
+		vk::VertexInputAttributeDescription{.location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, normal)},
+		vk::VertexInputAttributeDescription{.location = 2, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof(Vertex, tex_coord)}
 	};
 }
 
 std::vector<vk::VertexInputAttributeDescription> VeMesh::Vertex::getAttributeDescriptions() {
 	return {
 		vk::VertexInputAttributeDescription{.location = 0, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, pos)},
-		vk::VertexInputAttributeDescription{.location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, color)},
-		vk::VertexInputAttributeDescription{.location = 2, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, normal)},
-		vk::VertexInputAttributeDescription{.location = 3, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof(Vertex, tex_coord)},
-		vk::VertexInputAttributeDescription{.location = 4, .binding = 0, .format = vk::Format::eR32G32B32A32Sfloat, .offset = offsetof(Vertex, tangent)}
+		vk::VertexInputAttributeDescription{.location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, normal)},
+		vk::VertexInputAttributeDescription{.location = 2, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof(Vertex, tex_coord)},
+		vk::VertexInputAttributeDescription{.location = 3, .binding = 0, .format = vk::Format::eR32G32B32A32Sfloat, .offset = offsetof(Vertex, tangent)}
 	};
 }
 
 std::vector<vk::VertexInputAttributeDescription> VeMesh::Vertex::getAttributeDescriptionsShadow() {
 	return {vk::VertexInputAttributeDescription{
-		.location = 0, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, pos)
+		.location = 0, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = 0
 	}};
 }
 

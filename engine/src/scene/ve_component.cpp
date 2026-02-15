@@ -1,5 +1,5 @@
 #include "scene/ve_component.hpp"
-#include "scene/ve_game_object.hpp"
+#include "scene/ve_registry.hpp"
 #include "resources/ve_mesh.hpp"
 
 #define GLM_FORCE_RADIANS
@@ -70,7 +70,8 @@ void TransformComponent::updateTransform() const {
 	m_cached_normal_transform = R3 * S3;
 
 	m_transform_dirty = false;
-	m_owner->invalidateWorldTransform();
+	if (m_registry)
+		m_registry->invalidateWorldTransform(m_entity);
 }
 
 
@@ -78,20 +79,7 @@ void TransformComponent::updateTransform() const {
 // PointLightComponent
 // ---------------------------------------------------------------------------
 
-void PointLightComponent::update(float delta_time) {
-	if (!rotates)
-		return;
-
-	auto* transform = m_owner->getComponent<TransformComponent>();
-	if (!transform)
-		return;
-
-	const float speed = 0.04f;
-	const glm::mat4 rot = glm::rotate(glm::mat4(1.0f), speed * delta_time, glm::vec3(0.0f, 0.0f, 1.0f));
-	glm::vec4 pos{transform->getTranslation(), 1.0f};
-	pos = rot * pos;
-	transform->setTranslation(glm::vec3(pos));
-}
+void PointLightComponent::update(float /*delta_time*/) {}
 
 // ---------------------------------------------------------------------------
 // MeshComponent
@@ -108,7 +96,8 @@ void MeshComponent::invalidateWorldAABB() {
 }
 
 void MeshComponent::updateWorldAABB() const {
-	const glm::mat4& model = getOwner()->getTransform();
+	assert(m_registry && "MeshComponent must have Registry context for world AABB");
+	const glm::mat4& model = m_registry->getWorldTransform(m_entity);
 	m_cached_world_aabb = transformAABB(getMesh()->getLocalAABB(), model);
 	m_world_aabb_dirty = false;
 }

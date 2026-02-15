@@ -87,7 +87,10 @@ set(MIKKTSPACE_DIR "${PROJECT_SOURCE_DIR}/external/mikktspace")
 if(EXISTS "${MIKKTSPACE_DIR}/mikktspace.c")
 	target_sources(VEngineLib PRIVATE ${MIKKTSPACE_DIR}/mikktspace.c)
 	target_include_directories(VEngineLib SYSTEM PRIVATE ${MIKKTSPACE_DIR})
-	set_source_files_properties(${MIKKTSPACE_DIR}/mikktspace.c PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+	set_source_files_properties(${MIKKTSPACE_DIR}/mikktspace.c PROPERTIES
+		SKIP_PRECOMPILE_HEADERS ON
+		COMPILE_OPTIONS "-w"
+	)
 	message(STATUS "MikkTSpace (vendored): ${MIKKTSPACE_DIR}")
 endif()
 

@@ -28,18 +28,18 @@ public:
 
 	struct Vertex {
 		glm::vec3 pos;
-		glm::vec3 color;
 		glm::vec3 normal;
 		glm::vec2 tex_coord{0.0f, 0.0f};
 		glm::vec4 tangent{0.0f, 0.0f, 0.0f, 0.0f};
 
 		static std::vector<vk::VertexInputBindingDescription> getBindingDescriptions();
+		static std::vector<vk::VertexInputBindingDescription> getShadowBindingDescriptions();
 		static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptions();
 		static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptionsSimple();
 		static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptionsShadow();
 
 		bool operator==(const Vertex& other) const {
-			return pos == other.pos && color == other.color && normal == other.normal &&
+			return pos == other.pos && normal == other.normal &&
 			       tangent == other.tangent && tex_coord == other.tex_coord;
 		}
 	};
@@ -53,9 +53,11 @@ public:
 	VeMesh& operator=(const VeMesh&) = delete;
 
 	void bindVertexBuffer(vk::raii::CommandBuffer& command_buffer) const;
+	void bindShadowVertexBuffer(vk::raii::CommandBuffer& command_buffer) const;
 	void bindIndexBuffer(vk::raii::CommandBuffer& command_buffer) const;
 	void draw(vk::raii::CommandBuffer& command_buffer) const;
 	void drawIndexed(vk::raii::CommandBuffer& command_buffer) const;
+	void drawIndexed(vk::raii::CommandBuffer& command_buffer, uint32_t instance_count, uint32_t first_instance) const;
 
 	uint32_t getVertexCount() const { return m_vertex_count; }
 	uint32_t getIndexCount() const { return m_index_count; }
@@ -68,11 +70,13 @@ protected:
 
 private:
 	void createVertexBuffers(const std::vector<Vertex>& vertices);
+	void createShadowVertexBuffer(const std::vector<Vertex>& vertices);
 	void createIndexBuffers(const std::vector<uint32_t>& indices);
 	void computeLocalAABB(const std::vector<Vertex>& vertices);
 
 	VeDevice& m_ve_device;
 	std::unique_ptr<VeBuffer> m_vertex_buffer;
+	std::unique_ptr<VeBuffer> m_shadow_vertex_buffer;
 	std::unique_ptr<VeBuffer> m_index_buffer;
 	uint32_t m_vertex_count{0};
 	uint32_t m_index_count{0};
@@ -89,7 +93,6 @@ struct std::hash<ve::VeMesh::Vertex> {
 	size_t operator()(ve::VeMesh::Vertex const& v) const noexcept {
 		size_t seed = 0u;
 		seed ^= std::hash<glm::vec3>()(v.pos) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-		seed ^= std::hash<glm::vec3>()(v.color) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 		seed ^= std::hash<glm::vec3>()(v.normal) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 		seed ^= std::hash<glm::vec2>()(v.tex_coord) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 		seed ^= std::hash<glm::vec4>()(v.tangent) + 0x9e3779b9 + (seed << 6) + (seed >> 2);

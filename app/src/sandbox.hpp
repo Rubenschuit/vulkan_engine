@@ -22,7 +22,7 @@ public:
 	virtual void onSwapChainRecreated() override;
 
 private:
-	void createUniformBuffers();
+	void createBuffers();
 	void createDescriptors();
 
 	void initSystems();

@@ -8,9 +8,9 @@
 #include <filesystem>
 
 namespace ve {
-	class VeGameObject;
 	class VeDevice;
 	class VePipeline;
+	class VeMesh;
 	class MeshComponent;
     class VeBuffer;
     class VeDescriptorPool;
@@ -26,6 +26,7 @@ public:
 		VeDevice& device,
 		VeDescriptorPool& descriptor_pool,
 		const vk::raii::DescriptorSetLayout& material_set_layout,
+		const std::vector<std::unique_ptr<VeBuffer>>& instance_buffers,
 		std::filesystem::path shader_path);
 	~ShadowRenderSystem();
 
@@ -57,7 +58,8 @@ private:
 		const vk::raii::DescriptorSetLayout& material_set_layout);
 	void createPipeline(vk::Format depth_format);
 	void createShadowUBOs();
-	void createShadowPassDescriptorSets(VeDescriptorPool& descriptor_pool);
+	void createShadowPassDescriptorSets(VeDescriptorPool& descriptor_pool,
+		const std::vector<std::unique_ptr<VeBuffer>>& instance_buffers);
 	void createShadowTextureDescriptorSets(VeDescriptorPool& descriptor_pool);
 	void renderShadowMap(VeFrameInfo& frame_info, uint32_t light_index) const;
 
@@ -65,7 +67,7 @@ private:
 
 	std::filesystem::path m_shader_path;
 
-	// Shadow global descriptor set layout (for shadow pass UBO)
+	// Shadow global descriptor set layout (for shadow pass UBO + instance SSBO)
 	std::unique_ptr<VeDescriptorSetLayout> m_shadow_global_set_layout;
 
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
@@ -88,11 +90,19 @@ private:
 	vk::Format m_shadow_depth_format;
 
 	struct ShadowDrawable {
-		VeGameObject* obj = nullptr;
+		Entity entity;
 		MeshComponent* mesh = nullptr;
 	};
 	std::vector<ShadowDrawable> m_shadow_drawables;
 	bool m_shadow_drawables_dirty = true;
+
+	// Instanced draw groups for shadow pass
+	struct ShadowInstanceGroup {
+		VeMesh* mesh = nullptr;
+		uint32_t first_instance = 0;
+		uint32_t instance_count = 0;
+	};
+	mutable std::vector<ShadowInstanceGroup> m_shadow_instance_groups;
 };
 
 }

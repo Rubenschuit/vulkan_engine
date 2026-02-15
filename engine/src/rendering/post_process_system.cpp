@@ -107,6 +107,7 @@ void PostProcessSystem::createPipeline(vk::Format color_format) {
 	// No vertex input for full screen triangle
 	pipeline_config.attribute_descriptions.clear();
 	pipeline_config.binding_descriptions.clear();
+	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eNone;
 
 	// Disable depth testing for post process
 	pipeline_config.depth_stencil_info.depthTestEnable = vk::False;

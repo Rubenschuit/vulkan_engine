@@ -17,7 +17,7 @@ namespace ve {
 // First a window, device and swap chain are initialised in the base class
 Sandbox::Sandbox(const std::filesystem::path& working_dir) : m_paths(working_dir) {
 	m_resource_manager = std::make_unique<VeResourceManager>(m_ve_device);
-	createUniformBuffers();
+	createBuffers();
 	createDescriptors();
 
 	initSystems();
@@ -124,8 +124,8 @@ VeFrameInfo Sandbox::update() {
 		.command_buffer = command_buffer,
 		.compute_command_buffer = compute_command_buffer,
 		.camera = m_camera,
-		.game_objects = m_active_scene->getGameObjects(),
-		.visible_game_objects = m_culling_system->getVisibleGameObjectsRef(),
+		.registry = &m_active_scene->getRegistry(),
+		.visible_objects = m_culling_system->getVisibleObjectsRef(),
 		.frame_time = m_frame_time,
 		.total_time = m_total_time,
 		.current_frame = current_frame,
@@ -137,7 +137,10 @@ VeFrameInfo Sandbox::update() {
 			ui_actions.bloom_enabled ? ui_actions.bloom_strength : 0.0f,
 			{0.0f, 0.0f, 0.0f}, // padding
 			texel_size
-		}
+		},
+		.instance_data = static_cast<InstanceData*>(m_instance_buffers[current_frame]->getMappedMemory()),
+		.instance_count = 0,
+		.instance_capacity = INITIAL_INSTANCE_CAPACITY,
 	};
 
 	// Updates camera state based on input and frame time. Returns actions for systems.
@@ -346,37 +349,45 @@ void Sandbox::renderAppWindows() {
 				ImGui::Separator();
 				if (ImGui::CollapsingHeader("Point Lights")) {
 					if (m_active_scene) {
-						auto& game_objects = m_active_scene->getGameObjects();
-						std::vector<std::pair<uint32_t, VeGameObject*>> lights;
-						for (auto& [id, obj] : game_objects) {
-							if (obj.getComponent<PointLightComponent>() && obj.getComponent<TransformComponent>())
-								lights.push_back({id, &obj});
+						auto& registry = m_active_scene->getRegistry();
+						auto& pl_pool = registry.pointLights();
+
+						// Collect light entities sorted by id for stable UI order
+						std::vector<Entity> lights;
+						lights.reserve(pl_pool.size());
+						for (uint32_t i = 0; i < pl_pool.size(); i++) {
+							Entity e = registry.entityFromIndex(pl_pool.entityAt(i));
+							if (registry.hasComponent<TransformComponent>(e))
+								lights.push_back(e);
 						}
-						std::sort(lights.begin(), lights.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+						std::sort(lights.begin(), lights.end());
+
 						if (!lights.empty()) {
 							if (ImGui::Button("All on")) {
-								for (auto& p : lights) p.second->setActive(true);
+								for (auto e : lights) registry.setActive(e, true);
 							}
 							ImGui::SameLine();
 							if (ImGui::Button("All off")) {
-								for (auto& p : lights) p.second->setActive(false);
+								for (auto e : lights) registry.setActive(e, false);
 							}
 						}
-						const uint32_t scene_sun_id = m_active_scene->getSunId();
+						const Entity scene_sun = m_active_scene->getSun();
 						for (size_t i = 0; i < lights.size(); i++) {
-							VeGameObject* obj = lights[i].second;
-							auto* pl = obj->getComponent<PointLightComponent>();
-							auto* transform = obj->getComponent<TransformComponent>();
-							if (!pl || !transform) continue;
-							ImGui::PushID(static_cast<int>(obj->getId()));
-							const std::string label = obj->getName().empty() ? ("Light " + std::to_string(static_cast<unsigned>(i))) : obj->getName();
+							Entity e = lights[i];
+							auto* pl = registry.getComponent<PointLightComponent>(e);
+							auto* transform = registry.getComponent<TransformComponent>(e);
+							if (!pl || !transform)
+								continue;
+							ImGui::PushID(static_cast<int>(e.id()));
+							const auto& name = registry.getName(e);
+							const std::string label = name.empty() ? ("Light " + std::to_string(static_cast<unsigned>(i))) : name;
 							if (ImGui::TreeNode(label.c_str())) {
-								bool active = obj->isActive();
+								bool active = registry.isActive(e);
 								ImGui::Checkbox("Active", &active);
-								obj->setActive(active);
+								registry.setActive(e, active);
 								ImGui::ColorEdit3("Color", &pl->color.r);
 								ImGui::SliderFloat("Intensity", &pl->intensity, 0.0f, 100000.0f);
-								if (scene_sun_id != 0 && obj->getId() == scene_sun_id)
+								if (!scene_sun.isNull() && e == scene_sun)
 									ui_actions.sun_intensity = pl->intensity;
 								glm::vec3 pos = transform->getTranslation();
 								if (ImGui::DragFloat3("Position", &pos.x)) {
@@ -752,8 +763,8 @@ void Sandbox::renderAppWindows() {
 	ImGui::End();
 }
 
-void Sandbox::createUniformBuffers() {
-	VE_LOGD("Creating uniform buffers");
+void Sandbox::createBuffers() {
+	VE_LOGD("Creating buffers");
 	vk::DeviceSize buffer_size = sizeof(UniformBufferObject);
 	assert(buffer_size > 0 && "Uniform buffer size is zero");
 	//assert(buffer_size % 16 == 0 && "Uniform buffer size must be a multiple of 16 bytes");
@@ -772,6 +783,19 @@ void Sandbox::createUniformBuffers() {
 		));
 		m_uniform_buffers[i]->map();
 	}
+
+	// Per-frame instance SSBO buffers (for instanced draw transforms)
+	m_instance_buffers.clear();
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		m_instance_buffers.emplace_back(std::make_unique<VeBuffer>(
+			m_ve_device,
+			sizeof(InstanceData),
+			INITIAL_INSTANCE_CAPACITY,
+			vk::BufferUsageFlagBits::eStorageBuffer,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+		));
+		m_instance_buffers[i]->map();
+	}
 }
 
 // Creates descriptor set layouts, pool, and descriptor sets used by render systems.
@@ -782,11 +806,12 @@ void Sandbox::createUniformBuffers() {
 void Sandbox::createDescriptors() {
 	VE_LOGD("Creating descriptors");
 
-	// Global set layout for global UBO and optional ray tracing acceleration structure
+	// Global set layout: UBO (binding 0), instance SSBO (binding 1), optional ray tracing (binding 2)
 	m_global_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eAllGraphics)
+		.addBinding(1, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eVertex)
 #if ENABLE_RAY_TRACING
-		.addBinding(1, vk::DescriptorType::eAccelerationStructureKHR, vk::ShaderStageFlagBits::eFragment)
+		.addBinding(2, vk::DescriptorType::eAccelerationStructureKHR, vk::ShaderStageFlagBits::eFragment)
 #endif
 		.build();
 
@@ -814,19 +839,21 @@ void Sandbox::createDescriptors() {
 		.addPoolSize(vk::DescriptorType::eSampler, MAX_FRAMES_IN_FLIGHT + 7)
 		// Sampled images: shadow map array (1 per frame) + slack
 		.addPoolSize(vk::DescriptorType::eSampledImage, MAX_FRAMES_IN_FLIGHT + 7)
-		// Compute storage buffers:
-		.addPoolSize(vk::DescriptorType::eStorageBuffer, 14 * MAX_FRAMES_IN_FLIGHT)
+		// Storage buffers: compute + instance SSBO (1 per frame for global + 1 per frame per shadow light)
+		.addPoolSize(vk::DescriptorType::eStorageBuffer, 14 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + MAX_SHADOW_LIGHTS * MAX_FRAMES_IN_FLIGHT)
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
 		.buildShared();
 
-	// create gloabal ubo descriptor sets (per frame)
+	// Create global descriptor sets (per frame): UBO (binding 0) + instance SSBO (binding 1)
 	m_global_descriptor_sets.clear();
 	m_global_descriptor_sets.reserve(MAX_FRAMES_IN_FLIGHT);
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		auto buffer_info = m_uniform_buffers[i]->getDescriptorInfo();
+		auto instance_info = m_instance_buffers[i]->getDescriptorInfo();
 		vk::raii::DescriptorSet set{nullptr};
 		VeDescriptorWriter(*m_global_set_layout, *m_global_pool)
 			.writeBuffer(0, &buffer_info)
+			.writeBuffer(1, &instance_info)
 			.build(set);
 		m_global_descriptor_sets.push_back(std::move(set));
 	}
@@ -897,6 +924,7 @@ void Sandbox::initSystems() {
 		m_ve_device,
 		*m_global_pool,
 		m_material_set_layout->getDescriptorSetLayout(),
+		m_instance_buffers,
 		m_paths.shader("shadow_shader.spv")
 	);
 

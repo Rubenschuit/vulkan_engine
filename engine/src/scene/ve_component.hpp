@@ -1,7 +1,9 @@
-/* Component system for VeGameObject entities.
+/* Component system for ECS entities. Components are plain data holders that
+ * can be attached to entities. Systems operate on entities with specific component combinations.
  */
 #pragma once
 #include "ve_export.hpp"
+#include "ve_entity.hpp"
 #include "resources/ve_resource_manager.hpp"
 #include "resources/ve_mesh.hpp"
 #include "resources/ve_material.hpp"
@@ -14,7 +16,7 @@
 namespace ve {
 
 // Forward declarations
-class VeGameObject;
+class Registry;
 
 // ---------------------------------------------------------------------------
 // Component type ID system
@@ -46,8 +48,9 @@ public:
 	virtual void update(float /*delta_time*/) {}
 	virtual void render() {} // unused
 
-	void setOwner(VeGameObject* entity) { m_owner = entity; }
-	VeGameObject* getOwner() const { return m_owner; }
+	void setContext(Entity entity, Registry* registry) { m_entity = entity; m_registry = registry; }
+	Entity getEntity() const { return m_entity; }
+	Registry* getRegistry() const { return m_registry; }
 
 	template <typename T>
 	static size_t getTypeID() {
@@ -55,7 +58,8 @@ public:
 	}
 
 protected:
-	VeGameObject* m_owner = nullptr;
+	Entity m_entity;
+	Registry* m_registry = nullptr;
 
 };
 

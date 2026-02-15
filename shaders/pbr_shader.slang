@@ -1,8 +1,9 @@
 #define PI 3.1415926536
+#define MAX_LIGHTS 40
+#define MAX_SHADOW_LIGHTS 3
 
 struct VertexInput {
 	float3 in_pos : POSITION;
-	float3 in_color : COLOR;
 	float3 in_normal : NORMAL;
 	float2 in_tex_coord : TEXCOORD0;
 	float4 in_tangent : TANGENT; // xyz = tangent, w = bitangent sign
@@ -42,8 +43,8 @@ struct UniformBuffer {
 	float4x4 projection_view;
 	float4 camera_position; // .w unused
 	float4 ambient_light_color;
-	PointLight point_lights[40]; // constant must be equal to ve::MAX_LIGHTS, TODO use specialization constant
-	ShadowLight shadow_lights[3]; // MAX_SHADOW_LIGHTS
+	PointLight point_lights[MAX_LIGHTS]; // must be equal to ve::MAX_LIGHTS, TODO use specialization constant
+	ShadowLight shadow_lights[MAX_SHADOW_LIGHTS]; // MAX_SHADOW_LIGHTS
 	uint32_t num_lights;
 	uint32_t num_shadow_lights;
 	uint32_t render_mode; // see RenderMode enum
@@ -53,14 +54,21 @@ struct UniformBuffer {
 [vk::binding(0, 0)] // binding 0, set 0
 ConstantBuffer<UniformBuffer> ubo;
 
+// Per-instance transforms stored in SSBO, indexed by SV_InstanceID (always 0-based)
+struct InstanceData {
+	float4x4 transform;
+	float4   normal_col0;
+	float4   normal_col1;
+	float4   normal_col2;
+};
+[vk::binding(1, 0)] // binding 1, set 0
+StructuredBuffer<InstanceData> instances;
+
 struct PushConstantData {
-	[vk::offset(0)]   float4x4 transform;
-	[vk::offset(64)]  float4   normal_col0;
-	[vk::offset(80)]  float4   normal_col1;
-	[vk::offset(96)]  float4   normal_col2;
-	[vk::offset(112)] float    has_texture;
-	[vk::offset(116)] float    alpha_cutoff;
-	[vk::offset(120)] uint32_t material_flags;  // bits 0-1: alpha_mode, bit 2: double_sided, bit 3: flip_tex_coord_v, bit 4: use_spec_gloss_texture
+	[vk::offset(0)]  float    has_texture;
+	[vk::offset(4)]  float    alpha_cutoff;
+	[vk::offset(8)]  uint32_t material_flags;  // bits 0-1: alpha_mode, bit 2: double_sided, bit 3: flip_tex_coord_v, bit 4: use_spec_gloss_texture
+	[vk::offset(12)] uint32_t instance_offset;  // SSBO offset (SV_InstanceID is 0-based in Slang)
 };
 [push_constant]
 PushConstantData push_constants;
@@ -71,9 +79,8 @@ struct VertexOutput {
 	float3 frag_normal_world;
 	float3 frag_tangent_world;
 	float3 frag_bitangent_world;
-	float3 frag_color;
 	float2 frag_tex_coord;
-	float4 shadow_coord[3]; // MAX_SHADOW_LIGHTS
+	float4 shadow_coord[MAX_SHADOW_LIGHTS]; // MAX_SHADOW_LIGHTS
 };
 
 // Transform x and y coordinates from [0,1] to [-1,1] and keep z and w coordinates unchanged
@@ -85,20 +92,22 @@ static const float4x4 bias_matrix = float4x4(
 );
 
 [shader("vertex")]
-VertexOutput vertMain(VertexInput input) {
+VertexOutput vertMain(VertexInput input, uint instance_id : SV_InstanceID) {
     VertexOutput output;
 
+	InstanceData inst = instances[instance_id + push_constants.instance_offset];
+
 	float4 pos = float4(input.in_pos, 1.0); // homogeneous coordinates
-	float4 world_pos = mul(push_constants.transform, pos); // apply per-object transform
+	float4 world_pos = mul(inst.transform, pos); // apply per-instance transform
 
 	output.pos = mul(ubo.projection_view, world_pos);
 	output.frag_pos_world = world_pos.xyz;
 
 	// Transform normal and tangent to world space
 	float3x3 normal_matrix = float3x3(
-		float3(push_constants.normal_col0.x, push_constants.normal_col1.x, push_constants.normal_col2.x),
-		float3(push_constants.normal_col0.y, push_constants.normal_col1.y, push_constants.normal_col2.y),
-		float3(push_constants.normal_col0.z, push_constants.normal_col1.z, push_constants.normal_col2.z)
+		float3(inst.normal_col0.x, inst.normal_col1.x, inst.normal_col2.x),
+		float3(inst.normal_col0.y, inst.normal_col1.y, inst.normal_col2.y),
+		float3(inst.normal_col0.z, inst.normal_col1.z, inst.normal_col2.z)
 	);
 	float3 tangent = mul(normal_matrix, input.in_tangent.xyz);
 	float3 normal = normalize(mul(normal_matrix, input.in_normal));
@@ -109,8 +118,6 @@ VertexOutput vertMain(VertexInput input) {
 	output.frag_normal_world = normal;
 	output.frag_tangent_world = tangent;
 	output.frag_bitangent_world = bitangent;
-	// pass through
-    output.frag_color = input.in_color;
 	float2 tex_coord = input.in_tex_coord;
 	if ((push_constants.material_flags & 8u) != 0u)  // flip_tex_coord_v (bit 3)
 		tex_coord.y = 1.0f - tex_coord.y;
@@ -302,7 +309,7 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	float3 view_dir = normalize(ubo.camera_position.xyz - in_vert.frag_pos_world);
 
 	// Create mapping from light index to shadow term (defaults to 1.0 = no shadow)
-	float shadow_terms[20]; // MAX_LIGHTS
+	float shadow_terms[MAX_LIGHTS];
 	for (uint32_t i = 0; i < ubo.num_lights; i++) {
 		shadow_terms[i] = 1.0;
 	}

@@ -53,6 +53,7 @@ private:
 
 	std::string m_resource_id;
 	mutable VeResourceManager* m_manager = nullptr;
+	mutable T* m_cached = nullptr;
 };
 
 

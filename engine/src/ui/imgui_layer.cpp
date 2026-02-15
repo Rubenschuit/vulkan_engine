@@ -29,12 +29,13 @@ static VkDescriptorPool createImguiDescriptorPool(vk::raii::Device& device) {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
         {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}
     };
-    VkDescriptorPoolCreateInfo pool_info{};
-    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    pool_info.maxSets = 1000 * static_cast<uint32_t>(pool_sizes.size());
-    pool_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
-    pool_info.pPoolSizes = pool_sizes.data();
+    VkDescriptorPoolCreateInfo pool_info{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets = 1000 * static_cast<uint32_t>(pool_sizes.size()),
+        .poolSizeCount = static_cast<uint32_t>(pool_sizes.size()),
+        .pPoolSizes = pool_sizes.data()
+    };
     VkDescriptorPool pool = VK_NULL_HANDLE;
     VkResult res = vkCreateDescriptorPool(*device, &pool_info, nullptr, &pool);
     if (res != VK_SUCCESS) {

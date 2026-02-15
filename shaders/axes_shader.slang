@@ -1,7 +1,6 @@
 struct VertexInput {
     float3 in_pos : POSITION;
-    float3 in_color : COLOR;
-	float3 in_normal : NORMAL; // ignored
+	float3 in_normal : NORMAL; // repurposed as per-vertex color
     float2 in_tex_coord : TEXCOORD0; // ignored
 };
 
@@ -23,10 +22,10 @@ struct VertexOutput {
 VertexOutput vertMain(VertexInput input) {
     VertexOutput outV;
     outV.tex_coord = input.in_tex_coord; // unused
-	outV.normal = input.in_normal; // unused
+	outV.normal = float3(0.0); // unused
     float4 pos = float4(input.in_pos, 1.0);
     outV.pos = mul(ubo.proj, mul(ubo.view, pos)); // only view and projection
-    outV.color = input.in_color;
+    outV.color = input.in_normal; // normal field stores per-vertex color
     return outV;
 }
 

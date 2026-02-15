@@ -23,8 +23,8 @@ void addAABBEdges(const VeMesh::AABB& aabb, glm::vec3 color, std::vector<VeMesh:
 	const glm::vec3 v7(mn.x, mx.y, mx.z);
 
 	auto push_line = [&](const glm::vec3& a, const glm::vec3& b) {
-		out.push_back({a, color, glm::vec3{1.0f}});
-		out.push_back({b, color, glm::vec3{1.0f}});
+		out.push_back({a, color}); // color stored in normal field (axes_shader reads it)
+		out.push_back({b, color});
 	};
 
 	// Bottom face
@@ -103,7 +103,7 @@ void AabbDebugRenderSystem::render(VeFrameInfo& frame_info) const {
 
 	const glm::vec3 color(1.0f, 0.1f, 0.0f);
 
-	for (auto& [id, entry] : frame_info.visible_game_objects) {
+	for (auto& entry : frame_info.visible_objects) {
 		MeshComponent* mesh_comp = entry.mesh;
 		if (!mesh_comp || !mesh_comp->hasMesh())
 			continue;

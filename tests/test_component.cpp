@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <scene/ve_component.hpp>
-#include <scene/ve_game_object.hpp>
+#include <scene/ve_registry.hpp>
 #include <glm/glm.hpp>
 
 // Dummy component for testing type ID uniqueness
@@ -25,46 +25,33 @@ TEST_CASE("ComponentTypeIDSystem assigns unique IDs per type", "[component][type
 	REQUIRE(ve::Component::getTypeID<ve::TransformComponent>() == id_transform);
 }
 
-TEST_CASE("VeGameObject addComponent returns existing component if already present", "[gameobject][component]") {
-	auto obj = ve::VeGameObject::createGameObject();
+TEST_CASE("Registry getComponent returns nullptr for missing component", "[registry][component]") {
+	ve::Registry registry;
+	auto e = registry.createEntity("test");
 
-	auto* t1 = obj.getComponent<ve::TransformComponent>();
-	REQUIRE(t1 != nullptr);
-
-	// addComponent of same type should return existing, not create duplicate
-	auto* t2 = obj.addComponent<ve::TransformComponent>();
-	REQUIRE(t2 == t1);
+	REQUIRE(registry.getComponent<ve::PointLightComponent>(e) == nullptr);
+	REQUIRE(registry.getComponent<ve::MeshComponent>(e) == nullptr);
 }
 
-TEST_CASE("VeGameObject getComponent returns nullptr for missing component", "[gameobject][component]") {
-	auto obj = ve::VeGameObject::createGameObject();
-
-	REQUIRE(obj.getComponent<ve::PointLightComponent>() == nullptr);
-	REQUIRE(obj.getComponent<ve::MeshComponent>() == nullptr);
-}
-
-TEST_CASE("VeGameObject removeComponent", "[gameobject][component]") {
-	auto obj = ve::VeGameObject::createGameObject();
+TEST_CASE("Registry removeComponent", "[registry][component]") {
+	ve::Registry registry;
+	auto e = registry.createEntity("test");
 
 	// Add PointLight
-	auto* pl = obj.addComponent<ve::PointLightComponent>();
-	REQUIRE(pl != nullptr);
-	REQUIRE(obj.getComponent<ve::PointLightComponent>() == pl);
+	auto& pl = registry.addComponent<ve::PointLightComponent>(e);
+	REQUIRE(registry.getComponent<ve::PointLightComponent>(e) == &pl);
 
 	// Remove it
-	bool removed = obj.removeComponent<ve::PointLightComponent>();
-	REQUIRE(removed);
-	REQUIRE(obj.getComponent<ve::PointLightComponent>() == nullptr);
-
-	// Remove non-existent returns false
-	removed = obj.removeComponent<ve::PointLightComponent>();
-	REQUIRE_FALSE(removed);
+	registry.removeComponent<ve::PointLightComponent>(e);
+	REQUIRE(registry.getComponent<ve::PointLightComponent>(e) == nullptr);
 }
 
-TEST_CASE("Component owner is set when added", "[component][owner]") {
-	auto obj = ve::VeGameObject::createGameObject();
-	auto* transform = obj.getComponent<ve::TransformComponent>();
+TEST_CASE("Component context is set when added via Registry", "[component][context]") {
+	ve::Registry registry;
+	auto e = registry.createGameObject();
+	auto* transform = registry.getComponent<ve::TransformComponent>(e);
 
 	REQUIRE(transform != nullptr);
-	REQUIRE(transform->getOwner() == &obj);
+	REQUIRE(transform->getEntity() == e);
+	REQUIRE(transform->getRegistry() == &registry);
 }

@@ -26,7 +26,7 @@ TEST_CASE("defaultPipelineConfigInfo sets sane Vulkan defaults", "[pipeline][con
     // Rasterization
     REQUIRE(cfg.rasterization_info.polygonMode == vk::PolygonMode::eFill);
     REQUIRE(cfg.rasterization_info.cullMode == vk::CullModeFlagBits::eBack);
-    REQUIRE(cfg.rasterization_info.frontFace == vk::FrontFace::eClockwise);
+    REQUIRE(cfg.rasterization_info.frontFace == vk::FrontFace::eCounterClockwise);
     REQUIRE(cfg.rasterization_info.lineWidth == 1.0f);
 
     // Multisample

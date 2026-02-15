@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <scene/ve_game_object.hpp>
+#include <scene/ve_registry.hpp>
 #include <scene/ve_component.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -13,79 +13,84 @@ static bool mat4Equal(const glm::mat4& a, const glm::mat4& b, float eps = 1e-5f)
 	return true;
 }
 
-TEST_CASE("VeGameObject creation and IDs", "[gameobject][core]") {
-	auto obj1 = ve::VeGameObject::createGameObject();
-	auto obj2 = ve::VeGameObject::createGameObject();
+TEST_CASE("Entity creation and IDs", "[entity][core]") {
+	ve::Registry registry;
+	auto e1 = registry.createEntity();
+	auto e2 = registry.createEntity();
 
-	REQUIRE(obj1.getId() != obj2.getId());
+	REQUIRE(e1 != e2);
+	REQUIRE(registry.isAlive(e1));
+	REQUIRE(registry.isAlive(e2));
 }
 
-TEST_CASE("VeGameObject transform matrix calculation", "[gameobject][transform]") {
-	auto obj = ve::VeGameObject::createGameObject();
+TEST_CASE("Entity transform matrix calculation", "[entity][transform]") {
+	ve::Registry registry;
+	auto e = registry.createGameObject();
+	auto* tc = registry.getComponent<ve::TransformComponent>(e);
+	REQUIRE(tc != nullptr);
 
 	SECTION("Identity transform default") {
-		glm::mat4 transform = obj.getTransform();
-		REQUIRE(mat4Equal(transform, glm::mat4(1.0f)));
+		REQUIRE(mat4Equal(tc->getTransform(), glm::mat4(1.0f)));
 	}
 
 	SECTION("Translation only") {
-		obj.getComponent<ve::TransformComponent>()->translation = {1.0f, 2.0f, 3.0f};
+		tc->setTranslation({1.0f, 2.0f, 3.0f});
 		glm::mat4 expected = glm::translate(glm::mat4(1.0f), {1.0f, 2.0f, 3.0f});
-		REQUIRE(mat4Equal(obj.getTransform(), expected));
+		REQUIRE(mat4Equal(tc->getTransform(), expected));
 	}
 
 	SECTION("Scale only") {
-		obj.getComponent<ve::TransformComponent>()->scale = {2.0f, 2.0f, 2.0f};
+		tc->setScale({2.0f, 2.0f, 2.0f});
 		glm::mat4 expected = glm::scale(glm::mat4(1.0f), {2.0f, 2.0f, 2.0f});
-		REQUIRE(mat4Equal(obj.getTransform(), expected));
+		REQUIRE(mat4Equal(tc->getTransform(), expected));
 	}
 
 	SECTION("Rotation only (Y-axis)") {
-		obj.getComponent<ve::TransformComponent>()->setRotationEuler({0.0f, glm::half_pi<float>(), 0.0f});
+		tc->setRotationEuler({0.0f, glm::half_pi<float>(), 0.0f});
 		glm::mat4 expected = glm::rotate(glm::mat4(1.0f), glm::half_pi<float>(), {0.0f, 1.0f, 0.0f});
-		REQUIRE(mat4Equal(obj.getTransform(), expected));
+		REQUIRE(mat4Equal(tc->getTransform(), expected));
 	}
 
 	SECTION("Rotation order (ZYX: Rz*Ry*Rx)") {
-		obj.getComponent<ve::TransformComponent>()->setRotationEuler({0.5f, 0.5f, 0.5f}); // Radians (x,y,z)
+		tc->setRotationEuler({0.5f, 0.5f, 0.5f});
 
 		glm::mat4 rx = glm::rotate(glm::mat4(1.0f), 0.5f, {1.0f, 0.0f, 0.0f});
 		glm::mat4 ry = glm::rotate(glm::mat4(1.0f), 0.5f, {0.0f, 1.0f, 0.0f});
 		glm::mat4 rz = glm::rotate(glm::mat4(1.0f), 0.5f, {0.0f, 0.0f, 1.0f});
 		glm::mat4 expected = rz * ry * rx;
 
-		REQUIRE(mat4Equal(obj.getTransform(), expected));
+		REQUIRE(mat4Equal(tc->getTransform(), expected));
 	}
 }
 
-TEST_CASE("VeGameObject point light factory", "[gameobject][factory]") {
-	auto light = ve::VeGameObject::createPointLight(5.0f, 2.0f, {1.0f, 0.0f, 0.0f});
+TEST_CASE("Registry point light factory", "[entity][factory]") {
+	ve::Registry registry;
+	auto light = registry.createPointLight(5.0f, 2.0f, {1.0f, 0.0f, 0.0f});
 
-	auto* pl = light.getComponent<ve::PointLightComponent>();
-	auto* transform = light.getComponent<ve::TransformComponent>();
+	auto* pl = registry.getComponent<ve::PointLightComponent>(light);
+	auto* transform = registry.getComponent<ve::TransformComponent>(light);
 	REQUIRE(pl != nullptr);
 	REQUIRE(pl->intensity == 5.0f);
 	REQUIRE(pl->color == glm::vec3(1.0f, 0.0f, 0.0f));
-	REQUIRE(transform->scale.x == 2.0f);
+	REQUIRE(transform->getScale().x == 2.0f);
 }
 
-TEST_CASE("VeGameObject parent-child hierarchy", "[gameobject][hierarchy]") {
-	auto parent = ve::VeGameObject::createGameObject();
-	auto child = ve::VeGameObject::createGameObject();
+TEST_CASE("Registry parent-child hierarchy", "[entity][hierarchy]") {
+	ve::Registry registry;
+	auto parent = registry.createGameObject();
+	auto child = registry.createGameObject();
 
-	parent.getComponent<ve::TransformComponent>()->translation = {1.0f, 2.0f, 3.0f};
-	child.getComponent<ve::TransformComponent>()->translation = {0.0f, 1.0f, 0.0f};
+	registry.getComponent<ve::TransformComponent>(parent)->setTranslation({1.0f, 2.0f, 3.0f});
+	registry.getComponent<ve::TransformComponent>(child)->setTranslation({0.0f, 1.0f, 0.0f});
 
-	parent.addChild(&child);
+	registry.setParent(child, parent);
 
-	REQUIRE(child.getParent() == &parent);
-	REQUIRE(parent.getChildren().size() == 1);
-	REQUIRE(parent.getChildren()[0] == &child);
+	REQUIRE(registry.getParent(child) == parent);
+	REQUIRE(registry.firstChild(parent) == child);
 
 	// World transform of child should include parent's translation
-	glm::mat4 child_world = child.getTransform();
+	const glm::mat4& child_world = registry.getWorldTransform(child);
 	REQUIRE(child_world[3][0] == 1.0f);
 	REQUIRE(child_world[3][1] == 3.0f);
 	REQUIRE(child_world[3][2] == 3.0f);
 }
-

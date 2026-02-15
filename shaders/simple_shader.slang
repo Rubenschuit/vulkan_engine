@@ -4,7 +4,6 @@
 
 struct VertexInput {
 	float3 in_pos : POSITION;
-	float3 in_color : COLOR;
 	float3 in_normal : NORMAL;
 	float2 in_tex_coord : TEXCOORD0;
 };
@@ -54,12 +53,20 @@ struct UniformBuffer {
 [vk::binding(0, 0)] // binding 0, set 0
 ConstantBuffer<UniformBuffer> ubo;
 
+// Per-instance transforms stored in SSBO, indexed by SV_InstanceID (always 0-based)
+struct InstanceData {
+	float4x4 transform;
+	float4   normal_col0;
+	float4   normal_col1;
+	float4   normal_col2;
+};
+[vk::binding(1, 0)] // binding 1, set 0
+StructuredBuffer<InstanceData> instances;
+
 struct PushConstantData {
-	[vk::offset(0)]   float4x4 transform;      // 64
-	[vk::offset(64)]  float4   normal_col0;    // 16
-	[vk::offset(80)]  float4   normal_col1;    // 16
-	[vk::offset(96)]  float4   normal_col2;    // 16
-	[vk::offset(112)] float    has_texture;    // 4
+	[vk::offset(0)] float    has_texture;       // 4
+	[vk::offset(4)] uint32_t instance_offset;   // 4 (SSBO offset, SV_InstanceID is 0-based in Slang)
+	[vk::offset(8)] float    padding[2];        // 8 (pad to 16)
 };
 [push_constant]
 PushConstantData push_constants;
@@ -68,7 +75,6 @@ struct VertexOutput {
 	float4 pos : SV_Position;
     float3 frag_pos_world;
 	float3 frag_normal_world;
-	float3 frag_color;
 	float2 frag_tex_coord;
 	float4 shadow_coord[MAX_SHADOW_LIGHTS]; // MAX_SHADOW_LIGHTS
 };
@@ -80,23 +86,23 @@ static const float4x4 bias_matrix = float4x4(
     0.0, 0.0, 0.0, 1.0);
 
 [shader("vertex")]
-VertexOutput vertMain(VertexInput input) {
+VertexOutput vertMain(VertexInput input, uint instance_id : SV_InstanceID) {
     VertexOutput output;
 
+	InstanceData inst = instances[instance_id + push_constants.instance_offset];
+
 	float4 pos = float4(input.in_pos, 1.0); // homogeneous coordinates
-	float4 world_pos = mul(push_constants.transform, pos); // apply per-object transform
+	float4 world_pos = mul(inst.transform, pos); // apply per-instance transform
 
 	output.pos = mul(ubo.projection_view, world_pos); // pre-computed view and projection
 	output.frag_pos_world = world_pos.xyz;
 
 	// Transform normal to world space
 	output.frag_normal_world = normalize(float3(
-		dot(push_constants.normal_col0.xyz, input.in_normal),
-		dot(push_constants.normal_col1.xyz, input.in_normal),
-		dot(push_constants.normal_col2.xyz, input.in_normal)
+		dot(inst.normal_col0.xyz, input.in_normal),
+		dot(inst.normal_col1.xyz, input.in_normal),
+		dot(inst.normal_col2.xyz, input.in_normal)
 	));
-	// pass through
-    output.frag_color = input.in_color;
 	output.frag_tex_coord = input.in_tex_coord;
 
 	 // calculate shadow coordinates only if shadows are enabled
@@ -180,8 +186,8 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	if (ubo.render_mode == RenderMode::NORMAL_VECTOR)
 		return float4(0.5 * normal + 0.5, 1.0f);
 
-	// Textured objects (no shadow/lighting)
-	float4 base_color = float4(in_vert.frag_color, 1.0f);
+	// Base color for untextured objects
+	float4 base_color = float4(1.0, 1.0, 1.0, 1.0);
 	if (push_constants.has_texture > 0.5f) {
 		float2 uv = in_vert.frag_tex_coord;
 		uv.x = 1.0f - uv.x;

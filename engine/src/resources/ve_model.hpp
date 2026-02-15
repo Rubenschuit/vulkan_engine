@@ -1,6 +1,6 @@
 /* VeModel - scene graph container for glTF models.
- * Not a Resource - owns nodes (VeGameObjects) that make up the hierarchy.
  * Loads glTF, creates VeMesh and VeMaterial resources, builds node hierarchy.
+ * Nodes are stored as lightweight LoadedNode structs; addToScene creates entities in a Registry.
  */
 #pragma once
 #include "ve_export.hpp"
@@ -8,13 +8,13 @@
 #include "vulkan/ve_descriptors.hpp"
 #include "resources/ve_resource_manager.hpp"
 #include "resources/ve_mesh.hpp"
-#include "scene/ve_game_object.hpp"
-#include "scene/ve_scene.hpp"
+#include "scene/ve_registry.hpp"
 #include <filesystem>
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <memory>
+#include <optional>
 #include <string>
-#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -41,31 +41,22 @@ public:
 	VeModel(const VeModel&) = delete;
 	VeModel& operator=(const VeModel&) = delete;
 
-	// Add all nodes to the scene (the unordered_map is used to store the game objects by their id)
-	void addToScene(std::unordered_map<uint32_t, VeGameObject>& game_objects,
+	// Add all loaded nodes to a Registry as entities with components and hierarchy.
+	void addToScene(Registry& registry,
 	                const glm::vec3& root_translation,
 	                const glm::vec3& root_rotation,
 	                const glm::vec3& root_scale);
 
-	// Alternative: return a vector of objects instead of mutating a map. Caller can modify and merge.
-	std::vector<VeGameObject> addToScene(const glm::vec3& root_translation,
-	                                    const glm::vec3& root_rotation,
-	                                    const glm::vec3& root_scale);
-
-	// Load a simple single mesh model (quad, cube, etc.) and return a single GameObject with transform applied.
-	// If no mesh found, create a new empty game object.
-	static VeGameObject loadAsSingleObject(VeResourceManager& resource_manager,
-	                                       const std::filesystem::path& model_path,
-	                                       const glm::vec3& translation,
-	                                       const glm::vec3& rotation,
-	                                       const glm::vec3& scale,
-	                                       bool flip_tex_coord_v = false);
-
-	// Get all node IDs for iteration (e.g. to find root)
-	const std::vector<VeGameObject>& getNodes() const { return m_nodes; }
-
-	// Root node ID (first root added to scene)
-	uint32_t getRootId() const { return m_root_id; }
+	// Load a glTF and extract the first mesh+material resource handles.
+	// Returns nullopt if the model contains no valid mesh.
+	struct SingleMeshData {
+		ResourceHandle<VeMesh> mesh;
+		ResourceHandle<VeMaterial> material;
+	};
+	static std::optional<SingleMeshData> loadSingleMesh(
+		VeResourceManager& resource_manager,
+		const std::filesystem::path& model_path,
+		bool flip_tex_coord_v = false);
 
 	// Lights extracted from glTF (KHR_lights_punctual) or from emissive materials. Applied when addToScene is used.
 	enum class ExtractedLightType { Point, Directional };
@@ -89,7 +80,18 @@ private:
 	                  VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout,
 	                  bool extract_lights, bool flip_tex_coord_v = false);
 
-	std::vector<VeGameObject> m_nodes;
+	// Lightweight node data from glTF parsing
+	struct LoadedNode {
+		uint32_t id = 0;
+		std::string name;
+		glm::vec3 translation{0.f};
+		glm::quat rotation{1.f, 0.f, 0.f, 0.f};
+		glm::vec3 scale{1.f};
+		ResourceHandle<VeMesh> mesh;
+		ResourceHandle<VeMaterial> material;
+	};
+
+	std::vector<LoadedNode> m_nodes;
 	std::vector<std::pair<uint32_t, uint32_t>> m_parent_links;  // (child_id, parent_id)
 	std::unordered_set<uint32_t> m_root_ids;
 	uint32_t m_root_id{0};
@@ -97,6 +99,8 @@ private:
 	std::vector<ResourceHandle<VeMaterial>> m_material_handles;
 	std::vector<ExtractedLight> m_punctual_lights;
 	std::vector<ExtractedLight> m_emissive_lights;
+
+	static uint32_t s_next_node_id;
 };
 
 } // namespace ve

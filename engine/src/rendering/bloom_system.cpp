@@ -158,6 +158,7 @@ void BloomSystem::createPipelines() {
 	config.color_format = vk::Format::eR16G16B16A16Sfloat;
 	config.attribute_descriptions.clear();
 	config.binding_descriptions.clear();
+	config.rasterization_info.cullMode = vk::CullModeFlagBits::eNone;
 	config.depth_stencil_info.depthTestEnable = vk::False;
 	config.depth_stencil_info.depthWriteEnable = vk::False;
 

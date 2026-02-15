@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "rendering/culling_system.hpp"
 #include "scene/ve_component.hpp"
+#include "scene/ve_registry.hpp"
 #include "resources/ve_mesh.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -59,7 +60,7 @@ CullingSystem::CullingSystem(VeCamera& camera)
 }
 
 void CullingSystem::cullObjects(VeFrameInfo& frame_info) {
-	m_visible_game_objects.clear();
+	m_visible_objects.clear();
 	m_last_total_mesh_objects = 0;
 	m_last_visible_count = 0;
 
@@ -70,20 +71,27 @@ void CullingSystem::cullObjects(VeFrameInfo& frame_info) {
 		extractFrustumPlanes(view_proj, planes);
 	}
 
-	for (auto& [id, obj] : frame_info.game_objects) {
-		auto* mesh_comp = obj.getComponent<MeshComponent>();
-		if (!mesh_comp || !mesh_comp->hasMesh() || !mesh_comp->hasMaterial())
+	auto& registry = *frame_info.registry;
+	auto& mesh_pool = registry.meshes();
+	m_visible_objects.reserve(mesh_pool.size());
+	for (uint32_t i = 0; i < mesh_pool.size(); i++) {
+		MeshComponent& mesh = mesh_pool.data()[i];
+		if (!mesh.hasMesh() || !mesh.hasMaterial())
 			continue;
+
+		uint32_t entity_idx = mesh_pool.entityAt(i);
+		Entity entity = registry.entityFromIndex(entity_idx);
+		if (!registry.isActive(entity)) continue;
 
 		m_last_total_mesh_objects++;
 
 		if (!m_culling_enabled) {
-			m_visible_game_objects[id] = VisibleObject{&obj, mesh_comp};
+			m_visible_objects.push_back({entity, &mesh});
 			m_last_visible_count++;
 		} else {
-			const VeMesh::AABB world_aabb = mesh_comp->getWorldAABB();
+			const VeMesh::AABB world_aabb = mesh.getWorldAABB();
 			if (isAABBInFrustum(world_aabb, planes)) {
-				m_visible_game_objects[id] = VisibleObject{&obj, mesh_comp};
+				m_visible_objects.push_back({entity, &mesh});
 				m_last_visible_count++;
 			}
 		}

@@ -23,6 +23,8 @@
 
 namespace ve {
 
+uint32_t VeModel::s_next_node_id = 0;
+
 // Return image index for a glTF texture: texture.source or KHR_texture_basisu.source. Returns -1 if invalid.
 static int getTextureImageIndex(const tinygltf::Model& gltf, size_t tex_idx) {
 	if (tex_idx >= gltf.textures.size())
@@ -712,7 +714,6 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 			VeMesh::Vertex vertex{};
 			const float* pos = reinterpret_cast<const float*>(&pos_buf.data[pos_bv.byteOffset + pos_accessor.byteOffset + i * pos_stride]);
 			vertex.pos = {pos[0], -pos[2], pos[1]};
-			vertex.color = {1, 1, 1};
 			const float* normal = reinterpret_cast<const float*>(&normal_buf.data[normal_bv.byteOffset + normal_accessor.byteOffset + i * normal_stride]);
 			vertex.normal = {normal[0], -normal[2], normal[1]};
 			if (has_tex_coords && tex_stride > 0) {
@@ -835,33 +836,30 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	};
 
 	// Recursively create nodes.
-	// Each glTF node induces a GameObject with TransformComponent. If mesh:
-	// add MeshComponent(s) to the same object. A gltf node with a mesh can
-	// contain multiple primitives (sub-meshes), which are then added as
-	// children to the same GameObject.
-	// TODO: investigate potential dangling pointers in the parent_links vector when nodes are removed from the scene.
+	// Each glTF node becomes a LoadedNode with transform + optional mesh/material.
+	// A glTF node with multiple primitives produces child LoadedNodes for primitives 2+.
 	std::function<void(int, int)> processNode = [&](int gltf_node_idx, int parent_our_idx) {
 		const auto& node = gltf.nodes[static_cast<size_t>(gltf_node_idx)];
 		NodeTRS trs = getNodeTRS(node);
 
-		// Create one GameObject for this glTF node (transform + optional mesh)
-		VeGameObject node_obj = VeGameObject::createGameObject();
-		auto* tr = node_obj.getComponent<TransformComponent>();
-		tr->setTranslation(trs.translation);
-		tr->setScale(trs.scale);
-		tr->setRotation(trs.rotation);
+		LoadedNode loaded{};
+		loaded.id = s_next_node_id++;
+		loaded.name = node.name;
+		loaded.translation = trs.translation;
+		loaded.rotation = trs.rotation;
+		loaded.scale = trs.scale;
 
 		int node_our_idx = static_cast<int>(m_nodes.size());
-		uint32_t node_id = node_obj.getId();
-		m_nodes.push_back(std::move(node_obj));
+		uint32_t node_id = loaded.id;
+		m_nodes.push_back(std::move(loaded));
 
 		if (parent_our_idx >= 0) {
-			m_parent_links.emplace_back(node_id, m_nodes[static_cast<size_t>(parent_our_idx)].getId());
+			m_parent_links.emplace_back(node_id, m_nodes[static_cast<size_t>(parent_our_idx)].id);
 		} else {
 			m_root_ids.insert(node_id);
 		}
 
-		// If node has mesh: add first primitive to this object, rest as children
+		// If node has mesh: assign first primitive to this node, rest as children
 		if (node.mesh >= 0) {
 			const auto& mesh = gltf.meshes[static_cast<size_t>(node.mesh)];
 			for (size_t prim_idx = 0; prim_idx < mesh.primitives.size(); prim_idx++) {
@@ -887,12 +885,15 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 				                                           : ResourceHandle<VeMaterial>{};
 				if (mat_handle.isValid()) {
 					if (prim_idx == 0) {
-						m_nodes[static_cast<size_t>(node_our_idx)].addComponent<MeshComponent>(std::move(mesh_handle), std::move(mat_handle));
+						m_nodes[static_cast<size_t>(node_our_idx)].mesh = std::move(mesh_handle);
+						m_nodes[static_cast<size_t>(node_our_idx)].material = std::move(mat_handle);
 					} else {
-						VeGameObject prim_obj = VeGameObject::createGameObject();
-						prim_obj.addComponent<MeshComponent>(std::move(mesh_handle), m_material_handles[mat_idx]);
-						m_parent_links.emplace_back(prim_obj.getId(), node_id);
-						m_nodes.push_back(std::move(prim_obj));
+						LoadedNode prim_node{};
+						prim_node.id = s_next_node_id++;
+						prim_node.mesh = std::move(mesh_handle);
+						prim_node.material = m_material_handles[mat_idx];
+						m_parent_links.emplace_back(prim_node.id, node_id);
+						m_nodes.push_back(std::move(prim_node));
 					}
 				}
 			}
@@ -906,11 +907,11 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	for (int root_idx : root_nodes) {
 		processNode(root_idx, -1);
 		if (m_root_id == 0 && !m_nodes.empty()) {
-			m_root_id = m_nodes[0].getId();
+			m_root_id = m_nodes[0].id;
 		}
 	}
 	if (!m_nodes.empty() && m_root_id == 0) {
-		m_root_id = m_nodes[0].getId();
+		m_root_id = m_nodes[0].id;
 	}
 
 	// Emissive-as-lights: for materials with emissive intensity above threshold, add a point light per instance (optional)
@@ -956,95 +957,87 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	VE_LOGI("Loaded model " << model_path << " with " << m_nodes.size() << " nodes, " << m_punctual_lights.size() << " punctual, " << m_emissive_lights.size() << " emissive lights");
 }
 
-void VeModel::addToScene(std::unordered_map<uint32_t, VeGameObject>& game_objects,
+void VeModel::addToScene(Registry& registry,
                          const glm::vec3& root_translation,
                          const glm::vec3& root_rotation,
                          const glm::vec3& root_scale) {
-	// Single wrapper node: applies root transform once to the whole scene so scale/rotation/translation
-	// behave correctly (e.g. root_scale uniformly scales the model; multiple glTF roots don't get mixed scales).
-	VeGameObject wrapper = VeGameObject::createGameObject();
-	auto* wrapper_tr = wrapper.getComponent<TransformComponent>();
-	wrapper_tr->setTranslation(root_translation);
-	wrapper_tr->setRotationEuler(root_rotation);
-	wrapper_tr->setScale(root_scale);
-	uint32_t wrapper_id = wrapper.getId();
-	game_objects.emplace(wrapper_id, std::move(wrapper));
+	// Wrapper entity for root transform
+	Entity wrapper = registry.createGameObject();
+	auto* wrapper_tc = registry.getComponent<TransformComponent>(wrapper);
+	wrapper_tc->setTranslation(root_translation);
+	wrapper_tc->setRotationEuler(root_rotation);
+	wrapper_tc->setScale(root_scale);
 
-	for (auto& node : m_nodes) {
-		game_objects.emplace(node.getId(), std::move(node));
+	// Map LoadedNode IDs to new Entity IDs
+	std::unordered_map<uint32_t, Entity> id_map;
+	for (const auto& node : m_nodes) {
+		Entity entity = registry.createEntity(node.name);
+		id_map[node.id] = entity;
+
+		// TransformComponent (every node has TRS)
+		auto& tc = registry.addComponent<TransformComponent>(entity);
+		tc.setTranslation(node.translation);
+		tc.setRotation(node.rotation);
+		tc.setScale(node.scale);
+
+		// MeshComponent (only if node has valid mesh+material)
+		if (node.mesh.isValid() && node.material.isValid()) {
+			auto& mc = registry.addComponent<MeshComponent>(entity, node.mesh, node.material);
+			auto* mat = node.material.get();
+			mc.has_texture = (mat && mat->hasDescriptorSet()) ? 1.0f : 0.0f;
+		}
 	}
 	m_nodes.clear();
 
+	// Set up hierarchy from parent links
 	for (const auto& [child_id, parent_id] : m_parent_links) {
-		if (game_objects.count(child_id) && game_objects.count(parent_id)) {
-			game_objects.at(child_id).setParent(&game_objects.at(parent_id));
+		auto child_it = id_map.find(child_id);
+		auto parent_it = id_map.find(parent_id);
+		if (child_it != id_map.end() && parent_it != id_map.end()) {
+			registry.setParent(child_it->second, parent_it->second);
 		}
 	}
-	// Make all glTF roots children of the wrapper so one root transform applies to the whole model
+	// Make all glTF roots children of the wrapper
 	for (uint32_t root_id : m_root_ids) {
-		if (game_objects.count(root_id)) {
-			game_objects.at(root_id).setParent(&game_objects.at(wrapper_id));
+		auto it = id_map.find(root_id);
+		if (it != id_map.end()) {
+			registry.setParent(it->second, wrapper);
 		}
 	}
-	// Extracted lights: place at world position (wrapper * L.position). Only point lights are added for now.
+
+	// Extracted lights: place at world position (wrapper * L.position)
 	const glm::mat4 wrapper_world = glm::translate(glm::mat4(1.0f), root_translation)
 		* glm::mat4_cast(glm::quat_cast(glm::eulerAngleZYX(root_rotation.z, root_rotation.y, root_rotation.x)))
 		* glm::scale(glm::mat4(1.0f), root_scale);
 	constexpr float size = 0.1f;
 	for (const ExtractedLight& L : m_emissive_lights) {
-		VeGameObject light_obj = VeGameObject::createPointLight(L.intensity * EMISSIVE_LIGHT_INTENSITY_SCALE, size, L.color);
-		light_obj.getComponent<TransformComponent>()->setTranslation(glm::vec3(wrapper_world * glm::vec4(L.position, 1.0f)));
-		light_obj.setName(L.name.empty() ? "Light (emissive)" : L.name);
-		uint32_t light_id = light_obj.getId();
-		// TODO: make this configurable, currently these are warm street lights
-		glm::vec3 orange = glm::vec3(1.0f, 0.21f, 0.0f);
-		light_obj.getComponent<PointLightComponent>()->color = orange;
-		game_objects.emplace(light_id, std::move(light_obj));
+		Entity light = registry.createPointLight(L.intensity * EMISSIVE_LIGHT_INTENSITY_SCALE, size, L.color);
+		registry.setName(light, L.name.empty() ? "Light (emissive)" : L.name);
+		auto* tc = registry.getComponent<TransformComponent>(light);
+		tc->setTranslation(glm::vec3(wrapper_world * glm::vec4(L.position, 1.0f)));
+		auto* plc = registry.getComponent<PointLightComponent>(light);
+		plc->color = glm::vec3(1.0f, 0.21f, 0.0f);
 	}
 	for (const ExtractedLight& L : m_punctual_lights) {
-		if (L.type != VeModel::ExtractedLightType::Point)
-			continue;  // directional lights not added yet
-		VeGameObject light_obj = VeGameObject::createPointLight(L.intensity, size, L.color);
-		light_obj.getComponent<TransformComponent>()->setTranslation(glm::vec3(wrapper_world * glm::vec4(L.position, 1.0f)));
-		light_obj.setName(L.name.empty() ? "Light (imported)" : L.name);
-		uint32_t light_id = light_obj.getId();
-		game_objects.emplace(light_id, std::move(light_obj));
+		if (L.type != ExtractedLightType::Point) continue;
+		Entity light = registry.createPointLight(L.intensity, size, L.color);
+		registry.setName(light, L.name.empty() ? "Light (imported)" : L.name);
+		auto* tc = registry.getComponent<TransformComponent>(light);
+		tc->setTranslation(glm::vec3(wrapper_world * glm::vec4(L.position, 1.0f)));
 	}
 }
 
-std::vector<VeGameObject> VeModel::addToScene(const glm::vec3& root_translation,
-                                              const glm::vec3& root_rotation,
-                                              const glm::vec3& root_scale) {
-	std::unordered_map<uint32_t, VeGameObject> temp;
-	addToScene(temp, root_translation, root_rotation, root_scale);
-	std::vector<VeGameObject> result;
-	result.reserve(temp.size());
-	for (auto& [id, obj] : temp) {
-		result.push_back(std::move(obj));
-	}
-	return result;
-}
-
-VeGameObject VeModel::loadAsSingleObject(VeResourceManager& resource_manager,
-                                        const std::filesystem::path& model_path,
-                                        const glm::vec3& translation,
-                                        const glm::vec3& rotation,
-                                        const glm::vec3& scale,
-                                        bool flip_tex_coord_v) {
+std::optional<VeModel::SingleMeshData> VeModel::loadSingleMesh(
+	VeResourceManager& resource_manager,
+	const std::filesystem::path& model_path,
+	bool flip_tex_coord_v) {
 	auto model = load(resource_manager, model_path.lexically_normal(), nullptr, nullptr, false, flip_tex_coord_v);
-	for (const auto& node : model->getNodes()) {
-		auto* mesh_comp = node.getComponent<MeshComponent>();
-		if (mesh_comp && mesh_comp->hasMesh() && mesh_comp->hasMaterial()) {
-			VeGameObject obj = VeGameObject::createGameObject();
-			obj.addComponent<MeshComponent>(mesh_comp->getMeshHandle(), mesh_comp->getMaterialHandle());
-			auto* tr = obj.getComponent<TransformComponent>();
-			tr->setTranslation(translation);
-			tr->setRotationEuler(rotation);
-			tr->setScale(scale);
-			return obj;
+	for (const auto& node : model->m_nodes) {
+		if (node.mesh.isValid() && node.material.isValid()) {
+			return SingleMeshData{node.mesh, node.material};
 		}
 	}
-	return VeGameObject::createGameObject();
+	return std::nullopt;
 }
 
 } // namespace ve

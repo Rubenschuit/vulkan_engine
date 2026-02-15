@@ -3,7 +3,6 @@
 // TODO: look into using a callback for input handling.
 #pragma once
 #include "ve_export.hpp"
-#include "scene/ve_game_object.hpp"
 #include "platform/ve_window.hpp"
 #include "scene/ve_camera.hpp"
 
@@ -64,7 +63,6 @@ private:
 	void handleMouseToggle();
 
 	GLFWwindow* m_window{nullptr};
-	//std::unordered_map<uint32_t, VeGameObject>& game_objects;
 
 	KeyMappings m_key_mappings{};
 	double m_last_x = 0.0;

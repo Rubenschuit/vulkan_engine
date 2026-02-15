@@ -18,7 +18,7 @@ public:
 
 	void setSunIntensity(float intensity) override;
 	float getSunIntensity() const override;
-	uint32_t getSunId() const override { return m_sun_id; }
+	Entity getSun() const override { return m_sun; }
 
 private:
 	void loadGameObjects(VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths);
@@ -27,7 +27,7 @@ private:
 
 	vk::raii::DescriptorSet* m_default_material_descriptor_set = nullptr;
 
-	uint32_t m_sun_id;
+	Entity m_sun;
 };
 
 }

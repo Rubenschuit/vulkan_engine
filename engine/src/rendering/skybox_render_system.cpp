@@ -103,26 +103,13 @@ void SkyboxRenderSystem::setSkybox(size_t index) {
 
 void SkyboxRenderSystem::loadCubeModel(VeResourceManager& resource_manager, const std::filesystem::path& cube_model_path) {
 	constexpr float s = 4.0f * 1500.0f;
-	auto model = VeModel::load(resource_manager, cube_model_path, nullptr, nullptr);
-	std::unordered_map<uint32_t, VeGameObject> temp;
-	model->addToScene(temp, {0, 0, 0}, {0, 0, 0}, {s, s, s});
-	// addToScene uses a wrapper (no mesh); take the first object that has a mesh
-	for (auto& [id, obj] : temp) {
-		if (obj.getComponent<MeshComponent>()) {
-			m_cube_object = std::move(obj);
-			break;
-		}
-	}
-	if (!m_cube_object.getComponent<MeshComponent>()) {
+	auto mesh_data = VeModel::loadSingleMesh(resource_manager, cube_model_path);
+	if (!mesh_data) {
 		VE_LOGE("Failed to load cube model for skybox");
 		return;
 	}
-	// Clear parent (wrapper is destroyed when temp goes out of scope) and bake scale into local transform
-	m_cube_object.setParent(nullptr);
-	auto* tr = m_cube_object.getComponent<TransformComponent>();
-	tr->setTranslation({0.f, 0.f, 0.f});
-	tr->setRotationEuler({0.f, 0.f, 0.f});
-	tr->setScale({s, s, s});
+	m_cube_mesh = std::move(mesh_data->mesh);
+	m_cube_transform.setScale({s, s, s});
 }
 
 void SkyboxRenderSystem::createPipelineLayout(
@@ -151,7 +138,7 @@ void SkyboxRenderSystem::createPipeline(vk::Format color_format, vk::SampleCount
 	pipeline_config.multisample_info.rasterizationSamples = sample_count;
 
 	pipeline_config.color_format = color_format;
-	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eBack;
+	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eFront;
 	pipeline_config.depth_stencil_info.depthWriteEnable = VK_TRUE;
 	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLessOrEqual;
 	auto attribute_descriptions = VeMesh::Vertex::getAttributeDescriptionsSimple();
@@ -208,18 +195,17 @@ void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 		{}
 	);
 
-	auto* mesh = m_cube_object.getComponent<MeshComponent>();
-	auto* transform = m_cube_object.getComponent<TransformComponent>();
-	assert(mesh && mesh->hasMesh() && transform && "Cube must have Mesh and Transform components");
+	assert(m_cube_mesh.isValid() && "Cube mesh must be loaded");
+	VeMesh* cube = m_cube_mesh.get();
 
 	if (m_settings.rotate) {
 		float speed = 0.004f;
 		glm::vec3 euler_delta{-speed * frame_info.frame_time, 0.2f * speed * frame_info.frame_time, 0.0f};
-		transform->setRotation(transform->getRotation() * glm::quat_cast(glm::eulerAngleZYX(euler_delta.z, euler_delta.y, euler_delta.x)));
+		m_cube_transform.setRotation(m_cube_transform.getRotation() * glm::quat_cast(glm::eulerAngleZYX(euler_delta.z, euler_delta.y, euler_delta.x)));
 	}
 
 	SkyboxPushConstantData push{};
-	push.transform = transform->getTransform();
+	push.transform = m_cube_transform.getTransform();
 	push.params.x = m_settings.exposure;
 	// Day: slight warm tint, Night: cool tint
 	push.params.y = m_settings.is_day ? 1.05f : 0.9f;   // R
@@ -234,9 +220,9 @@ void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 		vk::ArrayProxy<const uint8_t>(sizeof(SkyboxPushConstantData), reinterpret_cast<const uint8_t*>(&push))
 	);
 
-	mesh->getMesh()->bindVertexBuffer(frame_info.command_buffer);
-	mesh->getMesh()->bindIndexBuffer(frame_info.command_buffer);
-	mesh->getMesh()->drawIndexed(frame_info.command_buffer);
+	cube->bindVertexBuffer(frame_info.command_buffer);
+	cube->bindIndexBuffer(frame_info.command_buffer);
+	cube->drawIndexed(frame_info.command_buffer);
 }
 
 void SkyboxRenderSystem::renderAsBackground(VeFrameInfo& frame_info) {
@@ -260,18 +246,17 @@ void SkyboxRenderSystem::renderAsBackground(VeFrameInfo& frame_info) {
 		{}
 	);
 
-	auto* mesh = m_cube_object.getComponent<MeshComponent>();
-	auto* transform = m_cube_object.getComponent<TransformComponent>();
-	assert(mesh && mesh->hasMesh() && transform && "Cube must have Mesh and Transform components");
+	assert(m_cube_mesh.isValid() && "Cube mesh must be loaded");
+	VeMesh* cube = m_cube_mesh.get();
 
 	if (m_settings.rotate) {
 		float speed = 0.004f;
 		glm::vec3 euler_delta{-speed * frame_info.frame_time, 0.2f * speed * frame_info.frame_time, 0.0f};
-		transform->setRotation(transform->getRotation() * glm::quat_cast(glm::eulerAngleZYX(euler_delta.z, euler_delta.y, euler_delta.x)));
+		m_cube_transform.setRotation(m_cube_transform.getRotation() * glm::quat_cast(glm::eulerAngleZYX(euler_delta.z, euler_delta.y, euler_delta.x)));
 	}
 
 	SkyboxPushConstantData push{};
-	push.transform = transform->getTransform();
+	push.transform = m_cube_transform.getTransform();
 	push.params.x = m_settings.exposure;
 	push.params.y = m_settings.is_day ? 1.05f : 0.9f;
 	push.params.z = m_settings.is_day ? 1.0f : 0.95f;
@@ -285,9 +270,9 @@ void SkyboxRenderSystem::renderAsBackground(VeFrameInfo& frame_info) {
 		vk::ArrayProxy<const uint8_t>(sizeof(SkyboxPushConstantData), reinterpret_cast<const uint8_t*>(&push))
 	);
 
-	mesh->getMesh()->bindVertexBuffer(frame_info.command_buffer);
-	mesh->getMesh()->bindIndexBuffer(frame_info.command_buffer);
-	mesh->getMesh()->drawIndexed(frame_info.command_buffer);
+	cube->bindVertexBuffer(frame_info.command_buffer);
+	cube->bindIndexBuffer(frame_info.command_buffer);
+	cube->drawIndexed(frame_info.command_buffer);
 }
 
 } // namespace ve

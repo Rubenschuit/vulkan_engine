@@ -20,7 +20,6 @@
 #include "resources/ve_resource_manager.hpp"
 
 #include "rendering/ve_frame_info.hpp"
-#include "scene/ve_game_object.hpp"
 #include "scene/ve_component.hpp"
 #include "scene/ve_camera.hpp"
 #include "resources/ve_model.hpp"

@@ -26,8 +26,15 @@ void VePipeline::defaultPipelineConfigInfo(PipelineConfigInfo& config_info, VeDe
 		.dynamicStateCount = static_cast<uint32_t>(config_info.dynamic_state_enables.size()),
 		.pDynamicStates = config_info.dynamic_state_enables.data()
 	};
-	config_info.viewport_info = { .sType = vk::StructureType::ePipelineViewportStateCreateInfo, .pNext = nullptr, .flags = {}, .viewportCount = 1, .pViewports = nullptr, .scissorCount = 1, .pScissors = nullptr };
-
+	config_info.viewport_info = {
+		.sType = vk::StructureType::ePipelineViewportStateCreateInfo,
+		.pNext = nullptr,
+		.flags = {},
+		.viewportCount = 1,
+		.pViewports = nullptr,
+		.scissorCount = 1,
+		.pScissors = nullptr
+	};
 	config_info.input_assembly_info = {
 		.sType = vk::StructureType::ePipelineInputAssemblyStateCreateInfo,
 		.pNext = nullptr,
@@ -43,7 +50,7 @@ void VePipeline::defaultPipelineConfigInfo(PipelineConfigInfo& config_info, VeDe
 		.rasterizerDiscardEnable = VK_FALSE,
 		.polygonMode = vk::PolygonMode::eFill,
 		.cullMode = vk::CullModeFlagBits::eBack,
-		.frontFace = vk::FrontFace::eClockwise,
+		.frontFace = vk::FrontFace::eCounterClockwise,
 		.depthBiasEnable = VK_FALSE,
 		.depthBiasConstantFactor = 0.0f,
 		.depthBiasClamp = 0.0f,

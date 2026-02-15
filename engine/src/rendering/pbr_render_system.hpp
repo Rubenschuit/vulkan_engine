@@ -11,6 +11,7 @@
 namespace ve {
 	class VeDevice;
 	class VePipeline;
+	class VeMesh;
 	class MeshComponent;
 }
 
@@ -62,13 +63,27 @@ private:
 
 	struct Drawable {
 		VkDescriptorSet material_set;
-		VeGameObject* obj;
+		Entity entity;
 		MeshComponent* mesh = nullptr;
 		float dist_sq = 0.0f;
 		AlphaMode alpha_mode = AlphaMode::ALPHA_OPAQUE;
+		uint32_t ssbo_index = 0;  // index into instance SSBO (set in prepareFrame)
 	};
 	mutable std::vector<Drawable> m_opaque_drawables;
 	mutable std::vector<Drawable> m_transparent_drawables;
+
+	// Instanced draw groups: opaque drawables merged by (mesh, material) for batched draws
+	struct InstanceGroup {
+		VeMesh* mesh = nullptr;
+		VkDescriptorSet material_set = VK_NULL_HANDLE;
+		uint32_t first_instance = 0;  // offset into SSBO
+		uint32_t instance_count = 0;
+		float has_texture = 0.0f;
+		float alpha_cutoff = 0.0f;
+		uint32_t material_flags = 0;
+		bool double_sided = false;
+	};
+	mutable std::vector<InstanceGroup> m_opaque_groups;
 };
 
 } // namespace ve

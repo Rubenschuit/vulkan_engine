@@ -11,6 +11,8 @@ namespace ve {
     // Forward declarations
     class VeDevice;
     class VePipeline;
+    class VeMesh;
+    class MeshComponent;
 }
 
 namespace ve {
@@ -57,6 +59,16 @@ private:
 
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_ve_pipeline;
+
+	// Instanced draw groups
+	struct InstanceGroup {
+		VeMesh* mesh = nullptr;
+		VkDescriptorSet material_set = VK_NULL_HANDLE;
+		uint32_t first_instance = 0;
+		uint32_t instance_count = 0;
+		float has_texture = 0.0f;
+	};
+	mutable std::vector<InstanceGroup> m_instance_groups;
 };
 }
 

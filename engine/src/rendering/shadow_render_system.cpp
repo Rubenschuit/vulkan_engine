@@ -7,7 +7,9 @@
 #include "vulkan/ve_image.hpp"
 #include "resources/ve_texture.hpp"
 #include "scene/ve_component.hpp"
+#include "scene/ve_registry.hpp"
 #include "rendering/ve_frame_info.hpp"
+#include "resources/ve_mesh.hpp"
 #include "utils/ve_log.hpp"
 
 #define GLM_FORCE_RADIANS
@@ -17,18 +19,16 @@
 
 namespace ve {
 
-struct SimplePushConstantData {
-	alignas(16) glm::mat4 transform;
-	alignas(16) glm::mat3x4 normal_transform;
-	alignas(4)  float has_texture;
-	alignas(4)  float padding[3];
+struct ShadowPushConstantData {
+	alignas(4) uint32_t instance_offset; // SSBO offset (SV_InstanceID is 0-based in Slang)
 };
-static_assert(sizeof(SimplePushConstantData) <= 128, "Push constants must be 128 bytes for stable layout");
+static_assert(sizeof(ShadowPushConstantData) == 4, "Shadow push constants must be 4 bytes");
 
 ShadowRenderSystem::ShadowRenderSystem(
 	VeDevice& device,
 	VeDescriptorPool& descriptor_pool,
 	const vk::raii::DescriptorSetLayout& material_set_layout,
+	const std::vector<std::unique_ptr<VeBuffer>>& instance_buffers,
 	std::filesystem::path shader_path)
 	: m_ve_device(device), m_shader_path(shader_path) {
 
@@ -46,9 +46,10 @@ ShadowRenderSystem::ShadowRenderSystem(
 	// Create shadow resources (images, sampler, descriptor sets)
 	createShadowResources();
 
-	// Create shadow global descriptor set layout (for shadow pass UBO)
+	// Create shadow global descriptor set layout (for shadow pass UBO + instance SSBO)
 	m_shadow_global_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eAllGraphics)
+		.addBinding(1, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eVertex)
 		.build();
 
 	// Create shadow descriptor set layout (for sampling shadow maps)
@@ -58,7 +59,7 @@ ShadowRenderSystem::ShadowRenderSystem(
 		.build();
 
 	createShadowUBOs();
-	createShadowPassDescriptorSets(descriptor_pool);
+	createShadowPassDescriptorSets(descriptor_pool, instance_buffers);
 	createShadowTextureDescriptorSets(descriptor_pool);
 	createPipelineLayout(material_set_layout);
 	createPipeline(m_shadow_depth_format);
@@ -69,9 +70,9 @@ ShadowRenderSystem::~ShadowRenderSystem() {
 
 void ShadowRenderSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& material_set_layout) {
 	vk::PushConstantRange push_constant_range{
-		.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+		.stageFlags = vk::ShaderStageFlagBits::eVertex,
 		.offset = 0,
-		.size = sizeof(SimplePushConstantData)
+		.size = sizeof(ShadowPushConstantData)
 	};
 	vk::DescriptorSetLayout layouts[2] = {*m_shadow_global_set_layout->getDescriptorSetLayout(), *material_set_layout};
 	vk::PipelineLayoutCreateInfo pipeline_layout_info{
@@ -92,9 +93,10 @@ void ShadowRenderSystem::createPipeline(vk::Format depth_format) {
 	pipeline_config.color_format = vk::Format::eUndefined;
 	pipeline_config.depth_format = depth_format;
 	pipeline_config.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptionsShadow();
+	pipeline_config.binding_descriptions = VeMesh::Vertex::getShadowBindingDescriptions();
 
 	pipeline_config.multisample_info.rasterizationSamples = vk::SampleCountFlagBits::e1;
-	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eBack;
+	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eFront;
 	pipeline_config.rasterization_info.depthClampEnable = VK_TRUE;
 	pipeline_config.rasterization_info.depthBiasEnable = VK_TRUE;
 
@@ -113,7 +115,6 @@ void ShadowRenderSystem::createPipeline(vk::Format depth_format) {
 void ShadowRenderSystem::createShadowUBOs() {
 	vk::DeviceSize buffer_size = sizeof(UniformBufferObject);
 	assert(buffer_size > 0 && "Shadow uniform buffer size is zero");
-	//assert(buffer_size % 16 == 0 && "Shadow uniform buffer size must be a multiple of 16 bytes");
 	assert(buffer_size <= m_ve_device.getDeviceProperties().limits.maxUniformBufferRange && "Shadow uniform buffer size exceeds maximum limit");
 
 	// Create one buffer for each frame and each shadow-casting light
@@ -132,13 +133,17 @@ void ShadowRenderSystem::createShadowUBOs() {
 	}
 }
 
-void ShadowRenderSystem::createShadowPassDescriptorSets(VeDescriptorPool& descriptor_pool) {
-	// Create descriptor sets for shadow pass (per-frame, per-shadow-light) - contains view/proj matrices
+void ShadowRenderSystem::createShadowPassDescriptorSets(
+	VeDescriptorPool& descriptor_pool,
+	const std::vector<std::unique_ptr<VeBuffer>>& instance_buffers) {
+	// Create descriptor sets for shadow pass (per-frame, per-shadow-light)
+	// Each set contains: binding 0 = per-light UBO, binding 1 = per-frame instance SSBO
 	for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
 		m_shadow_global_descriptor_sets[frame].clear();
 
+		auto instance_info = instance_buffers[frame]->getDescriptorInfo();
+
 		for (size_t light = 0; light < MAX_SHADOW_LIGHTS; light++) {
-			// Update descriptor set with shadow UBO for this specific shadow-casting light
 			vk::DescriptorBufferInfo buffer_info{
 				.buffer = *m_shadow_ubos[frame][light]->getBuffer(),
 				.offset = 0,
@@ -148,6 +153,7 @@ void ShadowRenderSystem::createShadowPassDescriptorSets(VeDescriptorPool& descri
 			vk::raii::DescriptorSet descriptor_set{nullptr};
 			VeDescriptorWriter(*m_shadow_global_set_layout, descriptor_pool)
 				.writeBuffer(0, &buffer_info)
+				.writeBuffer(1, &instance_info)
 				.build(descriptor_set);
 
 			m_shadow_global_descriptor_sets[frame].push_back(std::move(descriptor_set));
@@ -283,18 +289,58 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 	// Build shadow draw list only when dirty (shared by all lights)
 	if (m_shadow_drawables_dirty) {
 		m_shadow_drawables.clear();
-		m_shadow_drawables.reserve(frame_info.game_objects.size());
-		for (auto& [id, obj] : frame_info.game_objects) {
-			auto* mesh = obj.getComponent<MeshComponent>();
-			auto* transform = obj.getComponent<TransformComponent>();
-			if (!mesh || !mesh->getMesh() || !transform)
-				continue;
-			if (!mesh->has_shadow)
-				continue;
-
-			m_shadow_drawables.emplace_back(&obj, mesh);
+		auto& registry = *frame_info.registry;
+		auto& mesh_pool = registry.meshes();
+		m_shadow_drawables.reserve(mesh_pool.size());
+		for (uint32_t i = 0; i < mesh_pool.size(); i++) {
+			MeshComponent& mesh = mesh_pool.data()[i];
+			if (!mesh.getMesh() || !mesh.has_shadow) continue;
+			uint32_t entity_idx = mesh_pool.entityAt(i);
+			Entity entity = registry.entityFromIndex(entity_idx);
+			if (!registry.isActive(entity)) continue;
+			auto* transform = registry.getComponent<TransformComponent>(entity);
+			if (!transform) continue;
+			m_shadow_drawables.emplace_back(entity, &mesh);
 		}
 		m_shadow_drawables_dirty = false;
+	}
+
+	// Write shadow drawable transforms to SSBO (once for all lights)
+	auto& registry = *frame_info.registry;
+	m_shadow_instance_groups.clear();
+
+	// Sort shadow drawables by mesh for batching
+	std::sort(m_shadow_drawables.begin(), m_shadow_drawables.end(),
+		[](const ShadowDrawable& a, const ShadowDrawable& b) {
+			return a.mesh->getMesh() < b.mesh->getMesh();
+		});
+
+	for (auto& d : m_shadow_drawables) {
+		if (frame_info.instance_count >= frame_info.instance_capacity) {
+			VE_LOGW("Instance buffer full (" << frame_info.instance_capacity << " instances), skipping remaining shadow objects");
+			break;
+		}
+		uint32_t idx = frame_info.instance_count++;
+		frame_info.instance_data[idx].transform = registry.getWorldTransform(d.entity);
+		// Normal not needed for shadow pass, but we write to maintain struct alignment
+		frame_info.instance_data[idx].normal_transform[0] = glm::vec4(0.0f);
+		frame_info.instance_data[idx].normal_transform[1] = glm::vec4(0.0f);
+		frame_info.instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
+
+		VeMesh* mesh_ptr = d.mesh->getMesh();
+		if (!m_shadow_instance_groups.empty()) {
+			auto& group = m_shadow_instance_groups.back();
+			if (group.mesh == mesh_ptr) {
+				group.instance_count++;
+				continue;
+			}
+		}
+
+		ShadowInstanceGroup group{};
+		group.mesh = mesh_ptr;
+		group.first_instance = idx;
+		group.instance_count = 1;
+		m_shadow_instance_groups.push_back(group);
 	}
 
 	auto& command_buffer = frame_info.command_buffer;
@@ -391,27 +437,25 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 		{}
 	);
 
-	for (const auto& d : m_shadow_drawables) {
-		VeGameObject& obj = *d.obj;
-		MeshComponent* mesh = d.mesh;
-		SimplePushConstantData push{};
-		const glm::mat3 nrm = obj.getNormalTransform();
-		push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
-		push.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
-		push.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
-		push.transform = obj.getTransform();
-		push.has_texture = mesh->has_texture;
+	VeMesh* bound_mesh = nullptr;
+	for (const auto& group : m_shadow_instance_groups) {
+		// Push instance_offset for SSBO indexing (SV_InstanceID is 0-based in Slang)
+		ShadowPushConstantData push{};
+		push.instance_offset = group.first_instance;
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
-			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+			vk::ShaderStageFlagBits::eVertex,
 			0,
-			vk::ArrayProxy<const uint8_t>(sizeof(SimplePushConstantData), reinterpret_cast<const uint8_t*>(&push))
+			vk::ArrayProxy<const uint8_t>(sizeof(ShadowPushConstantData), reinterpret_cast<const uint8_t*>(&push))
 		);
-		mesh->getMesh()->bindVertexBuffer(frame_info.command_buffer);
-		mesh->getMesh()->bindIndexBuffer(frame_info.command_buffer);
-		mesh->getMesh()->drawIndexed(frame_info.command_buffer);
+
+		if (group.mesh != bound_mesh) {
+			bound_mesh = group.mesh;
+			bound_mesh->bindShadowVertexBuffer(frame_info.command_buffer);
+			bound_mesh->bindIndexBuffer(frame_info.command_buffer);
+		}
+		group.mesh->drawIndexed(frame_info.command_buffer, group.instance_count, 0);
 	}
 }
 
 } // namespace ve
-

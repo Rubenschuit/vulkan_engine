@@ -9,7 +9,6 @@
 #include "input/input_controller.hpp"
 #include "scene/ve_camera.hpp"
 #include "rendering/ve_frame_info.hpp"
-#include "scene/ve_game_object.hpp"
 #include <memory>
 #include <vector>
 #include <chrono>
@@ -47,6 +46,8 @@ protected:
 	VeRenderer m_ve_renderer;
 	std::unique_ptr<ImGuiLayer> m_imgui_layer{}; // created in cpp
 	std::vector<std::unique_ptr<VeBuffer>> m_uniform_buffers{}; // one per frame in flight
+	std::vector<std::unique_ptr<VeBuffer>> m_instance_buffers{}; // SSBO for per-instance transforms
+	static constexpr uint32_t INITIAL_INSTANCE_CAPACITY = 16384;
 
 	// Descriptor pool, layouts, sets
 	std::shared_ptr<VeDescriptorPool> m_global_pool{};

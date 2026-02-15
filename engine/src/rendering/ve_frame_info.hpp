@@ -2,8 +2,8 @@
 for each frame in the rendering process. */
 #pragma once
 #include "ve_export.hpp"
-#include "resources/ve_model.hpp"
-#include "scene/ve_game_object.hpp"
+#include "scene/ve_entity.hpp"
+#include "scene/ve_registry.hpp"
 #include "scene/ve_scene.hpp"
 #include "ve_config.hpp"
 #include "scene/ve_camera.hpp"
@@ -11,16 +11,24 @@ for each frame in the rendering process. */
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
 #include <glm/glm.hpp>
-#include <unordered_map>
+#include <vector>
 
 namespace ve {
 
 class MeshComponent;
 
-// Cached visible object to avoid repeated getComponent<MeshComponent>() when iterating.
-// Build once per frame in culling system.
+// Per-instance transform data uploaded to the instance SSBO each frame.
+// Indexed by gl_InstanceIndex (SV_InstanceID in Slang) in vertex shaders.
+struct InstanceData {
+	glm::mat4 transform;            // 64 bytes — world transform
+	glm::mat3x4 normal_transform;   // 48 bytes — normal matrix (3 columns packed as vec4)
+};
+static_assert(sizeof(InstanceData) == 112, "InstanceData must be 112 bytes for SSBO alignment");
+
+// Cached visible object built once per frame by the culling system.
+// Stores Entity + direct MeshComponent* for zero-lookup rendering.
 struct VisibleObject {
-	VeGameObject* obj = nullptr;
+	Entity entity;
 	MeshComponent* mesh = nullptr;
 };
 
@@ -99,12 +107,16 @@ struct VeFrameInfo {
 	vk::raii::CommandBuffer& command_buffer;
 	vk::raii::CommandBuffer& compute_command_buffer;
 	ve::VeCamera& camera;
-	std::unordered_map<uint32_t, VeGameObject>& game_objects;
-	std::unordered_map<uint32_t, VisibleObject>& visible_game_objects;
+	Registry* registry = nullptr;
+	std::vector<VisibleObject>& visible_objects;
 	float frame_time;
 	float total_time;
 	uint32_t current_frame;
 	PostProcessPushConstant post_process_push;
+	// Instance data SSBO: persistently mapped, render systems append transforms here.
+	InstanceData* instance_data = nullptr;  // mapped pointer to instance buffer
+	uint32_t instance_count = 0;            // current number of instances written this frame
+	uint32_t instance_capacity = 0;         // max instances the buffer can hold
 };
 
 }

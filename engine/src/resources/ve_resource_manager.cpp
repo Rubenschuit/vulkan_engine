@@ -11,7 +11,8 @@ namespace ve {
 // ---------------------------------------------------------------------------
 template <typename T>
 ResourceHandle<T>::ResourceHandle(const std::string& resource_id, VeResourceManager* manager)
-	: m_resource_id(resource_id), m_manager(manager) {
+	: m_resource_id(resource_id), m_manager(manager),
+	  m_cached(manager ? manager->getResource<T>(resource_id) : nullptr) {
 }
 
 template <typename T>
@@ -22,7 +23,7 @@ ResourceHandle<T>::~ResourceHandle() {
 // Copy constructor
 template <typename T>
 ResourceHandle<T>::ResourceHandle(const ResourceHandle& other)
-	: m_resource_id(other.m_resource_id), m_manager(other.m_manager) {
+	: m_resource_id(other.m_resource_id), m_manager(other.m_manager), m_cached(other.m_cached) {
 	addRef();
 }
 
@@ -33,6 +34,7 @@ ResourceHandle<T>& ResourceHandle<T>::operator=(const ResourceHandle& other) {
 		release();
 		m_resource_id = other.m_resource_id;
 		m_manager = other.m_manager;
+		m_cached = other.m_cached;
 		addRef();
 	}
 	return *this;
@@ -41,8 +43,9 @@ ResourceHandle<T>& ResourceHandle<T>::operator=(const ResourceHandle& other) {
 // Move constructor
 template <typename T>
 ResourceHandle<T>::ResourceHandle(ResourceHandle&& other) noexcept
-	: m_resource_id(std::move(other.m_resource_id)), m_manager(other.m_manager) {
+	: m_resource_id(std::move(other.m_resource_id)), m_manager(other.m_manager), m_cached(other.m_cached) {
 	other.m_manager = nullptr;
+	other.m_cached = nullptr;
 }
 
 // Move assignment operator
@@ -52,21 +55,23 @@ ResourceHandle<T>& ResourceHandle<T>::operator=(ResourceHandle&& other) noexcept
 		release();
 		m_resource_id = std::move(other.m_resource_id);
 		m_manager = other.m_manager;
+		m_cached = other.m_cached;
 		other.m_manager = nullptr;
+		other.m_cached = nullptr;
 	}
 	return *this;
 }
 
-// Get the resource pointer or nullptr if not found.
+// Get the cached resource pointer (resolved eagerly at construction time).
 template <typename T>
 T* ResourceHandle<T>::get() const {
-	return m_manager ? m_manager->getResource<T>(m_resource_id) : nullptr;
+	return m_cached;
 }
 
-// Check if the resource is valid.
+// Check if the handle refers to a valid resource.
 template <typename T>
 bool ResourceHandle<T>::isValid() const {
-	return m_manager && m_manager->hasResource<T>(m_resource_id);
+	return m_cached != nullptr;
 }
 
 // Get the resource id.
@@ -89,6 +94,7 @@ void ResourceHandle<T>::release() const {
 	if (m_manager) {
 		m_manager->release<T>(m_resource_id);
 		m_manager = nullptr;
+		m_cached = nullptr;
 	}
 }
 

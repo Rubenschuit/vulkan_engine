@@ -130,8 +130,9 @@ bool VeRenderer::beginFrame() {
 	}
 
 	command_buffer.reset();
-	vk::CommandBufferBeginInfo info{};
-	info.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+	vk::CommandBufferBeginInfo info{
+		.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit
+	};
 	command_buffer.begin(info);
 
 	// Also begin compute command buffer

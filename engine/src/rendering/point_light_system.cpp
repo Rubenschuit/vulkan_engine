@@ -3,6 +3,7 @@
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_pipeline.hpp"
 #include "scene/ve_component.hpp"
+#include "scene/ve_registry.hpp"
 #include "utils/ve_log.hpp"
 
 #define GLM_FORCE_RADIANS
@@ -61,6 +62,7 @@ void PointLightSystem::createPipeline(vk::Format color_format, vk::SampleCountFl
 	pipeline_config.attribute_descriptions.clear();
 	pipeline_config.binding_descriptions.clear();
 
+	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eNone;
 	pipeline_config	.depth_stencil_info.depthTestEnable = VK_TRUE;
 	pipeline_config.depth_stencil_info.depthWriteEnable = VK_FALSE;
 	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLessOrEqual;
@@ -88,7 +90,7 @@ void PointLightSystem::createPipeline(vk::Format color_format, vk::SampleCountFl
 }
 
 
-// Performs a draw call for each game object with a point light component
+// Performs a draw call for each point light, iterating the dense pool directly
 void PointLightSystem::render(VeFrameInfo& frame_info) const {
 	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 	std::array<vk::DescriptorSet, 2> sets{*frame_info.global_descriptor_set, *frame_info.texture_descriptor_set};
@@ -100,29 +102,30 @@ void PointLightSystem::render(VeFrameInfo& frame_info) const {
 		{}
 	);
 
-	for (auto& [id, obj] : frame_info.game_objects) {
-		if (!obj.isActive())
-			continue;
-		auto* pl = obj.getComponent<PointLightComponent>();
-		auto* transform = obj.getComponent<TransformComponent>();
-		if (!pl || !transform)
-			continue;
+	auto& registry = *frame_info.registry;
+	auto& pl_pool = registry.pointLights();
+	for (uint32_t i = 0; i < pl_pool.size(); i++) {
+		uint32_t entity_idx = pl_pool.entityAt(i);
+		Entity entity = registry.entityFromIndex(entity_idx);
+		if (!registry.isActive(entity)) continue;
+		auto* transform = registry.getComponent<TransformComponent>(entity);
+		if (!transform) continue;
+		PointLightComponent& pl = pl_pool.data()[i];
 		SimplePushConstantData push{};
 		push.position = glm::vec4{transform->getTranslation(), 1.0f};
 		push.scale = transform->getScale().x;
-		push.color = glm::vec4{pl->color, pl->intensity};
-		// push constant provided as raw bytes to avoid MSVC debug mode corruption with push across dll boundaries
+		push.color = glm::vec4{pl.color, pl.intensity};
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 			0,
 			vk::ArrayProxy<const uint8_t>(sizeof(SimplePushConstantData), reinterpret_cast<const uint8_t*>(&push))
 		);
-		frame_info.command_buffer.draw(6, 1, 0, 0); // 6 vertices for point light
+		frame_info.command_buffer.draw(6, 1, 0, 0);
 	}
 }
 
-// Update UBO with point light data for global access in shaders
+// Update UBO with point light data
 void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObject& ubo) {
 	uint32_t num_lights = 0;
 	uint32_t num_shadow_lights = 0;
@@ -132,29 +135,31 @@ void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBuffe
 	ubo.ambient_light_color.y *= ubo.ambient_light_color.w;
 	ubo.ambient_light_color.z *= ubo.ambient_light_color.w;
 
-	for (auto& [id, obj] : frame_info.game_objects) {
-		if (!obj.isActive())
+	auto& registry = *frame_info.registry;
+	auto& pl_pool = registry.pointLights();
+	for (uint32_t i = 0; i < pl_pool.size(); i++) {
+		uint32_t entity_idx = pl_pool.entityAt(i);
+		Entity entity = registry.entityFromIndex(entity_idx);
+		if (!registry.isActive(entity))
 			continue;
-		auto* pl = obj.getComponent<PointLightComponent>();
-		auto* transform = obj.getComponent<TransformComponent>();
-		if (!pl || !transform)
+		auto* transform = registry.getComponent<TransformComponent>(entity);
+		if (!transform)
 			continue;
 		assert(num_lights < MAX_LIGHTS && "Number of point lights exceeds MAX_LIGHTS");
 
-		glm::vec3 color = pl->color;
+		PointLightComponent& pl = pl_pool.data()[i];
+		glm::vec3 color = pl.color;
 
-		// Populate point light data
 		ubo.point_lights[num_lights].position = glm::vec4{transform->getTranslation(), 1.0f};
-		ubo.point_lights[num_lights].color.x = color.x * pl->intensity;
-		ubo.point_lights[num_lights].color.y = color.y * pl->intensity;
-		ubo.point_lights[num_lights].color.z = color.z * pl->intensity;
-		ubo.point_lights[num_lights].color.w = pl->intensity;
+		ubo.point_lights[num_lights].color.x = color.x * pl.intensity;
+		ubo.point_lights[num_lights].color.y = color.y * pl.intensity;
+		ubo.point_lights[num_lights].color.z = color.z * pl.intensity;
+		ubo.point_lights[num_lights].color.w = pl.intensity;
 
-		// If this light casts shadows, add it to shadow_lights array
-		if (pl->casts_shadow && num_shadow_lights < MAX_SHADOW_LIGHTS) {
+		if (pl.casts_shadow && num_shadow_lights < MAX_SHADOW_LIGHTS) {
 			glm::vec3 light_pos = transform->getTranslation();
 			glm::vec3 scene_center = glm::vec3(0.0f, 0.0f, 0.0f);
-			glm::vec3 view_up = glm::vec3(0.0f, 1.0f, 0.0f); // shadow looks down z axis
+			glm::vec3 view_up = glm::vec3(0.0f, 1.0f, 0.0f);
 			glm::mat4 light_view = glm::lookAt(light_pos, scene_center, view_up);
 			float near_plane = 1.0f;
 			float far_plane = 400.0f;
@@ -171,10 +176,5 @@ void PointLightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBuffe
 
 	ubo.num_lights = num_lights;
 	ubo.num_shadow_lights = num_shadow_lights;
-	static bool first_log = true;
-	if (first_log) {
-		first_log = false;
-		//VE_LOGI("Point light system: updated UBO with " << num_lights << " lights, " << num_shadow_lights << " shadow-casting");
-	}
 }
 } // namespace ve

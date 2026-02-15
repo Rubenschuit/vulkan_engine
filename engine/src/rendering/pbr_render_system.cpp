@@ -3,6 +3,7 @@
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_pipeline.hpp"
 #include "scene/ve_component.hpp"
+#include "scene/ve_registry.hpp"
 #include "rendering/ve_frame_info.hpp"
 #include "resources/ve_mesh.hpp"
 #include "scene/ve_scene.hpp"
@@ -15,14 +16,15 @@
 
 namespace ve {
 
+// Push constants contain per-batch material flags + SSBO offset.
+// Per-instance transforms are in the SSBO.
 struct PbrPushConstantData {
-	alignas(16) glm::mat4 transform;
-	alignas(16) glm::mat3x4 normal_transform;
-	alignas(4)  float has_texture;
-	alignas(4)  float alpha_cutoff;
-	alignas(4)  uint32_t material_flags;  // bits 0-1: alpha_mode, bit 2: double_sided, bit 3: flip_tex_coord_v, bit 4: use_spec_gloss_texture
+	alignas(4) float has_texture;
+	alignas(4) float alpha_cutoff;
+	alignas(4) uint32_t material_flags;  // bits 0-1: alpha_mode, bit 2: double_sided, bit 3: flip_tex_coord_v, bit 4: use_spec_gloss_texture
+	alignas(4) uint32_t instance_offset; // SSBO offset for this batch
 };
-static_assert(sizeof(PbrPushConstantData) <= 128, "Push constants must be 128 bytes for stable layout");
+static_assert(sizeof(PbrPushConstantData) == 16, "Push constants must be 16 bytes");
 
 // Objects with any transmission (> 0) are sorted into the transparent pass for proper
 // alpha compositing after the skybox. Among those, only objects above this threshold
@@ -91,16 +93,18 @@ void PbrRenderSystem::createPipeline(vk::Format color_format, vk::SampleCountFla
 void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info) const {
 	m_opaque_drawables.clear();
 	m_transparent_drawables.clear();
-	const size_t visible_count = frame_info.visible_game_objects.size();
+	m_opaque_groups.clear();
+	const size_t visible_count = frame_info.visible_objects.size();
 	m_opaque_drawables.reserve(std::max(visible_count, m_opaque_drawables.capacity()));
 	m_transparent_drawables.reserve(std::max(visible_count, m_transparent_drawables.capacity()));
 
 	const glm::vec3 camera_pos = frame_info.camera.getPosition();
+	auto& registry = *frame_info.registry;
 
-	for (auto& [id, entry] : frame_info.visible_game_objects) {
-		VeGameObject& obj = *entry.obj;
+	// 1. Build drawable lists (opaque vs transparent)
+	for (auto& entry : frame_info.visible_objects) {
 		MeshComponent* mesh = entry.mesh;
-		if (!mesh || !obj.getComponent<TransformComponent>())
+		if (!mesh || !registry.getComponent<TransformComponent>(entry.entity))
 			continue;
 		auto* mat = mesh->getMaterial();
 		vk::raii::DescriptorSet& mat_set = mat->hasDescriptorSet()
@@ -109,119 +113,214 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info) const {
 		MaterialAlphaProps alpha_props = mat->getAlphaProps();
 		float transmission = mat->getMaterialFactors().transmission_factor;
 		bool use_transparent_pass = (alpha_props.alpha_mode == AlphaMode::BLEND) || (transmission > 0.0f);
-		glm::vec3 obj_pos = obj.getTransform() * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+		glm::vec3 obj_pos = registry.getWorldTransform(entry.entity) * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		float dist_sq = glm::dot(obj_pos - camera_pos, obj_pos - camera_pos);
 		if (use_transparent_pass)
-			m_transparent_drawables.emplace_back(*mat_set, entry.obj, mesh, dist_sq, alpha_props.alpha_mode);
+			m_transparent_drawables.emplace_back(*mat_set, entry.entity, mesh, dist_sq, alpha_props.alpha_mode);
 		else
-			m_opaque_drawables.emplace_back(*mat_set, entry.obj, mesh, dist_sq, alpha_props.alpha_mode);
+			m_opaque_drawables.emplace_back(*mat_set, entry.entity, mesh, dist_sq, alpha_props.alpha_mode);
 	}
 
+	// 2. Sort opaques by (mesh pointer, material set) for instanced batching
 	std::sort(m_opaque_drawables.begin(), m_opaque_drawables.end(),
 		[](const Drawable& a, const Drawable& b) {
-			if (a.dist_sq != b.dist_sq)
-				return a.dist_sq > b.dist_sq;
-			// Same distance: OPAQUE before MASK (pillar before vine)
-			if (a.alpha_mode != b.alpha_mode)
-				return static_cast<uint32_t>(a.alpha_mode) < static_cast<uint32_t>(b.alpha_mode);
-			// Same alpha mode: sort by material for batching.
+			VeMesh* mesh_a = a.mesh->getMesh();
+			VeMesh* mesh_b = b.mesh->getMesh();
+			if (mesh_a != mesh_b)
+				return mesh_a < mesh_b;
 			return a.material_set < b.material_set;
 		});
+
+	// 3. Write opaque instance transforms to SSBO and build instance groups
+	for (size_t i = 0; i < m_opaque_drawables.size(); ++i) {
+		auto& d = m_opaque_drawables[i];
+		if (frame_info.instance_count >= frame_info.instance_capacity) {
+			VE_LOGW("Instance buffer full (" << frame_info.instance_capacity << " instances), skipping remaining opaque objects");
+			m_opaque_drawables.resize(i);
+			break;
+		}
+
+		// Write transform to SSBO
+		uint32_t idx = frame_info.instance_count++;
+		d.ssbo_index = idx;
+		const glm::mat3 nrm = registry.getWorldNormal(d.entity);
+		frame_info.instance_data[idx].transform = registry.getWorldTransform(d.entity);
+		frame_info.instance_data[idx].normal_transform[0] = glm::vec4(nrm[0], 0.0f);
+		frame_info.instance_data[idx].normal_transform[1] = glm::vec4(nrm[1], 0.0f);
+		frame_info.instance_data[idx].normal_transform[2] = glm::vec4(nrm[2], 0.0f);
+
+		// Check if we can merge with the current group
+		VeMesh* mesh_ptr = d.mesh->getMesh();
+		if (!m_opaque_groups.empty()) {
+			auto& group = m_opaque_groups.back();
+			if (group.mesh == mesh_ptr && group.material_set == d.material_set) {
+				group.instance_count++;
+				continue;
+			}
+		}
+
+		// Start a new group
+		auto* mat_ptr = d.mesh->getMaterial();
+		MaterialAlphaProps alpha_props = mat_ptr ? mat_ptr->getAlphaProps() : MaterialAlphaProps{};
+		InstanceGroup group{};
+		group.mesh = mesh_ptr;
+		group.material_set = d.material_set;
+		group.first_instance = idx;
+		group.instance_count = 1;
+		group.has_texture = d.mesh->has_texture;
+		group.alpha_cutoff = alpha_props.alpha_cutoff;
+		group.material_flags = static_cast<uint32_t>(alpha_props.alpha_mode) | (alpha_props.double_sided ? 4u : 0u)
+			| (mat_ptr && mat_ptr->getFlipTexCoordV() ? 8u : 0u)
+			| (alpha_props.use_spec_gloss_texture ? 16u : 0u);
+		group.double_sided = alpha_props.double_sided;
+		m_opaque_groups.push_back(group);
+	}
+
+	// 4. Sort transparents back-to-front and write their transforms to SSBO
 	std::sort(m_transparent_drawables.begin(), m_transparent_drawables.end(),
 		[](const Drawable& a, const Drawable& b) { return a.dist_sq > b.dist_sq; });
+
+	for (auto& d : m_transparent_drawables) {
+		if (frame_info.instance_count >= frame_info.instance_capacity) {
+			VE_LOGW("Instance buffer full (" << frame_info.instance_capacity << " instances), skipping remaining transparent objects");
+			break;
+		}
+		uint32_t idx = frame_info.instance_count++;
+		d.ssbo_index = idx;
+		const glm::mat3 nrm = registry.getWorldNormal(d.entity);
+		frame_info.instance_data[idx].transform = registry.getWorldTransform(d.entity);
+		frame_info.instance_data[idx].normal_transform[0] = glm::vec4(nrm[0], 0.0f);
+		frame_info.instance_data[idx].normal_transform[1] = glm::vec4(nrm[1], 0.0f);
+		frame_info.instance_data[idx].normal_transform[2] = glm::vec4(nrm[2], 0.0f);
+	}
 }
 
 void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info) const {
 	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+
+	// Bind global (set 0) and shadow (set 2) once — they don't change between draws
+	frame_info.command_buffer.bindDescriptorSets(
+		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		0, {*frame_info.global_descriptor_set}, {});
+	frame_info.command_buffer.bindDescriptorSets(
+		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		2, {*frame_info.shadow_descriptor_set}, {});
+
 	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
-	for (const auto& d : m_opaque_drawables) {
-		if (d.material_set != bound_material_set) {
-			bound_material_set = d.material_set;
+	VeMesh* bound_mesh = nullptr;
+
+	for (const auto& group : m_opaque_groups) {
+		// Bind material descriptor set (set 1) only when it changes
+		if (group.material_set != bound_material_set) {
+			bound_material_set = group.material_set;
 			frame_info.command_buffer.bindDescriptorSets(
 				vk::PipelineBindPoint::eGraphics,
 				*m_pipeline_layout,
-				0,
-				{*frame_info.global_descriptor_set, bound_material_set, *frame_info.shadow_descriptor_set},
+				1,
+				{bound_material_set},
 				{}
 			);
 		}
-		VeGameObject& obj = *d.obj;
-		MeshComponent* mesh = d.mesh;
-		auto* mat_ptr = mesh->getMaterial();
-		MaterialAlphaProps alpha_props = mat_ptr ? mat_ptr->getAlphaProps() : MaterialAlphaProps{};
-		PbrPushConstantData push{};
-		const glm::mat3 nrm = obj.getNormalTransform();
-		push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
-		push.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
-		push.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
-		push.transform = obj.getTransform();
-		push.has_texture = mesh->has_texture;
-		push.alpha_cutoff = alpha_props.alpha_cutoff;
-		push.material_flags = static_cast<uint32_t>(alpha_props.alpha_mode) | (alpha_props.double_sided ? 4u : 0u)
-			| (mat_ptr && mat_ptr->getFlipTexCoordV() ? 8u : 0u)
-			| (alpha_props.use_spec_gloss_texture ? 16u : 0u);
-		if (alpha_props.double_sided)
+
+		// Set dynamic state
+		if (group.double_sided)
 			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eNone);
 		else
-			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eFront);
+			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eBack);
 		frame_info.command_buffer.setDepthWriteEnable(VK_TRUE);
+
+		// Push per-batch material constants
+		PbrPushConstantData push{
+			.has_texture = group.has_texture,
+			.alpha_cutoff = group.alpha_cutoff,
+			.material_flags = group.material_flags,
+			.instance_offset = group.first_instance
+		};
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 			0,
 			vk::ArrayProxy<const uint8_t>(sizeof(PbrPushConstantData), reinterpret_cast<const uint8_t*>(&push))
 		);
-		mesh->getMesh()->bindVertexBuffer(frame_info.command_buffer);
-		mesh->getMesh()->bindIndexBuffer(frame_info.command_buffer);
-		mesh->getMesh()->drawIndexed(frame_info.command_buffer);
+
+		// Bind VBO/IBO (if mesh changed)
+		if (group.mesh != bound_mesh) {
+			bound_mesh = group.mesh;
+			bound_mesh->bindVertexBuffer(frame_info.command_buffer);
+			bound_mesh->bindIndexBuffer(frame_info.command_buffer);
+		}
+
+		// Instanced draw (firstInstance=0, shader uses instance_offset push constant for SSBO indexing)
+		group.mesh->drawIndexed(frame_info.command_buffer, group.instance_count, 0);
 	}
 }
 
 void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
 	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+
+	// Bind global (set 0) and shadow (set 2) once — they don't change between draws
+	frame_info.command_buffer.bindDescriptorSets(
+		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		0, {*frame_info.global_descriptor_set}, {});
+	frame_info.command_buffer.bindDescriptorSets(
+		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		2, {*frame_info.shadow_descriptor_set}, {});
+
 	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
+	VeMesh* bound_mesh = nullptr;
+
 	for (const auto& d : m_transparent_drawables) {
+		// Bind material descriptor set (set 1) only when it changes
 		if (d.material_set != bound_material_set) {
 			bound_material_set = d.material_set;
 			frame_info.command_buffer.bindDescriptorSets(
 				vk::PipelineBindPoint::eGraphics,
 				*m_pipeline_layout,
-				0,
-				{*frame_info.global_descriptor_set, bound_material_set, *frame_info.shadow_descriptor_set},
+				1,
+				{bound_material_set},
 				{}
 			);
 		}
-		VeGameObject& obj = *d.obj;
+
 		MeshComponent* mesh = d.mesh;
 		auto* mat_ptr = mesh->getMaterial();
 		MaterialAlphaProps alpha_props = mat_ptr ? mat_ptr->getAlphaProps() : MaterialAlphaProps{};
 		float transmission = mat_ptr ? mat_ptr->getMaterialFactors().transmission_factor : 0.0f;
 		bool is_transparent = (alpha_props.alpha_mode == AlphaMode::BLEND) || (transmission > HIGH_TRANSMISSION_THRESHOLD);
-		PbrPushConstantData push{};
-		const glm::mat3 nrm = obj.getNormalTransform();
-		push.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
-		push.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
-		push.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
-		push.transform = obj.getTransform();
-		push.has_texture = mesh->has_texture;
-		push.alpha_cutoff = alpha_props.alpha_cutoff;
-		push.material_flags = static_cast<uint32_t>(alpha_props.alpha_mode) | (alpha_props.double_sided ? 4u : 0u)
-			| (mat_ptr && mat_ptr->getFlipTexCoordV() ? 8u : 0u)
-			| (alpha_props.use_spec_gloss_texture ? 16u : 0u);
+
+		// Set dynamic state
 		if (alpha_props.double_sided)
 			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eNone);
 		else
-			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eFront);
+			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eBack);
 		frame_info.command_buffer.setDepthWriteEnable(!is_transparent);
+
+		// Push per-object material constants
+		PbrPushConstantData push{
+			.has_texture = mesh->has_texture,
+			.alpha_cutoff = alpha_props.alpha_cutoff,
+			.material_flags = static_cast<uint32_t>(alpha_props.alpha_mode) | (alpha_props.double_sided ? 4u : 0u)
+				| (mat_ptr && mat_ptr->getFlipTexCoordV() ? 8u : 0u)
+				| (alpha_props.use_spec_gloss_texture ? 16u : 0u),
+			.instance_offset = d.ssbo_index
+		};
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 			0,
 			vk::ArrayProxy<const uint8_t>(sizeof(PbrPushConstantData), reinterpret_cast<const uint8_t*>(&push))
 		);
-		mesh->getMesh()->bindVertexBuffer(frame_info.command_buffer);
-		mesh->getMesh()->bindIndexBuffer(frame_info.command_buffer);
-		mesh->getMesh()->drawIndexed(frame_info.command_buffer);
+
+		// Bind VBO/IBO (if mesh changed)
+		VeMesh* mesh_ptr = mesh->getMesh();
+		if (mesh_ptr != bound_mesh) {
+			bound_mesh = mesh_ptr;
+			bound_mesh->bindVertexBuffer(frame_info.command_buffer);
+			bound_mesh->bindIndexBuffer(frame_info.command_buffer);
+		}
+
+		// Single-instance draw (transparent objects not batched, preserve back-to-front order)
+		mesh_ptr->drawIndexed(frame_info.command_buffer, 1, 0);
 	}
 }
 
@@ -232,4 +331,3 @@ void PbrRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 }
 
 } // namespace ve
-

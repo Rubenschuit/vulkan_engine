@@ -10,6 +10,7 @@
 #include "ve_config.hpp"
 #include "rendering/ve_frame_info.hpp"
 #include "resources/ve_resource_manager.hpp"
+#include "scene/ve_component.hpp"
 
 #include <memory>
 #include <vector>
@@ -100,7 +101,8 @@ private:
 
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_ve_pipeline;
-	VeGameObject m_cube_object = VeGameObject::createGameObject();
+	ResourceHandle<VeMesh> m_cube_mesh;
+	TransformComponent m_cube_transform;
 
 	std::vector<SkyboxEntry> m_available_skyboxes;
 	size_t m_current_index = 0;
