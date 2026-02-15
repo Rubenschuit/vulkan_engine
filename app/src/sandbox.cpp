@@ -241,15 +241,23 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	}
 
 	// Main scene pass
-	m_ve_renderer.beginSceneRender(command_buffer);
-
 	if (m_active_scene->getType() == VeScene::Type::SIMPLE) {
+		m_ve_renderer.beginSceneRender(command_buffer);
 		m_skybox_render_system->render(frame_info);
 		m_simple_render_system->renderObjects(frame_info);
 		m_particle_system->render(frame_info);
 	} else {
-		//m_skybox_render_system->render(frame_info);
 		m_pbr_render_system->prepareFrame(frame_info);
+
+		// Depth pre-pass: render opaque depth before color pass
+		if (ui_actions.depth_prepass_enabled) {
+			m_ve_renderer.beginDepthPrePass(command_buffer);
+			m_depth_prepass_system->render(frame_info, m_pbr_render_system->getOpaqueGroups());
+			m_ve_renderer.endDepthPrePass(command_buffer);
+		}
+
+		m_ve_renderer.beginSceneRender(command_buffer, ui_actions.depth_prepass_enabled);
+
 		m_pbr_render_system->renderOpaque(frame_info);
 		m_skybox_render_system->renderAsBackground(frame_info);
 		m_pbr_render_system->renderTransparent(frame_info);
@@ -311,6 +319,8 @@ void Sandbox::recreatePipelines() {
 	m_skybox_render_system->recreatePipeline(offscreen_format, sample_count);
 	m_particle_system->recreatePipeline(offscreen_format, sample_count);
 	m_fireworks_system->recreatePipeline(offscreen_format, sample_count);
+
+	m_depth_prepass_system->recreatePipeline(sample_count);
 
 	m_post_process_system->recreatePipeline(color_format, m_ve_renderer.getResolveTargetImageView(), m_bloom_system->getBloomTexture());
 	m_imgui_layer->recreatePipeline();
@@ -730,6 +740,7 @@ void Sandbox::renderAppWindows() {
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Skip drawing objects outside the camera view");
 				}
+				ImGui::Checkbox("Depth Pre-Pass", &ui_actions.depth_prepass_enabled);
 
 				ImGui::Separator();
 				ImGui::Text("Post Processing: ");
@@ -925,6 +936,13 @@ void Sandbox::initSystems() {
 		*m_global_pool,
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_instance_buffers,
+		m_paths.shader("shadow_shader.spv")
+	);
+
+	m_depth_prepass_system = std::make_unique<DepthPrePassSystem>(
+		m_ve_device,
+		m_global_set_layout->getDescriptorSetLayout(),
+		m_ve_renderer.getSampleCount(),
 		m_paths.shader("shadow_shader.spv")
 	);
 

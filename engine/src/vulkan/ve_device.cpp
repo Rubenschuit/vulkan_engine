@@ -294,15 +294,13 @@ void VeDevice::pickPhysicalDevice() {
 
 void VeDevice::createLogicalDevice() {
 	assert(*m_physical_device != VK_NULL_HANDLE && "Physical device must be selected before creating logical device");
-	m_queue_index = findQueueFamilies(m_physical_device);
-	assert(m_queue_index != UINT32_MAX && "Failed to find a valid queue family index");
-	//TODO: transfer_queue_index = findTransferQueueFamilies(physical_device);
-	// same for compute queue
-	// For now we use the same queue for m1 machine
-	m_transfer_queue_index = m_queue_index;
-	m_compute_queue_index = m_queue_index;
-	assert(m_transfer_queue_index != UINT32_MAX && "Failed to find a valid transfer queue family index");
-	assert(m_compute_queue_index != UINT32_MAX && "Failed to find a valid compute queue family index");
+
+	m_queue_family_indices = findAllQueueFamilies(m_physical_device);
+	assert(m_queue_family_indices.isComplete() && "Failed to find all required queue families");
+
+	m_queue_index          = m_queue_family_indices.graphicsFamily;
+	m_compute_queue_index  = m_queue_family_indices.computeFamily;
+	m_transfer_queue_index = m_queue_family_indices.transferFamily;
 
 	// Setup a chain of structures to enable required Vulkan features
 	// Note: Slang-generated SPIR-V for VS uses DrawParameters (BaseVertex/VertexIndex),
@@ -320,29 +318,18 @@ void VeDevice::createLogicalDevice() {
 	};
 
 	assert(m_required_device_extensions.size() > 0 && "At least one device extension must be enabled");
-	float queue_priority = 0.0f;
-	vk::DeviceQueueCreateInfo device_queue_create_info {
-		.queueFamilyIndex = m_queue_index,
-		.queueCount = 1,
-		.pQueuePriorities = &queue_priority
-	};
-	vk::DeviceQueueCreateInfo device_queue_create_info_transfer {
-		.queueFamilyIndex = m_transfer_queue_index,
-		.queueCount = 1,
-		.pQueuePriorities = &queue_priority
-	};
-	vk::DeviceQueueCreateInfo device_queue_create_info_compute {
-		.queueFamilyIndex = m_compute_queue_index,
-		.queueCount = 1,
-		.pQueuePriorities = &queue_priority
-	};
 
-	std::vector<vk::DeviceQueueCreateInfo> queue_create_infos{};
-	queue_create_infos.push_back(device_queue_create_info);
-	if (m_queue_index != m_transfer_queue_index)
-		queue_create_infos.push_back(device_queue_create_info_transfer);
-	if (m_queue_index != m_compute_queue_index)
-		queue_create_infos.push_back(device_queue_create_info_compute);
+	// Create one DeviceQueueCreateInfo per unique queue family
+	float queue_priority = 1.0f;
+	auto unique_families = m_queue_family_indices.uniqueFamilies();
+	std::vector<vk::DeviceQueueCreateInfo> queue_create_infos;
+	for (uint32_t family : unique_families) {
+		queue_create_infos.push_back({
+			.queueFamilyIndex = family,
+			.queueCount = 1,
+			.pQueuePriorities = &queue_priority
+		});
+	}
 
 	std::vector<const char*> enabled_extensions = m_required_device_extensions;
 
@@ -355,55 +342,81 @@ void VeDevice::createLogicalDevice() {
 	};
 
 	m_device = vk::raii::Device(m_physical_device, device_create_info);
-	m_queue = vk::raii::Queue(m_device, m_queue_index, 0);
+	m_queue          = vk::raii::Queue(m_device, m_queue_index, 0);
+	m_compute_queue  = vk::raii::Queue(m_device, m_compute_queue_index, 0);
 	m_transfer_queue = vk::raii::Queue(m_device, m_transfer_queue_index, 0);
-	m_compute_queue = vk::raii::Queue(m_device, m_compute_queue_index, 0);
 }
 
-// Finds a queue family that supports graphics, compute and present
-// TODO: add support for separate graphics/transfer/compute/present queues and timeline semaphores
-uint32_t VeDevice::findQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device) const {
-assert(*m_surface != VK_NULL_HANDLE && "Surface must be valid when finding queue families");
-	auto qf_properties = phyisical_device.getQueueFamilyProperties();
-	assert(!qf_properties.empty() && "Physical device has no queue families");
-	// get the first index into queueFamilyProperties which supports graphics, compute and present
-	uint32_t _queue_index = UINT32_MAX;
-	for (uint32_t qfp_index = 0; qfp_index < qf_properties.size(); qfp_index++) {
-		if ((qf_properties[qfp_index].queueFlags & vk::QueueFlagBits::eGraphics) &&
-			(qf_properties[qfp_index].queueFlags & vk::QueueFlagBits::eCompute) &&
-			phyisical_device.getSurfaceSupportKHR(qfp_index, *m_surface)) {
-			_queue_index = qfp_index;
-			break;
-		}
-	}
-	if (_queue_index == UINT32_MAX) {
-		throw std::runtime_error("Could not find a queue for graphics and present");
-	}
-	return _queue_index;
-}
-
-// Not used for now as m1 machines do not have a dedicated transfer queue
-uint32_t VeDevice::findTransferQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device) const {
+// Finds separate queue families for graphics+present, async compute, and async transfer.
+// Prefers distinct families for each role to enable parallel execution.
+// Falls back to the graphics family when no separate family is available.
+QueueFamilyIndices VeDevice::findAllQueueFamilies(const vk::raii::PhysicalDevice& physical_device) const {
 	assert(*m_surface != VK_NULL_HANDLE && "Surface must be valid when finding queue families");
-	auto qf_properties = phyisical_device.getQueueFamilyProperties();
-	assert(!qf_properties.empty() && "Physical device has no queue families");
-	// get the first index into queueFamilyProperties which transfer but NOT graphics
-	uint32_t _queue_index = UINT32_MAX;
-	for (uint32_t qfp_index = 0; qfp_index < qf_properties.size(); qfp_index++) {
-		VE_LOGD("Queue family " << qfp_index << " supports flags: " << to_string(qf_properties[qfp_index].queueFlags));
-		VE_LOGD("Queue family " << qfp_index << " has " << qf_properties[qfp_index].queueCount << " queues");
-		if ((qf_properties[qfp_index].queueFlags & vk::QueueFlagBits::eTransfer) &&
-			!(qf_properties[qfp_index].queueFlags & vk::QueueFlagBits::eGraphics)
-			) {
-			// found
-			_queue_index = qfp_index;
+	auto qf_props = physical_device.getQueueFamilyProperties();
+	assert(!qf_props.empty() && "Physical device has no queue families");
+
+	QueueFamilyIndices indices;
+
+	// Log all available queue families
+	for (uint32_t i = 0; i < static_cast<uint32_t>(qf_props.size()); i++) {
+		VE_LOGD("Queue family " << i
+			<< ": flags=" << vk::to_string(qf_props[i].queueFlags)
+			<< " count=" << qf_props[i].queueCount);
+	}
+
+	// Pass 1: find graphics+present family
+	for (uint32_t i = 0; i < static_cast<uint32_t>(qf_props.size()); i++) {
+		bool has_graphics = (qf_props[i].queueFlags & vk::QueueFlagBits::eGraphics) != vk::QueueFlags{};
+		bool has_compute  = (qf_props[i].queueFlags & vk::QueueFlagBits::eCompute)  != vk::QueueFlags{};
+		bool has_present  = physical_device.getSurfaceSupportKHR(i, *m_surface);
+
+		if (has_graphics && has_compute && has_present) {
+			indices.graphicsFamily = i;
 			break;
 		}
 	}
-	if (_queue_index == UINT32_MAX) {
-		throw std::runtime_error("Could not find a queue for transfer");
+	if (indices.graphicsFamily == UINT32_MAX) {
+		throw std::runtime_error("Could not find a queue family for graphics and present");
 	}
-	return _queue_index;
+
+	// Pass 2: find a compute family different from graphics
+	for (uint32_t i = 0; i < static_cast<uint32_t>(qf_props.size()); i++) {
+		bool has_compute = (qf_props[i].queueFlags & vk::QueueFlagBits::eCompute) != vk::QueueFlags{};
+		if (has_compute && i != indices.graphicsFamily) {
+			indices.computeFamily = i;
+			break;
+		}
+	}
+	if (indices.computeFamily == UINT32_MAX) {
+		indices.computeFamily = indices.graphicsFamily;
+		VE_LOGW("No separate compute queue family found, sharing graphics family " << indices.graphicsFamily);
+	}
+
+	// Pass 3: find a transfer family different from graphics and compute
+	for (uint32_t i = 0; i < static_cast<uint32_t>(qf_props.size()); i++) {
+		bool has_transfer = (qf_props[i].queueFlags & vk::QueueFlagBits::eTransfer) != vk::QueueFlags{};
+		if (has_transfer && i != indices.graphicsFamily && i != indices.computeFamily) {
+			indices.transferFamily = i;
+			break;
+		}
+	}
+	if (indices.transferFamily == UINT32_MAX) {
+		indices.transferFamily = indices.graphicsFamily;
+		VE_LOGW("No separate transfer queue family found, sharing graphics family " << indices.graphicsFamily);
+	}
+
+	// Summary
+	auto unique = indices.uniqueFamilies();
+	if (indices.allSameFamily()) {
+		VE_LOGI("All queues on single family " << indices.graphicsFamily);
+	} else {
+		VE_LOGI("Using " << unique.size() << " separate queue families: "
+			<< "Graphics=" << indices.graphicsFamily
+			<< " Compute=" << indices.computeFamily
+			<< " Transfer=" << indices.transferFamily);
+	}
+
+	return indices;
 }
 
 std::vector<const char *> VeDevice::getRequiredInstanceExtensions() {
@@ -497,7 +510,6 @@ vk::Format VeDevice::findDepthFormat() {
 	);
 }
 
-// sharing mode is hardcoded exclusive for now
 void VeDevice::createBuffer(
 		vk::DeviceSize size,
 		vk::BufferUsageFlags usage,
@@ -508,12 +520,17 @@ void VeDevice::createBuffer(
 	assert(size > 0 && "Buffer size must be greater than zero");
 	assert(usage != static_cast<vk::BufferUsageFlags>(0) && "Buffer usage flags must not be empty");
 
-	// Create buffer
+	// Use concurrent sharing when queue families differ, exclusive otherwise
+	auto unique_families = m_queue_family_indices.uniqueFamilies();
+	bool use_concurrent = !m_queue_family_indices.allSameFamily() && unique_families.size() > 1;
+
 	vk::BufferCreateInfo buffer_create_info {
 		.sType = vk::StructureType::eBufferCreateInfo,
 		.size = size,
 		.usage = usage,
-		.sharingMode = vk::SharingMode::eExclusive
+		.sharingMode = use_concurrent ? vk::SharingMode::eConcurrent : vk::SharingMode::eExclusive,
+		.queueFamilyIndexCount = use_concurrent ? static_cast<uint32_t>(unique_families.size()) : 0u,
+		.pQueueFamilyIndices = use_concurrent ? unique_families.data() : nullptr
 	};
 	buffer = vk::raii::Buffer(m_device, buffer_create_info);
 
@@ -580,7 +597,12 @@ void VeDevice::copyBufferToImageWithMipmaps(vk::raii::Buffer& src_buffer, const 
 
 // Single-time command buffer helpers (select queue/pool)
 [[nodiscard]] std::unique_ptr<vk::raii::CommandBuffer> VeDevice::beginSingleTimeCommands(QueueKind kind) {
-	vk::CommandPool pool = (kind == QueueKind::Graphics) ? *m_command_pool : *m_command_pool_transfer;
+	vk::CommandPool pool;
+	switch (kind) {
+		case QueueKind::Graphics: pool = *m_command_pool; break;
+		case QueueKind::Compute:  pool = *m_command_pool_compute; break;
+		case QueueKind::Transfer: pool = *m_command_pool_transfer; break;
+	}
 	vk::CommandBufferAllocateInfo alloc_info{
 		.sType = vk::StructureType::eCommandBufferAllocateInfo,
 		.commandPool = pool,
@@ -594,13 +616,18 @@ void VeDevice::copyBufferToImageWithMipmaps(vk::raii::Buffer& src_buffer, const 
 
 void VeDevice::endSingleTimeCommands(vk::raii::CommandBuffer& cmd, QueueKind kind) {
 	cmd.end();
+
+	vk::raii::Fence fence(m_device, vk::FenceCreateInfo{});
 	vk::SubmitInfo submit_info{ .commandBufferCount = 1, .pCommandBuffers = &*cmd };
-	if (kind == QueueKind::Graphics) {
-		m_queue.submit(submit_info);
-		m_queue.waitIdle();
-	} else {
-		m_transfer_queue.submit(submit_info);
-		m_transfer_queue.waitIdle();
+
+	switch (kind) {
+		case QueueKind::Graphics: m_queue.submit(submit_info, *fence); break;
+		case QueueKind::Compute:  m_compute_queue.submit(submit_info, *fence); break;
+		case QueueKind::Transfer: m_transfer_queue.submit(submit_info, *fence); break;
 	}
+
+	// Wait only for this specific submission rather than stalling the entire queue
+	while (vk::Result::eTimeout ==
+		m_device.waitForFences(*fence, vk::True, UINT64_MAX));
 }
 }

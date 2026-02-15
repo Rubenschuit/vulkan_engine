@@ -38,7 +38,10 @@ public:
 	// When false is returned (e.g. swap chain out of date), the command buffer is not valid for use.
 	bool beginFrame();
 	void submitCompute(vk::raii::CommandBuffer& compute_command_buffer);
-	void beginSceneRender(vk::raii::CommandBuffer& command_buffer);
+	void beginDepthPrePass(vk::raii::CommandBuffer& command_buffer);
+	void endDepthPrePass(vk::raii::CommandBuffer& command_buffer);
+
+	void beginSceneRender(vk::raii::CommandBuffer& command_buffer, bool load_depth = false);
 	// Ends dynamic rendering for the scene but does not transition to Present.
 	void endSceneRender(vk::raii::CommandBuffer& command_buffer);
 

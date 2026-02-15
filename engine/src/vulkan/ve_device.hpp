@@ -13,10 +13,11 @@ There are also methods for submitting single time command buffers to a queue. */
 #include <vulkan/vulkan_raii.hpp>
 #include <vulkan/vulkan_beta.h> // required for macOS portability subset extension
 #include <vector>
+#include <algorithm>
 
 namespace ve {
 
-enum class QueueKind { Graphics, Transfer };
+enum class QueueKind { Graphics, Compute, Transfer };
 
 struct SwapChainSupportDetails {
 	vk::SurfaceCapabilitiesKHR capabilities;
@@ -25,11 +26,22 @@ struct SwapChainSupportDetails {
 };
 
 struct QueueFamilyIndices {
-	uint32_t graphicsFamily;
-	uint32_t presentFamily;
-	bool graphicsFamilyHasValue = false;
-	bool presentFamilyHasValue = false;
-	bool isComplete() { return graphicsFamilyHasValue && presentFamilyHasValue; }
+	uint32_t graphicsFamily = UINT32_MAX;
+	uint32_t computeFamily  = UINT32_MAX;
+	uint32_t transferFamily = UINT32_MAX;
+
+	bool isComplete() const {
+		return graphicsFamily != UINT32_MAX && computeFamily != UINT32_MAX && transferFamily != UINT32_MAX;
+	}
+	bool allSameFamily() const {
+		return graphicsFamily == computeFamily && computeFamily == transferFamily;
+	}
+	std::vector<uint32_t> uniqueFamilies() const {
+		std::vector<uint32_t> v{graphicsFamily, computeFamily, transferFamily};
+		std::sort(v.begin(), v.end());
+		v.erase(std::unique(v.begin(), v.end()), v.end());
+		return v;
+	}
 };
 
 class VENGINE_API VeDevice {
@@ -56,6 +68,9 @@ public:
 	vk::raii::Instance& getInstance() { return m_instance; }
 	vk::raii::PhysicalDevice& getPhysicalDevice() { return m_physical_device; }
 	uint32_t getGraphicsQueueFamilyIndex() const { return m_queue_index; }
+	uint32_t getComputeQueueFamilyIndex() const { return m_compute_queue_index; }
+	uint32_t getTransferQueueFamilyIndex() const { return m_transfer_queue_index; }
+	const QueueFamilyIndices& getQueueFamilyIndices() const { return m_queue_family_indices; }
 
 	SwapChainSupportDetails getSwapChainSupport() { return querySwapChainSupport(m_physical_device); }
 	uint32_t findMemoryType(uint32_t type_filter, vk::MemoryPropertyFlags properties);
@@ -94,9 +109,7 @@ private:
 
 	bool isDeviceSuitable (const vk::raii::PhysicalDevice& device) const;
 	std::vector<const char *> getRequiredInstanceExtensions();
-	uint32_t findQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device) const;
-	uint32_t findTransferQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device) const;
-	//TODO: uint32_t findComputeQueueFamilies(const vk::raii::PhysicalDevice& phyisical_device);
+	QueueFamilyIndices findAllQueueFamilies(const vk::raii::PhysicalDevice& physical_device) const;
 	SwapChainSupportDetails querySwapChainSupport(const vk::raii::PhysicalDevice& device) const;
 	vk::SampleCountFlagBits queryMaxUsableSampleCount() const;
 
@@ -116,6 +129,7 @@ private:
 	vk::raii::Queue m_queue{nullptr};
 	vk::raii::Queue m_transfer_queue{nullptr};
 	vk::raii::Queue m_compute_queue{nullptr};
+	QueueFamilyIndices m_queue_family_indices;
 	uint32_t m_queue_index = UINT32_MAX; // queue family index for graphics and present
 	uint32_t m_transfer_queue_index = UINT32_MAX;
 	uint32_t m_compute_queue_index = UINT32_MAX;

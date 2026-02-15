@@ -19,6 +19,18 @@ namespace ve {
 
 class VENGINE_API PbrRenderSystem {
 public:
+	// Instanced draw groups: opaque drawables merged by (mesh, material) for batched draws
+	struct InstanceGroup {
+		VeMesh* mesh = nullptr;
+		VkDescriptorSet material_set = VK_NULL_HANDLE;
+		uint32_t first_instance = 0;  // offset into SSBO
+		uint32_t instance_count = 0;
+		float has_texture = 0.0f;
+		float alpha_cutoff = 0.0f;
+		uint32_t material_flags = 0;
+		bool double_sided = false;
+	};
+
 	PbrRenderSystem(
 		VeDevice& device,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
@@ -44,6 +56,8 @@ public:
 	void setTopology(vk::PrimitiveTopology topology) {
 		m_topology = topology;
 	}
+
+	const std::vector<InstanceGroup>& getOpaqueGroups() const { return m_opaque_groups; }
 
 private:
 	void createPipelineLayout(
@@ -71,20 +85,7 @@ private:
 	};
 	mutable std::vector<Drawable> m_opaque_drawables;
 	mutable std::vector<Drawable> m_transparent_drawables;
-
-	// Instanced draw groups: opaque drawables merged by (mesh, material) for batched draws
-	struct InstanceGroup {
-		VeMesh* mesh = nullptr;
-		VkDescriptorSet material_set = VK_NULL_HANDLE;
-		uint32_t first_instance = 0;  // offset into SSBO
-		uint32_t instance_count = 0;
-		float has_texture = 0.0f;
-		float alpha_cutoff = 0.0f;
-		uint32_t material_flags = 0;
-		bool double_sided = false;
-	};
 	mutable std::vector<InstanceGroup> m_opaque_groups;
 };
 
 } // namespace ve
-

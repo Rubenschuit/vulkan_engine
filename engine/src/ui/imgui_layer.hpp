@@ -34,6 +34,9 @@ struct VENGINE_API UIContext {
 	float cpu_time = 0.0f;
 	float gpu_time = 0.0f;
 
+	// depth pre-pass
+	bool depth_prepass_enabled = false;
+
 	// culling
 	bool enable_frustum_culling = true;
 	uint32_t cull_total_objects = 0;

@@ -37,12 +37,15 @@ VeImage::VeImage(
 
 VeImage::~VeImage() {}
 
-// Hardcoded:
-// imageType=2D, extent.z=1, initlayout, sharingmode=excl
+// Hardcoded: imageType=2D, extent.z=1, initlayout
 void VeImage::createImage() {
 	assert(m_width > 0 && m_height > 0 && "Image width and height must be greater than zero");
 	assert(m_usage != static_cast<vk::ImageUsageFlags>(0) && "Image usage flags must not be empty");
-	// Create image
+
+	// Use concurrent sharing when queue families differ, exclusive otherwise
+	auto unique_families = m_ve_device.getQueueFamilyIndices().uniqueFamilies();
+	bool use_concurrent = !m_ve_device.getQueueFamilyIndices().allSameFamily() && unique_families.size() > 1;
+
 	vk::ImageCreateInfo image_info {
 		.sType = vk::StructureType::eImageCreateInfo,
 		.pNext = nullptr,
@@ -55,9 +58,9 @@ void VeImage::createImage() {
 		.samples = m_num_samples,
 		.tiling = m_tiling,
 		.usage = m_usage,
-		.sharingMode = vk::SharingMode::eExclusive,
-		.queueFamilyIndexCount = 0,
-		.pQueueFamilyIndices = nullptr,
+		.sharingMode = use_concurrent ? vk::SharingMode::eConcurrent : vk::SharingMode::eExclusive,
+		.queueFamilyIndexCount = use_concurrent ? static_cast<uint32_t>(unique_families.size()) : 0u,
+		.pQueueFamilyIndices = use_concurrent ? unique_families.data() : nullptr,
 		.initialLayout = vk::ImageLayout::eUndefined
 	};
 	m_image = vk::raii::Image(m_ve_device.getDevice(), image_info);

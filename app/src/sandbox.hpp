@@ -1,5 +1,6 @@
 #pragma once
 #include "VEngine/VEngine.hpp"
+#include "rendering/depth_prepass_system.hpp"
 #include "asset_paths.hpp"
 #include "scenes/bistro_scene.hpp"
 #include "scenes/simple_scene.hpp"
@@ -115,6 +116,7 @@ private:
 	std::unique_ptr<ParticleSystem> m_particle_system;
 	std::unique_ptr<FireworksSystem> m_fireworks_system;
 	std::unique_ptr<ShadowRenderSystem> m_shadow_render_system;
+	std::unique_ptr<DepthPrePassSystem> m_depth_prepass_system;
 	std::unique_ptr<PostProcessSystem> m_post_process_system;
 	std::unique_ptr<BloomSystem> m_bloom_system;
 };

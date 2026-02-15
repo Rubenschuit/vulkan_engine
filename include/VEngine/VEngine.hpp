@@ -39,6 +39,7 @@
 #include "rendering/skybox_render_system.hpp"
 #include "rendering/shadow_render_system.hpp"
 #include "rendering/pbr_render_system.hpp"
+#include "rendering/depth_prepass_system.hpp"
 #include "rendering/fireworks_system.hpp"
 #include "rendering/bloom_system.hpp"
 #include "rendering/post_process_system.hpp"

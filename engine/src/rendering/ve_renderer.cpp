@@ -182,9 +182,54 @@ void VeRenderer::endFrame(vk::raii::CommandBuffer& command_buffer) {
 	m_is_frame_started = false;
 }
 
+void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
+	assert(m_is_frame_started && "Can't begin depth pre-pass while frame is not in progress");
+	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin depth pre-pass on command buffer from a different frame");
+
+	auto extent = m_ve_swap_chain->getSwapChainExtent();
+
+	vk::RenderingAttachmentInfo depth_attachment_info = {
+		.imageView = *m_ve_swap_chain->getDepthImageView(),
+		.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+		.loadOp = vk::AttachmentLoadOp::eClear,
+		.storeOp = vk::AttachmentStoreOp::eStore,
+		.clearValue = vk::ClearDepthStencilValue(1.0f, 0)
+	};
+	vk::RenderingInfo rendering_info = {
+		.renderArea = { .offset = { 0, 0 }, .extent = extent },
+		.layerCount = 1,
+		.colorAttachmentCount = 0,
+		.pColorAttachments = nullptr,
+		.pDepthAttachment = &depth_attachment_info
+	};
+
+	command_buffer.beginRendering(rendering_info);
+	command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f));
+	command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), extent));
+}
+
+void VeRenderer::endDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
+	assert(m_is_frame_started && "Can't end depth pre-pass while frame is not in progress");
+	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end depth pre-pass on command buffer from a different frame");
+	command_buffer.endRendering();
+
+	// Barrier: depth writes from pre-pass must be visible before scene pass reads them
+	vk::MemoryBarrier2 depth_barrier{
+		.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
+		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+		.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+		.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+	};
+	vk::DependencyInfo dep_info{
+		.memoryBarrierCount = 1,
+		.pMemoryBarriers = &depth_barrier
+	};
+	command_buffer.pipelineBarrier2(dep_info);
+}
+
 // Transitions the swap chain image and multi sampled color image
 // to color_attachment_optimal. Begins dynamic rendering.
-void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer) {
+void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer, bool load_depth) {
 	assert(m_is_frame_started && "Can't call beginRender while frame is not in progress");
 	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin render on command buffer from a different frame");
 
@@ -233,8 +278,8 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer) {
 	vk::RenderingAttachmentInfo depth_attachment_info = {
 		.imageView = *m_ve_swap_chain->getDepthImageView(),
 		.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-		.loadOp = vk::AttachmentLoadOp::eClear,
-		.storeOp = vk::AttachmentStoreOp::eDontCare,
+		.loadOp = load_depth ? vk::AttachmentLoadOp::eLoad : vk::AttachmentLoadOp::eClear,
+		.storeOp = vk::AttachmentStoreOp::eStore,
 		.clearValue = vk::ClearDepthStencilValue(1.0f, 0)
 	};
 	vk::RenderingInfo rendering_info = {

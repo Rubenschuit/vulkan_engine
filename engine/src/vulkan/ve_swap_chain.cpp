@@ -81,7 +81,7 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer command_buffer, uint3
 	// Wait on image-available (binary) and compute timeline before starting graphics work.
 	vk::PipelineStageFlags wait_stages[2] = {
 		vk::PipelineStageFlagBits::eColorAttachmentOutput, // swapchain image usage
-		vk::PipelineStageFlagBits::eVertexInput            // instanced vertex buffer reads
+		vk::PipelineStageFlagBits::eVertexInput | vk::PipelineStageFlagBits::eDrawIndirect // compute→graphics sync
 	};
 	// We will signal two semaphores (timeline + binary). For timeline submit info,
 	// signalSemaphoreValueCount must equal signalSemaphoreCount when any signaled semaphore is a timeline.
@@ -267,7 +267,7 @@ void VeSwapChain::createDepthResources() {
 		m_desired_num_samples,
 		depth_format,
 		vk::ImageTiling::eOptimal,
-		vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eTransientAttachment,
+		vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		vk::ImageAspectFlagBits::eDepth,
 		false,

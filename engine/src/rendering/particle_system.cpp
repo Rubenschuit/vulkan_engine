@@ -301,6 +301,9 @@ void ParticleSystem::createPipeline(vk::Format color_format, vk::SampleCountFlag
 	config.color_format = color_format;
 	config.pipeline_layout = *m_pipeline_layout;
 
+	// Billboard quads don't need culling
+	config.rasterization_info.cullMode = vk::CullModeFlagBits::eNone;
+
 	// attempt to reduce z-fighting
 	config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	config.depth_stencil_info.depthWriteEnable = VK_FALSE;
@@ -446,7 +449,9 @@ void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 	}
 
 
-	// Add barrier to ensure compute writes are visible to vertex shader read and indirect command execution
+	// Ensure compute writes are visible to vertex shader read and indirect command execution.
+	// On MoltenVK/M1, different queue families may map to the same Metal command queue,
+	// so the full dst stage/access masks provide correct synchronization.
 	vk::BufferMemoryBarrier barrier{
 		.srcAccessMask = vk::AccessFlagBits::eShaderWrite,
 		.dstAccessMask = vk::AccessFlagBits::eVertexAttributeRead,
@@ -457,7 +462,6 @@ void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 		.size = VK_WHOLE_SIZE
 	};
 
-	// Barrier for indirect buffer
 	vk::BufferMemoryBarrier indirect_barrier{
 		.srcAccessMask = vk::AccessFlagBits::eShaderWrite,
 		.dstAccessMask = vk::AccessFlagBits::eIndirectCommandRead,

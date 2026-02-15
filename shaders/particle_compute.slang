@@ -8,6 +8,7 @@
 struct UniformBuffer {
 	float4x4 view;
 	float4x4 proj;
+	float4x4 projection_view;
 	float4 camera_position;
 };
 [vk::binding(0, 0)]
