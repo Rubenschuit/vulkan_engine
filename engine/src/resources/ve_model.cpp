@@ -236,9 +236,9 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	loader.SetImageLoader(LoadImageDataVeModel, &load_opt);
 	std::string err, warn;
 	bool ret = false;
-	std::string ext = model_path.extension().string();
-	std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-	if (ext == ".glb") {
+	std::string path_ext = model_path.extension().string();
+	std::transform(path_ext.begin(), path_ext.end(), path_ext.begin(), ::tolower);
+	if (path_ext == ".glb") {
 		VE_LOGI("Loading glTF binary file (NOT SUPPORTED YET): " << model_path);
 		ret = loader.LoadBinaryFromFile(&gltf, &err, &warn, model_path.string());
 	} else {
@@ -286,8 +286,8 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 			// KHR_materials_pbrSpecularGlossiness: diffuseTexture as albedo when baseColorTexture missing
 			auto it_sg = mat.extensions.find("KHR_materials_pbrSpecularGlossiness");
 			if (it_sg != mat.extensions.end()) {
-				const tinygltf::Value& ext = it_sg->second;
-				if (ext.Has("diffuseTexture") && ext.Get("diffuseTexture").Has("index")) {
+				const tinygltf::Value& extension = it_sg->second;
+				if (extension.Has("diffuseTexture") && extension.Get("diffuseTexture").Has("index")) {
 					has_textured_materials = true;
 				}
 			}

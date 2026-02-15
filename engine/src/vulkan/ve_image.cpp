@@ -133,10 +133,21 @@ void VeImage::transitionImageLayout(
 	vk::PipelineStageFlags2 dst_stage) {
 
 	assert(*m_image != VK_NULL_HANDLE && "Image must be valid when transitioning image layout");
-	QueueKind kind = QueueKind::Graphics;
-	if (m_usage & vk::ImageUsageFlagBits::eTransferSrc || m_usage & vk::ImageUsageFlagBits::eTransferDst) {
-		kind = QueueKind::Transfer;
-	}
+
+	// Only use the transfer queue when both stages are transfer-compatible.
+	// Stages like eFragmentShader are not valid on a dedicated transfer queue family.
+	constexpr auto kTransferStages =
+		vk::PipelineStageFlagBits2::eTransfer |
+		vk::PipelineStageFlagBits2::eAllTransfer |
+		vk::PipelineStageFlagBits2::eTopOfPipe |
+		vk::PipelineStageFlagBits2::eBottomOfPipe |
+		vk::PipelineStageFlagBits2::eHost |
+		vk::PipelineStageFlagBits2::eAllCommands;
+
+	bool has_transfer_usage = (m_usage & vk::ImageUsageFlagBits::eTransferSrc) || (m_usage & vk::ImageUsageFlagBits::eTransferDst);
+	bool stages_ok = !(src_stage & ~kTransferStages) && !(dst_stage & ~kTransferStages);
+
+	QueueKind kind = (has_transfer_usage && stages_ok) ? QueueKind::Transfer : QueueKind::Graphics;
 	auto command_buffer = m_ve_device.beginSingleTimeCommands(kind);
 	transitionImageLayout(*command_buffer, old_layout, new_layout, src_access_mask, dst_access_mask, src_stage, dst_stage);
 	m_ve_device.endSingleTimeCommands(*command_buffer, kind);

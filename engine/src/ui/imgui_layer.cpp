@@ -142,8 +142,12 @@ void ImGuiLayer::renderEngineWindows(UIContext& context) {
 	static float frame_time_ms = 0.0f;
 	static float cpu_time_ms = 0.0f;
 	static float gpu_time_ms = 0.0f;
+	static float compute_gpu_time_ms = 0.0f;
+	static float gpu_overlap_ms = 0.0f;
 	static float cpu_time_sum = 0.0f;
 	static float gpu_time_sum = 0.0f;
+	static float compute_gpu_time_sum = 0.0f;
+	static float gpu_overlap_sum = 0.0f;
 	static float accumulated_dt = 0.0f;
 	static float fps_history[120] = {};
 	static int history_offset = 0;
@@ -153,6 +157,8 @@ void ImGuiLayer::renderEngineWindows(UIContext& context) {
 	// Text display updates (every 60 frames)
 	cpu_time_sum += context.cpu_time;
 	gpu_time_sum += context.gpu_time;
+	compute_gpu_time_sum += context.compute_gpu_time;
+	gpu_overlap_sum += context.gpu_overlap;
 	accumulated_dt += dt;
 	frame_count++;
 
@@ -161,9 +167,13 @@ void ImGuiLayer::renderEngineWindows(UIContext& context) {
 		frame_time_ms = (accumulated_dt / 60.0f) * 1000.0f;
 		cpu_time_ms = cpu_time_sum / 60.0f;
 		gpu_time_ms = gpu_time_sum / 60.0f;
+		compute_gpu_time_ms = compute_gpu_time_sum / 60.0f;
+		gpu_overlap_ms = gpu_overlap_sum / 60.0f;
 		frame_count = 0;
 		cpu_time_sum = 0.0f;
 		gpu_time_sum = 0.0f;
+		compute_gpu_time_sum = 0.0f;
+		gpu_overlap_sum = 0.0f;
 		accumulated_dt = 0.0f;
 	}
 
@@ -187,8 +197,12 @@ void ImGuiLayer::renderEngineWindows(UIContext& context) {
 	if (ImGui::Begin("Performance", &context.show_performance, flags)) {
 		ImGui::Text("FPS: %.1f", fps);
 		ImGui::Text("Frame Time: %.2f ms", frame_time_ms);
-		ImGui::Text("CPU Time:   %.2f ms", cpu_time_ms);
-		ImGui::Text("GPU Time:   %.2f ms", gpu_time_ms);
+		ImGui::Text("CPU Time:       %.2f ms", cpu_time_ms);
+		ImGui::Text("GPU Graphics:   %.2f ms", gpu_time_ms);
+		ImGui::Text("GPU Compute:    %.2f ms", compute_gpu_time_ms);
+		if (gpu_overlap_ms > 0.001f) {
+			ImGui::Text("GPU Overlap:    %.2f ms", gpu_overlap_ms);
+		}
 
 		float max_fps = 0.0f;
 		for (float f : fps_history) if (f > max_fps) max_fps = f;

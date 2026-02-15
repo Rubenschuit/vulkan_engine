@@ -33,6 +33,8 @@ struct VENGINE_API UIContext {
 	// timing
 	float cpu_time = 0.0f;
 	float gpu_time = 0.0f;
+	float compute_gpu_time = 0.0f;
+	float gpu_overlap = 0.0f;
 
 	// depth pre-pass
 	bool depth_prepass_enabled = false;

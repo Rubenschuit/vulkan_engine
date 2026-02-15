@@ -2,6 +2,7 @@
 #include "rendering/ve_renderer.hpp"
 
 #include <stdexcept>
+#include <algorithm>
 
 
 namespace ve {
@@ -10,11 +11,11 @@ VeRenderer::VeRenderer(VeDevice& device, VeWindow& window) : m_ve_device(device)
 	m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, m_ve_window.getExtent(), m_desired_num_samples, m_present_mode, m_hdr_enabled);
 	createCommandBuffers();
 
-	// Create query pool for GPU timing
+	// Create query pool for GPU timing (4 per frame: compute start/end, graphics start/end)
 	vk::QueryPoolCreateInfo query_pool_info{
 		.sType = vk::StructureType::eQueryPoolCreateInfo,
 		.queryType = vk::QueryType::eTimestamp,
-		.queryCount = 2 * ve::MAX_FRAMES_IN_FLIGHT
+		.queryCount = 4 * ve::MAX_FRAMES_IN_FLIGHT
 	};
 	m_query_pool = vk::raii::QueryPool(m_ve_device.getDevice(), query_pool_info);
 	m_query_active.resize(ve::MAX_FRAMES_IN_FLIGHT, false);
@@ -115,17 +116,29 @@ bool VeRenderer::beginFrame() {
 	auto& command_buffer = getCurrentCommandBuffer();
 	uint32_t frame_index = m_ve_swap_chain->getCurrentFrame();
 
-	// Retrieve results from the previous time this frame slot was used (N-2 or N-3 frames ago)
+	// Retrieve results from the previous time this frame slot was used
+	// Layout per frame: [compute_start, compute_end, graphics_start, graphics_end]
 	if (m_query_active[frame_index]) {
-		std::array<uint64_t, 2> timestamps;
+		std::array<uint64_t, 4> ts;
+		uint32_t base = frame_index * 4;
 		vk::Result query_result = (*m_ve_device.getDevice()).getQueryPoolResults(
-			*m_query_pool, frame_index * 2, 2, timestamps.size() * sizeof(uint64_t),
-			timestamps.data(), sizeof(uint64_t), vk::QueryResultFlagBits::e64
+			*m_query_pool, base, 4, ts.size() * sizeof(uint64_t),
+			ts.data(), sizeof(uint64_t), vk::QueryResultFlagBits::e64
 		);
 
 		if (query_result == vk::Result::eSuccess) {
-			float timestamp_period = m_ve_device.getDeviceProperties().limits.timestampPeriod;
-			m_gpu_time = static_cast<float>(timestamps[1] - timestamps[0]) * timestamp_period / 1000000.0f;
+			float period = m_ve_device.getDeviceProperties().limits.timestampPeriod;
+			float ns_to_ms = period / 1000000.0f;
+
+			m_compute_gpu_time = static_cast<float>(ts[1] - ts[0]) * ns_to_ms;
+			m_gpu_time = static_cast<float>(ts[3] - ts[2]) * ns_to_ms;
+
+			// Overlap: how much compute and graphics executed simultaneously
+			uint64_t overlap_start = std::max(ts[0], ts[2]);
+			uint64_t overlap_end = std::min(ts[1], ts[3]);
+			m_gpu_overlap = (overlap_end > overlap_start)
+				? static_cast<float>(overlap_end - overlap_start) * ns_to_ms
+				: 0.0f;
 		}
 	}
 
@@ -140,9 +153,14 @@ bool VeRenderer::beginFrame() {
 	compute_command_buffer.reset();
 	compute_command_buffer.begin(info);
 
-	// Reset query pool for this frame and write start timestamp
-	command_buffer.resetQueryPool(*m_query_pool, frame_index * 2, 2);
-	command_buffer.writeTimestamp(vk::PipelineStageFlagBits::eAllGraphics, *m_query_pool, frame_index * 2);
+	// Reset and write start timestamps from each command buffer's own queue
+	uint32_t base = frame_index * 4;
+	compute_command_buffer.resetQueryPool(*m_query_pool, base, 2);     // compute range [base, base+1]
+	// NOTE: compute start timestamp is written by the particle system after its host→compute
+	// barrier, so it measures actual dispatch time and not the submit-level semaphore wait.
+
+	command_buffer.resetQueryPool(*m_query_pool, base + 2, 2);         // graphics range [base+2, base+3]
+	command_buffer.writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, *m_query_pool, base + 2);
 	m_query_active[frame_index] = true;
 
 	return true;
@@ -155,8 +173,8 @@ void VeRenderer::endFrame(vk::raii::CommandBuffer& command_buffer) {
 
 	uint32_t frame_index = m_ve_swap_chain->getCurrentFrame();
 
-	// Write end timestamp
-	command_buffer.writeTimestamp(vk::PipelineStageFlagBits::eAllGraphics, *m_query_pool, frame_index * 2 + 1);
+	// Write graphics end timestamp
+	command_buffer.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, *m_query_pool, frame_index * 4 + 3);
 
 	transitionToPresent(command_buffer);
 	command_buffer.end();
@@ -377,12 +395,16 @@ void VeRenderer::transitionToPresent(vk::raii::CommandBuffer& command_buffer) {
 	);
 }
 
-// Expects a compute command buffer that has been recorded and ended.
-// Submits the command buffer to the compute queue, signaling the timeline semaphore when done.
+// Writes compute end timestamp, ends the command buffer, and submits to the compute queue.
 // Should be called between beginFrame() and endFrame().
 void VeRenderer::submitCompute(vk::raii::CommandBuffer& compute_command_buffer) {
 	assert(m_is_frame_started && "Can't call submitCompute while frame is not in progress");
 	assert(&compute_command_buffer == &getCurrentComputeCommandBuffer() && "Can't submit compute on command buffer from a different frame");
+
+	uint32_t frame_index = m_ve_swap_chain->getCurrentFrame();
+	compute_command_buffer.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, *m_query_pool, frame_index * 4 + 1);
+	compute_command_buffer.end();
+
 	m_ve_swap_chain->submitComputeWork(*compute_command_buffer);
 }
 

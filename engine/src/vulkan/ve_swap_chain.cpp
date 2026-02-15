@@ -56,23 +56,22 @@ void VeSwapChain::submitComputeWork(vk::CommandBuffer command_buffer) {
 		.sType = vk::StructureType::eTimelineSemaphoreSubmitInfo,
 		.pNext = nullptr,
 		.waitSemaphoreValueCount = 1,
-		.pWaitSemaphoreValues = &compute_wait_value,
+		.pWaitSemaphoreValues = &m_compute_wait_value,
 		.signalSemaphoreValueCount = 1,
-		.pSignalSemaphoreValues = &compute_signal_value
+		.pSignalSemaphoreValues = &m_compute_signal_value
 	};
 	vk::PipelineStageFlags wait_stages[] = {vk::PipelineStageFlagBits::eComputeShader};
 	vk::SubmitInfo submit_info{
 		.pNext = &timeline_info,
 		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = &*semaphore,
+		.pWaitSemaphores = &*m_compute_timeline,
 		.pWaitDstStageMask = wait_stages,
 		.commandBufferCount = 1,
 		.pCommandBuffers = &command_buffer,
 		.signalSemaphoreCount = 1,
-		.pSignalSemaphores = &*semaphore
+		.pSignalSemaphores = &*m_compute_timeline
 	};
 
-	// Submit the command buffer to the compute queue and signal the fence when it is done
 	m_ve_device.getComputeQueue().submit(submit_info, nullptr);
 }
 
@@ -83,11 +82,13 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer command_buffer, uint3
 		vk::PipelineStageFlagBits::eColorAttachmentOutput, // swapchain image usage
 		vk::PipelineStageFlagBits::eVertexInput | vk::PipelineStageFlagBits::eDrawIndirect // compute→graphics sync
 	};
-	// We will signal two semaphores (timeline + binary). For timeline submit info,
-	// signalSemaphoreValueCount must equal signalSemaphoreCount when any signaled semaphore is a timeline.
-	// Provide a dummy 0 for the binary semaphore; it will be ignored.
-	std::array<uint64_t, 2> signal_values{ graphics_signal_value, uint64_t{0} };
-	std::array<uint64_t, 2> wait_values{ uint64_t{0}, graphics_wait_value };
+
+	// Wait values: 0 (ignored) for binary image_available, compute timeline value for compute sync
+	std::array<uint64_t, 2> wait_values{ uint64_t{0}, m_graphics_wait_value };
+	// Signal only the binary render_finished semaphore (for present).
+	// Graphics no longer signals the compute timeline — compute chain is independent.
+	std::array<uint64_t, 1> signal_values{ uint64_t{0} };
+
 	vk::TimelineSemaphoreSubmitInfo timeline_info{
 		.sType = vk::StructureType::eTimelineSemaphoreSubmitInfo,
 		.pNext = nullptr,
@@ -97,11 +98,11 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer command_buffer, uint3
 		.pSignalSemaphoreValues = signal_values.data()
 	};
 
-	// Wait on image-available (binary) and the timeline semaphore
-	std::array<vk::Semaphore, 2> wait_sems{ *m_image_available_semaphores[m_current_frame], *semaphore };
-	// Signal both the timeline semaphore (for internal frame graph) and a binary render-finished semaphore (for WSI present)
+	// Wait on image-available (binary) and the compute timeline semaphore
+	std::array<vk::Semaphore, 2> wait_sems{ *m_image_available_semaphores[m_current_frame], *m_compute_timeline };
+	// Signal only the binary render-finished semaphore (for WSI present)
 	vk::Semaphore render_finished = *m_render_finished_semaphores[*image_index];
-	std::array<vk::Semaphore, 2> signal_sems{ *semaphore, render_finished };
+	std::array<vk::Semaphore, 1> signal_sems{ render_finished };
 	vk::SubmitInfo submit_info{
 		.pNext = &timeline_info,
 		.waitSemaphoreCount = static_cast<uint32_t>(wait_sems.size()),
@@ -295,8 +296,8 @@ void VeSwapChain::createSyncObjects() {
 		.initialValue = 0
 	};
 	vk::SemaphoreCreateInfo timeline_sem_ci{ .pNext = &semaphore_type };
-	semaphore = vk::raii::Semaphore(m_ve_device.getDevice(), timeline_sem_ci);
-	timeline_value = 0;
+	m_compute_timeline = vk::raii::Semaphore(m_ve_device.getDevice(), timeline_sem_ci);
+	m_compute_timeline_value = 0;
 
 	// fences
 	m_in_flight_fences.clear();
@@ -420,10 +421,9 @@ void VeSwapChain::advanceFrame() {
 }
 
 void VeSwapChain::updateTimelineValues() {
-	compute_wait_value = timeline_value;
-	compute_signal_value = ++timeline_value;
-	graphics_wait_value = compute_signal_value;
-	graphics_signal_value = ++timeline_value;
+	m_compute_wait_value   = m_compute_timeline_value;       // wait for previous compute
+	m_compute_signal_value = ++m_compute_timeline_value;     // signal this compute
+	m_graphics_wait_value  = m_compute_signal_value;         // graphics waits for current compute
 }
 
 // Transition the image layout of the given swap chain image using

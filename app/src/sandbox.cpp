@@ -141,6 +141,8 @@ VeFrameInfo Sandbox::update() {
 		.instance_data = static_cast<InstanceData*>(m_instance_buffers[current_frame]->getMappedMemory()),
 		.instance_count = 0,
 		.instance_capacity = INITIAL_INSTANCE_CAPACITY,
+		.compute_query_pool = m_ve_renderer.getQueryPool(),
+		.compute_start_query = m_ve_renderer.getComputeStartQuery(),
 	};
 
 	// Updates camera state based on input and frame time. Returns actions for systems.
@@ -176,7 +178,6 @@ VeFrameInfo Sandbox::update() {
 	m_fireworks_system->recordComputeCommands(frame_info);
 	m_particle_system->recordComputeCommands(frame_info);
 
-	frame_info.compute_command_buffer.end();
 	m_ve_renderer.submitCompute(frame_info.compute_command_buffer);
 
 	return frame_info;
@@ -290,6 +291,8 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 
 	// Update GPU time from renderer
 	ui_actions.gpu_time = m_ve_renderer.getGpuTime();
+	ui_actions.compute_gpu_time = m_ve_renderer.getComputeGpuTime();
+	ui_actions.gpu_overlap = m_ve_renderer.getGpuOverlap();
 
 	// Draw UI: begin frame, render app-specific windows, render engine windows, end frame
 	m_imgui_layer->renderUI(ui_actions, [this](UIContext&) {

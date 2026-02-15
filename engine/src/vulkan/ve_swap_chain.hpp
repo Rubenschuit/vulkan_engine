@@ -101,13 +101,12 @@ private:
 	bool m_hdr_enabled;
 
 	// Synchronization primitives
-	// TODO: consider moving the timeline semaphore somewhere else
-	vk::raii::Semaphore semaphore{nullptr};
-	uint64_t timeline_value = 0;
-	uint64_t compute_wait_value;
-	uint64_t compute_signal_value;
-	uint64_t graphics_wait_value;
-	uint64_t graphics_signal_value;
+	// Compute-only timeline: compute signals, graphics waits. Enables async compute overlap.
+	vk::raii::Semaphore m_compute_timeline{nullptr};
+	uint64_t m_compute_timeline_value = 0;
+	uint64_t m_compute_wait_value;    // previous compute's signal value
+	uint64_t m_compute_signal_value;  // this frame's compute signal value
+	uint64_t m_graphics_wait_value;   // = m_compute_signal_value (graphics waits for current compute)
 	std::vector<vk::raii::Fence> m_in_flight_fences;
 	// Per-swapchain-image binary semaphores signaled by graphics submit and waited by present
 	std::vector<vk::raii::Semaphore> m_render_finished_semaphores;

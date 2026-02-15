@@ -117,6 +117,10 @@ struct VeFrameInfo {
 	InstanceData* instance_data = nullptr;  // mapped pointer to instance buffer
 	uint32_t instance_count = 0;            // current number of instances written this frame
 	uint32_t instance_capacity = 0;         // max instances the buffer can hold
+
+	// GPU timing: compute systems write the start timestamp after their barriers resolve.
+	vk::QueryPool compute_query_pool = VK_NULL_HANDLE;
+	uint32_t compute_start_query = 0;       // query index for compute start timestamp
 };
 
 }

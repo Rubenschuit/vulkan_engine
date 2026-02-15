@@ -269,6 +269,7 @@ void ParticleSystem::createComputePipelineLayout() {
 }
 
 // Compute shader .spv file names are appended with a c
+// TODO: make this more robust
 void ParticleSystem::createComputePipeline() {
 	// remove .spv, add c.spv
 	std::string path_str = m_shader_path.string();
@@ -431,6 +432,14 @@ void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 	);
 
 
+	// Write compute start timestamp after the host→compute barrier.
+	// The barrier's dstStage=eComputeShader is gated by the submit-level semaphore wait,
+	// so this timestamp fires only after the semaphore is signaled — measuring actual work, not wait time.
+	if (frame_info.compute_query_pool) {
+		frame_info.compute_command_buffer.writeTimestamp(
+			vk::PipelineStageFlagBits::eComputeShader, frame_info.compute_query_pool, frame_info.compute_start_query);
+	}
+
 	frame_info.compute_command_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
 	frame_info.compute_command_buffer.bindDescriptorSets(
 		vk::PipelineBindPoint::eCompute,
@@ -449,37 +458,21 @@ void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 	}
 
 
-	// Ensure compute writes are visible to vertex shader read and indirect command execution.
-	// On MoltenVK/M1, different queue families may map to the same Metal command queue,
-	// so the full dst stage/access masks provide correct synchronization.
-	vk::BufferMemoryBarrier barrier{
+	// Make compute shader writes available before the timeline semaphore signal.
+	// Cross-queue visibility (vertex reads, indirect command reads) is handled by
+	// the semaphore wait in submitAndPresent with dstStageMask = eVertexInput | eDrawIndirect.
+	// We only use compute-compatible stages here so this works on dedicated compute queue families.
+	vk::MemoryBarrier mem_barrier{
 		.srcAccessMask = vk::AccessFlagBits::eShaderWrite,
-		.dstAccessMask = vk::AccessFlagBits::eVertexAttributeRead,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.buffer = *m_render_buffers[frame_info.current_frame]->getBuffer(),
-		.offset = 0,
-		.size = VK_WHOLE_SIZE
+		.dstAccessMask = vk::AccessFlagBits::eNone
 	};
-
-	vk::BufferMemoryBarrier indirect_barrier{
-		.srcAccessMask = vk::AccessFlagBits::eShaderWrite,
-		.dstAccessMask = vk::AccessFlagBits::eIndirectCommandRead,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.buffer = *m_indirect_buffers[frame_info.current_frame]->getBuffer(),
-		.offset = 0,
-		.size = VK_WHOLE_SIZE
-	};
-
-	vk::BufferMemoryBarrier barriers[] = { barrier, indirect_barrier };
 
 	frame_info.compute_command_buffer.pipelineBarrier(
 		vk::PipelineStageFlagBits::eComputeShader,
-		vk::PipelineStageFlagBits::eVertexInput | vk::PipelineStageFlagBits::eDrawIndirect,
+		vk::PipelineStageFlagBits::eBottomOfPipe,
 		{},
+		mem_barrier,
 		nullptr,
-		{ barriers[0], barriers[1] },
 		nullptr
 	);
 

@@ -72,6 +72,10 @@ public:
 	void setSwapChainNeedsRecreation() { m_swap_chain_needs_recreation = true; }
 
 	float getGpuTime() const { return m_gpu_time; }
+	float getComputeGpuTime() const { return m_compute_gpu_time; }
+	float getGpuOverlap() const { return m_gpu_overlap; }
+	vk::QueryPool getQueryPool() const { return *m_query_pool; }
+	uint32_t getComputeStartQuery() const { return getCurrentFrame() * 4; }
 
 	bool hasHdrSupport() const { return m_ve_device.hasHdrColorSpaceExtension(); }
 	void setHdrEnabled(bool enabled) { m_hdr_enabled = hasHdrSupport() && enabled; m_swap_chain_needs_recreation = true; }
@@ -97,7 +101,9 @@ private:
 	vk::SampleCountFlagBits m_desired_num_samples = vk::SampleCountFlagBits::e1;
 
 	vk::raii::QueryPool m_query_pool = nullptr;
-	float m_gpu_time = 0.0f;
+	float m_gpu_time = 0.0f;         // graphics-only GPU time
+	float m_compute_gpu_time = 0.0f; // compute-only GPU time
+	float m_gpu_overlap = 0.0f;      // compute/graphics overlap
 	std::vector<bool> m_query_active;
 };
 }

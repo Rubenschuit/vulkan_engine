@@ -60,7 +60,7 @@ private:
 	// UI context captured during renderUI(), consumed in updateParticles() for example.
 	struct SandboxUIContext : public UIContext {
 		enum class SceneType { NONE = 0, SIMPLE = 1, SPONZA = 2, SPONZA_LOW = 3, BISTRO = 4 };
-		SceneType current_scene = SceneType::BISTRO;
+		SceneType current_scene = SceneType::SIMPLE;
 		RenderMode render_mode = RenderMode::BRDF_MICROFACET;
 
 		// ambient light (color RGB + intensity)
