@@ -186,6 +186,9 @@ VeFrameInfo Sandbox::update() {
 // Update particle system based on input actions and UI context
 // Consider moving this to the particle system class
 void Sandbox::updateParticles(InputActions& actions) {
+	m_particle_system->setEnabled(ui_actions.particles_enabled);
+	m_fireworks_system->setEnabled(ui_actions.fireworks_enabled);
+
 	// Apply input actions
 	if (actions.set_mode >= 1 && actions.set_mode <= 5) {
 		ParticleMode mode = static_cast<ParticleMode>(actions.set_mode);
@@ -464,6 +467,9 @@ void Sandbox::renderAppWindows() {
 				ImGui::EndTabItem();
 			}
 			if (ImGui::BeginTabItem("Particle")) {
+				ImGui::Checkbox("Enabled##particles", &ui_actions.particles_enabled);
+				ImGui::Separator();
+
 				int count = static_cast<int>(ui_actions.pending_particle_count);
 
 				// 1. Simulation Control
@@ -504,6 +510,9 @@ void Sandbox::renderAppWindows() {
 				ImGui::EndTabItem();
 			}
 			if (ImGui::BeginTabItem("Fireworks")) {
+				ImGui::Checkbox("Enabled##fireworks", &ui_actions.fireworks_enabled);
+				ImGui::Separator();
+
 				auto& config = m_fireworks_system->getConfig();
 
 				ImGui::Text("Launch Settings");
@@ -854,7 +863,7 @@ void Sandbox::createDescriptors() {
 		// Sampled images: shadow map array (1 per frame) + slack
 		.addPoolSize(vk::DescriptorType::eSampledImage, MAX_FRAMES_IN_FLIGHT + 7)
 		// Storage buffers: compute + instance SSBO (1 per frame for global + 1 per frame per shadow light)
-		.addPoolSize(vk::DescriptorType::eStorageBuffer, 14 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + MAX_SHADOW_LIGHTS * MAX_FRAMES_IN_FLIGHT)
+		.addPoolSize(vk::DescriptorType::eStorageBuffer, 22 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + MAX_SHADOW_LIGHTS * MAX_FRAMES_IN_FLIGHT)
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
 		.buildShared();
 

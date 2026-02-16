@@ -36,6 +36,10 @@ struct VENGINE_API UIContext {
 	float compute_gpu_time = 0.0f;
 	float gpu_overlap = 0.0f;
 
+	// particle systems
+	bool particles_enabled = true;
+	bool fireworks_enabled = true;
+
 	// depth pre-pass
 	bool depth_prepass_enabled = false;
 

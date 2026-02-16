@@ -73,6 +73,7 @@ struct ParticleParams {
 	float flash_scale;
 	float flash_time;
 
+	uint32_t frame_id; // monotonic counter, used to expire spawn flags
 };
 
 // Data structure for vertex shader input
@@ -120,6 +121,9 @@ public:
 
 	void recordComputeCommands(VeFrameInfo& frame_info);
 	void render(VeFrameInfo& frame_info) const;
+
+	void setEnabled(bool enabled) { m_enabled = enabled; }
+	bool isEnabled() const { return m_enabled; }
 	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
 		m_pipeline.reset();
 		createPipeline(color_format, sample_count);
@@ -203,6 +207,8 @@ private:
 	float m_max_life{80.0f};
 	glm::vec4 m_wind_direction{0.0f}; // default no wind
 	bool m_should_respawn{true};
+	bool m_enabled{true};
+	uint32_t m_frame_id{0};
 
 	// Emission state
 	uint32_t m_emit_head{0}; // Current head of the ring buffer (in particle index)
@@ -223,6 +229,11 @@ private:
 	std::unique_ptr<VeBuffer> m_indices_counter_buffer; // 6 uints: dead_count, alive_count, dead_head, dead_tail, alive_head, alive_tail
 	std::unique_ptr<VeBuffer> m_dead_indices_buffer; // array of dead particle indices
 	std::unique_ptr<VeBuffer> m_alive_indices_buffer; // array of alive particle indices
+
+	// Spawn staging: eliminates write-write race between spawner and target threads
+	// Ping-ponged per frame: spawner writes to current, thread i reads from previous
+	std::vector<std::unique_ptr<VeBuffer>> m_spawn_buffers;
+	std::vector<std::unique_ptr<VeBuffer>> m_spawn_flags_buffers;
 
 	// Shared pool for descriptor allocations
 	std::shared_ptr<VeDescriptorPool> m_descriptor_pool;

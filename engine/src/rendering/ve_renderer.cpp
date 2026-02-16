@@ -116,29 +116,45 @@ bool VeRenderer::beginFrame() {
 	auto& command_buffer = getCurrentCommandBuffer();
 	uint32_t frame_index = m_ve_swap_chain->getCurrentFrame();
 
-	// Retrieve results from the previous time this frame slot was used
+	// Retrieve results from the previous time this frame slot was used.
+	// Read compute and graphics pairs separately: the compute start timestamp
+	// may not be written when particle systems are disabled.
 	// Layout per frame: [compute_start, compute_end, graphics_start, graphics_end]
 	if (m_query_active[frame_index]) {
-		std::array<uint64_t, 4> ts;
 		uint32_t base = frame_index * 4;
-		vk::Result query_result = (*m_ve_device.getDevice()).getQueryPoolResults(
-			*m_query_pool, base, 4, ts.size() * sizeof(uint64_t),
-			ts.data(), sizeof(uint64_t), vk::QueryResultFlagBits::e64
+		float period = m_ve_device.getDeviceProperties().limits.timestampPeriod;
+		float ns_to_ms = period / 1000000.0f;
+
+		// Graphics timestamps (always written)
+		std::array<uint64_t, 2> gfx_ts;
+		vk::Result gfx_result = (*m_ve_device.getDevice()).getQueryPoolResults(
+			*m_query_pool, base + 2, 2, gfx_ts.size() * sizeof(uint64_t),
+			gfx_ts.data(), sizeof(uint64_t), vk::QueryResultFlagBits::e64
 		);
+		if (gfx_result == vk::Result::eSuccess) {
+			m_gpu_time = static_cast<float>(gfx_ts[1] - gfx_ts[0]) * ns_to_ms;
+		}
 
-		if (query_result == vk::Result::eSuccess) {
-			float period = m_ve_device.getDeviceProperties().limits.timestampPeriod;
-			float ns_to_ms = period / 1000000.0f;
-
-			m_compute_gpu_time = static_cast<float>(ts[1] - ts[0]) * ns_to_ms;
-			m_gpu_time = static_cast<float>(ts[3] - ts[2]) * ns_to_ms;
+		// Compute timestamps (start may be missing when particle systems are disabled)
+		std::array<uint64_t, 2> comp_ts;
+		vk::Result comp_result = (*m_ve_device.getDevice()).getQueryPoolResults(
+			*m_query_pool, base, 2, comp_ts.size() * sizeof(uint64_t),
+			comp_ts.data(), sizeof(uint64_t), vk::QueryResultFlagBits::e64
+		);
+		if (comp_result == vk::Result::eSuccess) {
+			m_compute_gpu_time = static_cast<float>(comp_ts[1] - comp_ts[0]) * ns_to_ms;
 
 			// Overlap: how much compute and graphics executed simultaneously
-			uint64_t overlap_start = std::max(ts[0], ts[2]);
-			uint64_t overlap_end = std::min(ts[1], ts[3]);
-			m_gpu_overlap = (overlap_end > overlap_start)
-				? static_cast<float>(overlap_end - overlap_start) * ns_to_ms
-				: 0.0f;
+			if (gfx_result == vk::Result::eSuccess) {
+				uint64_t overlap_start = std::max(comp_ts[0], gfx_ts[0]);
+				uint64_t overlap_end = std::min(comp_ts[1], gfx_ts[1]);
+				m_gpu_overlap = (overlap_end > overlap_start)
+					? static_cast<float>(overlap_end - overlap_start) * ns_to_ms
+					: 0.0f;
+			}
+		} else {
+			m_compute_gpu_time = 0.0f;
+			m_gpu_overlap = 0.0f;
 		}
 	}
 

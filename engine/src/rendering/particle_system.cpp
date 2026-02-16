@@ -186,6 +186,42 @@ void ParticleSystem::createSpawnBuffers() {
 		vk::BufferUsageFlagBits::eStorageBuffer,
 		vk::MemoryPropertyFlagBits::eDeviceLocal
 	);
+
+	// Spawn staging buffers (ping-ponged per frame):
+	// Spawner writes to current frame's buffer, thread i reads from previous frame's buffer.
+	m_spawn_buffers.clear();
+	m_spawn_buffers.resize(MAX_FRAMES_IN_FLIGHT);
+	m_spawn_flags_buffers.clear();
+	m_spawn_flags_buffers.resize(MAX_FRAMES_IN_FLIGHT);
+
+	vk::DeviceSize spawn_buffer_size = sizeof(Particle) * buffer_capacity;
+	vk::DeviceSize spawn_flags_size = sizeof(uint32_t) * buffer_capacity;
+
+	// Zero-init staging for spawn flags
+	std::vector<uint32_t> zero_flags(buffer_capacity, 0);
+	VeBuffer flags_staging(
+		m_ve_device, spawn_flags_size, 1,
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+	);
+	flags_staging.map();
+	flags_staging.writeToBuffer(zero_flags.data());
+
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+		m_spawn_buffers[i] = std::make_unique<VeBuffer>(
+			m_ve_device, spawn_buffer_size, 1,
+			vk::BufferUsageFlagBits::eStorageBuffer,
+			vk::MemoryPropertyFlagBits::eDeviceLocal
+		);
+
+		m_spawn_flags_buffers[i] = std::make_unique<VeBuffer>(
+			m_ve_device, spawn_flags_size, 1,
+			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eDeviceLocal
+		);
+		// Zero-initialize flags so first frame doesn't read garbage from spawn_prev
+		m_ve_device.copyBuffer(flags_staging.getBuffer(), m_spawn_flags_buffers[i]->getBuffer(), spawn_flags_size);
+	}
 }
 
 void ParticleSystem::createUniformBuffers() {
@@ -224,6 +260,10 @@ void ParticleSystem::createDescriptorSetLayouts() {
 		.addBinding(7, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Indices Counters
 		.addBinding(8, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Dead Indices
 		.addBinding(9, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Alive Indices
+		.addBinding(10, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Spawn Prev
+		.addBinding(11, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Spawn Flags Prev
+		.addBinding(12, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Spawn Out
+		.addBinding(13, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Spawn Flags Out
 		.build();
 }
 
@@ -244,6 +284,11 @@ void ParticleSystem::createDescriptorSets() {
 		auto counter_info = m_indices_counter_buffer->getDescriptorInfo();
 		auto dead_indices_info = m_dead_indices_buffer->getDescriptorInfo();
 		auto alive_indices_info = m_alive_indices_buffer->getDescriptorInfo();
+		// Ping-pong spawn buffers: prev frame for reading, current frame for writing
+		auto spawn_prev_info = m_spawn_buffers[prev]->getDescriptorInfo();
+		auto spawn_flags_prev_info = m_spawn_flags_buffers[prev]->getDescriptorInfo();
+		auto spawn_out_info = m_spawn_buffers[i]->getDescriptorInfo();
+		auto spawn_flags_out_info = m_spawn_flags_buffers[i]->getDescriptorInfo();
 
 		VeDescriptorWriter(*m_compute_set_layout, *m_descriptor_pool)
 			.writeBuffer(3, &ubo_info)
@@ -255,6 +300,10 @@ void ParticleSystem::createDescriptorSets() {
 			.writeBuffer(7, &counter_info)
 			.writeBuffer(8, &dead_indices_info)
 			.writeBuffer(9, &alive_indices_info)
+			.writeBuffer(10, &spawn_prev_info)
+			.writeBuffer(11, &spawn_flags_prev_info)
+			.writeBuffer(12, &spawn_out_info)
+			.writeBuffer(13, &spawn_flags_out_info)
 			.build(set);
 		m_compute_descriptor_sets.push_back(std::move(set));
 	}
@@ -329,6 +378,7 @@ void ParticleSystem::createPipeline(vk::Format color_format, vk::SampleCountFlag
 // Updates the particle system by recording compute commands into the compute command buffer.
 // updates the particle parameters UBO for compute shader
 void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
+	if (!m_enabled) return;
 	assert(frame_info.current_frame < MAX_FRAMES_IN_FLIGHT && "current_frame out of bounds");
 	assert(m_compute_uniform_buffers.size() == MAX_FRAMES_IN_FLIGHT && "compute_uniform_buffers size incorrect");
 	assert(m_total_time >= 0.0f && "total_time should be non-negative");
@@ -354,6 +404,7 @@ void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 	params.trail_timeout = m_trail_timeout;
 	params.flash_scale = m_flash_scale;
 	params.flash_time = m_flash_time;
+	params.frame_id = ++m_frame_id;
 	// Default wind
 	params.wind_direction = m_wind_direction;
 
@@ -432,16 +483,14 @@ void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 	);
 
 
-	// Write compute start timestamp after the host→compute barrier.
-	// Null out the handle afterwards so that a second recordComputeCommands
-	// call in the same frame (e.g. fireworks' internal ParticleSystem) does
-	// not write the same query index again without a reset.
+	// Write compute start timestamp after the host compute barrier.
 	if (frame_info.compute_query_pool) {
 		frame_info.compute_command_buffer.writeTimestamp(
 			vk::PipelineStageFlagBits::eComputeShader, frame_info.compute_query_pool, frame_info.compute_start_query);
 		frame_info.compute_query_pool = VK_NULL_HANDLE;
 	}
 
+	// Bind compute pipeline and descriptor sets
 	frame_info.compute_command_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
 	frame_info.compute_command_buffer.bindDescriptorSets(
 		vk::PipelineBindPoint::eCompute,
@@ -451,10 +500,11 @@ void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 		{}
 	);
 
-	// Dispatch enough workgroups to cover all particles
-	// shader discards excess threads
-	const uint32_t workgroup_size = 64;
-	uint32_t group_count_x = (m_capacity + workgroup_size - 1) / workgroup_size; // ceilDiv
+	// Dispatch workgroups to cover active particles only (not full buffer capacity).
+	// Particles at indices >= m_particle_count are dead/unused and don't need processing.
+	// Must match [numthreads(256, 1, 1)] in the compute shader.
+	const uint32_t workgroup_size = 256;
+	uint32_t group_count_x = (m_particle_count + workgroup_size - 1) / workgroup_size;
 	if (group_count_x > 0) {
 		frame_info.compute_command_buffer.dispatch(group_count_x, 1, 1);
 	}
@@ -486,6 +536,7 @@ void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 // with particle positions and colors is bound as a vertex buffer.
 // Instance rendering is used to draw a quad for each particle.
 void ParticleSystem::render(VeFrameInfo& frame_info) const {
+	if (!m_enabled) return;
 	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipeline->getPipeline());
 
 	frame_info.command_buffer.bindDescriptorSets(
@@ -575,6 +626,8 @@ void ParticleSystem::setParticleCount(uint32_t count, bool reset) {
 		m_dead_indices_buffer.reset();
 		m_alive_indices_buffer.reset();
 		m_indices_counter_buffer.reset();
+		m_spawn_buffers.clear();
+		m_spawn_flags_buffers.clear();
 
 		m_particle_count = count;
 		m_pending_particle_count = m_particle_count;

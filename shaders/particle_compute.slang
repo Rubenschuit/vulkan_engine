@@ -1,7 +1,7 @@
 // This shader file contains vertex and fragment shaders for the particle system.
-// It also contains the compute shader for the particle simulation.
-// The compute shader is compiled to its own spv file appended with c.spv.
-// TODO: This file has become large, consider splitting the vertex + fragment shaders into a separate file.
+// It also contains the compute shader for the particle simulation and
+// firework spawning logic. It has become very ad hoc and is not well organized, but it works for now.
+// TODO: This file has become large, consider splitting into separate files.
 
 // ------------- Graphics --------------
 
@@ -176,6 +176,7 @@ struct Params {
 	float flash_scale;
 	float flash_time;
 
+	uint32_t frame_id; // monotonic counter, used to expire spawn flags
 };
 [vk::binding(3, 0)]
 ConstantBuffer<Params> params;
@@ -222,6 +223,17 @@ RWStructuredBuffer<uint> dead_indices;
 // Alive particle indices (ring buffer)
 [vk::binding(9, 0)]
 RWStructuredBuffer<uint> alive_indices;
+
+// Spawn staging: spawner threads write to spawn_out to avoid write-write races with particles_out.
+// Thread i reads from spawn_prev (previous frame, guaranteed complete after dispatch barrier).
+[vk::binding(10, 0)]
+RWStructuredBuffer<Particle> spawn_prev;   // Previous frame's staged spawns (read)
+[vk::binding(11, 0)]
+RWStructuredBuffer<uint> spawn_flags_prev; // Previous frame's spawn flags (read, 0 = no spawn)
+[vk::binding(12, 0)]
+RWStructuredBuffer<Particle> spawn_out;    // Current frame's staged spawns (write)
+[vk::binding(13, 0)]
+RWStructuredBuffer<uint> spawn_flags_out;  // Current frame's spawn flags (write)
 
 // RNG helpers
 uint wang_hash(uint seed) {
@@ -642,8 +654,8 @@ void addToAliveIndices(uint particle_index) {
 	InterlockedAdd(indices_counters[1], 1); // alive_count
 }
 
-// Pop a dead particle index from dead_indices, or fallback to oldest alive if empty
-// Returns true if a dead index was found, false if using alive fallback
+// Pop a dead particle index from dead_indices, or fallback to oldest alive if empty.
+// Returns true if a dead index was found, false if using alive fallback.
 bool popDeadIndex(out uint particle_index) {
 	uint dead_count = indices_counters[0];
 	if (dead_count > 0) {
@@ -660,7 +672,7 @@ bool popDeadIndex(out uint particle_index) {
 		// Race condition: another thread consumed it, fall through to alive fallback
 	}
 
-	// Fallback: use oldest from alive_indices (circular buffer behavior)
+	// Fallback: recycle oldest from alive_indices
 	uint alive_head;
 	InterlockedAdd(indices_counters[4], 1, alive_head); // alive_head
 	uint wrapped_head = alive_head % params.particle_count;
@@ -719,22 +731,17 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 		}
 	}
 
+	// Check for pending spawn from previous frame's compute dispatch.
+	// spawn_prev is guaranteed complete (dispatch barrier between frames).
+	if (spawn_flags_prev[i] != 0) {
+		Particle spawned = spawn_prev[i];
+		spawn_flags_prev[i] = 0; // clear flag for reuse
+		particles_out[i] = spawned;
+		appendToRenderBuffer(spawned);
+		return;
+	}
+
 	Particle p = particles_prev[i];
-	Particle p_out = particles_out[i];
-
-	// Check if this particle was just spawned this frame
-	if (p.simulation_data.w == -1.0f || p.extra_data.x != p_out.extra_data.x) {
-
-		p.simulation_data.w = 0.0f;
-		particles_prev[i].simulation_data.w = 0.0f;
-		return;
-	}
-
-	// Also check particles_out to see if a particle was just spawned there
-
-	if (p_out.simulation_data.w == -1.0f) {
-		return;
-	}
 
 	// Update lifetime
 	p.velocity.w -= params.delta_time;
@@ -848,7 +855,8 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 
 				// Spawn trail particle
 				uint trail_index;
-				bool used_dead = popDeadIndex(trail_index);
+				if (!popDeadIndex(trail_index))
+					continue; // capacity full, skip this trail
 
 				Particle trail;
 				trail.position = p.position;
@@ -856,10 +864,10 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 				trail.color = p.color;
 				trail.tex_coords = float4(0.0f);
 				trail.extra_data = float4((float)ParticleType::TYPE_TRAIL, p.velocity.w, 0.0f, 0.0f);
-				trail.simulation_data = float4(0.0f, 0.0f, 0.0f, -1.0f); // .w=-1.0 means just spawned
+				trail.simulation_data = float4(0.0f);
 
-				particles_out[trail_index] = trail;
-				particles_prev[trail_index] = trail;
+				spawn_out[trail_index] = trail;
+				spawn_flags_out[trail_index] = params.frame_id;
 				addToAliveIndices(trail_index);
 				appendToRenderBuffer(trail);
 
@@ -867,7 +875,8 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 				uint state = wang_hash(asuint(trail_index) ^ asuint(params.total_time) ^ uint(spawn_count));
 				if (rand01(state) < 0.4f) {
 					uint smoke_index;
-					popDeadIndex(smoke_index);
+					if (!popDeadIndex(smoke_index))
+						continue; // capacity full, skip smoke
 
 					Particle smoke;
 					float SMOKE_SCALE = 5.0f;
@@ -877,10 +886,10 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 					smoke.color = float4(0.4f, 0.4f, 0.4f, 0.5f);
 					smoke.tex_coords = float4(0.0f);
 					smoke.extra_data = float4((float)ParticleType::TYPE_SMOKE, SMOKE_LIFE, 0.0f, 0.0f);
-					smoke.simulation_data = float4(0.0f, 0.0f, 0.0f, -1.0f);
+					smoke.simulation_data = float4(0.0f);
 
-					particles_out[smoke_index] = smoke;
-					particles_prev[smoke_index] = smoke;
+					spawn_out[smoke_index] = smoke;
+					spawn_flags_out[smoke_index] = params.frame_id;
 					addToAliveIndices(smoke_index);
 					appendToRenderBuffer(smoke);
 				}
@@ -908,7 +917,8 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 		}
 
 		// Apply wind force constantly (not affected by drag)
-		float3 wind_velocity = normalize(params.wind_direction.xyz) * params.wind_direction.w;
+		// wind_direction.xyz is already normalized on the CPU side
+		float3 wind_velocity = params.wind_direction.xyz * params.wind_direction.w;
 
 		// Update position with internal velocity + wind
 		p.position.xyz += (p.velocity.xyz + wind_velocity) * params.delta_time;
@@ -939,7 +949,7 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 	} else {
 		// other types: use time-based cycling
 		float cycle_time = 1.0f;
-		float flipbook_seed = p.position.w * 9.9f; // scale as seed
+		float flipbook_seed = p.position.w * 9.9f; // scale as seed or better:
 		cycle_progress = ((params.total_time + flipbook_seed) % cycle_time) / cycle_time;
 	}
 
@@ -980,21 +990,6 @@ void compMain(uint3 thread_id : SV_DispatchThreadID) {
 	p.tex_coords = float4(column1, row1, column2, row2) / (float)num_rows;
 	p.extra_data.z = blend;
 
-
-	Particle final_check = particles_out[i];
-	if (final_check.simulation_data.w == -1.0f) {
-		// Particle was just spawned (has sentinel), don't overwrite
-		return;
-	}
-
-
-	uint final_check_type = (uint)final_check.extra_data.x;
-	uint p_type = (uint)p.extra_data.x;
-	if ((final_check_type == ParticleType::TYPE_SMOKE || final_check_type == ParticleType::TYPE_TRAIL) &&
-	    final_check_type != p_type) {
-		// Particle was just spawned, don't overwrite
-		return;
-	}
 
 	particles_out[i] = p;
 

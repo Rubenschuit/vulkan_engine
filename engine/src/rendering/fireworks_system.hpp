@@ -1,3 +1,8 @@
+/* This is a very ad hoc fireworks particle system, which consists of
+ * launching "rockets" that explode into trail-emitting particles. Rockets also
+ * emit a smoke and spark trail. It uses a compute shader to update particles
+ * and a graphics pipeline to render them.
+ */
 #pragma once
 #include "ve_export.hpp"
 #include "rendering/particle_system.hpp"
@@ -36,7 +41,7 @@ struct FireworksConfig {
 
     float gravity = 15.0f;
 
-    int max_particles = 1000000;
+    int max_particles = 100000;
 
 	float trail_interval = 0.012f;
 	glm::vec4 smoke_color = glm::vec4(0.4f, 0.4f, 0.4f, 0.5f);
@@ -65,7 +70,16 @@ public:
 
     FireworksConfig& getConfig() { return m_config; }
 
+	void setEnabled(bool enabled) { m_enabled = enabled; m_particle_system->setEnabled(enabled); }
+	bool isEnabled() const { return m_enabled; }
+
 private:
+	// Longest particle lifetime in the fireworks system (smoke = 7s).
+	// After all rockets die, wait this long before going fully idle.
+	static constexpr float COOLDOWN_TIME = 8.0f;
+
+	bool m_enabled{true};
+	float m_idle_timer{0.0f}; // counts down after last rocket dies
     std::unique_ptr<ParticleSystem> m_particle_system;
     std::vector<Rocket> m_rockets;
     FireworksConfig m_config;

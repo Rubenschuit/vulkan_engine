@@ -73,6 +73,7 @@ void FireworksSystem::launchRocket(glm::vec3 pos, glm::vec3 vel, glm::vec4 color
 }
 
 void FireworksSystem::recordComputeCommands(VeFrameInfo& frame_info) {
+	if (!m_enabled) return;
     // Handle pending capacity change at the start of update (safe point)
     if (m_pending_capacity > 0) {
         if (m_particle_system) {
@@ -92,80 +93,91 @@ void FireworksSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 	m_particle_system->setGravity(m_config.gravity);
 	m_particle_system->setTrailInterval(m_config.trail_interval);
 
-	// Update active rockets
-    for (auto it = m_rockets.begin(); it != m_rockets.end(); ) {
-        Rocket& r = *it;
+	glm::vec3 wind_velocity = dir * m_config.wind_strength;
+
+	// Update active rockets (swap-and-pop removal for O(1) erase)
+	for (size_t i = 0; i < m_rockets.size(); ) {
+		Rocket& r = m_rockets[i];
 
 		// apply physics
-		glm::vec3 wind_velocity = glm::normalize(m_config.wind_direction) * m_config.wind_strength;
 		r.pos += wind_velocity * dt;
-        r.vel.z -= m_config.gravity * dt;
-        r.pos += r.vel * dt;
+		r.vel.z -= m_config.gravity * dt;
+		r.pos += r.vel * dt;
 
-        if (r.type == 0) {
-            float spiral_factor = glm::clamp(r.vel.z, 0.0f, 10.0f);
-            float spiral_speed = glm::clamp(r.vel.z, 0.0f, 5.0f);
-            float rocket_seed = r.color.r * 1000.0f; // desync the spirals of different rockets
-            r.pos.x += glm::cos(frame_info.total_time * spiral_speed + rocket_seed) * spiral_factor * dt;
-            r.pos.y += glm::sin(frame_info.total_time * spiral_speed + rocket_seed) * spiral_factor * dt;
-        }
-        r.timer -= dt;
+		if (r.type == 0) {
+			float spiral_factor = glm::clamp(r.vel.z, 0.0f, 10.0f);
+			float spiral_speed = glm::clamp(r.vel.z, 0.0f, 5.0f);
+			float rocket_seed = r.color.r * 1000.0f; // desync the spirals of different rockets
+			r.pos.x += glm::cos(frame_info.total_time * spiral_speed + rocket_seed) * spiral_factor * dt;
+			r.pos.y += glm::sin(frame_info.total_time * spiral_speed + rocket_seed) * spiral_factor * dt;
+		}
+		r.timer -= dt;
 		r.trail_timer -= dt;
 
-		// Trail emission should be framerate independent: emit every 4ms
+		// Trail emission should be framerate independent: emit every trail_interval
 		if (r.trail_timer <= 0.0f) {
 			r.trail_timer = m_config.trail_interval;
 
-            if (r.type == 0) {
+			if (r.type == 0) {
+				SpawnEvent smoke{
+					.position_scale = glm::vec4(r.pos, 5.0f),
+					.velocity_life = glm::vec4(r.vel * 0.02f, 7.0f),
+					.color = m_config.smoke_color,
+					.info = {0, 2, static_cast<uint32_t>(ParticleType::SMOKE), 0}
+				};
+				m_particle_system->emitParticles(smoke);
 
-                SpawnEvent smoke{
-                    .position_scale = glm::vec4(r.pos, 5.0f),
-                    .velocity_life = glm::vec4(r.vel * 0.02f, 7.0f),
-                    .color = m_config.smoke_color,
-                    .info = {0, 2, static_cast<uint32_t>(ParticleType::SMOKE), 0}
-                };
-                m_particle_system->emitParticles(smoke);
-
-                SpawnEvent spark{
-                    .position_scale = glm::vec4(r.pos, 0.2f),
-                    .velocity_life = glm::vec4(-r.vel * 0.0f, 0.34f),
-                    .color = glm::vec4(1.0f, 0.8f, 0.1f, 1.0f),
-                    .info = {0, 5, static_cast<uint32_t>(ParticleType::SPARK), 0}
-                };
-                m_particle_system->emitParticles(spark);
-            }
+				SpawnEvent spark{
+					.position_scale = glm::vec4(r.pos, 0.2f),
+					.velocity_life = glm::vec4(-r.vel * 0.0f, 0.34f),
+					.color = glm::vec4(1.0f, 0.8f, 0.1f, 1.0f),
+					.info = {0, 5, static_cast<uint32_t>(ParticleType::SPARK), 0}
+				};
+				m_particle_system->emitParticles(spark);
+			}
 		}
 
-        // Explosion check
-        bool dead = (r.timer <= 0.0f);
-        // Rocket specific explosion condition
-        if (r.type == 0 && r.vel.z < -5.0f) dead = true;
+		// Explosion check
+		bool dead = (r.timer <= 0.0f);
+		if (r.type == 0 && r.vel.z < -5.0f) dead = true;
 
-        if (dead) {
-            if (r.type == 0) {
+		if (dead) {
+			if (r.type == 0) {
 				uint32_t streamer_count = static_cast<uint32_t>(Random::intRange(m_config.explosion_particle_count, m_config.explosion_particle_count * 2));
 
-				// Each streamer is a single particle emitting a trail of particles spawned from the shader
-                SpawnEvent streamers{
-                    .position_scale = glm::vec4(r.pos, m_config.explosion_size),
-                    .velocity_life = glm::vec4(0.0f, 0.0f, 0.0f, 2.5f),
-                    .color = r.color,
-                    .info = {0, streamer_count, static_cast<uint32_t>(ParticleType::STREAMER), 0}
-                };
-                m_particle_system->emitParticles(streamers);
-            }
+				SpawnEvent streamers{
+					.position_scale = glm::vec4(r.pos, m_config.explosion_size),
+					.velocity_life = glm::vec4(0.0f, 0.0f, 0.0f, 2.5f),
+					.color = r.color,
+					.info = {0, streamer_count, static_cast<uint32_t>(ParticleType::STREAMER), 0}
+				};
+				m_particle_system->emitParticles(streamers);
+			}
 
-            it = m_rockets.erase(it);
-        } else {
-            ++it;
-        }
+			// Swap-and-pop: O(1) removal, order doesn't matter for rockets
+			m_rockets[i] = m_rockets.back();
+			m_rockets.pop_back();
+		} else {
+			++i;
+		}
+	}
+
+    // Track idle state: skip compute entirely when no rockets and all particles have died
+    if (!m_rockets.empty()) {
+        m_idle_timer = COOLDOWN_TIME;
+    } else {
+        m_idle_timer -= dt;
     }
 
-    // Update the internal particle system
-    m_particle_system->recordComputeCommands(frame_info);
+    // Only dispatch compute when there's active work (rockets flying or particles still alive)
+    if (m_idle_timer > 0.0f) {
+        m_particle_system->recordComputeCommands(frame_info);
+    }
 }
 
 void FireworksSystem::render(VeFrameInfo& frame_info) const {
+	if (!m_enabled || m_idle_timer <= 0.0f)
+		return;
     m_particle_system->render(frame_info);
 }
 
