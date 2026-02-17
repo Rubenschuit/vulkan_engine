@@ -41,7 +41,7 @@ struct VENGINE_API UIContext {
 	bool fireworks_enabled = true;
 
 	// depth pre-pass
-	bool depth_prepass_enabled = false;
+	bool depth_prepass_enabled = true;
 
 	// culling
 	bool enable_frustum_culling = true;

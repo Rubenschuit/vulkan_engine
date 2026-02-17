@@ -1,5 +1,5 @@
 #define PI 3.1415926536
-#define MAX_LIGHTS 40
+#define MAX_LIGHTS 160
 #define MAX_SHADOW_LIGHTS 3
 
 struct VertexInput {
@@ -69,6 +69,7 @@ struct PushConstantData {
 	[vk::offset(4)]  float    alpha_cutoff;
 	[vk::offset(8)]  uint32_t material_flags;  // bits 0-1: alpha_mode, bit 2: double_sided, bit 3: flip_tex_coord_v, bit 4: use_spec_gloss_texture
 	[vk::offset(12)] uint32_t instance_offset;  // SSBO offset (SV_InstanceID is 0-based in Slang)
+	[vk::offset(16)] float    depth_offset;     // clip-space Z offset (>0 pushes towards camera)
 };
 [push_constant]
 PushConstantData push_constants;
@@ -101,6 +102,9 @@ VertexOutput vertMain(VertexInput input, uint instance_id : SV_InstanceID) {
 	float4 world_pos = mul(inst.transform, pos); // apply per-instance transform
 
 	output.pos = mul(ubo.projection_view, world_pos);
+	// Push geometry towards camera in clip space (for decal overlay z-fighting).
+	// Multiplying by w makes the offset proportional to depth, so it's consistent at all distances.
+	output.pos.z -= push_constants.depth_offset * output.pos.w;
 	output.frag_pos_world = world_pos.xyz;
 
 	// Transform normal and tangent to world space
@@ -256,9 +260,11 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	float2 tex_coord = in_vert.frag_tex_coord;
 	float4 albedo = albedo_texture.Sample(tex_coord);
 
-	// glTF alphaMode: OPAQUE(0)=no discard, MASK(1)=discard below cutoff, BLEND(2)=no discard
+	// glTF alphaMode: OPAQUE(0)=force alpha 1, MASK(1)=discard below cutoff, BLEND(2)=use texture alpha
 	uint32_t alpha_mode = push_constants.material_flags & 3u;
-	if (alpha_mode == 1 && albedo.a < push_constants.alpha_cutoff)
+	if (alpha_mode == 0)
+		albedo.a = 1.0;
+	else if (alpha_mode == 1 && albedo.a < push_constants.alpha_cutoff)
 		discard;
 
 	float4 mr = metallic_roughness_texture.Sample(tex_coord);

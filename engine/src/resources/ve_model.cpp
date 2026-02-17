@@ -9,6 +9,7 @@
 #include <mikktspace.h>
 
 #include <algorithm>
+#include <numeric>
 #include <cctype>
 #include <filesystem>
 #include <unordered_map>
@@ -158,9 +159,8 @@ static const glm::mat4 ZUP_TO_YUP(1.0f, 0.0f, 0.0f, 0.0f,
 // Compensate so emissive intensities match other exporters. See glTF-Blender-IO #2473.
 static constexpr float BLENDER_EMISSIVE_FACTOR = 638.0f;
 
-// Emissive-derived point lights need scaling: raw glTF emissive values produce dim
-// lights; this multiplier brings them to visible levels in the rendered scene.
-static constexpr float EMISSIVE_LIGHT_INTENSITY_SCALE = 100.0f;
+// Emissive-derived point lights scaling
+static constexpr float EMISSIVE_LIGHT_INTENSITY_SCALE = 20.0f;
 
 // Build local node matrix in glTF space (column-major: T*R*S).
 static glm::mat4 getNodeMatrixGltf(const tinygltf::Node& node) {
@@ -203,6 +203,377 @@ static NodeTRS getNodeTRS(const tinygltf::Node& node) {
 	return {{0, 0, 0}, {1, 1, 1}, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)};
 }
 
+// Position dedup: quantize positions to 1cm grid to avoid duplicate lights
+struct PosKey {
+	int32_t x, y, z;
+	bool operator==(const PosKey&) const = default;
+};
+struct PosHash {
+	size_t operator()(const PosKey& k) const {
+		size_t h = std::hash<int32_t>{}(k.x);
+		h ^= std::hash<int32_t>{}(k.y) + 0x9e3779b9 + (h << 6) + (h >> 2);
+		h ^= std::hash<int32_t>{}(k.z) + 0x9e3779b9 + (h << 6) + (h >> 2);
+		return h;
+	}
+};
+using PosDedup = std::unordered_set<PosKey, PosHash>;
+static PosKey quantize(const glm::vec3& p) {
+	return {static_cast<int32_t>(std::round(p.x * 100.f)),
+	        static_cast<int32_t>(std::round(p.y * 100.f)),
+	        static_cast<int32_t>(std::round(p.z * 100.f))};
+}
+
+// Lightweight reference to a node+primitive for emissive extraction
+struct NodePrim { int node_idx; std::string key; size_t mat_idx; };
+using GeometryCenterExtent = std::unordered_map<std::string, std::pair<glm::vec3, float>>;
+
+// Compute world matrices for all nodes in engine (Z-up) space
+static std::vector<glm::mat4> computeNodeWorldMatrices(
+    const tinygltf::Model& gltf, const std::vector<int>& root_nodes) {
+	std::vector<glm::mat4> node_world_engine(gltf.nodes.size(), glm::mat4(1.0f));
+	std::function<void(int, const glm::mat4&)> traverse = [&](int node_idx, const glm::mat4& parent_world) {
+		if (node_idx < 0 || node_idx >= static_cast<int>(gltf.nodes.size())) return;
+		const auto& node = gltf.nodes[static_cast<size_t>(node_idx)];
+		glm::mat4 local_gltf = getNodeMatrixGltf(node);
+		glm::mat4 local_engine = YUP_TO_ZUP * local_gltf * ZUP_TO_YUP;
+		glm::mat4 world = parent_world * local_engine;
+		node_world_engine[static_cast<size_t>(node_idx)] = world;
+		for (int c : node.children)
+			traverse(c, world);
+	};
+	for (int r : root_nodes)
+		traverse(r, glm::mat4(1.0f));
+	return node_world_engine;
+}
+
+// Cluster vertex positions along dominant axis. Returns centroids.
+// For small meshes (extent < extent_threshold on all axes), returns single centroid.
+static std::vector<glm::vec3> clusterVertices(
+    const std::vector<glm::vec3>& positions, float gap_threshold, float extent_threshold = 0.02f) {
+	if (positions.empty()) return {};
+
+	// Find bounding box extent
+	glm::vec3 mn = positions[0], mx = positions[0];
+	for (const auto& p : positions) { mn = glm::min(mn, p); mx = glm::max(mx, p); }
+	glm::vec3 ext = mx - mn;
+
+	// Find dominant axis
+	int dom = 0;
+	if (ext.y > ext[dom]) dom = 1;
+	if (ext.z > ext[dom]) dom = 2;
+
+	if (ext[dom] < extent_threshold) {
+		// Small mesh: single centroid
+		return {(mn + mx) * 0.5f};
+	}
+
+	// Sort vertex indices by dominant axis
+	std::vector<size_t> sorted_idx(positions.size());
+	std::iota(sorted_idx.begin(), sorted_idx.end(), 0);
+	std::sort(sorted_idx.begin(), sorted_idx.end(),
+	          [&](size_t a, size_t b) { return positions[a][dom] < positions[b][dom]; });
+
+	// Cluster: split when gap between consecutive sorted vertices > threshold
+	std::vector<glm::vec3> centroids;
+	glm::vec3 sum = positions[sorted_idx[0]];
+	size_t count = 1;
+	for (size_t i = 1; i < sorted_idx.size(); i++) {
+		float gap = positions[sorted_idx[i]][dom] - positions[sorted_idx[i - 1]][dom];
+		if (gap > gap_threshold) {
+			centroids.push_back(sum / static_cast<float>(count));
+			sum = glm::vec3(0.f);
+			count = 0;
+		}
+		sum += positions[sorted_idx[i]];
+		count++;
+	}
+	centroids.push_back(sum / static_cast<float>(count));
+	return centroids;
+}
+
+// Extract KHR_lights_punctual lights from glTF extension data
+static std::vector<VeModel::ExtractedLight> extractPunctualLights(
+    const tinygltf::Model& gltf,
+    const std::vector<glm::mat4>& node_world_engine) {
+
+	std::vector<VeModel::ExtractedLight> punctual_lights;
+	auto it_pl = gltf.extensions.find("KHR_lights_punctual");
+	if (it_pl == gltf.extensions.end() || !it_pl->second.Has("lights") || !it_pl->second.Get("lights").IsArray())
+		return punctual_lights;
+
+	const auto& arr = it_pl->second.Get("lights").Get<tinygltf::Value::Array>();
+	for (size_t i = 0; i < arr.size(); i++) {
+		const auto& v = arr[i];
+		if (!v.IsObject())
+			continue;
+		VeModel::ExtractedLight light;
+		if (v.Has("type") && v.Get("type").IsString()) {
+			const std::string& type_str = v.Get("type").Get<std::string>();
+			if (type_str == "directional")
+				light.type = VeModel::ExtractedLightType::Directional;
+			else
+				light.type = VeModel::ExtractedLightType::Point;
+		}
+		if (v.Has("color") && v.Get("color").IsArray()) {
+			const auto& c = v.Get("color").Get<tinygltf::Value::Array>();
+			if (c.size() >= 3) {
+				light.color.x = c[0].IsNumber() ? static_cast<float>(c[0].Get<double>()) : 1.f;
+				light.color.y = c[1].IsNumber() ? static_cast<float>(c[1].Get<double>()) : 1.f;
+				light.color.z = c[2].IsNumber() ? static_cast<float>(c[2].Get<double>()) : 1.f;
+			}
+		}
+		if (v.Has("intensity") && v.Get("intensity").IsNumber())
+			light.intensity = static_cast<float>(v.Get("intensity").Get<double>());
+		if (v.Has("range") && v.Get("range").IsNumber())
+			light.range = static_cast<float>(v.Get("range").Get<double>());
+		if (v.Has("name") && v.Get("name").IsString())
+			light.name = v.Get("name").Get<std::string>();
+		punctual_lights.push_back(light);
+	}
+	for (size_t node_idx = 0; node_idx < gltf.nodes.size(); node_idx++) {
+		const auto& node = gltf.nodes[node_idx];
+		auto nit = node.extensions.find("KHR_lights_punctual");
+		if (nit == node.extensions.end() || !nit->second.Has("light") || !nit->second.Get("light").IsInt())
+			continue;
+		int light_idx = nit->second.Get("light").Get<int>();
+		if (light_idx < 0 || light_idx >= static_cast<int>(punctual_lights.size()))
+			continue;
+		const glm::mat4& W = node_world_engine[node_idx];
+		auto& pl = punctual_lights[static_cast<size_t>(light_idx)];
+		pl.position = glm::vec3(W * glm::vec4(0, 0, 0, 1));
+		pl.direction = glm::normalize(glm::mat3(W) * glm::vec3(0, 0, -1));
+		if (pl.name.empty() && !node.name.empty())
+			pl.name = node.name;
+		VE_LOGI("Extracted light " << pl.name << " from node " << node.name);
+	}
+	return punctual_lights;
+}
+
+// Extract lights from fixture nodes identified by name patterns.
+// Places lights at descendant emissive mesh positions, with vertex clustering for multi-bulb meshes.
+static std::vector<VeModel::ExtractedLight> extractFixtureLights(
+    const tinygltf::Model& gltf,
+    const std::vector<glm::mat4>& node_world_engine,
+    const std::vector<MaterialFactors>& material_factors,
+    PosDedup& dedup) {
+
+	std::vector<VeModel::ExtractedLight> fixture_lights;
+
+	struct FixturePattern { std::string substring; std::string group; };
+	const std::vector<FixturePattern> fixture_patterns = {
+		{"streetlight",  "Streetlights"},
+		{"wall_light",   "Wall Lights"},
+		{"ceiling_light","Ceiling Lights"},
+		{"lantern",      "Lanterns"},
+		{"spotlight",    "Spotlights"},
+		{"stringlights", "String Lights"},
+	};
+
+	constexpr float BULB_CLUSTER_GAP = 0.008f;
+
+	auto extractEmissiveDescendants = [&](int node_idx, const std::string& group_name,
+	                                      auto& self) -> void {
+		if (node_idx < 0 || node_idx >= static_cast<int>(gltf.nodes.size())) return;
+		const auto& node = gltf.nodes[static_cast<size_t>(node_idx)];
+
+		if (node.mesh >= 0) {
+			const auto& mesh = gltf.meshes[static_cast<size_t>(node.mesh)];
+			for (const auto& prim : mesh.primitives) {
+				if (prim.material < 0 || static_cast<size_t>(prim.material) >= material_factors.size()) continue;
+				const auto& mf = material_factors[static_cast<size_t>(prim.material)];
+				float len = glm::length(mf.emissive_factor);
+				if (len < 0.01f) continue;
+				if (prim.attributes.find("POSITION") == prim.attributes.end()) continue;
+
+				const auto& pos_acc = gltf.accessors[static_cast<size_t>(prim.attributes.at("POSITION"))];
+				const auto& pos_bv = gltf.bufferViews[static_cast<size_t>(pos_acc.bufferView)];
+				const auto& pos_buf = gltf.buffers[static_cast<size_t>(pos_bv.buffer)];
+				const uint8_t* pos_data = pos_buf.data.data() + pos_bv.byteOffset + pos_acc.byteOffset;
+				int stride_val = pos_acc.ByteStride(pos_bv);
+				size_t stride = static_cast<size_t>(stride_val > 0 ? stride_val : 12);
+
+				std::vector<glm::vec3> positions(pos_acc.count);
+				for (size_t vi = 0; vi < pos_acc.count; vi++) {
+					const float* fp = reinterpret_cast<const float*>(pos_data + vi * stride);
+					positions[vi] = glm::vec3(fp[0], fp[1], fp[2]);
+				}
+
+				const glm::mat4& W = node_world_engine[static_cast<size_t>(node_idx)];
+				const glm::mat4 to_world = W * YUP_TO_ZUP;
+				glm::vec3 color = mf.emissive_factor / len;
+				float intensity = std::clamp(len * mf.emissive_strength * 10.0f, 0.5f, 5.0f);
+
+				std::vector<glm::vec3> centroids = clusterVertices(positions, BULB_CLUSTER_GAP);
+
+				for (size_t ci = 0; ci < centroids.size(); ci++) {
+					glm::vec3 world_pos = glm::vec3(to_world * glm::vec4(centroids[ci], 1.0f));
+					PosKey pk = quantize(world_pos);
+					if (!dedup.insert(pk).second) continue;
+					std::string name = group_name + ": " + node.name;
+					if (centroids.size() > 1)
+						name += " [" + std::to_string(ci) + "]";
+					fixture_lights.push_back({
+						.type = VeModel::ExtractedLightType::Point,
+						.position = world_pos,
+						.direction = glm::vec3(0.0f, 0.0f, -1.0f),
+						.color = color,
+						.intensity = intensity,
+						.range = 0.f,
+						.name = std::move(name)
+					});
+				}
+				break;
+			}
+		}
+
+		for (int child_idx : node.children)
+			self(child_idx, group_name, self);
+	};
+
+	for (size_t node_idx = 0; node_idx < gltf.nodes.size(); node_idx++) {
+		const auto& node = gltf.nodes[node_idx];
+		if (node.name.empty()) continue;
+
+		std::string name_lower = node.name;
+		std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
+		               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+		std::string matched_group;
+		for (const auto& pat : fixture_patterns) {
+			if (name_lower.find(pat.substring) != std::string::npos) {
+				matched_group = pat.group;
+				break;
+			}
+		}
+		if (matched_group.empty()) continue;
+
+		for (int child_idx : node.children)
+			extractEmissiveDescendants(child_idx, matched_group, extractEmissiveDescendants);
+	}
+
+	return fixture_lights;
+}
+
+// Extract lights from emissive materials, with vertex clustering for large meshes
+static std::vector<VeModel::ExtractedLight> extractEmissiveLights(
+    const tinygltf::Model& gltf,
+    const std::vector<glm::mat4>& node_world_engine,
+    const std::vector<NodePrim>& node_primitives,
+    const GeometryCenterExtent& geometry_center_extent,
+    const std::vector<MaterialFactors>& material_factors,
+    PosDedup& dedup) {
+
+	std::vector<VeModel::ExtractedLight> emissive_lights;
+	uint32_t emissive_light_count = 0;
+	const float emissive_light_threshold = 0.1f;
+	constexpr float EMISSIVE_CLUSTER_GAP = 0.008f;
+	constexpr float EMISSIVE_CLUSTER_EXTENT = 0.02f;
+
+	auto findPositionAccessor = [&](const NodePrim& np) -> const tinygltf::Accessor* {
+		int mesh_idx = gltf.nodes[static_cast<size_t>(np.node_idx)].mesh;
+		if (mesh_idx < 0) return nullptr;
+		const auto& mesh = gltf.meshes[static_cast<size_t>(mesh_idx)];
+		for (const auto& prim : mesh.primitives) {
+			size_t pmat = (prim.material >= 0) ? static_cast<size_t>(prim.material) : 0;
+			if (pmat != np.mat_idx) continue;
+			auto pos_it = prim.attributes.find("POSITION");
+			if (pos_it == prim.attributes.end()) continue;
+			return &gltf.accessors[static_cast<size_t>(pos_it->second)];
+		}
+		return nullptr;
+	};
+
+	for (size_t mat_i = 0; mat_i < material_factors.size(); mat_i++) {
+		float chroma = glm::length(material_factors[mat_i].emissive_factor);
+		float strength = material_factors[mat_i].emissive_strength;
+		if (chroma * strength < emissive_light_threshold)
+			continue;
+		glm::vec3 color_n = (chroma > 1e-6f) ? (material_factors[mat_i].emissive_factor / chroma) : material_factors[mat_i].emissive_factor;
+		for (const NodePrim& np : node_primitives) {
+			if (np.mat_idx != mat_i)
+				continue;
+			auto ce_it = geometry_center_extent.find(np.key);
+			if (ce_it == geometry_center_extent.end())
+				continue;
+			float diag = ce_it->second.second;
+			const glm::mat4& W = node_world_engine[static_cast<size_t>(np.node_idx)];
+
+			float area_proxy = std::max(diag * diag, 0.01f);
+			float intensity_raw = strength * chroma * area_proxy * 0.08f;
+			float intensity = std::clamp(intensity_raw, 0.25f, 50.0f);
+			std::string mat_name = (mat_i < gltf.materials.size() && !gltf.materials[mat_i].name.empty())
+			                       ? gltf.materials[mat_i].name : "Emissive " + std::to_string(emissive_light_count);
+			const std::string& node_name = gltf.nodes[static_cast<size_t>(np.node_idx)].name;
+			std::string individual_name = !node_name.empty() ? node_name : "light " + std::to_string(emissive_light_count);
+
+			if (diag < EMISSIVE_CLUSTER_EXTENT) {
+				const glm::vec3& center = ce_it->second.first;
+				glm::vec3 world_pos = glm::vec3(W * glm::vec4(center, 1.f));
+				if (!dedup.insert(quantize(world_pos)).second) continue;
+				emissive_lights.push_back({
+					.type = VeModel::ExtractedLightType::Point,
+					.position = world_pos,
+					.direction = glm::vec3(0.0f, 0.0f, -1.0f),
+					.color = color_n,
+					.intensity = intensity,
+					.range = std::max(diag * 1.25f, 0.25f),
+					.name = mat_name + ": " + individual_name
+				});
+				emissive_light_count++;
+			} else {
+				const tinygltf::Accessor* pos_acc = findPositionAccessor(np);
+				if (!pos_acc) {
+					const glm::vec3& center = ce_it->second.first;
+					glm::vec3 world_pos = glm::vec3(W * glm::vec4(center, 1.f));
+					if (!dedup.insert(quantize(world_pos)).second) continue;
+					emissive_lights.push_back({
+						.type = VeModel::ExtractedLightType::Point,
+						.position = world_pos,
+						.direction = glm::vec3(0.0f, 0.0f, -1.0f),
+						.color = color_n,
+						.intensity = intensity,
+						.range = std::max(diag * 1.25f, 0.25f),
+						.name = mat_name + ": " + individual_name
+					});
+					emissive_light_count++;
+					continue;
+				}
+				const auto& bv = gltf.bufferViews[static_cast<size_t>(pos_acc->bufferView)];
+				const auto& buf = gltf.buffers[static_cast<size_t>(bv.buffer)];
+				const uint8_t* data = buf.data.data() + bv.byteOffset + pos_acc->byteOffset;
+				int sv = pos_acc->ByteStride(bv);
+				size_t stride = static_cast<size_t>(sv > 0 ? sv : 12);
+
+				std::vector<glm::vec3> positions(pos_acc->count);
+				for (size_t vi = 0; vi < pos_acc->count; vi++) {
+					const float* fp = reinterpret_cast<const float*>(data + vi * stride);
+					positions[vi] = {fp[0], -fp[2], fp[1]};  // Y-up → Z-up
+				}
+
+				std::vector<glm::vec3> centroids = clusterVertices(positions, EMISSIVE_CLUSTER_GAP, EMISSIVE_CLUSTER_EXTENT);
+
+				for (size_t ci = 0; ci < centroids.size(); ci++) {
+					glm::vec3 world_pos = glm::vec3(W * glm::vec4(centroids[ci], 1.f));
+					if (!dedup.insert(quantize(world_pos)).second) continue;
+					emissive_lights.push_back({
+						.type = VeModel::ExtractedLightType::Point,
+						.position = world_pos,
+						.direction = glm::vec3(0.0f, 0.0f, -1.0f),
+						.color = color_n,
+						.intensity = intensity,
+						.range = std::max(diag * 1.25f, 0.25f),
+						.name = mat_name + ": " + individual_name + " [" + std::to_string(ci) + "]"
+					});
+					emissive_light_count++;
+				}
+			}
+			if (emissive_light_count >= ve::MAX_LIGHTS - 1)
+				VE_LOGW("Reached maximum light count while extracting emissive lights from model; some lights may be missing");
+		}
+	}
+	return emissive_lights;
+}
+
 //----------------------------------
 // VeModel implementation
 //----------------------------------
@@ -212,9 +583,10 @@ static NodeTRS getNodeTRS(const tinygltf::Node& node) {
 std::unique_ptr<VeModel> VeModel::load(VeResourceManager& resource_manager,
                                        const std::filesystem::path& model_path,
                                        VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout,
-                                       bool extract_lights, bool flip_tex_coord_v) {
+                                       bool extract_lights, bool extract_fixture_lights,
+                                       bool flip_tex_coord_v) {
 	auto model = std::make_unique<VeModel>();
-	model->loadFromGltf(model_path, resource_manager, pool, material_layout, extract_lights, flip_tex_coord_v);
+	model->loadFromGltf(model_path, resource_manager, pool, material_layout, extract_lights, extract_fixture_lights, flip_tex_coord_v);
 	return model;
 }
 
@@ -225,7 +597,8 @@ VeModel::~VeModel() = default;
 // TODO: add .glb support
 void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceManager& resource_manager,
                            VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout,
-                           bool extract_lights, bool flip_tex_coord_v) {
+                           bool extract_lights, bool extract_fixture_lights,
+                           bool flip_tex_coord_v) {
 	tinygltf::Model gltf;
 	tinygltf::TinyGLTF loader;
 	// Accept KTX2/other formats as-is: we load textures via VeTexture from URI, not tinygltf's decoded data
@@ -241,8 +614,13 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	if (path_ext == ".glb") {
 		VE_LOGI("Loading glTF binary file (NOT SUPPORTED YET): " << model_path);
 		ret = loader.LoadBinaryFromFile(&gltf, &err, &warn, model_path.string());
-	} else {
+	} else if (path_ext == ".gltf") {
 		ret = loader.LoadASCIIFromFile(&gltf, &err, &warn, model_path.string());
+	}
+	else {
+		VE_LOGE("Unsupported file extension for glTF model: " << model_path);
+		assert(false);
+		return;
 	}
 	if (!ret) {
 		VE_LOGE("Failed to load glTF: " << err);
@@ -328,6 +706,10 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 			auto it_es = mat.extensions.find("KHR_materials_emissive_strength");
 			if (it_es != mat.extensions.end() && it_es->second.Has("emissiveStrength") && it_es->second.Get("emissiveStrength").IsNumber()) {
 				factors.emissive_strength = static_cast<float>(it_es->second.Get("emissiveStrength").Get<double>());
+			} else if (glm::length(factors.emissive_factor) > 0.1f) {
+				// Material has significant emissive color but no explicit strength extension.
+				// Use glTF spec default (1.0) so the surface actually glows.
+				factors.emissive_strength = 1.0f;
 			}
 			auto it_tr = mat.extensions.find("KHR_materials_transmission");
 			if (it_tr != mat.extensions.end() && it_tr->second.Has("transmissionFactor") && it_tr->second.Get("transmissionFactor").IsNumber()) {
@@ -415,7 +797,8 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 				(mat_name_lower.find("leaf") != std::string::npos) ||
 				(mat_name_lower.find("foliage") != std::string::npos) ||
 				(mat_name_lower.find("vine") != std::string::npos) ||
-				(mat_name_lower.find("curtain") != std::string::npos);
+				(mat_name_lower.find("curtain") != std::string::npos) ||
+				(mat_name_lower.find("decal") != std::string::npos);
 			if (material_alpha_props.back().alpha_mode == AlphaMode::BLEND &&
 				factors.transmission_factor <= 0.0f &&
 				factors.base_color_factor.w >= 0.99f &&
@@ -564,75 +947,23 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 		root_nodes.push_back(0);
 	}
 
-	// Node world matrices in engine (Z-up) space (used for light placement when extract_lights)
+	// Compute node world matrices when any light extraction is needed
 	std::vector<glm::mat4> node_world_engine;
+	PosDedup light_pos_dedup;
+	if (extract_lights || extract_fixture_lights) {
+		node_world_engine = computeNodeWorldMatrices(gltf, root_nodes);
+	}
+
+	// Punctual lights (KHR_lights_punctual extension)
 	if (extract_lights) {
-		node_world_engine.assign(gltf.nodes.size(), glm::mat4(1.0f));
-		std::function<void(int, const glm::mat4&)> traverse_for_world = [&](int node_idx, const glm::mat4& parent_world) {
-			if (node_idx < 0 || node_idx >= static_cast<int>(gltf.nodes.size())) return;
-			const auto& node = gltf.nodes[static_cast<size_t>(node_idx)];
-			glm::mat4 local_gltf = getNodeMatrixGltf(node);
-			glm::mat4 local_engine = YUP_TO_ZUP * local_gltf * ZUP_TO_YUP;
-			glm::mat4 world = parent_world * local_engine;
-			node_world_engine[static_cast<size_t>(node_idx)] = world;
-			for (int c : node.children)
-				traverse_for_world(c, world);
-		};
-		for (int r : root_nodes)
-			traverse_for_world(r, glm::mat4(1.0f));
+		m_punctual_lights = extractPunctualLights(gltf, node_world_engine);
+		for (const auto& L : m_punctual_lights)
+			light_pos_dedup.insert(quantize(L.position));
+	}
 
-		std::vector<VeModel::ExtractedLight> punctual_lights;
-		auto it_pl = gltf.extensions.find("KHR_lights_punctual");
-		if (it_pl != gltf.extensions.end() && it_pl->second.Has("lights") && it_pl->second.Get("lights").IsArray()) {
-			const auto& arr = it_pl->second.Get("lights").Get<tinygltf::Value::Array>();
-			for (size_t i = 0; i < arr.size(); i++) {
-				const auto& v = arr[i];
-				if (!v.IsObject())
-					continue;
-				VeModel::ExtractedLight light;
-				if (v.Has("type") && v.Get("type").IsString()) {
-					const std::string& type_str = v.Get("type").Get<std::string>();
-					if (type_str == "directional")
-						light.type = VeModel::ExtractedLightType::Directional;
-					else
-						light.type = VeModel::ExtractedLightType::Point;  // "point" or "spot"
-				}
-				if (v.Has("color") && v.Get("color").IsArray()) {
-					const auto& c = v.Get("color").Get<tinygltf::Value::Array>();
-					if (c.size() >= 3) {
-						light.color.x = c[0].IsNumber() ? static_cast<float>(c[0].Get<double>()) : 1.f;
-						light.color.y = c[1].IsNumber() ? static_cast<float>(c[1].Get<double>()) : 1.f;
-						light.color.z = c[2].IsNumber() ? static_cast<float>(c[2].Get<double>()) : 1.f;
-					}
-				}
-				if (v.Has("intensity") && v.Get("intensity").IsNumber())
-					light.intensity = static_cast<float>(v.Get("intensity").Get<double>());
-				if (v.Has("range") && v.Get("range").IsNumber())
-					light.range = static_cast<float>(v.Get("range").Get<double>());
-				if (v.Has("name") && v.Get("name").IsString())
-					light.name = v.Get("name").Get<std::string>();
-				punctual_lights.push_back(light);
-			}
-			for (size_t node_idx = 0; node_idx < gltf.nodes.size(); node_idx++) {
-				const auto& node = gltf.nodes[node_idx];
-				auto nit = node.extensions.find("KHR_lights_punctual");
-				if (nit == node.extensions.end() || !nit->second.Has("light") || !nit->second.Get("light").IsInt())
-					continue;
-				int light_idx = nit->second.Get("light").Get<int>();
-				if (light_idx < 0 || light_idx >= static_cast<int>(punctual_lights.size()))
-					continue;
-				const glm::mat4& W = node_world_engine[node_idx];
-				auto& pl = punctual_lights[static_cast<size_t>(light_idx)];
-				pl.position = glm::vec3(W * glm::vec4(0, 0, 0, 1));
-				pl.direction = glm::normalize(glm::mat3(W) * glm::vec3(0, 0, -1));
-				if (pl.name.empty() && !node.name.empty())
-					pl.name = node.name;
-				VE_LOGI("Extracted light " << pl.name << " from node " << node.name);
-			}
-			for (VeModel::ExtractedLight& L : punctual_lights)
-				m_punctual_lights.push_back(L);
-
-		}
+	// Name-based fixture extraction (streetlights, lanterns, etc.)
+	if (extract_fixture_lights) {
+		m_fixture_lights = extractFixtureLights(gltf, node_world_engine, material_factors, light_pos_dedup);
 	}
 
 	// Geometry key for mesh deduplication: same geometry+material shares one VeMesh.
@@ -644,8 +975,7 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 		return key;
 	};
 	std::unordered_map<std::string, ResourceHandle<VeMesh>> geometry_mesh_cache;
-	std::unordered_map<std::string, std::pair<glm::vec3, float>> geometry_center_extent;
-	struct NodePrim { int node_idx; std::string key; size_t mat_idx; };
+	GeometryCenterExtent geometry_center_extent;
 	std::vector<NodePrim> node_primitives;
 
 	// Create a VeMesh for a gltf primitive. Converts glTF Y-up to engine Z-up via (x,-z,y) to preserve handedness.
@@ -914,47 +1244,18 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 		m_root_id = m_nodes[0].id;
 	}
 
-	// Emissive-as-lights: for materials with emissive intensity above threshold, add a point light per instance (optional)
+	// Emissive-as-lights extraction (after mesh processing so node_primitives is populated)
 	if (extract_lights) {
-		uint32_t emissive_light_count = 0;
-		const float emissive_light_threshold = 0.1f;
-		for (size_t mat_i = 0; mat_i < material_factors.size(); mat_i++) {
-			float chroma = glm::length(material_factors[mat_i].emissive_factor);
-			float strength = material_factors[mat_i].emissive_strength;
-			if (chroma * strength < emissive_light_threshold)
-				continue;
-			glm::vec3 color_n = (chroma > 1e-6f) ? (material_factors[mat_i].emissive_factor / chroma) : material_factors[mat_i].emissive_factor;
-			for (const NodePrim& np : node_primitives) {
-				if (np.mat_idx != mat_i)
-					continue;
-				auto ce_it = geometry_center_extent.find(np.key);
-				if (ce_it == geometry_center_extent.end())
-					continue;
-				const glm::vec3& center = ce_it->second.first;
-				float diag = ce_it->second.second;
-				const glm::mat4& W = node_world_engine[static_cast<size_t>(np.node_idx)];
-				glm::vec3 world_pos = glm::vec3(W * glm::vec4(center, 1.f));
-				float area_proxy = std::max(diag * diag, 0.01f);
-				float intensity_raw = strength * chroma * area_proxy * 0.08f;
-				float intensity = std::clamp(intensity_raw, 0.25f, 50.0f);
-				VeModel::ExtractedLight L{
-					.type = VeModel::ExtractedLightType::Point,
-					.position = world_pos,
-					.direction = glm::vec3(0.0f, 0.0f, -1.0f),
-					.color = color_n,
-					.intensity = intensity,
-					.range = std::max(diag * 1.25f, 0.25f),
-					.name = "Emissive light " + std::to_string(emissive_light_count)
-				};
-				m_emissive_lights.push_back(L);
-				emissive_light_count++;
-				if (emissive_light_count >= ve::MAX_LIGHTS - 1)
-					break;
-			}
-		}
+		// Seed dedup from fixture lights so emissive doesn't overlap
+		for (const auto& L : m_fixture_lights)
+			light_pos_dedup.insert(quantize(L.position));
+		m_emissive_lights = extractEmissiveLights(gltf, node_world_engine,
+			node_primitives, geometry_center_extent, material_factors, light_pos_dedup);
 	}
 
-	VE_LOGI("Loaded model " << model_path << " with " << m_nodes.size() << " nodes, " << m_punctual_lights.size() << " punctual, " << m_emissive_lights.size() << " emissive lights");
+	VE_LOGI("Loaded model " << model_path << " with " << m_nodes.size() << " nodes, "
+	        << m_punctual_lights.size() << " punctual, " << m_emissive_lights.size() << " emissive, "
+	        << m_fixture_lights.size() << " fixture lights");
 }
 
 void VeModel::addToScene(Registry& registry,
@@ -967,6 +1268,58 @@ void VeModel::addToScene(Registry& registry,
 	wrapper_tc->setTranslation(root_translation);
 	wrapper_tc->setRotationEuler(root_rotation);
 	wrapper_tc->setScale(root_scale);
+
+	// Build lookup structures for world transform computation (used for dedup)
+	std::unordered_map<uint32_t, uint32_t> parent_of;
+	for (const auto& [child_id, parent_id] : m_parent_links)
+		parent_of[child_id] = parent_id;
+	std::unordered_map<uint32_t, size_t> id_to_index;
+	for (size_t i = 0; i < m_nodes.size(); i++)
+		id_to_index[m_nodes[i].id] = i;
+
+	auto localMatrix = [](const LoadedNode& n) -> glm::mat4 {
+		return glm::translate(glm::mat4(1.0f), n.translation)
+			* glm::mat4_cast(n.rotation)
+			* glm::scale(glm::mat4(1.0f), n.scale);
+	};
+	auto worldTransform = [&](uint32_t node_id) -> glm::mat4 {
+		std::vector<uint32_t> chain;
+		for (uint32_t cur = node_id; ; ) {
+			chain.push_back(cur);
+			auto it = parent_of.find(cur);
+			if (it == parent_of.end()) break;
+			cur = it->second;
+		}
+		glm::mat4 world(1.0f);
+		for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+			auto idx_it = id_to_index.find(*it);
+			if (idx_it != id_to_index.end())
+				world *= localMatrix(m_nodes[idx_it->second]);
+		}
+		return world;
+	};
+
+	// Dedup: same mesh+material at same world position → skip duplicate MeshComponent.
+	// Uses mesh pointer (not vertex/index counts) to avoid false positives from different
+	// geometry that happens to share counts.
+	struct DedupKey {
+		const void* mesh;
+		const void* material;
+		int32_t qx, qy, qz;
+		bool operator==(const DedupKey&) const = default;
+	};
+	struct DedupHash {
+		size_t operator()(const DedupKey& k) const {
+			size_t h = std::hash<const void*>{}(k.mesh);
+			h ^= std::hash<const void*>{}(k.material) + 0x9e3779b9 + (h << 6) + (h >> 2);
+			h ^= std::hash<int32_t>{}(k.qx) + 0x9e3779b9 + (h << 6) + (h >> 2);
+			h ^= std::hash<int32_t>{}(k.qy) + 0x9e3779b9 + (h << 6) + (h >> 2);
+			h ^= std::hash<int32_t>{}(k.qz) + 0x9e3779b9 + (h << 6) + (h >> 2);
+			return h;
+		}
+	};
+	std::unordered_set<DedupKey, DedupHash> mesh_dedup;
+	uint32_t dedup_count = 0;
 
 	// Map LoadedNode IDs to new Entity IDs
 	std::unordered_map<uint32_t, Entity> id_map;
@@ -982,11 +1335,24 @@ void VeModel::addToScene(Registry& registry,
 
 		// MeshComponent (only if node has valid mesh+material)
 		if (node.mesh.isValid() && node.material.isValid()) {
-			auto& mc = registry.addComponent<MeshComponent>(entity, node.mesh, node.material);
-			auto* mat = node.material.get();
-			mc.has_texture = (mat && mat->hasDescriptorSet()) ? 1.0f : 0.0f;
+			glm::vec3 pos(worldTransform(node.id)[3]);
+			DedupKey key{
+				node.mesh.get(), node.material.get(),
+				static_cast<int32_t>(std::round(pos.x * 1000.0f)),
+				static_cast<int32_t>(std::round(pos.y * 1000.0f)),
+				static_cast<int32_t>(std::round(pos.z * 1000.0f))
+			};
+			if (mesh_dedup.insert(key).second) {
+				auto& mc = registry.addComponent<MeshComponent>(entity, node.mesh, node.material);
+				auto* mat = node.material.get();
+				mc.has_texture = (mat && mat->hasDescriptorSet()) ? 1.0f : 0.0f;
+			} else {
+				dedup_count++;
+			}
 		}
 	}
+	if (dedup_count > 0)
+		VE_LOGI("addToScene: skipped " << dedup_count << " duplicate mesh instances");
 	m_nodes.clear();
 
 	// Set up hierarchy from parent links
@@ -1015,8 +1381,9 @@ void VeModel::addToScene(Registry& registry,
 		registry.setName(light, L.name.empty() ? "Light (emissive)" : L.name);
 		auto* tc = registry.getComponent<TransformComponent>(light);
 		tc->setTranslation(glm::vec3(wrapper_world * glm::vec4(L.position, 1.0f)));
-		auto* plc = registry.getComponent<PointLightComponent>(light);
-		plc->color = glm::vec3(1.0f, 0.21f, 0.0f);
+		//auto* plc = registry.getComponent<PointLightComponent>(light);
+		//plc->color = glm::vec3(1.0f, 0.21f, 0.0f);
+		registry.setActive(light, false);  // default OFF (MAX_LIGHTS constraint)
 	}
 	for (const ExtractedLight& L : m_punctual_lights) {
 		if (L.type != ExtractedLightType::Point) continue;
@@ -1024,6 +1391,14 @@ void VeModel::addToScene(Registry& registry,
 		registry.setName(light, L.name.empty() ? "Light (imported)" : L.name);
 		auto* tc = registry.getComponent<TransformComponent>(light);
 		tc->setTranslation(glm::vec3(wrapper_world * glm::vec4(L.position, 1.0f)));
+		registry.setActive(light, false);  // default OFF
+	}
+	for (const ExtractedLight& L : m_fixture_lights) {
+		Entity light = registry.createPointLight(L.intensity, size, L.color);
+		registry.setName(light, L.name);
+		auto* tc = registry.getComponent<TransformComponent>(light);
+		tc->setTranslation(glm::vec3(wrapper_world * glm::vec4(L.position, 1.0f)));
+		registry.setActive(light, false);  // default OFF
 	}
 }
 
@@ -1031,7 +1406,7 @@ std::optional<VeModel::SingleMeshData> VeModel::loadSingleMesh(
 	VeResourceManager& resource_manager,
 	const std::filesystem::path& model_path,
 	bool flip_tex_coord_v) {
-	auto model = load(resource_manager, model_path.lexically_normal(), nullptr, nullptr, false, flip_tex_coord_v);
+	auto model = load(resource_manager, model_path.lexically_normal(), nullptr, nullptr, false, false, flip_tex_coord_v);
 	for (const auto& node : model->m_nodes) {
 		if (node.mesh.isValid() && node.material.isValid()) {
 			return SingleMeshData{node.mesh, node.material};

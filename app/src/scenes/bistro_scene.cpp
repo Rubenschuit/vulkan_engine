@@ -37,13 +37,14 @@ void BistroScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
 			&pool,
 			&material_layout,
 			true,
+			false,
 			true
 		);
 		assert(m_bistro_model && "Failed to load Bistro model");
 
 		glm::vec3 root_translation = glm::vec3{0.0f, 0.0f, -40.0f} + bistro_translation;
 		glm::vec3 root_rotation = {0.0f, 0.0f, 0.0f};
-		glm::vec3 root_scale = {4.0f, 4.0f, 4.0f};
+		glm::vec3 root_scale = {1.0f, 1.0f, 1.0f};
 		m_bistro_model->addToScene(m_registry, root_translation, root_rotation, root_scale);
 
 		// Store default material for getDescriptorSet() fallback

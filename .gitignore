@@ -72,3 +72,5 @@ external/ktx-software/
 external/*-subbuild/
 
 *.blend
+assets/*
+scripts/*

@@ -25,7 +25,6 @@ struct AssetPaths {
 	std::filesystem::path shader(const char* name) const { return shaders_dir / name; }
 	std::filesystem::path sponza_model(const char* variant = "") const { return project_root / "models" / variant / "glTF" / "Sponza.gltf"; }
 	std::filesystem::path bistro_model() const { return project_root / "models" / "bistro-master" / "bistro.gltf"; }
-	std::filesystem::path mybistro_model() const { return project_root / "models" / "mybistro" / "bistro.gltf"; }
 
 	explicit AssetPaths(const std::filesystem::path& root)
 		: project_root(root),

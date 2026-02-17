@@ -82,7 +82,7 @@ private:
 	std::vector<std::vector<glm::mat4>> m_light_projs;
 
 	// Shadow mapping resources
-	std::unique_ptr<VeImage> m_shadow_map_array;  // single 2D array texture with MAX_LIGHTS layers
+	std::unique_ptr<VeImage> m_shadow_map_array;  // single 2D array texture with MAX_SHADOW_LIGHTS layers
 	std::vector<vk::raii::ImageView> m_shadow_map_layer_views;  // individual layer views for rendering
 	vk::raii::Sampler m_shadow_sampler{nullptr};
 	std::unique_ptr<VeDescriptorSetLayout> m_shadow_set_layout;

@@ -1,5 +1,5 @@
 #define PI 3.1415926536
-#define MAX_LIGHTS 40
+#define MAX_LIGHTS 160
 #define MAX_SHADOW_LIGHTS 3
 
 struct VertexInput {

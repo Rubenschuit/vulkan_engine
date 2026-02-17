@@ -565,10 +565,10 @@ stbi_uc* VeTexture::generateDefaultTexture(int width, int height, TextureType ty
                 break;
 
             case TextureType::EMISSIVE:
-                // Black: no emission
-                pixels[i * 4 + 0] = 0;
-                pixels[i * 4 + 1] = 0;
-                pixels[i * 4 + 2] = 0;
+                // White: emissive factor alone controls emission (glTF spec)
+                pixels[i * 4 + 0] = 255;
+                pixels[i * 4 + 1] = 255;
+                pixels[i * 4 + 2] = 255;
                 pixels[i * 4 + 3] = 255;
                 break;
         }

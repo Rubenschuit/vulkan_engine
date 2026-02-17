@@ -23,14 +23,14 @@ struct PbrPushConstantData {
 	alignas(4) float alpha_cutoff;
 	alignas(4) uint32_t material_flags;  // bits 0-1: alpha_mode, bit 2: double_sided, bit 3: flip_tex_coord_v, bit 4: use_spec_gloss_texture
 	alignas(4) uint32_t instance_offset; // SSBO offset for this batch
+	alignas(4) float depth_offset;       // clip-space Z offset (>0 pushes towards camera)
 };
-static_assert(sizeof(PbrPushConstantData) == 16, "Push constants must be 16 bytes");
+static_assert(sizeof(PbrPushConstantData) == 20, "Push constants must be 20 bytes");
 
-// Objects with any transmission (> 0) are sorted into the transparent pass for proper
-// alpha compositing after the skybox. Among those, only objects above this threshold
-// fully disable depth writes; low-transmission objects still write depth so they
-// properly occlude geometry behind them. Must match the threshold in pbr_shader.slang.
-static constexpr float HIGH_TRANSMISSION_THRESHOLD = 0.5f;
+// Clip-space depth offset for MASK (alpha-tested) decal overlays.
+// Multiplied by W in the vertex shader, making it distance-proportional.
+// Positive values push geometry towards the camera.
+static constexpr float MASK_DEPTH_OFFSET = 0.00001f;
 
 PbrRenderSystem::PbrRenderSystem(
 	VeDevice& device,
@@ -75,8 +75,11 @@ void PbrRenderSystem::createPipeline(vk::Format color_format, vk::SampleCountFla
 	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
 	pipeline_config.dynamic_state_enables.push_back(vk::DynamicState::eCullMode);
 	pipeline_config.dynamic_state_enables.push_back(vk::DynamicState::eDepthWriteEnable);
+	pipeline_config.dynamic_state_enables.push_back(vk::DynamicState::eDepthCompareOp);
+	pipeline_config.dynamic_state_enables.push_back(vk::DynamicState::eDepthBias);
 	pipeline_config.dynamic_state_info.dynamicStateCount = static_cast<uint32_t>(pipeline_config.dynamic_state_enables.size());
 	pipeline_config.dynamic_state_info.pDynamicStates = pipeline_config.dynamic_state_enables.data();
+	pipeline_config.rasterization_info.depthBiasEnable = VK_TRUE;
 	pipeline_config.multisample_info.rasterizationSamples = sample_count;
 	pipeline_config.color_format = color_format;
 	pipeline_config.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptions();
@@ -99,6 +102,7 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info) const {
 	m_transparent_drawables.reserve(std::max(visible_count, m_transparent_drawables.capacity()));
 
 	const glm::vec3 camera_pos = frame_info.camera.getPosition();
+	const glm::vec3 camera_fwd = frame_info.camera.getForward();
 	auto& registry = *frame_info.registry;
 
 	// 1. Build drawable lists (opaque vs transparent)
@@ -107,27 +111,35 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info) const {
 		if (!mesh || !registry.getComponent<TransformComponent>(entry.entity))
 			continue;
 		auto* mat = mesh->getMaterial();
+		VeMesh* mesh_ptr = mesh->getMesh();
 		vk::raii::DescriptorSet& mat_set = mat->hasDescriptorSet()
 			? mat->getDescriptorSet()
 			: frame_info.material_descriptor_set;
 		MaterialAlphaProps alpha_props = mat->getAlphaProps();
 		float transmission = mat->getMaterialFactors().transmission_factor;
 		bool use_transparent_pass = (alpha_props.alpha_mode == AlphaMode::BLEND) || (transmission > 0.0f);
-		glm::vec3 obj_pos = registry.getWorldTransform(entry.entity) * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-		float dist_sq = glm::dot(obj_pos - camera_pos, obj_pos - camera_pos);
+		// Use mesh AABB center for sort distance.
+		const auto& aabb = mesh->getWorldAABB();
+		glm::vec3 obj_pos = (aabb.min + aabb.max) * 0.5f;
+		// View-space depth: distance along camera look direction.
+		float dist = glm::dot(obj_pos - camera_pos, camera_fwd);
 		if (use_transparent_pass)
-			m_transparent_drawables.emplace_back(*mat_set, entry.entity, mesh, dist_sq, alpha_props.alpha_mode);
+			m_transparent_drawables.emplace_back(*mat_set, entry.entity, mesh, mesh_ptr, mat, dist, alpha_props.alpha_mode);
 		else
-			m_opaque_drawables.emplace_back(*mat_set, entry.entity, mesh, dist_sq, alpha_props.alpha_mode);
+			m_opaque_drawables.emplace_back(*mat_set, entry.entity, mesh, mesh_ptr, mat, dist, alpha_props.alpha_mode);
 	}
 
-	// 2. Sort opaques by (mesh pointer, material set) for instanced batching
+	// 2. Sort opaques: non-MASK before MASK (rendering order), then by mesh/material (batching).
+	//    This ensures base geometry writes depth before alpha-tested overlays, while
+	//    keeping mesh/material batching intact within each category.
 	std::sort(m_opaque_drawables.begin(), m_opaque_drawables.end(),
 		[](const Drawable& a, const Drawable& b) {
-			VeMesh* mesh_a = a.mesh->getMesh();
-			VeMesh* mesh_b = b.mesh->getMesh();
-			if (mesh_a != mesh_b)
-				return mesh_a < mesh_b;
+			bool a_mask = (a.alpha_mode == AlphaMode::MASK);
+			bool b_mask = (b.alpha_mode == AlphaMode::MASK);
+			if (a_mask != b_mask)
+				return !a_mask; // non-MASK first
+			if (a.mesh_ptr != b.mesh_ptr)
+				return a.mesh_ptr < b.mesh_ptr;
 			return a.material_set < b.material_set;
 		});
 
@@ -150,27 +162,25 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info) const {
 		frame_info.instance_data[idx].normal_transform[2] = glm::vec4(nrm[2], 0.0f);
 
 		// Check if we can merge with the current group
-		VeMesh* mesh_ptr = d.mesh->getMesh();
 		if (!m_opaque_groups.empty()) {
 			auto& group = m_opaque_groups.back();
-			if (group.mesh == mesh_ptr && group.material_set == d.material_set) {
+			if (group.mesh == d.mesh_ptr && group.material_set == d.material_set) {
 				group.instance_count++;
 				continue;
 			}
 		}
 
 		// Start a new group
-		auto* mat_ptr = d.mesh->getMaterial();
-		MaterialAlphaProps alpha_props = mat_ptr ? mat_ptr->getAlphaProps() : MaterialAlphaProps{};
+		MaterialAlphaProps alpha_props = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};
 		InstanceGroup group{};
-		group.mesh = mesh_ptr;
+		group.mesh = d.mesh_ptr;
 		group.material_set = d.material_set;
 		group.first_instance = idx;
 		group.instance_count = 1;
 		group.has_texture = d.mesh->has_texture;
-		group.alpha_cutoff = alpha_props.alpha_cutoff;
+		group.alpha_cutoff = (alpha_props.alpha_mode == AlphaMode::MASK) ? alpha_props.alpha_cutoff : 0.0f;
 		group.material_flags = static_cast<uint32_t>(alpha_props.alpha_mode) | (alpha_props.double_sided ? 4u : 0u)
-			| (mat_ptr && mat_ptr->getFlipTexCoordV() ? 8u : 0u)
+			| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? 8u : 0u)
 			| (alpha_props.use_spec_gloss_texture ? 16u : 0u);
 		group.double_sided = alpha_props.double_sided;
 		m_opaque_groups.push_back(group);
@@ -195,6 +205,56 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info) const {
 	}
 }
 
+void PbrRenderSystem::renderOpaqueGroup(
+	VeFrameInfo& frame_info,
+	const InstanceGroup& group,
+	VkDescriptorSet& bound_material_set,
+	VeMesh*& bound_mesh) const {
+
+	// Bind material descriptor set (set 1) only when it changes
+	if (group.material_set != bound_material_set) {
+		bound_material_set = group.material_set;
+		frame_info.command_buffer.bindDescriptorSets(
+			vk::PipelineBindPoint::eGraphics,
+			*m_pipeline_layout,
+			1,
+			{bound_material_set},
+			{}
+		);
+	}
+
+	// Set dynamic state
+	if (group.double_sided)
+		frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eNone);
+	else
+		frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eBack);
+
+	// Push per-batch material constants
+	PbrPushConstantData push{
+		.has_texture = group.has_texture,
+		.alpha_cutoff = group.alpha_cutoff,
+		.material_flags = group.material_flags,
+		.instance_offset = group.first_instance,
+		.depth_offset = (group.alpha_cutoff > 0.0f) ? MASK_DEPTH_OFFSET : 0.0f
+	};
+	frame_info.command_buffer.pushConstants(
+		*m_pipeline_layout,
+		vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+		0,
+		vk::ArrayProxy<const uint8_t>(sizeof(PbrPushConstantData), reinterpret_cast<const uint8_t*>(&push))
+	);
+
+	// Bind VBO/IBO (if mesh changed)
+	if (group.mesh != bound_mesh) {
+		bound_mesh = group.mesh;
+		bound_mesh->bindVertexBuffer(frame_info.command_buffer);
+		bound_mesh->bindIndexBuffer(frame_info.command_buffer);
+	}
+
+	// Instanced draw (firstInstance=0, shader uses instance_offset push constant for SSBO indexing)
+	group.mesh->drawIndexed(frame_info.command_buffer, group.instance_count, 0);
+}
+
 void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info) const {
 	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 
@@ -209,54 +269,32 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info) const {
 	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
 	VeMesh* bound_mesh = nullptr;
 
+	// Initial state for non-MASK geometry
+	frame_info.command_buffer.setDepthCompareOp(
+		m_depth_prepass_active ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eLess);
+	frame_info.command_buffer.setDepthBias(0.0f, 0.0f, 0.0f);
+	frame_info.command_buffer.setDepthWriteEnable(VK_TRUE);
+
+	// Groups are sorted non-MASK first, then MASK.
+	// When we hit the first MASK group, switch to eLessOrEqual and use a
+	// depth offset (push constant) to push them slightly towards the camera.
+	bool mask_state = false;
 	for (const auto& group : m_opaque_groups) {
-		// Bind material descriptor set (set 1) only when it changes
-		if (group.material_set != bound_material_set) {
-			bound_material_set = group.material_set;
-			frame_info.command_buffer.bindDescriptorSets(
-				vk::PipelineBindPoint::eGraphics,
-				*m_pipeline_layout,
-				1,
-				{bound_material_set},
-				{}
-			);
+		if (group.alpha_cutoff > 0.0f && !mask_state) {
+			frame_info.command_buffer.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
+			mask_state = true;
 		}
-
-		// Set dynamic state
-		if (group.double_sided)
-			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eNone);
-		else
-			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eBack);
-		frame_info.command_buffer.setDepthWriteEnable(VK_TRUE);
-
-		// Push per-batch material constants
-		PbrPushConstantData push{
-			.has_texture = group.has_texture,
-			.alpha_cutoff = group.alpha_cutoff,
-			.material_flags = group.material_flags,
-			.instance_offset = group.first_instance
-		};
-		frame_info.command_buffer.pushConstants(
-			*m_pipeline_layout,
-			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
-			0,
-			vk::ArrayProxy<const uint8_t>(sizeof(PbrPushConstantData), reinterpret_cast<const uint8_t*>(&push))
-		);
-
-		// Bind VBO/IBO (if mesh changed)
-		if (group.mesh != bound_mesh) {
-			bound_mesh = group.mesh;
-			bound_mesh->bindVertexBuffer(frame_info.command_buffer);
-			bound_mesh->bindIndexBuffer(frame_info.command_buffer);
-		}
-
-		// Instanced draw (firstInstance=0, shader uses instance_offset push constant for SSBO indexing)
-		group.mesh->drawIndexed(frame_info.command_buffer, group.instance_count, 0);
+		renderOpaqueGroup(frame_info, group, bound_material_set, bound_mesh);
 	}
 }
 
 void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
 	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+
+	// eLessOrEqual so transparent surfaces coplanar with opaque geometry (decal overlays)
+	// consistently pass the depth test and render on top.
+	frame_info.command_buffer.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
+	frame_info.command_buffer.setDepthBias(0.0f, 0.0f, 0.0f);
 
 	// Bind global (set 0) and shadow (set 2) once — they don't change between draws
 	frame_info.command_buffer.bindDescriptorSets(
@@ -282,27 +320,27 @@ void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
 			);
 		}
 
-		MeshComponent* mesh = d.mesh;
-		auto* mat_ptr = mesh->getMaterial();
-		MaterialAlphaProps alpha_props = mat_ptr ? mat_ptr->getAlphaProps() : MaterialAlphaProps{};
-		float transmission = mat_ptr ? mat_ptr->getMaterialFactors().transmission_factor : 0.0f;
-		bool is_transparent = (alpha_props.alpha_mode == AlphaMode::BLEND) || (transmission > HIGH_TRANSMISSION_THRESHOLD);
+		MaterialAlphaProps alpha_props = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};
 
 		// Set dynamic state
 		if (alpha_props.double_sided)
 			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eNone);
 		else
 			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eBack);
-		frame_info.command_buffer.setDepthWriteEnable(!is_transparent);
+		// No depth writes in the transparent pass. The opaque pass already provides
+		// correct occlusion against opaque geometry.
+		frame_info.command_buffer.setDepthWriteEnable(VK_FALSE);
+		frame_info.command_buffer.setDepthBias(0.0f, 0.0f, 0.0f);
 
 		// Push per-object material constants
 		PbrPushConstantData push{
-			.has_texture = mesh->has_texture,
+			.has_texture = d.mesh->has_texture,
 			.alpha_cutoff = alpha_props.alpha_cutoff,
 			.material_flags = static_cast<uint32_t>(alpha_props.alpha_mode) | (alpha_props.double_sided ? 4u : 0u)
-				| (mat_ptr && mat_ptr->getFlipTexCoordV() ? 8u : 0u)
+				| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? 8u : 0u)
 				| (alpha_props.use_spec_gloss_texture ? 16u : 0u),
-			.instance_offset = d.ssbo_index
+			.instance_offset = d.ssbo_index,
+			.depth_offset = 0.0f
 		};
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
@@ -312,15 +350,14 @@ void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
 		);
 
 		// Bind VBO/IBO (if mesh changed)
-		VeMesh* mesh_ptr = mesh->getMesh();
-		if (mesh_ptr != bound_mesh) {
-			bound_mesh = mesh_ptr;
+		if (d.mesh_ptr != bound_mesh) {
+			bound_mesh = d.mesh_ptr;
 			bound_mesh->bindVertexBuffer(frame_info.command_buffer);
 			bound_mesh->bindIndexBuffer(frame_info.command_buffer);
 		}
 
 		// Single-instance draw (transparent objects not batched, preserve back-to-front order)
-		mesh_ptr->drawIndexed(frame_info.command_buffer, 1, 0);
+		d.mesh_ptr->drawIndexed(frame_info.command_buffer, 1, 0);
 	}
 }
 

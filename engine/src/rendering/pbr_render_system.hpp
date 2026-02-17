@@ -58,13 +58,17 @@ public:
 	}
 
 	const std::vector<InstanceGroup>& getOpaqueGroups() const { return m_opaque_groups; }
+	void setDepthPrePassActive(bool active) { m_depth_prepass_active = active; }
 
 private:
+	bool m_depth_prepass_active = false;
 	void createPipelineLayout(
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		const vk::raii::DescriptorSetLayout& material_set_layout,
 		const vk::raii::DescriptorSetLayout& shadow_set_layout);
 	void createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
+	void renderOpaqueGroup(VeFrameInfo& frame_info, const InstanceGroup& group,
+		VkDescriptorSet& bound_material_set, VeMesh*& bound_mesh) const;
 
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;
@@ -79,6 +83,8 @@ private:
 		VkDescriptorSet material_set;
 		Entity entity;
 		MeshComponent* mesh = nullptr;
+		VeMesh* mesh_ptr = nullptr;         // cached mesh->getMesh() — avoids pointer chase during sort
+		VeMaterial* material_ptr = nullptr;  // cached mesh->getMaterial()
 		float dist_sq = 0.0f;
 		AlphaMode alpha_mode = AlphaMode::ALPHA_OPAQUE;
 		uint32_t ssbo_index = 0;  // index into instance SSBO (set in prepareFrame)

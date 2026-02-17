@@ -27,13 +27,15 @@ class VENGINE_API VeModel {
 public:
 	// Load glTF from path, create meshes and node hierarchy
 	// pool and material_layout can be null for models without textures
-	// extract_lights: if true, parse KHR_lights_punctual and add lights when addToScene is used
+	// extract_lights: parse KHR_lights_punctual + emissive-as-lights when addToScene is used
+	// extract_fixture_lights: name-based fixture extraction (streetlights, lanterns, etc.)
 	// flip_tex_coord_v: when true, materials use flipped v for tex coords
 	static std::unique_ptr<VeModel> load(VeResourceManager& resource_manager,
 	                                    const std::filesystem::path& model_path,
 	                                    VeDescriptorPool* pool = nullptr,
 	                                    VeDescriptorSetLayout* material_layout = nullptr,
 	                                    bool extract_lights = false,
+	                                    bool extract_fixture_lights = false,
 	                                    bool flip_tex_coord_v = false);
 
 	~VeModel();
@@ -71,6 +73,7 @@ public:
 	};
 	const std::vector<ExtractedLight>& getPunctualLights() const { return m_punctual_lights; }
 	const std::vector<ExtractedLight>& getEmissiveLights() const { return m_emissive_lights; }
+	const std::vector<ExtractedLight>& getFixtureLights() const { return m_fixture_lights; }
 
 	VeModel();
 
@@ -78,7 +81,8 @@ private:
 
 	void loadFromGltf(const std::filesystem::path& model_path, VeResourceManager& resource_manager,
 	                  VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout,
-	                  bool extract_lights, bool flip_tex_coord_v = false);
+	                  bool extract_lights, bool extract_fixture_lights,
+	                  bool flip_tex_coord_v = false);
 
 	// Lightweight node data from glTF parsing
 	struct LoadedNode {
@@ -99,6 +103,7 @@ private:
 	std::vector<ResourceHandle<VeMaterial>> m_material_handles;
 	std::vector<ExtractedLight> m_punctual_lights;
 	std::vector<ExtractedLight> m_emissive_lights;
+	std::vector<ExtractedLight> m_fixture_lights;
 
 	static uint32_t s_next_node_id;
 };

@@ -3,6 +3,7 @@
 #include "rendering/depth_prepass_system.hpp"
 #include "asset_paths.hpp"
 #include "scenes/bistro_scene.hpp"
+#include "scenes/gltf_scene.hpp"
 #include "scenes/simple_scene.hpp"
 #include "scenes/sponza_scene.hpp"
 #include <filesystem>
@@ -59,7 +60,7 @@ private:
 
 	// UI context captured during renderUI(), consumed in updateParticles() for example.
 	struct SandboxUIContext : public UIContext {
-		enum class SceneType { NONE = 0, SIMPLE = 1, SPONZA = 2, SPONZA_LOW = 3, BISTRO = 4 };
+		enum class SceneType { NONE = 0, SIMPLE = 1, SPONZA = 2, SPONZA_LOW = 3, BISTRO = 4, GLTF = 5 };
 		SceneType current_scene = SceneType::SIMPLE;
 		RenderMode render_mode = RenderMode::BRDF_MICROFACET;
 
@@ -102,6 +103,8 @@ private:
 
 	void loadScene(SandboxUIContext::SceneType scene_type);
 	void unloadScene();
+
+	std::filesystem::path m_pending_gltf_path;
 
 	std::chrono::steady_clock::time_point m_cpu_start;
 

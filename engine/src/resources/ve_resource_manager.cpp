@@ -62,24 +62,6 @@ ResourceHandle<T>& ResourceHandle<T>::operator=(ResourceHandle&& other) noexcept
 	return *this;
 }
 
-// Get the cached resource pointer (resolved eagerly at construction time).
-template <typename T>
-T* ResourceHandle<T>::get() const {
-	return m_cached;
-}
-
-// Check if the handle refers to a valid resource.
-template <typename T>
-bool ResourceHandle<T>::isValid() const {
-	return m_cached != nullptr;
-}
-
-// Get the resource id.
-template <typename T>
-const std::string& ResourceHandle<T>::getId() const {
-	return m_resource_id;
-}
-
 // Increment the reference count.
 template <typename T>
 void ResourceHandle<T>::addRef() const {

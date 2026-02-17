@@ -40,11 +40,11 @@ public:
 	ResourceHandle(ResourceHandle&& other) noexcept;
 	ResourceHandle& operator=(ResourceHandle&& other) noexcept;
 
-	T* get() const;
-	bool isValid() const;
-	const std::string& getId() const;
+	T* get() const { return m_cached; }
+	bool isValid() const { return m_cached != nullptr; }
+	const std::string& getId() const { return m_resource_id; }
 
-	T* operator->() const { return get(); }
+	T* operator->() const { return m_cached; }
 	explicit operator bool() const { return isValid(); }
 
 private:

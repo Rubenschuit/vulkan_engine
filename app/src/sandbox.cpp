@@ -7,10 +7,13 @@
 #include "sandbox.hpp"
 #include "utils/ve_random.hpp"
 #include <imgui.h>
+#include <imgui_internal.h>
+#include <portable-file-dialogs.h>
 #include <algorithm>
 #include <string>
 #include <vector>
 #include <cstdlib>
+#include <map>
 
 namespace ve {
 
@@ -51,6 +54,17 @@ void Sandbox::loadScene(SandboxUIContext::SceneType scene_type) {
 		case SandboxUIContext::SceneType::BISTRO:
 			VE_LOGD("Loading BistroScene...");
 			m_active_scene = std::make_unique<BistroScene>(m_ve_device, *m_resource_manager, *m_global_pool, *m_material_set_layout, m_paths);
+			break;
+		case SandboxUIContext::SceneType::GLTF:
+			if (m_pending_gltf_path.empty()) {
+				VE_LOGD("Creating empty GLTF Scene");
+				m_active_scene = std::make_unique<GltfScene>(m_ve_device, *m_resource_manager, *m_global_pool, *m_material_set_layout,
+															 &m_default_material_descriptor_set);
+			} else {
+				VE_LOGD("Loading GLTF Scene: " << m_pending_gltf_path);
+				m_active_scene = std::make_unique<GltfScene>(m_ve_device, *m_resource_manager, *m_global_pool, *m_material_set_layout,
+															 m_pending_gltf_path, &m_default_material_descriptor_set);
+			}
 			break;
 		default:
 			return;
@@ -260,6 +274,7 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 			m_ve_renderer.endDepthPrePass(command_buffer);
 		}
 
+		m_pbr_render_system->setDepthPrePassActive(ui_actions.depth_prepass_enabled);
 		m_ve_renderer.beginSceneRender(command_buffer, ui_actions.depth_prepass_enabled);
 
 		m_pbr_render_system->renderOpaque(frame_info);
@@ -358,10 +373,43 @@ void Sandbox::renderAppWindows() {
 				if (ImGui::RadioButton("Bistro", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::BISTRO))) {
 					ui_actions.current_scene = SandboxUIContext::SceneType::BISTRO;
 				}
+				ImGui::Spacing();
+				if (ImGui::Button("New Empty Scene")) {
+					m_pending_gltf_path.clear();
+					ui_actions.current_scene = SandboxUIContext::SceneType::GLTF;
+					m_loaded_scene_type = SandboxUIContext::SceneType::NONE;
+					m_pending_scene_load = SandboxUIContext::SceneType::GLTF;
+				}
+				ImGui::SameLine();
+				if (ImGui::Button("Load GLTF...")) {
+					auto selection = pfd::open_file(
+						"Select GLTF Model", "",
+						{"glTF Files", "*.gltf *.glb"},
+						pfd::opt::none
+					).result();
+					if (!selection.empty()) {
+						m_pending_gltf_path = selection[0];
+						ui_actions.current_scene = SandboxUIContext::SceneType::GLTF;
+						m_loaded_scene_type = SandboxUIContext::SceneType::NONE;
+						m_pending_scene_load = SandboxUIContext::SceneType::GLTF;
+					}
+				}
+				if (m_loaded_scene_type == SandboxUIContext::SceneType::GLTF) {
+					if (ImGui::Button("Add Model...")) {
+						auto selection = pfd::open_file(
+							"Add GLTF Model", "",
+							{"glTF Files", "*.gltf *.glb"},
+							pfd::opt::none
+						).result();
+						if (!selection.empty()) {
+							static_cast<GltfScene*>(m_active_scene.get())->addModel(selection[0]);
+							m_shadow_render_system->invalidateShadowDrawables();
+						}
+					}
+				}
 				ImGui::Separator();
 				ImGui::Text("Scene Settings");
-				ImGui::SliderFloat("Sun Intensity", &ui_actions.sun_intensity, 0.0f, 600000.0f);
-
+				ImGui::SliderFloat("Sun Intensity", &ui_actions.sun_intensity, 0.0f, 300000.0f);
 				ImGui::Separator();
 				if (ImGui::CollapsingHeader("Point Lights")) {
 					if (m_active_scene) {
@@ -387,35 +435,96 @@ void Sandbox::renderAppWindows() {
 								for (auto e : lights) registry.setActive(e, false);
 							}
 						}
+
+						// Partition lights into groups by name prefix (before ": ")
 						const Entity scene_sun = m_active_scene->getSun();
-						for (size_t i = 0; i < lights.size(); i++) {
-							Entity e = lights[i];
+						std::map<std::string, std::vector<Entity>> groups;
+						for (auto e : lights) {
+							const auto& name = registry.getName(e);
+							auto sep = name.find(": ");
+							if (sep != std::string::npos) {
+								groups[name.substr(0, sep)].push_back(e);
+							} else {
+								groups["Scene"].push_back(e);
+							}
+						}
+
+						// Per-light detail UI (reused in both scene and group contexts)
+						auto renderLightDetail = [&](Entity e, size_t idx) {
 							auto* pl = registry.getComponent<PointLightComponent>(e);
 							auto* transform = registry.getComponent<TransformComponent>(e);
-							if (!pl || !transform)
-								continue;
+							if (!pl || !transform) return;
 							ImGui::PushID(static_cast<int>(e.id()));
 							const auto& name = registry.getName(e);
-							const std::string label = name.empty() ? ("Light " + std::to_string(static_cast<unsigned>(i))) : name;
+							const std::string label = name.empty() ? ("Light " + std::to_string(static_cast<unsigned>(idx))) : name;
 							if (ImGui::TreeNode(label.c_str())) {
 								bool active = registry.isActive(e);
 								ImGui::Checkbox("Active", &active);
 								registry.setActive(e, active);
 								ImGui::ColorEdit3("Color", &pl->color.r);
-								ImGui::SliderFloat("Intensity", &pl->intensity, 0.0f, 100000.0f);
+								ImGui::DragFloat("Intensity", &pl->intensity, 1.0f, 0.0f, 5000.0f, "%.1f");
 								if (!scene_sun.isNull() && e == scene_sun)
 									ui_actions.sun_intensity = pl->intensity;
 								glm::vec3 pos = transform->getTranslation();
-								if (ImGui::DragFloat3("Position", &pos.x)) {
+								if (ImGui::DragFloat3("Position", &pos.x, 0.1f)) {
 									transform->setTranslation(pos);
 								}
-
-								static float size = transform->getScale().x;
-								if (ImGui::SliderFloat("Size", &size, 0.1f, 50.0f)) {
-									transform->setScale({size, size, size});
+								float sz = transform->getScale().x;
+								if (ImGui::SliderFloat("Size", &sz, 0.1f, 50.0f)) {
+									transform->setScale({sz, sz, sz});
 								}
 								ImGui::Checkbox("Rotates", &pl->rotates);
 								ImGui::Checkbox("Casts shadow", &pl->casts_shadow);
+								ImGui::TreePop();
+							}
+							ImGui::PopID();
+						};
+
+						// Render "Scene" group lights directly (sun, manually created)
+						auto scene_it = groups.find("Scene");
+						if (scene_it != groups.end()) {
+							for (size_t i = 0; i < scene_it->second.size(); i++)
+								renderLightDetail(scene_it->second[i], i);
+						}
+
+						// Render fixture/imported groups with group controls
+						for (auto& [group_name, group_lights] : groups) {
+							if (group_name == "Scene") continue;
+							ImGui::PushID(group_name.c_str());
+							// Count active lights in group
+							int active_count = 0;
+							for (auto e : group_lights)
+								if (registry.isActive(e)) active_count++;
+							std::string header = group_name + " (" + std::to_string(group_lights.size()) + ")";
+							if (ImGui::TreeNode(header.c_str())) {
+								// Group toggle
+								bool all_active = (active_count == static_cast<int>(group_lights.size()));
+								bool mixed = active_count > 0 && !all_active;
+								if (mixed) {
+									ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
+								}
+								if (ImGui::Checkbox("Enable group", &all_active)) {
+									for (auto e : group_lights) registry.setActive(e, all_active);
+								}
+								if (mixed) {
+									ImGui::PopItemFlag();
+								}
+								// Group intensity slider
+								float avg_intensity = 0.f;
+								for (auto e : group_lights) {
+									auto* pl = registry.getComponent<PointLightComponent>(e);
+									if (pl) avg_intensity += pl->intensity;
+								}
+								avg_intensity /= static_cast<float>(group_lights.size());
+								if (ImGui::DragFloat("Intensity", &avg_intensity, 1.0f, 0.0f, 5000.0f, "%.1f")) {
+									for (auto e : group_lights) {
+										auto* pl = registry.getComponent<PointLightComponent>(e);
+										if (pl) pl->intensity = avg_intensity;
+									}
+								}
+								// Individual lights
+								for (size_t i = 0; i < group_lights.size(); i++)
+									renderLightDetail(group_lights[i], i);
 								ImGui::TreePop();
 							}
 							ImGui::PopID();

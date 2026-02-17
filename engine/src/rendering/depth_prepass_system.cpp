@@ -58,13 +58,6 @@ void DepthPrePassSystem::createPipeline(vk::SampleCountFlagBits sample_count) {
 	// Match scene MSAA sample count (unlike shadow maps which are always 1x)
 	pipeline_config.multisample_info.rasterizationSamples = sample_count;
 
-	// Depth bias: push pre-pass depth slightly further so the main pass eLess test
-	// passes for the same geometry (true_depth < biased_depth).
-	pipeline_config.rasterization_info.depthBiasEnable = VK_TRUE;
-	pipeline_config.rasterization_info.depthBiasConstantFactor = 2.0f;
-	pipeline_config.rasterization_info.depthBiasSlopeFactor = 0.0f;
-	pipeline_config.rasterization_info.depthBiasClamp = 0.0f;
-
 	// Back-face culling default, with dynamic override for double-sided
 	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eBack;
 	pipeline_config.dynamic_state_enables.push_back(vk::DynamicState::eCullMode);
@@ -100,7 +93,9 @@ void DepthPrePassSystem::render(
 	VeMesh* bound_mesh = nullptr;
 
 	for (const auto& group : opaque_groups) {
-		// Skip alpha-masked groups: depth-only shader cannot do alpha test
+		// Skip MASK groups: the depth-only shader cannot do alpha testing, so it would
+		// write depth for transparent areas and block the wall behind from rendering.
+		// MASK geometry renders in a second color pass with eLessOrEqual instead.
 		if (group.alpha_cutoff > 0.0f)
 			continue;
 
