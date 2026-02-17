@@ -14,23 +14,21 @@ SimpleScene::SimpleScene(VeDevice& device, VeResourceManager& resource_manager, 
 }
 
 void SimpleScene::setSunIntensity(float intensity) {
-	auto* pl = m_registry.getComponent<PointLightComponent>(m_sun);
-	if (pl) pl->intensity = intensity;
+	auto* dl = m_registry.getComponent<DirectionalLightComponent>(m_sun);
+	if (dl) dl->intensity = intensity;
 }
 
 float SimpleScene::getSunIntensity() const {
-	const auto* pl = m_registry.getComponent<PointLightComponent>(m_sun);
-	return pl ? pl->intensity : DEFAULT_SUN_INTENSITY;
+	const auto* dl = m_registry.getComponent<DirectionalLightComponent>(m_sun);
+	return dl ? dl->intensity : DEFAULT_SUN_INTENSITY;
 }
 
 void SimpleScene::loadGameObjects(VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths) {
-	// sun light
+	// sun light (directional)
 	{
-		Entity sun = m_registry.createPointLight(DEFAULT_SUN_INTENSITY, 2.0f, glm::vec3(1.0f));
+		Entity sun = m_registry.createDirectionalLight(DEFAULT_SUN_INTENSITY, glm::vec3(0.2f), glm::vec3(0.3f, 0.4f, -1.0f));
 		m_registry.setName(sun, "Sun");
-		m_registry.getComponent<TransformComponent>(sun)->setTranslation({0.0f, 0.0f, 20.0f});
-		m_registry.getComponent<PointLightComponent>(sun)->rotates = false;
-		m_registry.getComponent<PointLightComponent>(sun)->casts_shadow = true;
+		m_registry.getComponent<DirectionalLightComponent>(sun)->casts_shadow = true;
 		m_sun = sun;
 	}
 

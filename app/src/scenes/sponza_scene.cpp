@@ -15,13 +15,13 @@ vk::raii::DescriptorSet& SponzaScene::getDescriptorSet() {
 }
 
 void SponzaScene::setSunIntensity(float intensity) {
-    auto* pl = m_registry.getComponent<PointLightComponent>(m_sun);
-    if (pl) pl->intensity = intensity;
+    auto* dl = m_registry.getComponent<DirectionalLightComponent>(m_sun);
+    if (dl) dl->intensity = intensity;
 }
 
 float SponzaScene::getSunIntensity() const {
-    const auto* pl = m_registry.getComponent<PointLightComponent>(m_sun);
-    return pl ? pl->intensity : DEFAULT_SUN_INTENSITY;
+    const auto* dl = m_registry.getComponent<DirectionalLightComponent>(m_sun);
+    return dl ? dl->intensity : DEFAULT_SUN_INTENSITY;
 }
 
 void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths, const char* variant) {
@@ -62,10 +62,12 @@ void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
         }
     }
 
-    // sponza sun light
+    // sponza sun light (directional)
     {
-        Entity sun = makeLight(DEFAULT_SUN_INTENSITY, 4.0f, glm::vec3(1.0f), "Sun",
-            glm::vec3{0.0f, 50.0f, -140.0f} + sponza_translation, true, true);
+        Entity sun = m_registry.createDirectionalLight(DEFAULT_SUN_INTENSITY, glm::vec3(1.0f),
+            glm::normalize(glm::vec3(0.5f, -1.0f, -3.0f)));
+        m_registry.setName(sun, "Sun");
+        m_registry.getComponent<DirectionalLightComponent>(sun)->casts_shadow = true;
         m_sun = sun;
     }
 

@@ -16,6 +16,7 @@ size_t ComponentTypeIDSystem::m_next_type_id = 0;
 // different static locals so type ID mismatch and getComponent returns nullptr.
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<TransformComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<PointLightComponent>();
+template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<DirectionalLightComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MeshComponent>();
 
 

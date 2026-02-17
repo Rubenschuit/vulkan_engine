@@ -162,6 +162,11 @@ static constexpr float BLENDER_EMISSIVE_FACTOR = 638.0f;
 // Emissive-derived point lights scaling
 static constexpr float EMISSIVE_LIGHT_INTENSITY_SCALE = 20.0f;
 
+// KHR_lights_punctual uses physical units (lux for directional, candela for point).
+// Our engine uses arbitrary intensity values (~1-10 for directional, ~50-200 for point).
+// This scale bridges the gap until we add EV100-based exposure.
+static constexpr float KHR_PUNCTUAL_INTENSITY_SCALE = 1.0f / 1000.0f;
+
 // Build local node matrix in glTF space (column-major: T*R*S).
 static glm::mat4 getNodeMatrixGltf(const tinygltf::Node& node) {
 	if (node.matrix.size() == 16) {
@@ -1386,12 +1391,22 @@ void VeModel::addToScene(Registry& registry,
 		registry.setActive(light, false);  // default OFF (MAX_LIGHTS constraint)
 	}
 	for (const ExtractedLight& L : m_punctual_lights) {
-		if (L.type != ExtractedLightType::Point) continue;
-		Entity light = registry.createPointLight(L.intensity, size, L.color);
-		registry.setName(light, L.name.empty() ? "Light (imported)" : L.name);
-		auto* tc = registry.getComponent<TransformComponent>(light);
-		tc->setTranslation(glm::vec3(wrapper_world * glm::vec4(L.position, 1.0f)));
-		registry.setActive(light, false);  // default OFF
+		float scaled_intensity = L.intensity * KHR_PUNCTUAL_INTENSITY_SCALE;
+		if (L.type == ExtractedLightType::Directional) {
+			// Transform direction by wrapper rotation (ignore translation/scale for directions)
+			glm::vec3 world_dir = glm::normalize(glm::mat3(wrapper_world) * L.direction);
+			Entity light = registry.createDirectionalLight(scaled_intensity, L.color, world_dir);
+			registry.setName(light, L.name.empty() ? "Light (directional)" : L.name);
+			registry.setActive(light, false);  // default OFF
+		} else {
+			Entity light = registry.createPointLight(scaled_intensity, size, L.color);
+			registry.setName(light, L.name.empty() ? "Light (imported)" : L.name);
+			auto* tc = registry.getComponent<TransformComponent>(light);
+			tc->setTranslation(glm::vec3(wrapper_world * glm::vec4(L.position, 1.0f)));
+			auto* plc = registry.getComponent<PointLightComponent>(light);
+			if (plc) plc->range = L.range;
+			registry.setActive(light, false);  // default OFF
+		}
 	}
 	for (const ExtractedLight& L : m_fixture_lights) {
 		Entity light = registry.createPointLight(L.intensity, size, L.color);

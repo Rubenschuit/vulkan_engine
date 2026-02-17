@@ -16,13 +16,13 @@ vk::raii::DescriptorSet& BistroScene::getDescriptorSet() {
 }
 
 void BistroScene::setSunIntensity(float intensity) {
-	auto* pl = m_registry.getComponent<PointLightComponent>(m_sun);
-	if (pl) pl->intensity = intensity;
+	auto* dl = m_registry.getComponent<DirectionalLightComponent>(m_sun);
+	if (dl) dl->intensity = intensity;
 }
 
 float BistroScene::getSunIntensity() const {
-	const auto* pl = m_registry.getComponent<PointLightComponent>(m_sun);
-	return pl ? pl->intensity : DEFAULT_SUN_INTENSITY;
+	const auto* dl = m_registry.getComponent<DirectionalLightComponent>(m_sun);
+	return dl ? dl->intensity : DEFAULT_SUN_INTENSITY;
 }
 
 void BistroScene::loadGameObjects(VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths) {
@@ -42,7 +42,7 @@ void BistroScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
 		);
 		assert(m_bistro_model && "Failed to load Bistro model");
 
-		glm::vec3 root_translation = glm::vec3{0.0f, 0.0f, -40.0f} + bistro_translation;
+		glm::vec3 root_translation = glm::vec3{0.0f, 0.0f, 0.0f} + bistro_translation;
 		glm::vec3 root_rotation = {0.0f, 0.0f, 0.0f};
 		glm::vec3 root_scale = {1.0f, 1.0f, 1.0f};
 		m_bistro_model->addToScene(m_registry, root_translation, root_rotation, root_scale);
@@ -56,14 +56,12 @@ void BistroScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
 		}
 	}
 
-	// Main light
+	// Main light (directional)
 	{
-		Entity sun = m_registry.createPointLight(DEFAULT_SUN_INTENSITY, 4.0f, glm::vec3(1.0f, 1.0f, 1.0f));
+		Entity sun = m_registry.createDirectionalLight(DEFAULT_SUN_INTENSITY, glm::vec3(1.0f),
+			glm::normalize(glm::vec3(-1.0f, -0.5f, -2.5f)));
 		m_registry.setName(sun, "Main light");
-		m_registry.getComponent<TransformComponent>(sun)->setTranslation(glm::vec3{40.0f, 40.0f, 90.0f} + bistro_translation);
-		auto* pl = m_registry.getComponent<PointLightComponent>(sun);
-		pl->rotates = true;
-		pl->casts_shadow = true;
+		m_registry.getComponent<DirectionalLightComponent>(sun)->casts_shadow = true;
 		m_sun = sun;
 	}
 }

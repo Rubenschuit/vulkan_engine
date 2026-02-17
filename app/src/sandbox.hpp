@@ -115,7 +115,7 @@ private:
 	std::unique_ptr<PbrRenderSystem> m_pbr_render_system;
 	std::unique_ptr<AabbDebugRenderSystem> m_aabb_debug_render_system;
 	std::unique_ptr<AxesRenderSystem> m_axes_render_system;
-	std::unique_ptr<PointLightSystem> m_point_light_system;
+	std::unique_ptr<LightSystem> m_light_system;
 	std::unique_ptr<ParticleSystem> m_particle_system;
 	std::unique_ptr<FireworksSystem> m_fireworks_system;
 	std::unique_ptr<ShadowRenderSystem> m_shadow_render_system;

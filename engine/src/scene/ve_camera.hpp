@@ -43,6 +43,10 @@ public:
 	const glm::vec3& getForward() const { return m_forward; }
 	const glm::vec3& getRight() const { return m_right; }
 	const glm::vec3& getUp() const { return m_up; }
+	float getNear() const { return m_z_near; }
+	float getFar() const { return m_z_far; }
+	float getFovY() const { return m_fov_y; }
+	float getAspect() const { return m_aspect_ratio; }
 
 private:
 	void clampPitch();

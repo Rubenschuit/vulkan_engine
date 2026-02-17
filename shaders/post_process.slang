@@ -9,7 +9,9 @@ struct PostProcessPushConstant {
     float exposure;
     int color_space; // 0: SRGB, 1: Extended Linear, 2: HDR10 ST2084
     float bloom_strength;
-	float padding[3];
+    int tone_map_mode; // 0=None, 1=Reinhard, 2=ACES Filmic, 3=PBR Neutral, 4=GT Tonemap
+    float hdr_peak_white;
+    float padding;
     float2 texel_size;
 };
 
@@ -51,6 +53,31 @@ float3 linearToPQ(float3 color) {
     return pow((c1 + c2 * cp) / (1.0 + c3 * cp), m2);
 }
 
+// ACES fitted tone mapping (Stephen Hill fit)
+// sRGB → XYZ → D65_2_D60 → AP1 → RRT_SAT
+static const float3x3 ACESInputMat = {
+    0.59719, 0.35458, 0.04823,
+    0.07600, 0.90834, 0.01566,
+    0.02840, 0.13383, 0.83777
+};
+// ODT_SAT → XYZ → D60_2_D65 → sRGB
+static const float3x3 ACESOutputMat = {
+     1.60475, -0.53108, -0.07367,
+    -0.10208,  1.10813, -0.00605,
+    -0.00327, -0.07276,  1.07602
+};
+float3 RRTAndODTFit(float3 v) {
+    float3 a = v * (v + 0.0245786) - 0.000090537;
+    float3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+    return a / b;
+}
+float3 ACESFitted(float3 color) {
+    color = mul(ACESInputMat, color);
+    color = RRTAndODTFit(color);
+    color = mul(ACESOutputMat, color);
+    return saturate(color);
+}
+
 // Convert BT.709 (sRGB) to BT.2020
 float3 bt709to2020(float3 color) {
     float3x3 m = {
@@ -59,6 +86,51 @@ float3 bt709to2020(float3 color) {
         0.0163914, 0.0880132, 0.8955954
     };
     return mul(m, color);
+}
+
+// Khronos PBR Neutral tone mapping (SDR, preserves PBR material colors)
+// https://github.com/KhronosGroup/ToneMapping/blob/main/PBR_Neutral/pbrNeutral.glsl
+float3 PBRNeutralToneMapping(float3 color) {
+    const float start_compression = 0.8 - 0.04;
+    const float desaturation = 0.15;
+    float x = min(color.r, min(color.g, color.b));
+    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    color -= offset;
+    float peak = max(color.r, max(color.g, color.b));
+    if (peak < start_compression)
+		return color;
+    const float d = 1.0 - start_compression;
+    float new_peak = 1.0 - d * d / (peak + d - start_compression);
+    color *= new_peak / peak;
+    float g = 1.0 - 1.0 / (desaturation * (peak - new_peak) + 1.0);
+    return lerp(color, float3(new_peak), g);
+}
+
+// GT/Uchimura tone mapping (Hajime Uchimura, Polyphony Digital)
+// P = peak brightness: 1.0 for SDR, >1.0 for HDR
+// https://www.desmos.com/calculator/gslcdxvipg
+float3 GTTonemap(float3 x, float P) {
+    const float a = 1.0;  // contrast
+    const float m = 0.22; // linear section start
+    const float l = 0.4;  // linear section length
+    const float c = 1.33; // black (toe strength)
+    const float b = 0.0;  // pedestal
+
+    float l0 = ((P - m) * l) / a;
+    float S0 = m + l0;
+    float S1 = m + a * l0;
+    float C2 = (a * P) / (P - S1);
+    float CP = -C2 / P;
+
+    float3 w0 = 1.0 - smoothstep(0.0, m, x);
+    float3 w2 = step(m + l0, x);
+    float3 w1 = 1.0 - w0 - w2;
+
+    float3 T = m * pow(x / m, c) + b;                     // toe
+    float3 L = m + a * (x - m);                           // linear section
+    float3 S = P - (P - S1) * exp(CP * (x - S0));         // shoulder → P
+
+    return T * w0 + L * w1 + S * w2;
 }
 
 [shader("fragment")]
@@ -99,20 +171,25 @@ float4 fragMain(VertexOutput input) : SV_Target {
         color += bloom * push.bloom_strength;
     }
 
-    if (push.color_space == 0) {
-        // SDR (SRGB Nonlinear)
-        // Keep it in [0, 1] range
-        color = color / (color + float3(1.0));
-        // Hardware handles gamma correction for _SRGB swapchain formats
-    } else if (push.color_space == 1) {
-        // HDR (Extended SRGB Linear)
-        // We can allow values > 1.0.
+    // Tone mapping
+    // Reinhard, ACES, and PBR Neutral are SDR-only (output clamped to [0,1]);
+    // fall back to GT tonemap in HDR modes to preserve headroom.
+    bool is_hdr = push.color_space != 0;
+    if (push.tone_map_mode == 1)
+        color = is_hdr ? GTTonemap(color, push.hdr_peak_white) : color / (color + float3(1.0)); // Reinhard (SDR) / GT (HDR)
+    else if (push.tone_map_mode == 2)
+        color = is_hdr ? GTTonemap(color, push.hdr_peak_white) : ACESFitted(color);    // ACES (SDR) / GT (HDR)
+    else if (push.tone_map_mode == 3)
+        color = is_hdr ? GTTonemap(color, push.hdr_peak_white) : PBRNeutralToneMapping(color); // PBR Neutral (SDR) / GT (HDR)
+    else if (push.tone_map_mode == 4)
+        color = GTTonemap(color, is_hdr ? push.hdr_peak_white : 1.0);                  // GT Tonemap
+
+    // Color space output
+    if (push.color_space == 1) {
+        // HDR (Extended SRGB Linear) — already tone mapped above
     } else if (push.color_space == 2) {
         // HDR (HDR10 ST2084 / PQ)
-        // Convert from sRGB/BT.709 primaries to BT.2020 primaries
         color = bt709to2020(color);
-
-        // Map scene 1.0 brightness to a reasonable value in nits.
         color = linearToPQ(color * 200.0 / 10000.0);
     }
 

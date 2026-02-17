@@ -52,6 +52,8 @@ struct VENGINE_API UIContext {
 	int blur_radius = 0;
 	float blur_strength = 1.0f;
 	float exposure = 1.0f;
+	int tone_map_mode = TONEMAP_NONE;
+	float hdr_peak_white = 4.0f;
 	bool bloom_enabled = true;
 	float bloom_strength = 0.01f;
 

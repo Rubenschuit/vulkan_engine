@@ -21,6 +21,7 @@ public:
 
 	vk::raii::DescriptorSet& getDescriptorSet() override;
 	Type getType() const override { return Type::PBR; }
+	glm::vec4 getDefaultAmbient() const override { return {1.0f, 1.0f, 1.0f, 0.05f}; }
 
 	void setSunIntensity(float intensity) override;
 	float getSunIntensity() const override;
@@ -29,7 +30,7 @@ public:
 private:
 	void loadGameObjects(VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths);
 
-	static constexpr float DEFAULT_SUN_INTENSITY = 4000.0f;
+	static constexpr float DEFAULT_SUN_INTENSITY = 5.0f;
 
 	std::unique_ptr<VeModel> m_bistro_model;
 	ResourceHandle<VeMaterial> m_default_material_handle;

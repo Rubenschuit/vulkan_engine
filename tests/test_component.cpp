@@ -12,17 +12,21 @@ TEST_CASE("ComponentTypeIDSystem assigns unique IDs per type", "[component][type
 	size_t id_b = ve::Component::getTypeID<TestComponentB>();
 	size_t id_transform = ve::Component::getTypeID<ve::TransformComponent>();
 	size_t id_point_light = ve::Component::getTypeID<ve::PointLightComponent>();
+	size_t id_dir_light = ve::Component::getTypeID<ve::DirectionalLightComponent>();
 	size_t id_mesh = ve::Component::getTypeID<ve::MeshComponent>();
 
 	REQUIRE(id_a != id_b);
 	REQUIRE(id_a != id_transform);
 	REQUIRE(id_b != id_transform);
 	REQUIRE(id_transform != id_point_light);
+	REQUIRE(id_point_light != id_dir_light);
+	REQUIRE(id_dir_light != id_mesh);
 	REQUIRE(id_point_light != id_mesh);
 
 	// Same type returns same ID
 	REQUIRE(ve::Component::getTypeID<TestComponentA>() == id_a);
 	REQUIRE(ve::Component::getTypeID<ve::TransformComponent>() == id_transform);
+	REQUIRE(ve::Component::getTypeID<ve::DirectionalLightComponent>() == id_dir_light);
 }
 
 TEST_CASE("Registry getComponent returns nullptr for missing component", "[registry][component]") {
@@ -44,6 +48,19 @@ TEST_CASE("Registry removeComponent", "[registry][component]") {
 	// Remove it
 	registry.removeComponent<ve::PointLightComponent>(e);
 	REQUIRE(registry.getComponent<ve::PointLightComponent>(e) == nullptr);
+}
+
+TEST_CASE("Registry DirectionalLightComponent add/remove", "[registry][component]") {
+	ve::Registry registry;
+	auto e = registry.createEntity("test");
+
+	auto& dl = registry.addComponent<ve::DirectionalLightComponent>(e);
+	REQUIRE(registry.getComponent<ve::DirectionalLightComponent>(e) == &dl);
+	REQUIRE(dl.getEntity() == e);
+	REQUIRE(dl.getRegistry() == &registry);
+
+	registry.removeComponent<ve::DirectionalLightComponent>(e);
+	REQUIRE(registry.getComponent<ve::DirectionalLightComponent>(e) == nullptr);
 }
 
 TEST_CASE("Component context is set when added via Registry", "[component][context]") {

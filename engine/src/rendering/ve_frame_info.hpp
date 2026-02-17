@@ -20,8 +20,8 @@ class MeshComponent;
 // Per-instance transform data uploaded to the instance SSBO each frame.
 // Indexed by gl_InstanceIndex (SV_InstanceID in Slang) in vertex shaders.
 struct InstanceData {
-	glm::mat4 transform;            // 64 bytes — world transform
-	glm::mat3x4 normal_transform;   // 48 bytes — normal matrix (3 columns packed as vec4)
+	alignas(16) glm::mat4 transform;            // 64 bytes — world transform
+	alignas(16) glm::mat3x4 normal_transform;   // 48 bytes — normal matrix (3 columns packed as vec4)
 };
 static_assert(sizeof(InstanceData) == 112, "InstanceData must be 112 bytes for SSBO alignment");
 
@@ -33,15 +33,20 @@ struct VisibleObject {
 };
 
 struct PointLight {
-	glm::vec4 position;
-	glm::vec4 color; // w indicates light intensity
+	alignas(16) glm::vec4 position; // xyz = world position, w = range (0 = infinite)
+	alignas(16) glm::vec4 color;    // xyz = color * intensity, w = intensity
+};
+
+struct DirectionalLight {
+	alignas(16) glm::vec4 direction;  // xyz = direction toward surface, w = unused
+	alignas(16) glm::vec4 color;      // xyz = color * intensity, w = intensity
 };
 
 struct ShadowLight {
-	glm::mat4 light_view;
-	glm::mat4 light_proj;
-	glm::mat4 shadow_matrix;        // pre-computed bias * light_proj * light_view
-	glm::vec4 light_index_padding;  // x = light_index, yzw = padding (ensures 16-byte alignment)
+	alignas(16) glm::mat4 light_view;
+	alignas(16) glm::mat4 light_proj;
+	alignas(16) glm::mat4 shadow_matrix;        // pre-computed bias * light_proj * light_view
+	alignas(16) glm::vec4 light_index_padding;  // x = light_index, y = type (0=point, 1=directional), zw = padding
 };
 
 enum class RenderMode : uint32_t {
@@ -64,13 +69,23 @@ enum class Topology : uint32_t {
 	LINE_LIST = 1,
 };
 
+enum ToneMapMode : int {
+	TONEMAP_NONE         = 0,
+	TONEMAP_REINHARD     = 1,
+	TONEMAP_ACES         = 2,
+	TONEMAP_PBR_NEUTRAL  = 3,
+	TONEMAP_GT           = 4,
+};
+
 struct PostProcessPushConstant {
 	int blur_radius = 0; // 0 means no blur
 	float blur_strength = 1.0f;
 	float exposure = 1.0f;
 	int color_space = 0; // 0: SRGB, 1: Extended Linear, 2: HDR10 ST2084
 	float bloom_strength = 0.01f;
-	float padding[3];
+	int tone_map_mode = TONEMAP_NONE;
+	float hdr_peak_white = 4.0f; // GT tonemap peak brightness in scene-linear units (HDR only)
+	float padding;
 	glm::vec2 texel_size;
 };
 
@@ -83,19 +98,25 @@ struct BloomUpsamplePushConstant {
 };
 
 struct UniformBufferObject {
-	glm::mat4 view;
-	glm::mat4 proj;
-	glm::mat4 projection_view;
-	glm::vec4 camera_position;
-	glm::vec4 ambient_light_color = DEFAULT_AMBIENT_LIGHT_COLOR;
-	PointLight point_lights[ve::MAX_LIGHTS]; // reserved for MAX_LIGHTS point lights
-	ShadowLight shadow_lights[ve::MAX_SHADOW_LIGHTS]; // reserved for MAX_SHADOW_LIGHTS shadow-casting lights
-	uint32_t num_lights = 0; // actual number of point lights ( <= MAX_LIGHTS)
-	uint32_t num_shadow_lights = 0; // actual number of shadow-casting lights ( <= MAX_SHADOW_LIGHTS)
-	RenderMode render_mode = RenderMode::BRDF;
-	ShadowMode shadow_mode = ShadowMode::REGULAR;
-	float shadow_bias = ve::SHADOW_BIAS;
+	alignas(16) glm::mat4 view;
+	alignas(16) glm::mat4 proj;
+	alignas(16) glm::mat4 projection_view;
+	alignas(16) glm::vec4 camera_position;
+	alignas(16) glm::vec4 ambient_light_color = DEFAULT_AMBIENT_LIGHT_COLOR;
+	alignas(16) PointLight point_lights[ve::MAX_LIGHTS];
+	alignas(16) ShadowLight shadow_lights[ve::MAX_SHADOW_LIGHTS];
+	alignas(4)  uint32_t num_lights = 0;
+	alignas(4)  uint32_t num_shadow_lights = 0;
+	alignas(4)  RenderMode render_mode = RenderMode::BRDF;
+	alignas(4)  ShadowMode shadow_mode = ShadowMode::REGULAR;
+	alignas(4)  float shadow_bias = ve::SHADOW_BIAS;
+	alignas(4)  uint32_t num_dir_lights = 0;
+	alignas(16) DirectionalLight dir_lights[ve::MAX_DIR_LIGHTS];
 };
+static_assert(offsetof(UniformBufferObject, dir_lights) % 16 == 0,
+	"dir_lights must be 16-byte aligned for GPU UBO layout");
+static_assert(sizeof(PostProcessPushConstant) == 40,
+	"PostProcessPushConstant size must match shader push constant layout");
 
 struct VeFrameInfo {
 	vk::raii::DescriptorSet& global_descriptor_set;

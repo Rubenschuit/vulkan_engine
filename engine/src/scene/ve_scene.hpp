@@ -1,5 +1,6 @@
 #pragma once
 #include "ve_export.hpp"
+#include "ve_config.hpp"
 #include "vulkan/ve_device.hpp"
 #include "scene/ve_registry.hpp"
 #include "resources/ve_material_properties.hpp"
@@ -32,6 +33,9 @@ public:
     virtual void setSunIntensity(float intensity) { (void)intensity; }
     // Entity of the scene sun (for UI sync). Null if no sun.
     virtual Entity getSun() const { return Entity::null(); }
+
+    // Per-scene ambient light defaults (color RGB, intensity in w)
+    virtual glm::vec4 getDefaultAmbient() const { return DEFAULT_AMBIENT_LIGHT_COLOR; }
 
 protected:
     VeDevice& m_device;

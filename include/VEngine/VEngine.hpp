@@ -34,7 +34,7 @@
 #include "rendering/simple_render_system.hpp"
 #include "rendering/aabb_debug_render_system.hpp"
 #include "rendering/axes_render_system.hpp"
-#include "rendering/point_light_system.hpp"
+#include "rendering/light_system.hpp"
 #include "rendering/particle_system.hpp"
 #include "rendering/skybox_render_system.hpp"
 #include "rendering/shadow_render_system.hpp"

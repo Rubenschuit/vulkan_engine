@@ -1,6 +1,7 @@
 #define PI 3.1415926536
 #define MAX_LIGHTS 160
 #define MAX_SHADOW_LIGHTS 3
+#define MAX_DIR_LIGHTS 4
 
 struct VertexInput {
 	float3 in_pos : POSITION;
@@ -13,11 +14,16 @@ struct PointLight {
 	float4 color; // .w = intensity
 };
 
+struct DirectionalLight {
+	float4 direction;  // xyz = direction toward surface, w = unused
+	float4 color;      // xyz = color * intensity, w = intensity
+};
+
 struct ShadowLight {
 	float4x4 light_view;
 	float4x4 light_proj;
 	float4x4 shadow_matrix;
-	float4 light_index_padding; // x = light_index, yzw = padding
+	float4 light_index_padding; // x = light_index, y = type (0=point, 1=directional), zw = padding
 };
 
 // Reminder: keep this in sync with the RenderMode enum in ve_frame_info.hpp
@@ -49,6 +55,10 @@ struct UniformBuffer {
 	uint32_t render_mode; // see RenderMode enum
 	uint32_t shadow_mode;
 	float shadow_bias;
+	uint32_t num_dir_lights;
+	float _pad_dir_0;
+	float _pad_dir_1;
+	DirectionalLight dir_lights[MAX_DIR_LIGHTS];
 };
 [vk::binding(0, 0)] // binding 0, set 0
 ConstantBuffer<UniformBuffer> ubo;
@@ -198,25 +208,31 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		return base_color;
 	}
 
-	// Create mapping from light index to shadow term (defaults to 1.0 = no shadow)
-	float shadow_terms[MAX_LIGHTS]; // MAX_LIGHTS
-	for (uint32_t i = 0; i < ubo.num_lights; i++) {
-		shadow_terms[i] = 1.0;
-	}
+	// Shadow terms for point lights and directional lights (default 1.0 = no shadow)
+	float point_shadow_terms[MAX_LIGHTS];
+	float dir_shadow_terms[MAX_DIR_LIGHTS];
+	for (uint32_t i = 0; i < ubo.num_lights; i++) point_shadow_terms[i] = 1.0;
+	for (uint32_t i = 0; i < ubo.num_dir_lights; i++) dir_shadow_terms[i] = 1.0;
 
 	// Calculate shadows for shadow-casting lights
 	if (ubo.shadow_mode != ShadowMode::DISABLED) {
 		for (uint32_t shadow_idx = 0; shadow_idx < ubo.num_shadow_lights; shadow_idx++) {
 			uint32_t light_idx = uint32_t(ubo.shadow_lights[shadow_idx].light_index_padding.x);
+			float is_directional = ubo.shadow_lights[shadow_idx].light_index_padding.y;
 
+			float shadow;
 			if (ubo.shadow_mode == ShadowMode::REGULAR) {
-				shadow_terms[light_idx] = calculateShadowTerm(shadow_idx,
+				shadow = calculateShadowTerm(shadow_idx,
 					in_vert.shadow_coord[shadow_idx] / in_vert.shadow_coord[shadow_idx].w, float2(0.0, 0.0));
-			}
-			else if (ubo.shadow_mode == ShadowMode::PCF) {
-				shadow_terms[light_idx] = calculateShadowPCF(shadow_idx,
+			} else {
+				shadow = calculateShadowPCF(shadow_idx,
 					in_vert.shadow_coord[shadow_idx] / in_vert.shadow_coord[shadow_idx].w);
 			}
+
+			if (is_directional > 0.5)
+				dir_shadow_terms[light_idx] = shadow;
+			else
+				point_shadow_terms[light_idx] = shadow;
 		}
 	}
 
@@ -224,23 +240,53 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	float3 diffuse_light = ubo.ambient_light_color.xyz; // already pre-multiplied by intensity on CPU
 	float3 specular_light = float3(0.0, 0.0, 0.0);
 	float3 view_dir = normalize(ubo.camera_position.xyz - in_vert.frag_pos_world);
+
+	// Point lights
 	for (uint32_t i = 0; i < ubo.num_lights; i++) {
-		float3 light_dir = ubo.point_lights[i].position.xyz - in_vert.frag_pos_world; // not normalized for attenuation calculation
+		float3 light_dir = ubo.point_lights[i].position.xyz - in_vert.frag_pos_world;
 		float3 L = normalize(light_dir);
 		float NdotL = max(dot(normal, L), 0.0);
 
 		if (NdotL <= 0.0)
 			continue;
 
-		float attenuation = 1.0 / (dot(light_dir, light_dir));
-		float3 light_color = ubo.point_lights[i].color.xyz * attenuation; // color already contains intensity
-		diffuse_light += light_color * NdotL * shadow_terms[i];
+		// KHR_lights_punctual attenuation
+		float distance_sq = dot(light_dir, light_dir);
+		float range = ubo.point_lights[i].position.w;
+		float attenuation;
+		if (range > 0.0) {
+			float dist = sqrt(distance_sq);
+			float ratio = dist / range;
+			float ratio2 = ratio * ratio;
+			float ratio4 = ratio2 * ratio2;
+			float window = clamp(1.0 - ratio4, 0.0, 1.0);
+			attenuation = (window * window) / max(distance_sq, 0.0001);
+		} else {
+			attenuation = 1.0 / max(distance_sq, 0.0001);
+		}
+		float3 light_color = ubo.point_lights[i].color.xyz * attenuation;
+		diffuse_light += light_color * NdotL * point_shadow_terms[i];
 
 		float3 H = normalize(L + view_dir);
 		float blinn = dot(normal, H);
 		blinn = clamp(blinn, 0.0, 1.0);
 		blinn = pow(blinn, 256.0);
-		specular_light += light_color * blinn * shadow_terms[i];
+		specular_light += light_color * blinn * point_shadow_terms[i];
+	}
+
+	// Directional lights (no distance attenuation)
+	for (uint32_t i = 0; i < ubo.num_dir_lights; i++) {
+		float3 L = normalize(-ubo.dir_lights[i].direction.xyz);
+		float NdotL = max(dot(normal, L), 0.0);
+		if (NdotL <= 0.0) continue;
+
+		float3 light_color = ubo.dir_lights[i].color.xyz;
+		diffuse_light += light_color * NdotL * dir_shadow_terms[i];
+
+		float3 H = normalize(L + view_dir);
+		float blinn = clamp(dot(normal, H), 0.0, 1.0);
+		blinn = pow(blinn, 256.0);
+		specular_light += light_color * blinn * dir_shadow_terms[i];
 	}
 
 	float3 final_color = base_color.rgb * diffuse_light + specular_light * base_color.rgb;

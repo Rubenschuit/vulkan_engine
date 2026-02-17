@@ -38,9 +38,10 @@ void Registry::destroyEntity(Entity e) {
 	uint32_t idx = e.index();
 
 	// Remove all components
-	if (m_transforms.has(idx))   m_transforms.remove(idx);
-	if (m_meshes.has(idx))       m_meshes.remove(idx);
-	if (m_point_lights.has(idx)) m_point_lights.remove(idx);
+	if (m_transforms.has(idx))        m_transforms.remove(idx);
+	if (m_meshes.has(idx))            m_meshes.remove(idx);
+	if (m_point_lights.has(idx))      m_point_lights.remove(idx);
+	if (m_directional_lights.has(idx)) m_directional_lights.remove(idx);
 
 	// Detach from hierarchy: unlink from parent's child list
 	auto& h = m_hierarchy[idx];
@@ -270,12 +271,23 @@ Entity Registry::createPointLight(float intensity, float radius, glm::vec3 color
 	return e;
 }
 
+Entity Registry::createDirectionalLight(float intensity, glm::vec3 color, glm::vec3 direction) {
+	Entity e = createGameObject();
+	auto& dl = addComponent<DirectionalLightComponent>(e);
+	dl.intensity = intensity;
+	dl.color = color;
+	dl.direction = glm::normalize(direction);
+	dl.casts_shadow = false;
+	return e;
+}
+
 // ── Bulk operations ─────────────────────────────────────────────────────────
 
 void Registry::clear() {
 	m_transforms.clear();
 	m_meshes.clear();
 	m_point_lights.clear();
+	m_directional_lights.clear();
 	m_meta.clear();
 	m_hierarchy.clear();
 	m_world_cache.clear();

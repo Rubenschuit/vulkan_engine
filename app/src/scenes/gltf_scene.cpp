@@ -53,22 +53,20 @@ vk::raii::DescriptorSet& GltfScene::getDescriptorSet() {
 }
 
 void GltfScene::setSunIntensity(float intensity) {
-	auto* pl = m_registry.getComponent<PointLightComponent>(m_sun);
-	if (pl) pl->intensity = intensity;
+	auto* dl = m_registry.getComponent<DirectionalLightComponent>(m_sun);
+	if (dl) dl->intensity = intensity;
 }
 
 float GltfScene::getSunIntensity() const {
-	const auto* pl = m_registry.getComponent<PointLightComponent>(m_sun);
-	return pl ? pl->intensity : DEFAULT_SUN_INTENSITY;
+	const auto* dl = m_registry.getComponent<DirectionalLightComponent>(m_sun);
+	return dl ? dl->intensity : DEFAULT_SUN_INTENSITY;
 }
 
 void GltfScene::createSunLight() {
-	m_sun = m_registry.createPointLight(DEFAULT_SUN_INTENSITY, 4.0f, glm::vec3(1.0f, 1.0f, 1.0f));
+	m_sun = m_registry.createDirectionalLight(DEFAULT_SUN_INTENSITY, glm::vec3(1.0f),
+		glm::normalize(glm::vec3(0.0f, -10.0f, -40.0f)));
 	m_registry.setName(m_sun, "Sun");
-	m_registry.getComponent<TransformComponent>(m_sun)->setTranslation({0.0f, 10.0f, 40.0f});
-	auto* sun_pl = m_registry.getComponent<PointLightComponent>(m_sun);
-	sun_pl->rotates = true;
-	sun_pl->casts_shadow = true;
+	m_registry.getComponent<DirectionalLightComponent>(m_sun)->casts_shadow = true;
 }
 
 } // namespace ve

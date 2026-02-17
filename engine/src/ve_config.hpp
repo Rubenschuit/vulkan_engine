@@ -7,9 +7,10 @@
 namespace ve {
 
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
-constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.016f); // w indicates light intensity
+constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.04f); // w indicates light intensity
 constexpr uint32_t MAX_LIGHTS = 160; // requirded for UBO alignment
 constexpr uint32_t MAX_SHADOW_LIGHTS = 3; // Maximum number of shadow-casting lights (independent of MAX_LIGHTS)
+constexpr uint32_t MAX_DIR_LIGHTS = 4; // Maximum number of directional lights
 
 constexpr bool MSAA_ENABLED = true;
 #ifdef __APPLE__
@@ -21,6 +22,7 @@ constexpr bool MSAA_ENABLED = true;
 // Shadow mapping configuration
 constexpr uint32_t SHADOW_MAP_RESOLUTION = 2048*2;
 constexpr float SHADOW_BIAS = 0.0001f;
+constexpr float DIR_SHADOW_MAX_DISTANCE = 300.0f; // Max distance from camera for directional light shadows
 
 // Central list of required Vulkan device extensions
 inline const std::vector<const char*> REQUIRED_DEVICE_EXTENSIONS = {

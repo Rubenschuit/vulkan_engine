@@ -260,6 +260,42 @@ TEST_CASE("Registry point light pool iteration", "[ecs][registry]") {
 	REQUIRE(intensity_sum == 3.0f);
 }
 
+TEST_CASE("Registry createDirectionalLight adds Transform + DirectionalLight", "[ecs][registry]") {
+	ve::Registry reg;
+	ve::Entity e = reg.createDirectionalLight(10.0f, {1.0f, 0.5f, 0.0f}, {0.0f, -1.0f, 0.0f});
+
+	REQUIRE(reg.hasComponent<ve::TransformComponent>(e));
+	REQUIRE(reg.hasComponent<ve::DirectionalLightComponent>(e));
+	REQUIRE(!reg.hasComponent<ve::PointLightComponent>(e));
+
+	auto* dl = reg.getComponent<ve::DirectionalLightComponent>(e);
+	REQUIRE(dl->intensity == 10.0f);
+	REQUIRE(dl->color == glm::vec3(1.0f, 0.5f, 0.0f));
+	REQUIRE(dl->direction == glm::vec3(0.0f, -1.0f, 0.0f));
+}
+
+TEST_CASE("Registry directional light pool iteration", "[ecs][registry]") {
+	ve::Registry reg;
+
+	reg.createGameObject();
+	reg.createDirectionalLight(3.0f);
+	reg.createPointLight(1.0f, 1.0f);
+	reg.createDirectionalLight(7.0f);
+	reg.createGameObject();
+
+	auto& dl_pool = reg.directionalLights();
+	REQUIRE(dl_pool.size() == 2);
+
+	float intensity_sum = 0.0f;
+	for (uint32_t i = 0; i < dl_pool.size(); i++) {
+		intensity_sum += dl_pool.data()[i].intensity;
+	}
+	REQUIRE(intensity_sum == 10.0f);
+
+	// Point lights should be unaffected
+	REQUIRE(reg.pointLights().size() == 1);
+}
+
 // ── Registry: hierarchy ─────────────────────────────────────────────────────
 
 TEST_CASE("Registry setParent and child iteration", "[ecs][registry][hierarchy]") {

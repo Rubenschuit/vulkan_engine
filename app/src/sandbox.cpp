@@ -72,6 +72,9 @@ void Sandbox::loadScene(SandboxUIContext::SceneType scene_type) {
 	m_loaded_scene_type = scene_type;
 	m_shadow_render_system->invalidateShadowDrawables();
 	ui_actions.sun_intensity = m_active_scene->getSunIntensity();
+	glm::vec4 ambient = m_active_scene->getDefaultAmbient();
+	ui_actions.ambient_light_color = glm::vec3(ambient);
+	ui_actions.ambient_light_intensity = ambient.w;
 	VE_LOGD("Scene loaded successfully.");
 }
 
@@ -149,7 +152,9 @@ VeFrameInfo Sandbox::update() {
 			ui_actions.exposure,
 			color_space_type,
 			ui_actions.bloom_enabled ? ui_actions.bloom_strength : 0.0f,
-			{0.0f, 0.0f, 0.0f}, // padding
+			ui_actions.tone_map_mode,
+			ui_actions.hdr_peak_white,
+			0.0f, // padding
 			texel_size
 		},
 		.instance_data = static_cast<InstanceData*>(m_instance_buffers[current_frame]->getMappedMemory()),
@@ -184,7 +189,7 @@ VeFrameInfo Sandbox::update() {
 	ubo.render_mode = ui_actions.render_mode;
 	ubo.shadow_mode = ui_actions.shadow_mode;
 	ubo.ambient_light_color = glm::vec4(ui_actions.ambient_light_color, ui_actions.ambient_light_intensity);
-	m_point_light_system->updateUniformBuffer(frame_info, ubo); // update UBO with point light data
+	m_light_system->updateUniformBuffer(frame_info, ubo); // update UBO with point light data
 	m_shadow_render_system->updateUniformBuffer(current_frame, ubo); // update internal shadow UBO with light data from main UBO
 	this->updateUniformBuffer(current_frame, ubo); // view/proj/camera location in application base class
 
@@ -287,7 +292,7 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	if (ui_actions.show_aabb_debug) {
 		m_aabb_debug_render_system->render(frame_info);
 	}
-	m_point_light_system->render(frame_info);
+	m_light_system->render(frame_info);
 	m_fireworks_system->render(frame_info);
 
 
@@ -333,7 +338,7 @@ void Sandbox::recreatePipelines() {
 	m_bloom_system->recreateResources(extent, m_ve_renderer.getResolveTargetImageView());
 
 	m_simple_render_system->recreatePipeline(offscreen_format, sample_count);
-	m_point_light_system->recreatePipeline(offscreen_format, sample_count);
+	m_light_system->recreatePipeline(offscreen_format, sample_count);
 	m_pbr_render_system->recreatePipeline(offscreen_format, sample_count);
 	m_aabb_debug_render_system->recreatePipeline(offscreen_format, sample_count);
 	m_axes_render_system->recreatePipeline(offscreen_format, sample_count);
@@ -409,125 +414,163 @@ void Sandbox::renderAppWindows() {
 				}
 				ImGui::Separator();
 				ImGui::Text("Scene Settings");
-				ImGui::SliderFloat("Sun Intensity", &ui_actions.sun_intensity, 0.0f, 300000.0f);
+				ImGui::SliderFloat("Sun Intensity", &ui_actions.sun_intensity, 0.0f, 20.0f);
 				ImGui::Separator();
-				if (ImGui::CollapsingHeader("Point Lights")) {
+				if (ImGui::CollapsingHeader("Lights")) {
 					if (m_active_scene) {
 						auto& registry = m_active_scene->getRegistry();
+						const Entity scene_sun = m_active_scene->getSun();
+
+						// --- Directional Lights ---
+						auto& dl_pool = registry.directionalLights();
+						if (dl_pool.size() > 0) {
+							ImGui::Text("Directional Lights");
+							ImGui::Separator();
+							for (uint32_t i = 0; i < dl_pool.size(); i++) {
+								Entity e = registry.entityFromIndex(dl_pool.entityAt(i));
+								auto& dl = dl_pool.data()[i];
+								ImGui::PushID(static_cast<int>(e.id()));
+								const auto& name = registry.getName(e);
+								const std::string label = name.empty() ? ("Dir Light " + std::to_string(i)) : name;
+								if (ImGui::TreeNode(label.c_str())) {
+									bool active = registry.isActive(e);
+									ImGui::Checkbox("Active", &active);
+									registry.setActive(e, active);
+									ImGui::ColorEdit3("Color", &dl.color.r);
+									ImGui::DragFloat("Intensity", &dl.intensity, 0.1f, 0.0f, 20.0f, "%.2f");
+									if (!scene_sun.isNull() && e == scene_sun)
+										ui_actions.sun_intensity = dl.intensity;
+									ImGui::DragFloat3("Direction", &dl.direction.x, 0.01f, -1.0f, 1.0f);
+									dl.direction = glm::normalize(dl.direction);
+									ImGui::Checkbox("Casts shadow", &dl.casts_shadow);
+									ImGui::TreePop();
+								}
+								ImGui::PopID();
+							}
+							ImGui::Spacing();
+						}
+
+						// --- Point Lights ---
 						auto& pl_pool = registry.pointLights();
 
-						// Collect light entities sorted by id for stable UI order
-						std::vector<Entity> lights;
-						lights.reserve(pl_pool.size());
-						for (uint32_t i = 0; i < pl_pool.size(); i++) {
-							Entity e = registry.entityFromIndex(pl_pool.entityAt(i));
-							if (registry.hasComponent<TransformComponent>(e))
-								lights.push_back(e);
-						}
-						std::sort(lights.begin(), lights.end());
+						if (pl_pool.size() > 0) {
+							ImGui::Text("Point Lights");
+							ImGui::Separator();
 
-						if (!lights.empty()) {
-							if (ImGui::Button("All on")) {
-								for (auto e : lights) registry.setActive(e, true);
+							// Collect light entities sorted by id for stable UI order
+							std::vector<Entity> lights;
+							lights.reserve(pl_pool.size());
+							for (uint32_t i = 0; i < pl_pool.size(); i++) {
+								Entity e = registry.entityFromIndex(pl_pool.entityAt(i));
+								if (registry.hasComponent<TransformComponent>(e))
+									lights.push_back(e);
 							}
-							ImGui::SameLine();
-							if (ImGui::Button("All off")) {
-								for (auto e : lights) registry.setActive(e, false);
+							std::sort(lights.begin(), lights.end());
+
+							if (!lights.empty()) {
+								if (ImGui::Button("All on")) {
+									for (auto e : lights) registry.setActive(e, true);
+								}
+								ImGui::SameLine();
+								if (ImGui::Button("All off")) {
+									for (auto e : lights) registry.setActive(e, false);
+								}
 							}
-						}
 
-						// Partition lights into groups by name prefix (before ": ")
-						const Entity scene_sun = m_active_scene->getSun();
-						std::map<std::string, std::vector<Entity>> groups;
-						for (auto e : lights) {
-							const auto& name = registry.getName(e);
-							auto sep = name.find(": ");
-							if (sep != std::string::npos) {
-								groups[name.substr(0, sep)].push_back(e);
-							} else {
-								groups["Scene"].push_back(e);
+							// Partition lights into groups by name prefix (before ": ")
+							std::map<std::string, std::vector<Entity>> groups;
+							for (auto e : lights) {
+								const auto& name = registry.getName(e);
+								auto sep = name.find(": ");
+								if (sep != std::string::npos) {
+									groups[name.substr(0, sep)].push_back(e);
+								} else {
+									groups["Scene"].push_back(e);
+								}
 							}
-						}
 
-						// Per-light detail UI (reused in both scene and group contexts)
-						auto renderLightDetail = [&](Entity e, size_t idx) {
-							auto* pl = registry.getComponent<PointLightComponent>(e);
-							auto* transform = registry.getComponent<TransformComponent>(e);
-							if (!pl || !transform) return;
-							ImGui::PushID(static_cast<int>(e.id()));
-							const auto& name = registry.getName(e);
-							const std::string label = name.empty() ? ("Light " + std::to_string(static_cast<unsigned>(idx))) : name;
-							if (ImGui::TreeNode(label.c_str())) {
-								bool active = registry.isActive(e);
-								ImGui::Checkbox("Active", &active);
-								registry.setActive(e, active);
-								ImGui::ColorEdit3("Color", &pl->color.r);
-								ImGui::DragFloat("Intensity", &pl->intensity, 1.0f, 0.0f, 5000.0f, "%.1f");
-								if (!scene_sun.isNull() && e == scene_sun)
-									ui_actions.sun_intensity = pl->intensity;
-								glm::vec3 pos = transform->getTranslation();
-								if (ImGui::DragFloat3("Position", &pos.x, 0.1f)) {
-									transform->setTranslation(pos);
+							// Per-light detail UI (reused in both scene and group contexts)
+							auto renderLightDetail = [&](Entity e, size_t idx) {
+								auto* pl = registry.getComponent<PointLightComponent>(e);
+								auto* transform = registry.getComponent<TransformComponent>(e);
+								if (!pl || !transform) return;
+								ImGui::PushID(static_cast<int>(e.id()));
+								const auto& name = registry.getName(e);
+								const std::string label = name.empty() ? ("Light " + std::to_string(static_cast<unsigned>(idx))) : name;
+								if (ImGui::TreeNode(label.c_str())) {
+									bool active = registry.isActive(e);
+									ImGui::Checkbox("Active", &active);
+									registry.setActive(e, active);
+									ImGui::ColorEdit3("Color", &pl->color.r);
+									ImGui::DragFloat("Intensity", &pl->intensity, 1.0f, 0.0f, 5000.0f, "%.1f");
+									glm::vec3 pos = transform->getTranslation();
+									if (ImGui::DragFloat3("Position", &pos.x, 0.1f)) {
+										transform->setTranslation(pos);
+									}
+									float sz = transform->getScale().x;
+									if (ImGui::SliderFloat("Size", &sz, 0.1f, 50.0f)) {
+										transform->setScale({sz, sz, sz});
+									}
+									ImGui::Checkbox("Rotates", &pl->rotates);
+									ImGui::Checkbox("Casts shadow", &pl->casts_shadow);
+									ImGui::DragFloat("Range", &pl->range, 0.5f, 0.0f, 1000.0f, "%.1f");
+									if (ImGui::IsItemHovered()) {
+										ImGui::SetTooltip("Attenuation range in world units (0 = infinite).");
+									}
+									ImGui::TreePop();
 								}
-								float sz = transform->getScale().x;
-								if (ImGui::SliderFloat("Size", &sz, 0.1f, 50.0f)) {
-									transform->setScale({sz, sz, sz});
-								}
-								ImGui::Checkbox("Rotates", &pl->rotates);
-								ImGui::Checkbox("Casts shadow", &pl->casts_shadow);
-								ImGui::TreePop();
+								ImGui::PopID();
+							};
+
+							// List "Scene" group lights directly (manually created lights without ": " in name)
+							auto scene_it = groups.find("Scene");
+							if (scene_it != groups.end()) {
+								for (size_t i = 0; i < scene_it->second.size(); i++)
+									renderLightDetail(scene_it->second[i], i);
 							}
-							ImGui::PopID();
-						};
 
-						// Render "Scene" group lights directly (sun, manually created)
-						auto scene_it = groups.find("Scene");
-						if (scene_it != groups.end()) {
-							for (size_t i = 0; i < scene_it->second.size(); i++)
-								renderLightDetail(scene_it->second[i], i);
-						}
-
-						// Render fixture/imported groups with group controls
-						for (auto& [group_name, group_lights] : groups) {
-							if (group_name == "Scene") continue;
-							ImGui::PushID(group_name.c_str());
-							// Count active lights in group
-							int active_count = 0;
-							for (auto e : group_lights)
-								if (registry.isActive(e)) active_count++;
-							std::string header = group_name + " (" + std::to_string(group_lights.size()) + ")";
-							if (ImGui::TreeNode(header.c_str())) {
-								// Group toggle
-								bool all_active = (active_count == static_cast<int>(group_lights.size()));
-								bool mixed = active_count > 0 && !all_active;
-								if (mixed) {
-									ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
-								}
-								if (ImGui::Checkbox("Enable group", &all_active)) {
-									for (auto e : group_lights) registry.setActive(e, all_active);
-								}
-								if (mixed) {
-									ImGui::PopItemFlag();
-								}
-								// Group intensity slider
-								float avg_intensity = 0.f;
-								for (auto e : group_lights) {
-									auto* pl = registry.getComponent<PointLightComponent>(e);
-									if (pl) avg_intensity += pl->intensity;
-								}
-								avg_intensity /= static_cast<float>(group_lights.size());
-								if (ImGui::DragFloat("Intensity", &avg_intensity, 1.0f, 0.0f, 5000.0f, "%.1f")) {
+							// Render fixture/imported groups with group controls
+							for (auto& [group_name, group_lights] : groups) {
+								if (group_name == "Scene") continue;
+								ImGui::PushID(group_name.c_str());
+								// Count active lights in group
+								int active_count = 0;
+								for (auto e : group_lights)
+									if (registry.isActive(e)) active_count++;
+								std::string header = group_name + " (" + std::to_string(group_lights.size()) + ")";
+								if (ImGui::TreeNode(header.c_str())) {
+									// Group toggle
+									bool all_active = (active_count == static_cast<int>(group_lights.size()));
+									bool mixed = active_count > 0 && !all_active;
+									if (mixed) {
+										ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
+									}
+									if (ImGui::Checkbox("Enable group", &all_active)) {
+										for (auto e : group_lights) registry.setActive(e, all_active);
+									}
+									if (mixed) {
+										ImGui::PopItemFlag();
+									}
+									// Group intensity slider
+									float avg_intensity = 0.f;
 									for (auto e : group_lights) {
 										auto* pl = registry.getComponent<PointLightComponent>(e);
-										if (pl) pl->intensity = avg_intensity;
+										if (pl) avg_intensity += pl->intensity;
 									}
+									avg_intensity /= static_cast<float>(group_lights.size());
+									if (ImGui::DragFloat("Intensity", &avg_intensity, 1.0f, 0.0f, 5000.0f, "%.1f")) {
+										for (auto e : group_lights) {
+											auto* pl = registry.getComponent<PointLightComponent>(e);
+											if (pl) pl->intensity = avg_intensity;
+										}
+									}
+									// Individual lights
+									for (size_t i = 0; i < group_lights.size(); i++)
+										renderLightDetail(group_lights[i], i);
+									ImGui::TreePop();
 								}
-								// Individual lights
-								for (size_t i = 0; i < group_lights.size(); i++)
-									renderLightDetail(group_lights[i], i);
-								ImGui::TreePop();
+								ImGui::PopID();
 							}
-							ImGui::PopID();
 						}
 					}
 				}
@@ -877,6 +920,34 @@ void Sandbox::renderAppWindows() {
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Tone mapping exposure adjustment.\n< 1.0: Darker, > 1.0: Brighter");
 				}
+				{
+					static const char* tone_map_names_sdr[] = {"None", "Reinhard", "ACES Fitted", "PBR Neutral", "GT Tonemap"};
+					static const char* tone_map_names_hdr[] = {"None", "GT Tonemap"};
+					static const char* tone_map_descriptions[] = {
+						"No tone mapping. Raw linear values clamped by display.",
+						"Simple highlight compression: color/(color+1).\nPreserves hue, gentle rolloff.",
+						"ACES fitted (Stephen Hill). sRGB -> AP1 color space,\nRRT+ODT fit. Rich midtones, cinematic look.",
+						"Khronos PBR Neutral. Preserves material base\ncolors under grayscale lighting.",
+						"Gran Turismo tonemap (Uchimura). Adjustable peak\nbrightness for HDR. Toe + linear + shoulder curve.",
+					};
+					if (ui_actions.hdr_enabled) {
+						// HDR: only None and GT are valid
+						int hdr_idx = (ui_actions.tone_map_mode == TONEMAP_GT) ? 1 : 0;
+						ImGui::Combo("Tone Mapping", &hdr_idx, tone_map_names_hdr, 2);
+						ui_actions.tone_map_mode = (hdr_idx == 1) ? TONEMAP_GT : TONEMAP_NONE;
+						if (ImGui::IsItemHovered())
+							ImGui::SetTooltip("%s", tone_map_descriptions[ui_actions.tone_map_mode]);
+					} else {
+						ImGui::Combo("Tone Mapping", &ui_actions.tone_map_mode, tone_map_names_sdr, 5);
+						if (ImGui::IsItemHovered())
+							ImGui::SetTooltip("%s", tone_map_descriptions[ui_actions.tone_map_mode]);
+					}
+					if (ui_actions.hdr_enabled && ui_actions.tone_map_mode == TONEMAP_GT) {
+						ImGui::SliderFloat("Peak White", &ui_actions.hdr_peak_white, 1.0f, 20.0f, "%.1f");
+						if (ImGui::IsItemHovered())
+							ImGui::SetTooltip("GT tonemap peak brightness in scene-linear units.\n4.0 ~ 320 nits, 10.0 ~ 800 nits");
+					}
+				}
 
 				ImGui::Text("Bloom");
 				ImGui::Separator();
@@ -1105,7 +1176,7 @@ void Sandbox::initSystems() {
 		m_paths.shader("axes_shader.spv")
 	);
 	VE_LOGD("pl system: " << m_paths.shader("point_light_shader.spv"));
-	m_point_light_system = std::make_unique<PointLightSystem>(
+	m_light_system = std::make_unique<LightSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),

@@ -15,20 +15,20 @@ namespace ve {
 
 namespace ve {
 
-class VENGINE_API PointLightSystem {
+class VENGINE_API LightSystem {
 public:
-	PointLightSystem(
+	LightSystem(
 		VeDevice& device,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		const vk::raii::DescriptorSetLayout& material_set_layout,
 		vk::Format color_format,
 		vk::SampleCountFlagBits sample_count,
 		std::filesystem::path shader_path);
-	~PointLightSystem();
+	~LightSystem();
 
 	//destroy copy and move constructors and assignment operators
-	PointLightSystem(const PointLightSystem&) = delete;
-	PointLightSystem& operator=(const PointLightSystem&) = delete;
+	LightSystem(const LightSystem&) = delete;
+	LightSystem& operator=(const LightSystem&) = delete;
 
 	void updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObject& ubo);
 	void render(VeFrameInfo& frame_info) const;
@@ -48,4 +48,3 @@ private:
 	std::filesystem::path m_shader_path;
 };
 }
-
