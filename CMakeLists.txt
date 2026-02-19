@@ -4,12 +4,6 @@ message(STATUS "Local .env.cmake: ${LOCAL_ENV}")
 
 cmake_minimum_required(VERSION 3.20)
 
-# Use consistent runtime library for both Debug and Release to avoid DLL conflicts
-if(MSVC)
-	set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL" CACHE STRING "" FORCE)
-	add_compile_definitions(NOMINMAX)
-endif()
-
 set(NAME VeApp)
 
 # Enforce C++20 uniformly, so no permissive for msvc
@@ -44,6 +38,11 @@ elseif (MSVC)
 endif()
 
 project(${NAME} VERSION 0.1)
+
+# Prevent Windows.h from defining min/max macros that break std::min/std::max
+if(WIN32)
+	add_compile_definitions(NOMINMAX)
+endif()
 
 include(${CMAKE_SOURCE_DIR}/cmake/Options.cmake)
 include(${CMAKE_SOURCE_DIR}/cmake/Dependencies.cmake)
