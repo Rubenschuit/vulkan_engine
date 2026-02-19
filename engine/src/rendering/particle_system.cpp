@@ -483,13 +483,6 @@ void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 	);
 
 
-	// Write compute start timestamp after the host compute barrier.
-	if (frame_info.compute_query_pool) {
-		frame_info.compute_command_buffer.writeTimestamp(
-			vk::PipelineStageFlagBits::eComputeShader, frame_info.compute_query_pool, frame_info.compute_start_query);
-		frame_info.compute_query_pool = VK_NULL_HANDLE;
-	}
-
 	// Bind compute pipeline and descriptor sets
 	frame_info.compute_command_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
 	frame_info.compute_command_buffer.bindDescriptorSets(

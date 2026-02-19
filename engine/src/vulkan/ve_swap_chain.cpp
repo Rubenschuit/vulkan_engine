@@ -85,9 +85,8 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer command_buffer, uint3
 
 	// Wait values: 0 (ignored) for binary image_available, compute timeline value for compute sync
 	std::array<uint64_t, 2> wait_values{ uint64_t{0}, m_graphics_wait_value };
-	// Signal only the binary render_finished semaphore (for present).
-	// Graphics no longer signals the compute timeline — compute chain is independent.
-	std::array<uint64_t, 1> signal_values{ uint64_t{0} };
+	// Signal: render_finished (binary, for present) + compute_timeline (for next frame's compute depth readback)
+	std::array<uint64_t, 2> signal_values{ uint64_t{0}, m_graphics_signal_value };
 
 	vk::TimelineSemaphoreSubmitInfo timeline_info{
 		.sType = vk::StructureType::eTimelineSemaphoreSubmitInfo,
@@ -100,9 +99,9 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer command_buffer, uint3
 
 	// Wait on image-available (binary) and the compute timeline semaphore
 	std::array<vk::Semaphore, 2> wait_sems{ *m_image_available_semaphores[m_current_frame], *m_compute_timeline };
-	// Signal only the binary render-finished semaphore (for WSI present)
+	// Signal: render-finished (binary, for present) + compute_timeline (graphics signal for next frame's compute)
 	vk::Semaphore render_finished = *m_render_finished_semaphores[*image_index];
-	std::array<vk::Semaphore, 1> signal_sems{ render_finished };
+	std::array<vk::Semaphore, 2> signal_sems{ render_finished, *m_compute_timeline };
 	vk::SubmitInfo submit_info{
 		.pNext = &timeline_info,
 		.waitSemaphoreCount = static_cast<uint32_t>(wait_sems.size()),
@@ -284,6 +283,7 @@ void VeSwapChain::createDepthResources() {
 		vk::PipelineStageFlagBits2::eTopOfPipe, // src stage
 		vk::PipelineStageFlagBits2::eEarlyFragmentTests // dst stage
 	);
+
 	VE_LOGD("Depth resource created");
 }
 
@@ -421,9 +421,12 @@ void VeSwapChain::advanceFrame() {
 }
 
 void VeSwapChain::updateTimelineValues() {
-	m_compute_wait_value   = m_compute_timeline_value;       // wait for previous compute
-	m_compute_signal_value = ++m_compute_timeline_value;     // signal this compute
-	m_graphics_wait_value  = m_compute_signal_value;         // graphics waits for current compute
+	// Two increments per frame: compute signals once, graphics signals once.
+	// Compute waits for prev graphics (depth committed), graphics waits for current compute (shadow mask ready).
+	m_compute_wait_value    = m_compute_timeline_value;       // prev frame's graphics signal
+	m_compute_signal_value  = ++m_compute_timeline_value;     // this compute (particles + shadow mask)
+	m_graphics_wait_value   = m_compute_signal_value;         // graphics waits for current compute
+	m_graphics_signal_value = ++m_compute_timeline_value;     // this graphics (depth committed)
 }
 
 // Transition the image layout of the given swap chain image using

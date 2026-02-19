@@ -37,12 +37,13 @@ PbrRenderSystem::PbrRenderSystem(
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	const vk::raii::DescriptorSetLayout& material_set_layout,
 	const vk::raii::DescriptorSetLayout& shadow_set_layout,
+	const vk::raii::DescriptorSetLayout& shadow_mask_set_layout,
 	vk::Format color_format,
 	vk::SampleCountFlagBits sample_count,
 	std::filesystem::path shader_path)
 	: m_ve_device(device), m_shader_path(std::move(shader_path)), m_color_format(color_format), m_sample_count(sample_count) {
 
-	createPipelineLayout(global_set_layout, material_set_layout, shadow_set_layout);
+	createPipelineLayout(global_set_layout, material_set_layout, shadow_set_layout, shadow_mask_set_layout);
 	createPipelines(m_color_format, m_sample_count);
 }
 
@@ -51,17 +52,18 @@ PbrRenderSystem::~PbrRenderSystem() = default;
 void PbrRenderSystem::createPipelineLayout(
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	const vk::raii::DescriptorSetLayout& material_set_layout,
-	const vk::raii::DescriptorSetLayout& shadow_set_layout) {
+	const vk::raii::DescriptorSetLayout& shadow_set_layout,
+	const vk::raii::DescriptorSetLayout& shadow_mask_set_layout) {
 	vk::PushConstantRange push_constant_range{
 		.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 		.offset = 0,
 		.size = sizeof(PbrPushConstantData)
 	};
 
-	vk::DescriptorSetLayout layouts[3] = {*global_set_layout, *material_set_layout, *shadow_set_layout};
+	vk::DescriptorSetLayout layouts[4] = {*global_set_layout, *material_set_layout, *shadow_set_layout, *shadow_mask_set_layout};
 	vk::PipelineLayoutCreateInfo pipeline_layout_info{
 		.sType = vk::StructureType::ePipelineLayoutCreateInfo,
-		.setLayoutCount = 3,
+		.setLayoutCount = 4,
 		.pSetLayouts = layouts,
 		.pushConstantRangeCount = 1,
 		.pPushConstantRanges = &push_constant_range
@@ -86,14 +88,12 @@ void PbrRenderSystem::createPipelines(vk::Format color_format, vk::SampleCountFl
 	pipeline_config.input_assembly_info.topology = m_topology;
 	pipeline_config.pipeline_layout = *m_pipeline_layout;
 
-	// Create one pipeline variant per shadow mode (spec constant ID 0 = ShadowMode)
+	// Create pipeline variants: 4 shadow modes × 2 mask states
 	for (uint32_t mode = 0; mode < SHADOW_MODE_COUNT; mode++) {
-		pipeline_config.specialization_constants = {{0, mode}};
-		m_pipelines[mode] = std::make_unique<VePipeline>(
-			m_ve_device,
-			m_shader_path,
-			pipeline_config);
-		assert(m_pipelines[mode] != VK_NULL_HANDLE && "Failed to create PBR pipeline variant");
+		pipeline_config.specialization_constants = {{0, mode}, {1, m_pcf_samples}, {2, m_pcss_filter_samples}, {3, 0u}};
+		m_pipelines[mode] = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
+		pipeline_config.specialization_constants = {{0, mode}, {1, m_pcf_samples}, {2, m_pcss_filter_samples}, {3, 1u}};
+		m_pipelines_mask[mode] = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
 	}
 }
 
@@ -261,15 +261,22 @@ void PbrRenderSystem::renderOpaqueGroup(
 
 void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info) const {
 	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
-	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipelines[mode]->getPipeline());
+	bool mask = frame_info.shadow_mask_active;
+	auto& pipeline = mask ? m_pipelines_mask[mode] : m_pipelines[mode];
+	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
 
-	// Bind global (set 0) and shadow (set 2) once — they don't change between draws
+	// Bind global (set 0), shadow (set 2), and shadow mask (set 3) once
 	frame_info.command_buffer.bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		0, {*frame_info.global_descriptor_set}, {});
 	frame_info.command_buffer.bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		2, {*frame_info.shadow_descriptor_set}, {});
+	if (frame_info.shadow_mask_descriptor_set) {
+		frame_info.command_buffer.bindDescriptorSets(
+			vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+			3, {**frame_info.shadow_mask_descriptor_set}, {});
+	}
 
 	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
 	VeMesh* bound_mesh = nullptr;
@@ -295,20 +302,27 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info) const {
 
 void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
 	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
-	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipelines[mode]->getPipeline());
+	bool mask = frame_info.shadow_mask_active;
+	auto& pipeline = mask ? m_pipelines_mask[mode] : m_pipelines[mode];
+	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
 
 	// eLessOrEqual so transparent surfaces coplanar with opaque geometry (decal overlays)
 	// consistently pass the depth test and render on top.
 	frame_info.command_buffer.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
 	frame_info.command_buffer.setDepthBias(0.0f, 0.0f, 0.0f);
 
-	// Bind global (set 0) and shadow (set 2) once — they don't change between draws
+	// Bind global (set 0), shadow (set 2), and shadow mask (set 3) once
 	frame_info.command_buffer.bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		0, {*frame_info.global_descriptor_set}, {});
 	frame_info.command_buffer.bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		2, {*frame_info.shadow_descriptor_set}, {});
+	if (frame_info.shadow_mask_descriptor_set) {
+		frame_info.command_buffer.bindDescriptorSets(
+			vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+			3, {**frame_info.shadow_mask_descriptor_set}, {});
+	}
 
 	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
 	VeMesh* bound_mesh = nullptr;

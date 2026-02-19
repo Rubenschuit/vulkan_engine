@@ -40,6 +40,7 @@ public:
 	const vk::raii::ImageView& getColorImageView() const { return m_color_image->getImageView(); }
 	const vk::raii::ImageView& getResolveTargetImageView() const { return m_resolve_target_image->getImageView(); }
 	const vk::raii::ImageView& getDepthImageView() const { return m_depth_image->getImageView(); }
+	const vk::raii::Image& getDepthImage() const { return m_depth_image->getImage(); }
 	const std::vector<vk::Image>& getSwapChainImages() const { return m_swap_chain_images; }
 	const std::vector<vk::raii::ImageView>& getSwapChainImageViews() const { return m_swap_chain_image_views; }
 	float getExtentAspectRatio() const;
@@ -101,12 +102,15 @@ private:
 	bool m_hdr_enabled;
 
 	// Synchronization primitives
-	// Compute-only timeline: compute signals, graphics waits. Enables async compute overlap.
+	// Shared timeline: both compute and graphics signal, enabling async compute with depth readback.
+	// Per frame: compute signals once (particles + shadow mask), graphics signals once (depth committed).
+	// Compute waits for prev graphics signal (depth safe to read), graphics waits for current compute.
 	vk::raii::Semaphore m_compute_timeline{nullptr};
 	uint64_t m_compute_timeline_value = 0;
-	uint64_t m_compute_wait_value;    // previous compute's signal value
-	uint64_t m_compute_signal_value;  // this frame's compute signal value
-	uint64_t m_graphics_wait_value;   // = m_compute_signal_value (graphics waits for current compute)
+	uint64_t m_compute_wait_value;     // prev frame's graphics signal (depth ready)
+	uint64_t m_compute_signal_value;   // this frame's compute signal
+	uint64_t m_graphics_wait_value;    // = m_compute_signal_value (graphics waits for current compute)
+	uint64_t m_graphics_signal_value;  // this frame's graphics signal (depth committed for next frame)
 	std::vector<vk::raii::Fence> m_in_flight_fences;
 	// Per-swapchain-image binary semaphores signaled by graphics submit and waited by present
 	std::vector<vk::raii::Semaphore> m_render_finished_semaphores;

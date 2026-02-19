@@ -206,20 +206,31 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	// View direction
 	float3 view_dir = normalize(ubo.camera_position.xyz - in_vert.frag_pos_world);
 
-	// View-space depth for CSM cascade selection
-	float frag_view_z = -(mul(ubo.view, float4(in_vert.frag_pos_world, 1.0))).z;
-
 	// CSM shadow for directional light (first dir light with CSM)
 	float csm_shadow = 1.0;
 	uint csm_cascade_idx = 0;
 	float csm_blend_t = 0.0;
 	if (SHADOW_MODE_SPEC != ShadowMode::DISABLED && ubo.csm_cascade_count > 0) {
-		csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, csm_cascade_idx, csm_blend_t);
+		if (SHADOW_MASK_SPEC != 0) {
+			// Shadow mask path: temporal reprojection + single texture sample
+			// Sampler uses clamp-to-edge, so off-screen UVs use nearest edge shadow value
+			float4 prev_clip = mul(ubo.prev_projection_view, float4(in_vert.frag_pos_world, 1.0));
+			float2 prev_ndc = prev_clip.xy / prev_clip.w;
+			float2 prev_uv = prev_ndc * 0.5 + 0.5;
+			csm_shadow = shadow_mask.SampleLevel(shadow_mask_sampler, prev_uv, 0);
+		} else {
+			// Inline CSM path: full cascade selection + shadow map sampling
+			float frag_view_z = -(mul(ubo.view, float4(in_vert.frag_pos_world, 1.0))).z;
+			csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, csm_cascade_idx, csm_blend_t);
+		}
 	}
 
 	// Cascade debug: tint each cascade a distinct color, lerp at blend boundaries
-	if (ubo.render_mode == RenderMode::CSM_CASCADE)
+	if (ubo.render_mode == RenderMode::CSM_CASCADE) {
+		if (SHADOW_MASK_SPEC != 0)
+			return float4(csm_shadow, csm_shadow, csm_shadow, 1.0);
 		return float4(csmDebugColor(albedo.rgb, csm_cascade_idx, csm_blend_t, csm_shadow), albedo.a);
+	}
 
 	// Point light shadow terms
 	float shadow_terms[MAX_SHADOW_LIGHTS];

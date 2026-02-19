@@ -124,6 +124,11 @@ struct UniformBufferObject {
 	alignas(4)  uint32_t csm_dir_light_index = 0xFFFFFFFF; // which dir_lights[] index has CSM (0xFFFFFFFF = none)
 	alignas(4)  float pcss_light_size = 0.04f;  // world-space light radius for PCSS penumbra
 	alignas(4)  uint32_t csm_blend_dithered = 0; // 0 = off, 1 = linear, 2 = dithered
+
+	// Screen-space shadow mask
+	alignas(16) glm::mat4 inverse_projection_view{1.0f};  // for depth → world reconstruction
+	alignas(16) glm::mat4 prev_projection_view{1.0f};     // previous frame's proj*view for temporal reprojection
+	alignas(8)  glm::vec2 screen_size{};                   // viewport dimensions in pixels
 };
 static_assert(offsetof(UniformBufferObject, dir_lights) % 16 == 0,
 	"dir_lights must be 16-byte aligned for GPU UBO layout");
@@ -180,6 +185,10 @@ struct VeFrameInfo {
 
 	// CSM cascade data (filled by LightSystem, consumed by ShadowRenderSystem)
 	CsmCascadeData csm_data;
+
+	// Screen-space shadow mask descriptor set (Set 3, null when mask unavailable)
+	vk::raii::DescriptorSet* shadow_mask_descriptor_set = nullptr;
+	bool shadow_mask_active = false;  // true when mask pipeline variant should be used
 
 	// GPU timing: compute systems write the start timestamp after their barriers resolve.
 	vk::QueryPool compute_query_pool = VK_NULL_HANDLE;

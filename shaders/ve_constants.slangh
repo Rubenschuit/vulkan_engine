@@ -14,5 +14,8 @@ enum ShadowMode {
 };
 
 [vk::constant_id(0)] const uint SHADOW_MODE_SPEC = 0;
+[vk::constant_id(1)] const uint PCF_SAMPLES_SPEC = 8;        // PCF + PCSS blocker: 4, 8, 16, or 32
+[vk::constant_id(2)] const uint PCSS_FILTER_SAMPLES_SPEC = 16; // PCSS filter: 8, 16, or 32
+[vk::constant_id(3)] const uint SHADOW_MASK_SPEC = 0;          // 0=inline CSM, 1=sample mask
 
 #endif

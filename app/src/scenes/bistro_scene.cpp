@@ -17,7 +17,8 @@ vk::raii::DescriptorSet& BistroScene::getDescriptorSet() {
 
 void BistroScene::setSunIntensity(float intensity) {
 	auto* dl = m_registry.getComponent<DirectionalLightComponent>(m_sun);
-	if (dl) dl->intensity = intensity;
+	if (dl)
+		dl->intensity = intensity;
 }
 
 float BistroScene::getSunIntensity() const {
@@ -44,7 +45,7 @@ void BistroScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
 
 		glm::vec3 root_translation = glm::vec3{0.0f, 0.0f, 0.0f} + bistro_translation;
 		glm::vec3 root_rotation = {0.0f, 0.0f, 0.0f};
-		glm::vec3 root_scale = {1.0f, 1.0f, 1.0f};
+		glm::vec3 root_scale = {2.0f, 2.0f, 2.0f};
 		m_bistro_model->addToScene(m_registry, root_translation, root_rotation, root_scale);
 
 		// Store default material for getDescriptorSet() fallback

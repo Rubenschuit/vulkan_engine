@@ -54,10 +54,11 @@ ShadowRenderSystem::ShadowRenderSystem(
 		.build();
 
 	// Create shadow descriptor set layout (for sampling shadow maps)
+	// eCompute needed so the screen-space shadow mask compute shader can read shadow maps
 	m_shadow_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
-		.addBinding(0, vk::DescriptorType::eSampler, vk::ShaderStageFlagBits::eFragment)       // comparison sampler
-		.addBinding(1, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eFragment)   // shadow map array
-		.addBinding(2, vk::DescriptorType::eSampler, vk::ShaderStageFlagBits::eFragment)       // raw sampler (PCSS)
+		.addBinding(0, vk::DescriptorType::eSampler, vk::ShaderStageFlagBits::eFragment | vk::ShaderStageFlagBits::eCompute)       // comparison sampler
+		.addBinding(1, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eFragment | vk::ShaderStageFlagBits::eCompute)   // shadow map array
+		.addBinding(2, vk::DescriptorType::eSampler, vk::ShaderStageFlagBits::eFragment | vk::ShaderStageFlagBits::eCompute)       // raw sampler (PCSS)
 		.build();
 
 	createShadowUBOs();

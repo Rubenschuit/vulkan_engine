@@ -70,6 +70,11 @@ struct UniformBuffer {
 	uint32_t csm_dir_light_index;
 	float    pcss_light_size;
 	uint32_t csm_blend_dithered;
+
+	// Screen-space shadow mask
+	float4x4 inverse_projection_view;
+	float4x4 prev_projection_view;  // previous frame's proj*view for temporal reprojection
+	float2   screen_size;
 };
 [vk::binding(0, 0)]
 ConstantBuffer<UniformBuffer> ubo;
@@ -94,6 +99,15 @@ SamplerComparisonState shadow_cmp_sampler;  // Hardware comparison sampler (2x2 
 Texture2DArray shadow_maps;
 [vk::binding(2, 2)]
 SamplerState shadow_sampler;  // Regular sampler for raw depth reads (PCSS blocker search)
+
+// ============================================================================
+// Screen-space shadow mask bindings (set 3)
+// ============================================================================
+
+[vk::binding(0, 3)]
+Texture2D<float> shadow_mask;
+[vk::binding(1, 3)]
+SamplerState shadow_mask_sampler;
 
 // ============================================================================
 // Utilities
@@ -152,6 +166,37 @@ static const float2 POISSON_DISK_16[16] = {
 	float2( 0.5765, -0.5011), float2(-0.0310, -0.3949),
 };
 
+// 32-sample Poisson disk
+static const float2 POISSON_DISK_32[32] = {
+	float2(-0.2138,  0.8933), float2( 0.1815, -0.9890),
+	float2( 0.8765,  0.2841), float2(-0.9613, -0.1357),
+	float2( 0.4058, -0.5805), float2(-0.5832,  0.5476),
+	float2( 0.7485, -0.4187), float2(-0.3495, -0.7276),
+	float2(-0.0684,  0.3795), float2( 0.6253,  0.7416),
+	float2(-0.7869, -0.5137), float2( 0.2440,  0.4335),
+	float2( 0.9167, -0.0795), float2(-0.4563,  0.1226),
+	float2(-0.1368, -0.3875), float2( 0.4753,  0.0854),
+	float2(-0.8537,  0.3460), float2( 0.0923, -0.6328),
+	float2( 0.3213,  0.9249), float2(-0.6424, -0.2156),
+	float2( 0.7891,  0.5632), float2(-0.2715, -0.9418),
+	float2(-0.9182,  0.0728), float2( 0.5510, -0.8136),
+	float2( 0.0267,  0.6940), float2(-0.5186,  0.8175),
+	float2( 0.6831, -0.1743), float2(-0.3928, -0.4582),
+	float2( 0.1648,  0.1391), float2(-0.7326,  0.6574),
+	float2( 0.9514, -0.2870), float2(-0.0533, -0.1486),
+};
+
+// Select Poisson disk sample by count (compile-time; dead branches eliminated by spec constants)
+float2 pcfDiskSample(uint i) {
+	if (PCF_SAMPLES_SPEC <= 8)  return POISSON_DISK_8[i];
+	if (PCF_SAMPLES_SPEC <= 16) return POISSON_DISK_16[i];
+	return POISSON_DISK_32[i];
+}
+float2 pcssFilterDiskSample(uint i) {
+	if (PCSS_FILTER_SAMPLES_SPEC <= 16) return POISSON_DISK_16[i];
+	return POISSON_DISK_32[i];
+}
+
 // Rotated Poisson disk PCF — each sample gets free 2x2 bilinear from comparison sampler
 float calculateShadowPCF(uint32_t light_index, float4 shadow_coord, float texel_size) {
 	if (shadow_coord.z <= -1.0 || shadow_coord.z >= 1.0 || shadow_coord.w <= 0.0)
@@ -166,20 +211,17 @@ float calculateShadowPCF(uint32_t light_index, float4 shadow_coord, float texel_
 	float ca = cos(angle);
 
 	float shadow = 0.0;
-	static const uint32_t num_samples = 8;
-	for (int i = 0; i < num_samples; i++) {
+	for (uint i = 0; i < PCF_SAMPLES_SPEC; i++) {
+		float2 disk = pcfDiskSample(i);
 		float2 offset = float2(
-			ca * POISSON_DISK_8[i].x - sa * POISSON_DISK_8[i].y,
-			sa * POISSON_DISK_8[i].x + ca * POISSON_DISK_8[i].y
+			ca * disk.x - sa * disk.y,
+			sa * disk.x + ca * disk.y
 		) * spread;
 		shadow += shadow_maps.SampleCmpLevelZero(shadow_cmp_sampler,
 			float3(shadow_coord.xy + offset, light_index), ref_depth);
 	}
-	return shadow / float(num_samples);
+	return shadow / float(PCF_SAMPLES_SPEC);
 }
-
-static const uint PCSS_BLOCKER_SAMPLES = 8;
-static const uint PCSS_FILTER_SAMPLES = 16;
 
 // PCSS: contact-hardening soft shadows via blocker search + variable-radius PCF
 float calculatePCSS(uint32_t layer, float4 shadow_coord, float texel_size) {
@@ -198,10 +240,11 @@ float calculatePCSS(uint32_t layer, float4 shadow_coord, float texel_size) {
 	float search_radius = light_size * texel_size * 600.0;
 	float blocker_sum = 0.0;
 	uint blocker_count = 0;
-	for (int i = 0; i < PCSS_BLOCKER_SAMPLES; i++) {
+	for (uint i = 0; i < PCF_SAMPLES_SPEC; i++) {
+		float2 disk = pcfDiskSample(i);
 		float2 offset = float2(
-			ca * POISSON_DISK_8[i].x - sa * POISSON_DISK_8[i].y,
-			sa * POISSON_DISK_8[i].x + ca * POISSON_DISK_8[i].y
+			ca * disk.x - sa * disk.y,
+			sa * disk.x + ca * disk.y
 		) * search_radius;
 		float depth = shadow_maps.SampleLevel(shadow_sampler,
 			float3(shadow_coord.xy + offset, layer), 0.0).r;
@@ -221,15 +264,16 @@ float calculatePCSS(uint32_t layer, float4 shadow_coord, float texel_size) {
 	float spread = clamp(penumbra, texel_size, 25.0 * texel_size);
 	float ref_depth = receiver - ubo.shadow_bias;
 	float shadow = 0.0;
-	for (int i = 0; i < PCSS_FILTER_SAMPLES; i++) {
+	for (uint i = 0; i < PCSS_FILTER_SAMPLES_SPEC; i++) {
+		float2 disk = pcssFilterDiskSample(i);
 		float2 offset = float2(
-			ca * POISSON_DISK_16[i].x - sa * POISSON_DISK_16[i].y,
-			sa * POISSON_DISK_16[i].x + ca * POISSON_DISK_16[i].y
+			ca * disk.x - sa * disk.y,
+			sa * disk.x + ca * disk.y
 		) * spread;
 		shadow += shadow_maps.SampleCmpLevelZero(shadow_cmp_sampler,
 			float3(shadow_coord.xy + offset, layer), ref_depth);
 	}
-	return shadow / float(PCSS_FILTER_SAMPLES);
+	return shadow / float(PCSS_FILTER_SAMPLES_SPEC);
 }
 
 // Sample shadow from a specific CSM cascade

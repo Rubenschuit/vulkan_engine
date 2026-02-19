@@ -1,6 +1,7 @@
 #pragma once
 #include "VEngine/VEngine.hpp"
 #include "rendering/depth_prepass_system.hpp"
+#include "rendering/shadow_mask_system.hpp"
 #include "asset_paths.hpp"
 #include "scenes/bistro_scene.hpp"
 #include "scenes/gltf_scene.hpp"
@@ -107,6 +108,9 @@ private:
 	std::filesystem::path m_pending_gltf_path;
 
 	std::chrono::steady_clock::time_point m_cpu_start;
+	bool m_shadow_mask_half_res = true; // tracks UI toggle for recreation
+	int m_pcf_samples = 8;
+	int m_pcss_filter_samples = 16;
 
 	// Render systems
 	std::unique_ptr<CullingSystem> m_culling_system;
@@ -122,6 +126,7 @@ private:
 	std::unique_ptr<DepthPrePassSystem> m_depth_prepass_system;
 	std::unique_ptr<PostProcessSystem> m_post_process_system;
 	std::unique_ptr<BloomSystem> m_bloom_system;
+	std::unique_ptr<ShadowMaskSystem> m_shadow_mask_system;
 };
 
 }

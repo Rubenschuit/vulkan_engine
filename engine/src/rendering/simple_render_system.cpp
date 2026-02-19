@@ -28,28 +28,33 @@ SimpleRenderSystem::SimpleRenderSystem(
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	const vk::raii::DescriptorSetLayout& material_set_layout,
 	const vk::raii::DescriptorSetLayout& shadow_set_layout,
+	const vk::raii::DescriptorSetLayout& shadow_mask_set_layout,
 	vk::Format color_format,
 	vk::SampleCountFlagBits sample_count,
 	std::filesystem::path shader_path)
 	: m_ve_device(device), m_shader_path(shader_path), m_color_format(color_format), m_sample_count(sample_count) {
 
-	createPipelineLayout(global_set_layout, material_set_layout, shadow_set_layout);
+	createPipelineLayout(global_set_layout, material_set_layout, shadow_set_layout, shadow_mask_set_layout);
 	createPipelines(m_color_format, m_sample_count);
 }
 
 SimpleRenderSystem::~SimpleRenderSystem() {
 }
 
-void SimpleRenderSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout, const vk::raii::DescriptorSetLayout& shadow_set_layout) {
+void SimpleRenderSystem::createPipelineLayout(
+	const vk::raii::DescriptorSetLayout& global_set_layout,
+	const vk::raii::DescriptorSetLayout& material_set_layout,
+	const vk::raii::DescriptorSetLayout& shadow_set_layout,
+	const vk::raii::DescriptorSetLayout& shadow_mask_set_layout) {
 	vk::PushConstantRange push_constant_range{
 		.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 		.offset = 0,
 		.size = sizeof(SimplePushConstantData)
 	};
-	vk::DescriptorSetLayout layouts[3] = {*global_set_layout, *material_set_layout, *shadow_set_layout};
+	vk::DescriptorSetLayout layouts[4] = {*global_set_layout, *material_set_layout, *shadow_set_layout, *shadow_mask_set_layout};
 	vk::PipelineLayoutCreateInfo pipeline_layout_info{
 		.sType = vk::StructureType::ePipelineLayoutCreateInfo,
-		.setLayoutCount = 3,
+		.setLayoutCount = 4,
 		.pSetLayouts = layouts,
 		.pushConstantRangeCount = 1,
 		.pPushConstantRanges = &push_constant_range
@@ -67,10 +72,12 @@ void SimpleRenderSystem::createPipelines(vk::Format color_format, vk::SampleCoun
 	pipeline_config.input_assembly_info.topology = m_topology;
 	pipeline_config.pipeline_layout = *m_pipeline_layout;
 
+	// Create pipeline variants: 4 shadow modes × 2 mask states
 	for (uint32_t mode = 0; mode < SHADOW_MODE_COUNT; mode++) {
-		pipeline_config.specialization_constants = {{0, mode}};
-		m_pipelines[mode] = std::make_unique<VePipeline>(
-			m_ve_device, m_shader_path, pipeline_config);
+		pipeline_config.specialization_constants = {{0, mode}, {1, m_pcf_samples}, {2, m_pcss_filter_samples}, {3, 0u}};
+		m_pipelines[mode] = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
+		pipeline_config.specialization_constants = {{0, mode}, {1, m_pcf_samples}, {2, m_pcss_filter_samples}, {3, 1u}};
+		m_pipelines_mask[mode] = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
 	}
 }
 
@@ -78,7 +85,9 @@ void SimpleRenderSystem::createPipelines(vk::Format color_format, vk::SampleCoun
 // (mesh, material) for instanced draw calls.
 void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
-	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipelines[mode]->getPipeline());
+	bool mask = frame_info.shadow_mask_active;
+	auto& pipeline = mask ? m_pipelines_mask[mode] : m_pipelines[mode];
+	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
 
 	auto& registry = *frame_info.registry;
 	m_instance_groups.clear();
@@ -148,13 +157,18 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		m_instance_groups.push_back(group);
 	}
 
-	// Bind global (set 0) and shadow (set 2) once — they don't change between draws
+	// Bind global (set 0), shadow (set 2), and shadow mask (set 3) once
 	frame_info.command_buffer.bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		0, {*frame_info.global_descriptor_set}, {});
 	frame_info.command_buffer.bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		2, {*frame_info.shadow_descriptor_set}, {});
+	if (frame_info.shadow_mask_descriptor_set) {
+		frame_info.command_buffer.bindDescriptorSets(
+			vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+			3, {**frame_info.shadow_mask_descriptor_set}, {});
+	}
 
 	// Render instance groups
 	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;

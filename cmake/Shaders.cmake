@@ -142,27 +142,40 @@ file(GLOB_RECURSE SLANG_SHADER_FILES "${PROJECT_SOURCE_DIR}/shaders/*.slang")
 # Create a target for each shader file and add target to list
 foreach(SLANG_SHADER ${SLANG_SHADER_FILES})
 	get_filename_component(SLANG_SHADER_NAME ${SLANG_SHADER} NAME_WE)
-	add_slang_spirv_target(${SLANG_SHADER_NAME}
-		TYPE GRAPHICS
-		SOURCES ${SLANG_SHADER}
-		VERT_ENTRY vertMain
-		FRAG_ENTRY fragMain
-		PROFILE spirv_1_5
-		OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
-		OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/${SLANG_SHADER_NAME}.spv"
-	)
-	if ( SLANG_SHADER_NAME MATCHES ".*_compute$")
-		add_slang_spirv_target(${SLANG_SHADER_NAME}c
+
+	if (SLANG_SHADER_NAME MATCHES "_comp$" AND NOT SLANG_SHADER_NAME MATCHES "_compute$")
+		# Compute-only shader: no vertMain/fragMain needed
+		add_slang_spirv_target(${SLANG_SHADER_NAME}
 			TYPE COMPUTE
 			SOURCES ${SLANG_SHADER}
 			ENTRY compMain
 			PROFILE spirv_1_5
 			OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
-			OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/${SLANG_SHADER_NAME}c.spv"
+			OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/${SLANG_SHADER_NAME}.spv"
 		)
-		list(APPEND SHADER_TARGETS ${SLANG_SHADER_NAME}c)
+		list(APPEND SHADER_TARGETS ${SLANG_SHADER_NAME})
+	else()
+		add_slang_spirv_target(${SLANG_SHADER_NAME}
+			TYPE GRAPHICS
+			SOURCES ${SLANG_SHADER}
+			VERT_ENTRY vertMain
+			FRAG_ENTRY fragMain
+			PROFILE spirv_1_5
+			OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
+			OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/${SLANG_SHADER_NAME}.spv"
+		)
+		if ( SLANG_SHADER_NAME MATCHES ".*_compute$")
+			add_slang_spirv_target(${SLANG_SHADER_NAME}c
+				TYPE COMPUTE
+				SOURCES ${SLANG_SHADER}
+				ENTRY compMain
+				PROFILE spirv_1_5
+				OUT_DIR "${PROJECT_SOURCE_DIR}/shaders"
+				OUT_FILE "${PROJECT_SOURCE_DIR}/shaders/${SLANG_SHADER_NAME}c.spv"
+			)
+			list(APPEND SHADER_TARGETS ${SLANG_SHADER_NAME}c)
+		endif()
+		list(APPEND SHADER_TARGETS ${SLANG_SHADER_NAME})
 	endif()
-	# Add to list of shader targets
-	list(APPEND SHADER_TARGETS ${SLANG_SHADER_NAME})
 
 endforeach()

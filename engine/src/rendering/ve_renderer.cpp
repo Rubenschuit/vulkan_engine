@@ -172,8 +172,7 @@ bool VeRenderer::beginFrame() {
 	// Reset and write start timestamps from each command buffer's own queue
 	uint32_t base = frame_index * 4;
 	compute_command_buffer.resetQueryPool(*m_query_pool, base, 2);     // compute range [base, base+1]
-	// NOTE: compute start timestamp is written by the particle system after its host→compute
-	// barrier, so it measures actual dispatch time and not the submit-level semaphore wait.
+	// NOTE: compute start timestamp is written by the application before the first compute dispatch.
 
 	command_buffer.resetQueryPool(*m_query_pool, base + 2, 2);         // graphics range [base+2, base+3]
 	command_buffer.writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, *m_query_pool, base + 2);

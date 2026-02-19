@@ -32,6 +32,8 @@ public:
 	vk::raii::CommandBuffer& getCurrentComputeCommandBuffer();
 	const vk::raii::ImageView& getSwapChainImageView(size_t index) const { return m_ve_swap_chain->getSwapChainImageViews()[index]; }
 	const vk::raii::ImageView& getResolveTargetImageView() const { return m_ve_swap_chain->getResolveTargetImageView(); }
+	const vk::raii::ImageView& getDepthImageView() const { return m_ve_swap_chain->getDepthImageView(); }
+	const vk::raii::Image& getDepthImage() const { return m_ve_swap_chain->getDepthImage(); }
 	bool isSwapChainOutOfDate() const { return m_swap_chain_needs_recreation; }
 
 	// Begin a new frame. Returns true if a frame was acquired and recording can start.

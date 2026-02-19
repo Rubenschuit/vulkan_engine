@@ -194,13 +194,67 @@ VeFrameInfo Sandbox::update() {
 	ubo.ambient_light_color = glm::vec4(ui_actions.ambient_light_color, ui_actions.ambient_light_intensity);
 	m_light_system->updateUniformBuffer(frame_info, ubo); // update UBO with light data
 	m_shadow_render_system->updateUniformBuffer(current_frame, ubo, frame_info.csm_data); // update internal shadow UBO with CSM + point light data
+
+	// Recreate shadow pipelines if sample counts changed
+	if (ui_actions.pcf_samples != m_pcf_samples || ui_actions.pcss_filter_samples != m_pcss_filter_samples) {
+		m_pcf_samples = ui_actions.pcf_samples;
+		m_pcss_filter_samples = ui_actions.pcss_filter_samples;
+		m_pbr_render_system->setShadowSamples(static_cast<uint32_t>(m_pcf_samples), static_cast<uint32_t>(m_pcss_filter_samples));
+		m_simple_render_system->setShadowSamples(static_cast<uint32_t>(m_pcf_samples), static_cast<uint32_t>(m_pcss_filter_samples));
+		m_shadow_mask_system->setShadowSamples(static_cast<uint32_t>(m_pcf_samples), static_cast<uint32_t>(m_pcss_filter_samples));
+	}
+
+	// Recreate shadow mask image if half-res toggle changed
+	if (ui_actions.shadow_mask_half_res != m_shadow_mask_half_res) {
+		m_shadow_mask_half_res = ui_actions.shadow_mask_half_res;
+		auto mask_extent = extent;
+		if (m_shadow_mask_half_res) {
+			mask_extent.width  = std::max(1u, mask_extent.width / 2);
+			mask_extent.height = std::max(1u, mask_extent.height / 2);
+		}
+		m_shadow_mask_system->recreate(*m_global_pool, mask_extent,
+			extent, m_ve_renderer.getSampleCount(),
+			m_ve_renderer.getDepthImageView(), m_ve_renderer.getDepthImage());
+	}
+
+	// Screen-space shadow mask UBO fields
+	bool msaa_active = m_ve_renderer.getSampleCount() != vk::SampleCountFlagBits::e1;
+	bool shadow_mask_active = ui_actions.shadow_mask_enabled
+		&& ui_actions.depth_prepass_enabled
+		&& ui_actions.shadow_mode != ShadowMode::DISABLED
+		&& (!msaa_active || m_shadow_mask_system->hasMsaaSupport());
+	ubo.screen_size = glm::vec2(static_cast<float>(extent.width), static_cast<float>(extent.height));
+
 	this->updateUniformBuffer(current_frame, ubo); // view/proj/camera location in application base class
 
-	// Record and submit compute work (two particle systems)
+	// Always save UBO data so previous-frame matrices are ready when shadow mask is enabled.
+	// The compute shader reads prev-frame depth/shadow maps via timeline semaphore, so the
+	// UBO it uses must also contain prev-frame matrices for consistent world reconstruction.
+	m_shadow_mask_system->savePrevFrameUBO(ubo, current_frame);
+
+	// Record and submit compute work (particles + shadow mask)
+	// Write compute start timestamp before any dispatches so GPU timing captures all compute work
+	if (frame_info.compute_query_pool) {
+		frame_info.compute_command_buffer.writeTimestamp(
+			vk::PipelineStageFlagBits::eComputeShader, frame_info.compute_query_pool, frame_info.compute_start_query);
+		frame_info.compute_query_pool = VK_NULL_HANDLE;
+	}
 	m_fireworks_system->recordComputeCommands(frame_info);
 	m_particle_system->recordComputeCommands(frame_info);
+	if (shadow_mask_active) {
+		m_shadow_mask_system->dispatch(frame_info);
+	}
 
 	m_ve_renderer.submitCompute(frame_info.compute_command_buffer);
+
+	// Set shadow mask descriptor set and pipeline selection flag for PBR/simple
+	frame_info.shadow_mask_active = shadow_mask_active;
+	if (shadow_mask_active) {
+		frame_info.shadow_mask_descriptor_set = &m_shadow_mask_system->getOutputDescriptorSet(current_frame);
+	}
+	else {
+		frame_info.shadow_mask_descriptor_set = &m_shadow_mask_system->getDummyOutputDescriptorSet();
+	}
 
 	return frame_info;
 }
@@ -350,6 +404,17 @@ void Sandbox::recreatePipelines() {
 	m_fireworks_system->recreatePipeline(offscreen_format, sample_count);
 
 	m_depth_prepass_system->recreatePipeline(sample_count);
+
+	{
+		auto mask_extent = extent;
+		if (m_shadow_mask_half_res) {
+			mask_extent.width  = std::max(1u, mask_extent.width / 2);
+			mask_extent.height = std::max(1u, mask_extent.height / 2);
+		}
+		m_shadow_mask_system->recreate(*m_global_pool, mask_extent,
+			extent, sample_count,
+			m_ve_renderer.getDepthImageView(), m_ve_renderer.getDepthImage());
+	}
 
 	m_post_process_system->recreatePipeline(color_format, m_ve_renderer.getResolveTargetImageView(), m_bloom_system->getBloomTexture());
 	m_imgui_layer->recreatePipeline();
@@ -854,6 +919,35 @@ void Sandbox::renderAppWindows() {
 						ImGui::SetTooltip("Virtual light size for PCSS penumbra.\nLarger = softer shadows farther from caster.");
 					}
 				}
+				if (ui_actions.shadow_mode == ShadowMode::PCF || ui_actions.shadow_mode == ShadowMode::PCSS) {
+					// PCF sample count (also used for PCSS blocker search)
+					static constexpr int pcf_values[] = {4, 8, 16, 32};
+					int pcf_idx = 0;
+					for (int j = 0; j < 4; j++) {
+						if (ui_actions.pcf_samples == pcf_values[j])
+							pcf_idx = j;
+					}
+					if (ImGui::Combo("PCF Samples", &pcf_idx, "4\0008\00016\00032\0")) {
+						ui_actions.pcf_samples = pcf_values[pcf_idx];
+					}
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Poisson disk samples for PCF filtering.\nAlso used for PCSS blocker search.\nRequires pipeline recreation.");
+					}
+				}
+				if (ui_actions.shadow_mode == ShadowMode::PCSS) {
+					static constexpr int pcss_values[] = {8, 16, 32};
+					int pcss_idx = 0;
+					for (int j = 0; j < 3; j++) {
+						if (ui_actions.pcss_filter_samples == pcss_values[j])
+							pcss_idx = j;
+					}
+					if (ImGui::Combo("PCSS Filter Samples", &pcss_idx, "8\00016\00032\0")) {
+						ui_actions.pcss_filter_samples = pcss_values[pcss_idx];
+					}
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Poisson disk samples for PCSS variable-radius filter.\nHigher = smoother soft shadows.\nRequires pipeline recreation.");
+					}
+				}
 				if (ui_actions.shadow_mode != ShadowMode::DISABLED) {
 					ImGui::Text("CSM Blend: ");
 					ImGui::SameLine();
@@ -862,6 +956,18 @@ void Sandbox::renderAppWindows() {
 					ImGui::RadioButton("Linear", &ui_actions.csm_blend_mode, 1);
 					ImGui::SameLine();
 					ImGui::RadioButton("Dithered", &ui_actions.csm_blend_mode, 2);
+					ImGui::Checkbox("Shadow Mask (async compute)", &ui_actions.shadow_mask_enabled);
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Screen-space shadow mask: evaluates CSM shadows\nonce per pixel via async compute (1-frame latency).\nRequires depth pre-pass enabled.");
+					}
+					if (ui_actions.shadow_mask_enabled) {
+						ImGui::Indent();
+						ImGui::Checkbox("Half Resolution", &ui_actions.shadow_mask_half_res);
+						if (ImGui::IsItemHovered()) {
+							ImGui::SetTooltip("Evaluate shadow mask at half screen resolution.\n4x fewer compute invocations, bilinear upsampled.");
+						}
+						ImGui::Unindent();
+					}
 				}
 
 				// Topology selection. Requires pipeline recreation
@@ -1038,7 +1144,7 @@ void Sandbox::createDescriptors() {
 
 	// Global set layout: UBO (binding 0), instance SSBO (binding 1), optional ray tracing (binding 2)
 	m_global_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
-		.addBinding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eAllGraphics)
+		.addBinding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eAllGraphics | vk::ShaderStageFlagBits::eCompute)
 		.addBinding(1, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eVertex)
 #if ENABLE_RAY_TRACING
 		.addBinding(2, vk::DescriptorType::eAccelerationStructureKHR, vk::ShaderStageFlagBits::eFragment)
@@ -1059,18 +1165,20 @@ void Sandbox::createDescriptors() {
 	// Material sets: SimpleScene ~3, Sponza ~170, Bistro 500+; allocate 4096 to avoid fragmentation / OUT_OF_POOL_MEMORY
 	constexpr uint32_t MAX_MATERIAL_SETS = 4096;
 	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
-		// Global sets + shadow global + compute + material sets + shadow + slack
-		.setMaxSets(4 * MAX_FRAMES_IN_FLIGHT + (MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS)
+		// Global sets + shadow global + compute + material sets + shadow + shadow mask (4 sets) + slack
+		.setMaxSets(4 * MAX_FRAMES_IN_FLIGHT + (MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS + 4 * MAX_FRAMES_IN_FLIGHT)
 		// Uniform buffers: global (per frame) + shadow global (per frame, per layer) + compute (2x per frame)
 		.addPoolSize(vk::DescriptorType::eUniformBuffer, 4 * MAX_FRAMES_IN_FLIGHT + (MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT) + MAX_MATERIAL_SETS + 1)
 		// Combined image samplers: SimpleScene (~3) + per-material (5 per set) + skybox (3) + slack
 		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 3 * 3 + MAX_MATERIAL_SETS * 5)
-		// Samplers: shadow comparison sampler + raw sampler (2 per frame) + slack
-		.addPoolSize(vk::DescriptorType::eSampler, 2 * MAX_FRAMES_IN_FLIGHT + 7)
-		// Sampled images: shadow map array (1 per frame) + slack
-		.addPoolSize(vk::DescriptorType::eSampledImage, MAX_FRAMES_IN_FLIGHT + 7)
+		// Samplers: shadow comparison sampler + raw sampler (2 per frame) + shadow mask output sampler (per frame) + slack
+		.addPoolSize(vk::DescriptorType::eSampler, 2 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + 7)
+		// Sampled images: shadow map array (1 per frame) + shadow mask depth + output (2 per frame each) + slack
+		.addPoolSize(vk::DescriptorType::eSampledImage, MAX_FRAMES_IN_FLIGHT + 4 * MAX_FRAMES_IN_FLIGHT + 7)
 		// Storage buffers: compute + instance SSBO (1 per frame for global + 1 per frame per shadow layer)
 		.addPoolSize(vk::DescriptorType::eStorageBuffer, 22 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT)
+		// Storage images: shadow mask output (1 per frame)
+		.addPoolSize(vk::DescriptorType::eStorageImage, MAX_FRAMES_IN_FLIGHT)
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
 		.buildShared();
 
@@ -1165,12 +1273,36 @@ void Sandbox::initSystems() {
 		m_paths.shader("shadow_shader.spv")
 	);
 
+	VE_LOGD("shadow mask system");
+	{
+		auto mask_extent = m_ve_renderer.getExtent();
+		if (ui_actions.shadow_mask_half_res) {
+			mask_extent.width  = std::max(1u, mask_extent.width / 2);
+			mask_extent.height = std::max(1u, mask_extent.height / 2);
+		}
+		m_shadow_mask_system = std::make_unique<ShadowMaskSystem>(
+			m_ve_device,
+			*m_global_pool,
+			*m_resource_manager,
+			m_global_set_layout->getDescriptorSetLayout(),
+			m_shadow_render_system->getShadowSetLayout(),
+			m_paths.shaders_dir,
+			mask_extent,
+			m_ve_renderer.getExtent(),
+			m_ve_renderer.getSampleCount(),
+			m_ve_renderer.getDepthImageView(),
+			m_ve_renderer.getDepthImage()
+		);
+		m_shadow_mask_half_res = ui_actions.shadow_mask_half_res;
+	}
+
 	VE_LOGD("simple system: " << m_paths.shader("simple_shader.spv"));
 	m_simple_render_system = std::make_unique<SimpleRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_shadow_render_system->getShadowSetLayout(),
+		m_shadow_mask_system->getShadowMaskSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
 		m_paths.shader("simple_shader.spv")
@@ -1181,6 +1313,7 @@ void Sandbox::initSystems() {
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_shadow_render_system->getShadowSetLayout(),
+		m_shadow_mask_system->getShadowMaskSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
 		m_paths.shader("pbr_shader.spv")

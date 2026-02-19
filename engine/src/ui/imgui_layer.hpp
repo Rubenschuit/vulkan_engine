@@ -26,6 +26,8 @@ struct VENGINE_API UIContext {
 	float fov = 80.0f;
 	ShadowMode shadow_mode = ShadowMode::PCF;
 	float pcss_light_size = 0.04f;
+	int pcf_samples = 8; // multiples of 4 between 4 and 64, or 0 to disable PCF
+	int pcss_filter_samples = 16;
 	int csm_blend_mode = 2; // 0=off, 1=linear, 2=dithered TODO: enum
 	Topology topology = Topology::TRIANGLE_LIST;
 	bool hdr_enabled = false;
@@ -44,6 +46,10 @@ struct VENGINE_API UIContext {
 
 	// depth pre-pass
 	bool depth_prepass_enabled = true;
+
+	// screen-space shadow mask (async compute)
+	bool shadow_mask_enabled = false;
+	bool shadow_mask_half_res = true;
 
 	// culling
 	bool enable_frustum_culling = true;

@@ -288,10 +288,11 @@ void VeDevice::pickPhysicalDevice() {
 	// set the maximum msaa samples
 	m_max_msaa_samples = queryMaxUsableSampleCount();
 
-	// query texture compression support
+	// query optional feature support
 	auto dev_features = m_physical_device.getFeatures();
 	m_supports_bc   = dev_features.textureCompressionBC;
 	m_supports_astc = dev_features.textureCompressionASTC_LDR;
+	m_supports_storage_image_ms = dev_features.shaderStorageImageMultisample;
 
 	// print the name of the selected physical device
 	auto properties = m_physical_device.getProperties();
@@ -316,7 +317,7 @@ void VeDevice::createLogicalDevice() {
 					vk::PhysicalDeviceVulkan13Features,
 					vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
 					vk::PhysicalDeviceTimelineSemaphoreFeatures> feature_chain = {
-		{.features = {.depthClamp = true, .samplerAnisotropy = true}},
+		{.features = {.depthClamp = true, .samplerAnisotropy = true, .shaderStorageImageMultisample = m_supports_storage_image_ms}},
 		{.multiview = true, .shaderDrawParameters = true},
 		{.synchronization2 = true, .dynamicRendering = true},
 		{.extendedDynamicState = true },

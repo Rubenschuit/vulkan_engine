@@ -63,6 +63,7 @@ protected:
 
 	// Camera settings
 	VeCamera m_camera;
+	glm::mat4 m_prev_projection_view{1.0f};  // previous frame's proj*view for shadow mask reprojection
 	float m_fov = glm::radians(80.0f); // Move to sandbox class
 	float m_near_plane = 0.1f;
 	float m_far_plane = 100000.0f;

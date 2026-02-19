@@ -31,10 +31,10 @@ Small modern cross-platform C++20 Vulkan 1.3+ renderer using GLFW and Slang. Pro
 - PBR for .gltf models like Sponza and Bistro
 - Particle system with compute shaders
 - Fireworks using the particle system
-- Point lights
-- Shadow mapping
+- Point lights, directional lights
+- Shadows: CSM, Screen Space Shadows with compute, PCF, PCSS
 - Post-processing effects like Bloom and Blur
-- Basic HDR
+- Basic HDR, several tone mapping options
 - Dear ImGui overlay
 - Skybox
 - FPS-style camera
@@ -51,10 +51,11 @@ Small modern cross-platform C++20 Vulkan 1.3+ renderer using GLFW and Slang. Pro
 - Slang compiler (included in Vulkan SDK since 1.3.296)
 - KTX library
 - GLFW 3.3+ (automatically fetched if missing)
-- GLM (automatically fetched if missing)
-- TinyGLTF (included in external)
-- Dear ImGui (included in external)
-- Mikktspace (included in external)
+- GLM       (automatically fetched if missing)
+- TinyGLTF 				(included in external)
+- Dear ImGui 			(included in external)
+- Mikktspace 			(included in external)
+- Portable File Dialogs (included in external)
 
 
 #### Downloads:
