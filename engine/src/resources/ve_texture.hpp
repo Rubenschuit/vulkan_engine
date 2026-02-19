@@ -36,8 +36,10 @@ public:
 	const vk::raii::ImageView& getImageView() const { return m_texture_image->getImageView(); };
 	vk::DescriptorImageInfo getDescriptorInfo() const;
 
-	// Create a depth compare sampler for shadow maps
+	// Create a depth comparison sampler for shadow maps
 	static vk::raii::Sampler createDepthCompareSampler(VeDevice& device);
+	// Create a regular (non-comparison) sampler for raw depth reads (PCSS blocker search)
+	static vk::raii::Sampler createShadowRawSampler(VeDevice& device);
 
 	// Create a default texture (4x4 placeholder for albedo/normal/metallic-roughness)
 	static std::shared_ptr<VeTexture> createDefault(VeDevice& device, TextureType type);

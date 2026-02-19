@@ -501,9 +501,6 @@ void VeTexture::createTextureSampler() {
 }
 
 vk::raii::Sampler VeTexture::createDepthCompareSampler(VeDevice& device) {
-	// MoltenVK doesn't support comparison samplers
-	bool enable_compare = false;
-
 	vk::SamplerCreateInfo sampler_info{
 		.magFilter = vk::Filter::eLinear,
 		.minFilter = vk::Filter::eLinear,
@@ -514,11 +511,31 @@ vk::raii::Sampler VeTexture::createDepthCompareSampler(VeDevice& device) {
 		.mipLodBias = 0.0f,
 		.anisotropyEnable = vk::False,
 		.maxAnisotropy = 1.0f,
-		.compareEnable = enable_compare,
+		.compareEnable = vk::True,
 		.compareOp = vk::CompareOp::eLess,
 		.minLod = 0.0f,
 		.maxLod = VK_LOD_CLAMP_NONE,
-		.borderColor = vk::BorderColor::eFloatOpaqueWhite,  // outside shadow map is lit (clamp to border)
+		.borderColor = vk::BorderColor::eFloatOpaqueWhite,  // outside shadow map = lit
+		.unnormalizedCoordinates = vk::False
+	};
+	return vk::raii::Sampler(device.getDevice(), sampler_info);
+}
+
+vk::raii::Sampler VeTexture::createShadowRawSampler(VeDevice& device) {
+	vk::SamplerCreateInfo sampler_info{
+		.magFilter = vk::Filter::eLinear,
+		.minFilter = vk::Filter::eLinear,
+		.mipmapMode = vk::SamplerMipmapMode::eLinear,
+		.addressModeU = vk::SamplerAddressMode::eClampToBorder,
+		.addressModeV = vk::SamplerAddressMode::eClampToBorder,
+		.addressModeW = vk::SamplerAddressMode::eClampToBorder,
+		.mipLodBias = 0.0f,
+		.anisotropyEnable = vk::False,
+		.maxAnisotropy = 1.0f,
+		.compareEnable = vk::False,
+		.minLod = 0.0f,
+		.maxLod = VK_LOD_CLAMP_NONE,
+		.borderColor = vk::BorderColor::eFloatOpaqueWhite,
 		.unnormalizedCoordinates = vk::False
 	};
 	return vk::raii::Sampler(device.getDevice(), sampler_info);

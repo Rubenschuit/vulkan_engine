@@ -24,7 +24,9 @@ struct VENGINE_API UIContext {
 
 	// graphics settings
 	float fov = 80.0f;
-	ShadowMode shadow_mode = ShadowMode::REGULAR;
+	ShadowMode shadow_mode = ShadowMode::PCF;
+	float pcss_light_size = 0.04f;
+	int csm_blend_mode = 2; // 0=off, 1=linear, 2=dithered TODO: enum
 	Topology topology = Topology::TRIANGLE_LIST;
 	bool hdr_enabled = false;
 	bool msaa = false;

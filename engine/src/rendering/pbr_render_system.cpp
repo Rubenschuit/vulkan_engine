@@ -43,7 +43,7 @@ PbrRenderSystem::PbrRenderSystem(
 	: m_ve_device(device), m_shader_path(std::move(shader_path)), m_color_format(color_format), m_sample_count(sample_count) {
 
 	createPipelineLayout(global_set_layout, material_set_layout, shadow_set_layout);
-	createPipeline(m_color_format, m_sample_count);
+	createPipelines(m_color_format, m_sample_count);
 }
 
 PbrRenderSystem::~PbrRenderSystem() = default;
@@ -70,7 +70,7 @@ void PbrRenderSystem::createPipelineLayout(
 	m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), pipeline_layout_info);
 }
 
-void PbrRenderSystem::createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+void PbrRenderSystem::createPipelines(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
 	PipelineConfigInfo pipeline_config{};
 	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
 	pipeline_config.dynamic_state_enables.push_back(vk::DynamicState::eCullMode);
@@ -84,13 +84,17 @@ void PbrRenderSystem::createPipeline(vk::Format color_format, vk::SampleCountFla
 	pipeline_config.color_format = color_format;
 	pipeline_config.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptions();
 	pipeline_config.input_assembly_info.topology = m_topology;
-
 	pipeline_config.pipeline_layout = *m_pipeline_layout;
-	m_ve_pipeline = std::make_unique<VePipeline>(
-		m_ve_device,
-		m_shader_path,
-		pipeline_config);
-	assert(m_ve_pipeline != VK_NULL_HANDLE && "Failed to create pipeline");
+
+	// Create one pipeline variant per shadow mode (spec constant ID 0 = ShadowMode)
+	for (uint32_t mode = 0; mode < SHADOW_MODE_COUNT; mode++) {
+		pipeline_config.specialization_constants = {{0, mode}};
+		m_pipelines[mode] = std::make_unique<VePipeline>(
+			m_ve_device,
+			m_shader_path,
+			pipeline_config);
+		assert(m_pipelines[mode] != VK_NULL_HANDLE && "Failed to create PBR pipeline variant");
+	}
 }
 
 void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info) const {
@@ -256,7 +260,8 @@ void PbrRenderSystem::renderOpaqueGroup(
 }
 
 void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info) const {
-	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
+	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipelines[mode]->getPipeline());
 
 	// Bind global (set 0) and shadow (set 2) once — they don't change between draws
 	frame_info.command_buffer.bindDescriptorSets(
@@ -289,7 +294,8 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info) const {
 }
 
 void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
-	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
+	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipelines[mode]->getPipeline());
 
 	// eLessOrEqual so transparent surfaces coplanar with opaque geometry (decal overlays)
 	// consistently pass the depth test and render on top.

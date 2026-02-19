@@ -56,12 +56,14 @@ enum class RenderMode : uint32_t {
 	BITANGENT_VECTOR = 3,
 	NORMAL_MAP = 4,
 	BRDF_MICROFACET = 5,
+	CSM_CASCADE = 6,
 };
 
 enum class ShadowMode : uint32_t {
 	DISABLED = 0,
 	REGULAR = 1,
 	PCF = 2,
+	PCSS = 3,
 };
 
 enum class Topology : uint32_t {
@@ -112,11 +114,45 @@ struct UniformBufferObject {
 	alignas(4)  float shadow_bias = ve::SHADOW_BIAS;
 	alignas(4)  uint32_t num_dir_lights = 0;
 	alignas(16) DirectionalLight dir_lights[ve::MAX_DIR_LIGHTS];
+
+	// Cascaded shadow maps
+	alignas(16) glm::mat4 csm_shadow_matrices[ve::NUM_CSM_CASCADES]; // bias * proj * view per cascade
+	alignas(16) glm::vec4 csm_split_distances{};  // view-space far-Z for cascades
+	alignas(4)  uint32_t csm_cascade_count = 0;
+	alignas(4)  uint32_t csm_base_layer = 0;
+	alignas(4)  float csm_shadow_map_size = static_cast<float>(ve::CSM_SHADOW_MAP_RESOLUTION);
+	alignas(4)  uint32_t csm_dir_light_index = 0xFFFFFFFF; // which dir_lights[] index has CSM (0xFFFFFFFF = none)
+	alignas(4)  float pcss_light_size = 0.04f;  // world-space light radius for PCSS penumbra
+	alignas(4)  uint32_t csm_blend_dithered = 0; // 0 = off, 1 = linear, 2 = dithered
 };
 static_assert(offsetof(UniformBufferObject, dir_lights) % 16 == 0,
 	"dir_lights must be 16-byte aligned for GPU UBO layout");
 static_assert(sizeof(PostProcessPushConstant) == 40,
 	"PostProcessPushConstant size must match shader push constant layout");
+
+// Minimal UBO for shadow passes
+struct ShadowPassUBO {
+	alignas(16) glm::mat4 view;
+	alignas(16) glm::mat4 proj;
+	alignas(16) glm::mat4 projection_view;
+};
+static_assert(sizeof(ShadowPassUBO) == 192, "ShadowPassUBO must be 192 bytes");
+
+// Multiview CSM UBO: all cascade view/proj matrices in a single buffer for multiview rendering
+struct CsmMultiviewUBO {
+	alignas(16) glm::mat4 view[NUM_CSM_CASCADES];
+	alignas(16) glm::mat4 proj[NUM_CSM_CASCADES];
+	alignas(16) glm::mat4 projection_view[NUM_CSM_CASCADES];
+};
+static_assert(sizeof(CsmMultiviewUBO) == 192 * NUM_CSM_CASCADES,
+	"CsmMultiviewUBO must be 192 bytes per cascade");
+
+// CPU-side cascade data passed from LightSystem to ShadowRenderSystem
+struct CsmCascadeData {
+	glm::mat4 light_view[ve::NUM_CSM_CASCADES];
+	glm::mat4 light_proj[ve::NUM_CSM_CASCADES];
+	uint32_t  active_cascade_count = 0;
+};
 
 struct VeFrameInfo {
 	vk::raii::DescriptorSet& global_descriptor_set;
@@ -139,9 +175,15 @@ struct VeFrameInfo {
 	uint32_t instance_count = 0;            // current number of instances written this frame
 	uint32_t instance_capacity = 0;         // max instances the buffer can hold
 
+	// Shadow mode for pipeline variant selection (set by application, consumed by render systems)
+	ShadowMode shadow_mode = ShadowMode::REGULAR;
+
+	// CSM cascade data (filled by LightSystem, consumed by ShadowRenderSystem)
+	CsmCascadeData csm_data;
+
 	// GPU timing: compute systems write the start timestamp after their barriers resolve.
 	vk::QueryPool compute_query_pool = VK_NULL_HANDLE;
-	uint32_t compute_start_query = 0;       // query index for compute start timestamp
+	uint32_t compute_start_query = 0;
 };
 
 }

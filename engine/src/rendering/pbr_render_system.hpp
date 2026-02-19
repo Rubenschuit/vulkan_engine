@@ -4,6 +4,7 @@
 #include "rendering/ve_frame_info.hpp"
 #include "resources/ve_material_properties.hpp"
 
+#include <array>
 #include <memory>
 #include <vector>
 #include <filesystem>
@@ -50,8 +51,9 @@ public:
 	void renderOpaque(VeFrameInfo& frame_info) const;
 	void renderTransparent(VeFrameInfo& frame_info) const;
 	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
-		m_ve_pipeline.reset();
-		createPipeline(color_format, sample_count);
+		for (auto& p : m_pipelines) 
+			p.reset();
+		createPipelines(color_format, sample_count);
 	}
 	void setTopology(vk::PrimitiveTopology topology) {
 		m_topology = topology;
@@ -66,7 +68,7 @@ private:
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		const vk::raii::DescriptorSetLayout& material_set_layout,
 		const vk::raii::DescriptorSetLayout& shadow_set_layout);
-	void createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
+	void createPipelines(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
 	void renderOpaqueGroup(VeFrameInfo& frame_info, const InstanceGroup& group,
 		VkDescriptorSet& bound_material_set, VeMesh*& bound_mesh) const;
 
@@ -76,8 +78,9 @@ private:
 	vk::Format m_color_format = vk::Format::eUndefined;
 	vk::SampleCountFlagBits m_sample_count = vk::SampleCountFlagBits::e1;
 
+	static constexpr uint32_t SHADOW_MODE_COUNT = 4;  // DISABLED, REGULAR, PCF, PCSS
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
-	std::unique_ptr<VePipeline> m_ve_pipeline;
+	std::array<std::unique_ptr<VePipeline>, SHADOW_MODE_COUNT> m_pipelines;
 
 	struct Drawable {
 		VkDescriptorSet material_set;

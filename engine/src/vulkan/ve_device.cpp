@@ -245,6 +245,7 @@ bool VeDevice::isDeviceSuitable(const vk::raii::PhysicalDevice& phyisical_device
 											vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
 											vk::PhysicalDeviceTimelineSemaphoreFeatures>();
 	if (!features.get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy ||
+		!features.get<vk::PhysicalDeviceVulkan11Features>().multiview ||
 		!features.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering ||
 		!features.get<vk::PhysicalDeviceVulkan13Features>().synchronization2 ||
 		!features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState ||
@@ -316,7 +317,7 @@ void VeDevice::createLogicalDevice() {
 					vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
 					vk::PhysicalDeviceTimelineSemaphoreFeatures> feature_chain = {
 		{.features = {.depthClamp = true, .samplerAnisotropy = true}},
-		{.shaderDrawParameters = true},
+		{.multiview = true, .shaderDrawParameters = true},
 		{.synchronization2 = true, .dynamicRendering = true},
 		{.extendedDynamicState = true },
 		{.timelineSemaphore = true}
@@ -631,8 +632,7 @@ void VeDevice::endSingleTimeCommands(vk::raii::CommandBuffer& cmd, QueueKind kin
 		case QueueKind::Transfer: m_transfer_queue.submit(submit_info, *fence); break;
 	}
 
-	// Wait only for this specific submission rather than stalling the entire queue
-	while (vk::Result::eTimeout ==
-		m_device.waitForFences(*fence, vk::True, UINT64_MAX));
+	// Wait only for this specific submission
+	while (vk::Result::eTimeout == m_device.waitForFences(*fence, vk::True, UINT64_MAX));
 }
 }

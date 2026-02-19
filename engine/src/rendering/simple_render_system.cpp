@@ -34,7 +34,7 @@ SimpleRenderSystem::SimpleRenderSystem(
 	: m_ve_device(device), m_shader_path(shader_path), m_color_format(color_format), m_sample_count(sample_count) {
 
 	createPipelineLayout(global_set_layout, material_set_layout, shadow_set_layout);
-	createPipeline(m_color_format, m_sample_count);
+	createPipelines(m_color_format, m_sample_count);
 }
 
 SimpleRenderSystem::~SimpleRenderSystem() {
@@ -57,7 +57,7 @@ void SimpleRenderSystem::createPipelineLayout(const vk::raii::DescriptorSetLayou
 	m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), pipeline_layout_info);
 }
 
-void SimpleRenderSystem::createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+void SimpleRenderSystem::createPipelines(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
 	PipelineConfigInfo pipeline_config{};
 	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
 	pipeline_config.multisample_info.rasterizationSamples = sample_count;
@@ -65,20 +65,20 @@ void SimpleRenderSystem::createPipeline(vk::Format color_format, vk::SampleCount
 	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eBack;
 	pipeline_config.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptionsSimple();
 	pipeline_config.input_assembly_info.topology = m_topology;
-
 	pipeline_config.pipeline_layout = *m_pipeline_layout;
-	m_ve_pipeline = std::make_unique<VePipeline>(
-		m_ve_device,
-		m_shader_path,
-		pipeline_config);
-	assert(m_ve_pipeline != VK_NULL_HANDLE && "Failed to create pipeline");
 
+	for (uint32_t mode = 0; mode < SHADOW_MODE_COUNT; mode++) {
+		pipeline_config.specialization_constants = {{0, mode}};
+		m_pipelines[mode] = std::make_unique<VePipeline>(
+			m_ve_device, m_shader_path, pipeline_config);
+	}
 }
 
 // Renders visible objects from frame_info.visible_objects. Objects are grouped by
 // (mesh, material) for instanced draw calls.
 void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
-	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
+	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipelines[mode]->getPipeline());
 
 	auto& registry = *frame_info.registry;
 	m_instance_groups.clear();

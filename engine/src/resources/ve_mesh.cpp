@@ -111,7 +111,7 @@ void VeMesh::createShadowVertexBuffer(const std::vector<Vertex>& vertices) {
 		m_ve_device,
 		sizeof(glm::vec3),
 		m_vertex_count,
-		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		1
 	);
@@ -137,7 +137,7 @@ void VeMesh::createIndexBuffers(const std::vector<uint32_t>& indices) {
 		m_ve_device,
 		sizeof(indices[0]),
 		m_index_count,
-		vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+		vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		1
 	);

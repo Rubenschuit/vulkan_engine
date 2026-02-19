@@ -35,6 +35,7 @@ struct PipelineConfigInfo {
 	std::vector<vk::VertexInputBindingDescription> binding_descriptions{};
 	// Specialization constants: map from constant ID to value
 	std::unordered_map<uint32_t, uint32_t> specialization_constants{};
+	uint32_t view_mask = 0;  // 0 = no multiview
 };
 
 class VENGINE_API VePipeline {

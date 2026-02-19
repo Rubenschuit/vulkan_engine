@@ -1,0 +1,359 @@
+#ifndef VE_COMMON_SLANGH
+#define VE_COMMON_SLANGH
+
+// Shared definitions, UBO, bindings, and shadow functions for PBR and simple shaders.
+// Each shader only needs to declare its own material textures (set 1) and push constants.
+
+#define PI 3.1415926536
+#include "ve_constants.slangh"
+
+// ============================================================================
+// Light structs (keep in sync with ve_frame_info.hpp)
+// ============================================================================
+
+struct PointLight {
+	float4 position;
+	float4 color; // .w = intensity
+};
+
+struct DirectionalLight {
+	float4 direction;  // xyz = direction toward surface, w = unused
+	float4 color;      // xyz = color * intensity, w = intensity
+};
+
+struct ShadowLight {
+	float4x4 light_view;
+	float4x4 light_proj;
+	float4x4 shadow_matrix;
+	float4 light_index_padding; // x = light_index, y = type (0=point, 1=directional), zw = padding
+};
+
+// Keep in sync with RenderMode enum in ve_frame_info.hpp
+enum RenderMode {
+	BRDF = 0,
+	NORMAL_VECTOR = 1,
+	TANGENT_VECTOR = 2,
+	BITANGENT_VECTOR = 3,
+	NORMAL_MAP = 4,
+	BRDF_MICROFACET = 5,
+	CSM_CASCADE = 6,
+};
+
+// ============================================================================
+// Uniform buffer + global bindings (set 0)
+// ============================================================================
+
+struct UniformBuffer {
+	float4x4 view;
+	float4x4 proj;
+	float4x4 projection_view;
+	float4 camera_position; // .w unused
+	float4 ambient_light_color;
+	PointLight point_lights[MAX_LIGHTS];
+	ShadowLight shadow_lights[MAX_SHADOW_LIGHTS];
+	uint32_t num_lights;
+	uint32_t num_shadow_lights;
+	uint32_t render_mode; // see RenderMode enum
+	uint32_t shadow_mode;
+	float shadow_bias;
+	uint32_t num_dir_lights;
+	float _pad_dir_0;
+	float _pad_dir_1;
+	DirectionalLight dir_lights[MAX_DIR_LIGHTS];
+
+	// CSM (Cascaded Shadow Maps)
+	float4x4 csm_shadow_matrices[NUM_CSM_CASCADES];
+	float4   csm_split_distances;  // view-space far-Z per cascade
+	uint32_t csm_cascade_count;
+	uint32_t csm_base_layer;
+	float    csm_shadow_map_size;
+	uint32_t csm_dir_light_index;
+	float    pcss_light_size;
+	uint32_t csm_blend_dithered;
+};
+[vk::binding(0, 0)]
+ConstantBuffer<UniformBuffer> ubo;
+
+// Per-instance transforms stored in SSBO, indexed by SV_InstanceID (always 0-based)
+struct InstanceData {
+	float4x4 transform;
+	float4   normal_col0;
+	float4   normal_col1;
+	float4   normal_col2;
+};
+[vk::binding(1, 0)]
+StructuredBuffer<InstanceData> instances;
+
+// ============================================================================
+// Shadow map bindings (set 2)
+// ============================================================================
+
+[vk::binding(0, 2)]
+SamplerComparisonState shadow_cmp_sampler;  // Hardware comparison sampler (2x2 bilinear PCF)
+[vk::binding(1, 2)]
+Texture2DArray shadow_maps;
+[vk::binding(2, 2)]
+SamplerState shadow_sampler;  // Regular sampler for raw depth reads (PCSS blocker search)
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
+// Bias matrix: converts NDC [-1,1] to texture coordinates [0,1]
+static const float4x4 bias_matrix = float4x4(
+	0.5, 0.0, 0.0, 0.5,
+	0.0, 0.5, 0.0, 0.5,
+	0.0, 0.0, 1.0, 0.0,
+	0.0, 0.0, 0.0, 1.0
+);
+
+// KHR_lights_punctual attenuation: smooth windowed falloff within range, 1/d² when range=0
+float calculateAttenuation(float distance_sq, float range) {
+	if (range > 0.0) {
+		float dist = sqrt(distance_sq);
+		float ratio = dist / range;
+		float ratio2 = ratio * ratio;
+		float ratio4 = ratio2 * ratio2;
+		float window = clamp(1.0 - ratio4, 0.0, 1.0);
+		return (window * window) / max(distance_sq, 0.0001);
+	}
+	return 1.0 / max(distance_sq, 0.0001);
+}
+
+// ============================================================================
+// Shadow sampling functions
+// ============================================================================
+
+// Hardware comparison shadow test: returns 1.0 (lit) or 0.0 (shadow) with free 2x2 bilinear PCF
+float calculateShadowTerm(uint32_t light_index, float4 shadow_coord, float2 offset) {
+	if (shadow_coord.z <= -1.0 || shadow_coord.z >= 1.0 || shadow_coord.w <= 0.0)
+		return 1.0;
+	return shadow_maps.SampleCmpLevelZero(shadow_cmp_sampler,
+		float3(shadow_coord.xy + offset, light_index), shadow_coord.z - ubo.shadow_bias);
+}
+
+// 8-sample Poisson disk
+static const float2 POISSON_DISK_8[8] = {
+	float2(-0.7071,  0.7071), float2( 0.0000, -0.8750),
+	float2( 0.8660,  0.5000), float2(-0.6614, -0.3536),
+	float2( 0.3090,  0.9511), float2( 0.5878, -0.8090),
+	float2(-0.9511,  0.0000), float2( 0.2588, -0.1830),
+};
+
+// 16-sample Poisson disk
+static const float2 POISSON_DISK_16[16] = {
+	float2(-0.9420, -0.3990), float2( 0.9456, -0.7689),
+	float2(-0.0942, -0.9293), float2( 0.3449,  0.2939),
+	float2(-0.9159,  0.4579), float2(-0.8154, -0.8790),
+	float2(-0.3826,  0.2762), float2( 0.9748,  0.7563),
+	float2( 0.4437, -0.0865), float2( 0.1628,  0.8842),
+	float2(-0.5466, -0.0710), float2(-0.1877,  0.7574),
+	float2( 0.7063,  0.3567), float2(-0.4483, -0.5765),
+	float2( 0.5765, -0.5011), float2(-0.0310, -0.3949),
+};
+
+// Rotated Poisson disk PCF — each sample gets free 2x2 bilinear from comparison sampler
+float calculateShadowPCF(uint32_t light_index, float4 shadow_coord, float texel_size) {
+	if (shadow_coord.z <= -1.0 || shadow_coord.z >= 1.0 || shadow_coord.w <= 0.0)
+		return 1.0;
+
+	float spread = 2.5f * texel_size;
+	float ref_depth = shadow_coord.z - ubo.shadow_bias;
+
+	// Per-fragment rotation angle from screen-space position to break banding
+	float angle = frac(sin(dot(shadow_coord.xy, float2(12.9898, 78.233))) * 43758.5453) * 2.0 * PI;
+	float sa = sin(angle);
+	float ca = cos(angle);
+
+	float shadow = 0.0;
+	static const uint32_t num_samples = 8;
+	for (int i = 0; i < num_samples; i++) {
+		float2 offset = float2(
+			ca * POISSON_DISK_8[i].x - sa * POISSON_DISK_8[i].y,
+			sa * POISSON_DISK_8[i].x + ca * POISSON_DISK_8[i].y
+		) * spread;
+		shadow += shadow_maps.SampleCmpLevelZero(shadow_cmp_sampler,
+			float3(shadow_coord.xy + offset, light_index), ref_depth);
+	}
+	return shadow / float(num_samples);
+}
+
+static const uint PCSS_BLOCKER_SAMPLES = 8;
+static const uint PCSS_FILTER_SAMPLES = 16;
+
+// PCSS: contact-hardening soft shadows via blocker search + variable-radius PCF
+float calculatePCSS(uint32_t layer, float4 shadow_coord, float texel_size) {
+	if (shadow_coord.z <= -1.0 || shadow_coord.z >= 1.0 || shadow_coord.w <= 0.0)
+		return 1.0;
+
+	float receiver = shadow_coord.z;
+	float light_size = ubo.pcss_light_size;
+
+	// Per-fragment rotation for both blocker search and PCF
+	float angle = frac(sin(dot(shadow_coord.xy, float2(12.9898, 78.233))) * 43758.5453) * 2.0 * PI;
+	float sa = sin(angle);
+	float ca = cos(angle);
+
+	// Step 1: Blocker search using raw sampler
+	float search_radius = light_size * texel_size * 600.0;
+	float blocker_sum = 0.0;
+	uint blocker_count = 0;
+	for (int i = 0; i < PCSS_BLOCKER_SAMPLES; i++) {
+		float2 offset = float2(
+			ca * POISSON_DISK_8[i].x - sa * POISSON_DISK_8[i].y,
+			sa * POISSON_DISK_8[i].x + ca * POISSON_DISK_8[i].y
+		) * search_radius;
+		float depth = shadow_maps.SampleLevel(shadow_sampler,
+			float3(shadow_coord.xy + offset, layer), 0.0).r;
+		if (depth + ubo.shadow_bias < receiver) {
+			blocker_sum += depth;
+			blocker_count++;
+		}
+	}
+	if (blocker_count == 0)
+		return 1.0;  // no blockers = fully lit
+	float avg_blocker = blocker_sum / float(blocker_count);
+
+	// Step 2: Penumbra estimation
+	float penumbra = (receiver - avg_blocker) / avg_blocker * light_size;
+
+	// Step 3: Variable-radius PCF using comparison sampler (free 2x2 bilinear per sample)
+	float spread = clamp(penumbra, texel_size, 25.0 * texel_size);
+	float ref_depth = receiver - ubo.shadow_bias;
+	float shadow = 0.0;
+	for (int i = 0; i < PCSS_FILTER_SAMPLES; i++) {
+		float2 offset = float2(
+			ca * POISSON_DISK_16[i].x - sa * POISSON_DISK_16[i].y,
+			sa * POISSON_DISK_16[i].x + ca * POISSON_DISK_16[i].y
+		) * spread;
+		shadow += shadow_maps.SampleCmpLevelZero(shadow_cmp_sampler,
+			float3(shadow_coord.xy + offset, layer), ref_depth);
+	}
+	return shadow / float(PCSS_FILTER_SAMPLES);
+}
+
+// Sample shadow from a specific CSM cascade
+float sampleCascadeShadow(uint cascade, float3 frag_pos_world) {
+	float4 shadow_coord = mul(ubo.csm_shadow_matrices[cascade], float4(frag_pos_world, 1.0));
+	shadow_coord /= shadow_coord.w;
+
+	uint layer_index = ubo.csm_base_layer + cascade;
+
+	float texel_size = 1.0 / ubo.csm_shadow_map_size;
+	if (SHADOW_MODE_SPEC == ShadowMode::PCSS)
+		return calculatePCSS(layer_index, shadow_coord, texel_size);
+	else if (SHADOW_MODE_SPEC == ShadowMode::PCF)
+		return calculateShadowPCF(layer_index, shadow_coord, texel_size);
+	else
+		return calculateShadowTerm(layer_index, shadow_coord, float2(0.0, 0.0));
+}
+
+// CSM shadow lookup: select cascade based on view-space depth, blend near boundaries
+float calculateCSMShadow(float3 frag_pos_world, float frag_view_z, out uint out_cascade, out float out_blend) {
+	out_cascade = 0;
+	out_blend = 0.0;
+	if (ubo.csm_cascade_count == 0)
+		return 1.0;
+
+	// Early-out: fragment beyond outermost cascade — no shadow data available
+	if (frag_view_z > ubo.csm_split_distances[ubo.csm_cascade_count - 1])
+		return 1.0;
+
+	// Select cascade: find the first cascade whose far-split covers this depth
+	uint cascade = ubo.csm_cascade_count - 1;
+	for (uint i = 0; i < ubo.csm_cascade_count; i++) {
+		if (frag_view_z < ubo.csm_split_distances[i]) {
+			cascade = i;
+			break;
+		}
+	}
+
+	// Blend with next cascade near split boundary to hide seams
+	// csm_blend_dithered: 0=off, 1=linear, 2=dithered
+	const float BLEND_FRACTION = 0.15;
+	if (ubo.csm_blend_dithered == 2 && cascade < ubo.csm_cascade_count - 1) {
+		// Dithered: pick ONE cascade upfront via noise, avoiding any second sample.
+		float split = ubo.csm_split_distances[cascade];
+		float cascade_start = (cascade == 0) ? 0.0 : ubo.csm_split_distances[cascade - 1];
+		float blend_zone = (split - cascade_start) * BLEND_FRACTION;
+
+		if (frag_view_z > split - blend_zone) {
+			float t = (frag_view_z - (split - blend_zone)) / blend_zone;
+			float noise = frac(sin(dot(frag_pos_world.xz, float2(12.9898, 78.233))) * 43758.5453);
+			if (noise < t)
+				cascade = cascade + 1;
+		}
+	}
+
+	out_cascade = cascade;
+
+	float shadow = sampleCascadeShadow(cascade, frag_pos_world);
+
+	// Linear blend: smooth lerp with next cascade in blend zone (2x sample cost)
+	if (ubo.csm_blend_dithered == 1 && cascade < ubo.csm_cascade_count - 1) {
+		float split = ubo.csm_split_distances[cascade];
+		float cascade_start = (cascade == 0) ? 0.0 : ubo.csm_split_distances[cascade - 1];
+		float blend_zone = (split - cascade_start) * BLEND_FRACTION;
+
+		if (frag_view_z > split - blend_zone) {
+			float next_shadow = sampleCascadeShadow(cascade + 1, frag_pos_world);
+			float t = (frag_view_z - (split - blend_zone)) / blend_zone;
+			shadow = lerp(shadow, next_shadow, t);
+			out_blend = t;
+		}
+	}
+
+	return shadow;
+}
+
+// Compute point light shadow terms from interpolated shadow coordinates
+void calculatePointShadowTerms(float4 shadow_coords[MAX_SHADOW_LIGHTS],
+                                out float shadow_terms[MAX_SHADOW_LIGHTS],
+                                out uint32_t shadow_for_light[MAX_SHADOW_LIGHTS]) {
+	for (uint32_t s = 0; s < MAX_SHADOW_LIGHTS; s++) {
+		shadow_terms[s] = 1.0;
+		shadow_for_light[s] = 0xFFFFFFFF;
+	}
+
+	if (SHADOW_MODE_SPEC == ShadowMode::DISABLED) return;
+
+	float texel_size = 1.0 / ubo.csm_shadow_map_size;
+	for (uint32_t shadow_idx = 0; shadow_idx < ubo.num_shadow_lights; shadow_idx++) {
+		shadow_for_light[shadow_idx] = uint32_t(ubo.shadow_lights[shadow_idx].light_index_padding.x);
+		uint32_t array_layer = uint32_t(ubo.shadow_lights[shadow_idx].light_index_padding.z);
+
+		float4 sc = shadow_coords[shadow_idx] / shadow_coords[shadow_idx].w;
+		if (SHADOW_MODE_SPEC == ShadowMode::PCSS)
+			shadow_terms[shadow_idx] = calculatePCSS(array_layer, sc, texel_size);
+		else if (SHADOW_MODE_SPEC == ShadowMode::REGULAR)
+			shadow_terms[shadow_idx] = calculateShadowTerm(array_layer, sc, float2(0.0, 0.0));
+		else
+			shadow_terms[shadow_idx] = calculateShadowPCF(array_layer, sc, texel_size);
+	}
+}
+
+// Look up shadow term for a specific point light index
+float getPointShadow(uint32_t light_index, float shadow_terms[MAX_SHADOW_LIGHTS],
+                     uint32_t shadow_for_light[MAX_SHADOW_LIGHTS]) {
+	for (uint32_t s = 0; s < ubo.num_shadow_lights; s++) {
+		if (shadow_for_light[s] == light_index)
+			return shadow_terms[s];
+	}
+	return 1.0;
+}
+
+// Cascade debug visualization: tint by cascade index, lerp at blend boundaries
+float3 csmDebugColor(float3 albedo, uint cascade, float blend_t, float shadow) {
+	static const float3 CASCADE_COLORS[4] = {
+		float3(1.0, 0.2, 0.2),  // red
+		float3(0.2, 1.0, 0.2),  // green
+		float3(0.2, 0.2, 1.0),  // blue
+		float3(1.0, 1.0, 0.2),  // yellow
+	};
+	float3 tint = CASCADE_COLORS[cascade % 4];
+	if (blend_t > 0.0 && cascade < ubo.csm_cascade_count - 1)
+		tint = lerp(tint, CASCADE_COLORS[(cascade + 1) % 4], blend_t);
+	return albedo * tint * shadow;
+}
+
+#endif

@@ -96,8 +96,8 @@ void SimpleScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
 
 			Entity quad_entity = m_registry.createEntity();
 			auto& tc = m_registry.addComponent<TransformComponent>(quad_entity);
-			tc.setTranslation({0.0f, -60.0f, 10.0f});
-			tc.setScale({8.0f, 8.0f, 8.0f});
+			tc.setTranslation({0.0f, 60.0f, 10.0f});
+			tc.setScale({18.0f, 18.0f, 18.0f});
 			auto& mc = m_registry.addComponent<MeshComponent>(quad_entity, quad_data->mesh, mat_handle);
 			mc.has_texture = 1.0f;
 			mc.has_shadow = false;

@@ -119,7 +119,7 @@ void VePipeline::createGraphicsPipeline(
 	// Build specialization constant data if provided
 	std::vector<vk::SpecializationMapEntry> spec_map_entries;
 	std::vector<uint32_t> spec_data;
-	vk::SpecializationInfo frag_spec_info{};
+	vk::SpecializationInfo spec_info{};
 
 	if (!config_info.specialization_constants.empty()) {
 		spec_map_entries.reserve(config_info.specialization_constants.size());
@@ -136,7 +136,7 @@ void VePipeline::createGraphicsPipeline(
 			offset++;
 		}
 
-		frag_spec_info = {
+		spec_info = {
 			.mapEntryCount = static_cast<uint32_t>(spec_map_entries.size()),
 			.pMapEntries = spec_map_entries.data(),
 			.dataSize = spec_data.size() * sizeof(uint32_t),
@@ -144,20 +144,22 @@ void VePipeline::createGraphicsPipeline(
 		};
 	}
 
+	const auto* p_spec_info = config_info.specialization_constants.empty() ? nullptr : &spec_info;
+
 	vk::PipelineShaderStageCreateInfo shader_stages[2] = {
 		{
 			.sType = vk::StructureType::ePipelineShaderStageCreateInfo,
 			.stage = vk::ShaderStageFlagBits::eVertex,
 			.module = *m_shader_module,
 			.pName = "vertMain",
-			.pSpecializationInfo = nullptr
+			.pSpecializationInfo = p_spec_info
 		},
 		{
 			.sType = vk::StructureType::ePipelineShaderStageCreateInfo,
 			.stage = vk::ShaderStageFlagBits::eFragment,
 			.module = *m_shader_module,
 			.pName = "fragMain",
-			.pSpecializationInfo = config_info.specialization_constants.empty() ? nullptr : &frag_spec_info
+			.pSpecializationInfo = p_spec_info
 		}
 	};
 	vk::PipelineVertexInputStateCreateInfo vertex_input_info{
@@ -182,7 +184,7 @@ void VePipeline::createGraphicsPipeline(
 	vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo{
 		.sType = vk::StructureType::ePipelineRenderingCreateInfo,
 		.pNext = nullptr,
-		.viewMask = 0,
+		.viewMask = config_info.view_mask,
 		.colorAttachmentCount = color_attachment_count,
 		.pColorAttachmentFormats = (config_info.color_format == vk::Format::eUndefined) ? nullptr : &config_info.color_format,
 		.depthAttachmentFormat = depth_format,

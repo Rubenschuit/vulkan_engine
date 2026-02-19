@@ -1,0 +1,18 @@
+#ifndef VE_CONSTANTS_SLANGH
+#define VE_CONSTANTS_SLANGH
+// Keep in sync with engine/src/ve_config.hpp
+#define MAX_LIGHTS          160
+#define MAX_SHADOW_LIGHTS   2
+#define MAX_DIR_LIGHTS      4
+#define NUM_CSM_CASCADES    3
+
+enum ShadowMode {
+	DISABLED = 0,
+	REGULAR = 1,
+	PCF = 2,
+	PCSS = 3,
+};
+
+[vk::constant_id(0)] const uint SHADOW_MODE_SPEC = 0;
+
+#endif

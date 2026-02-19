@@ -160,6 +160,7 @@ VeFrameInfo Sandbox::update() {
 		.instance_data = static_cast<InstanceData*>(m_instance_buffers[current_frame]->getMappedMemory()),
 		.instance_count = 0,
 		.instance_capacity = INITIAL_INSTANCE_CAPACITY,
+		.shadow_mode = ui_actions.shadow_mode,
 		.compute_query_pool = m_ve_renderer.getQueryPool(),
 		.compute_start_query = m_ve_renderer.getComputeStartQuery(),
 	};
@@ -188,9 +189,11 @@ VeFrameInfo Sandbox::update() {
 	UniformBufferObject ubo{};
 	ubo.render_mode = ui_actions.render_mode;
 	ubo.shadow_mode = ui_actions.shadow_mode;
+	ubo.pcss_light_size = ui_actions.pcss_light_size;
+	ubo.csm_blend_dithered = static_cast<uint32_t>(ui_actions.csm_blend_mode);
 	ubo.ambient_light_color = glm::vec4(ui_actions.ambient_light_color, ui_actions.ambient_light_intensity);
-	m_light_system->updateUniformBuffer(frame_info, ubo); // update UBO with point light data
-	m_shadow_render_system->updateUniformBuffer(current_frame, ubo); // update internal shadow UBO with light data from main UBO
+	m_light_system->updateUniformBuffer(frame_info, ubo); // update UBO with light data
+	m_shadow_render_system->updateUniformBuffer(current_frame, ubo, frame_info.csm_data); // update internal shadow UBO with CSM + point light data
 	this->updateUniformBuffer(current_frame, ubo); // view/proj/camera location in application base class
 
 	// Record and submit compute work (two particle systems)
@@ -443,6 +446,9 @@ void Sandbox::renderAppWindows() {
 									ImGui::DragFloat3("Direction", &dl.direction.x, 0.01f, -1.0f, 1.0f);
 									dl.direction = glm::normalize(dl.direction);
 									ImGui::Checkbox("Casts shadow", &dl.casts_shadow);
+									int celestial = static_cast<int>(dl.celestial_type);
+									if (ImGui::Combo("Celestial", &celestial, "Moon\0Sun\0"))
+										dl.celestial_type = static_cast<ve::CelestialType>(celestial);
 									ImGui::TreePop();
 								}
 								ImGui::PopID();
@@ -823,13 +829,12 @@ void Sandbox::renderAppWindows() {
 				ImGui::Text("Shadows:");
 				ImGui::PushItemWidth(200.0f);
 				int shadow_mode_int = static_cast<int>(ui_actions.shadow_mode);
-				if (ImGui::SliderInt("##shadow_slider", &shadow_mode_int, 0, 2, "")) {
-					// Ensure it snaps to discrete values
-					ui_actions.shadow_mode = static_cast<ShadowMode>(std::clamp(shadow_mode_int, 0, 2));
+				if (ImGui::SliderInt("##shadow_slider", &shadow_mode_int, 0, 3, "")) {
+					ui_actions.shadow_mode = static_cast<ShadowMode>(std::clamp(shadow_mode_int, 0, 3));
 				}
 				ImGui::PopItemWidth();
 				ImGui::SameLine();
-				const char* shadow_labels[] = { "Off", "Normal", "PCF" };
+				const char* shadow_labels[] = { "Off", "Normal", "PCF", "PCSS" };
 				ImGui::Text("%s", shadow_labels[static_cast<uint32_t>(ui_actions.shadow_mode)]);
 				if (ImGui::IsItemHovered()) {
 					ImGui::BeginTooltip();
@@ -839,7 +844,24 @@ void Sandbox::renderAppWindows() {
 					ImGui::Text("Normal: Hard shadows, good performance");
 					ImGui::Text("PCF: Percentage Closer Filtering");
 					ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "     Soft shadow edges, higher cost");
+					ImGui::Text("PCSS: Percentage Closer Soft Shadows");
+					ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "     Contact-hardening soft shadows, highest cost");
 					ImGui::EndTooltip();
+				}
+				if (ui_actions.shadow_mode == ShadowMode::PCSS) {
+					ImGui::SliderFloat("Light Size", &ui_actions.pcss_light_size, 0.001f, 0.2f, "%.3f");
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Virtual light size for PCSS penumbra.\nLarger = softer shadows farther from caster.");
+					}
+				}
+				if (ui_actions.shadow_mode != ShadowMode::DISABLED) {
+					ImGui::Text("CSM Blend: ");
+					ImGui::SameLine();
+					ImGui::RadioButton("Off", &ui_actions.csm_blend_mode, 0);
+					ImGui::SameLine();
+					ImGui::RadioButton("Linear", &ui_actions.csm_blend_mode, 1);
+					ImGui::SameLine();
+					ImGui::RadioButton("Dithered", &ui_actions.csm_blend_mode, 2);
 				}
 
 				// Topology selection. Requires pipeline recreation
@@ -888,6 +910,11 @@ void Sandbox::renderAppWindows() {
 					ui_actions.render_mode = RenderMode::NORMAL_MAP;
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Display normal map texture data directly");
+				}
+				if (ImGui::RadioButton("CSM Cascades", &current_render_mode, static_cast<int>(RenderMode::CSM_CASCADE)))
+					ui_actions.render_mode = RenderMode::CSM_CASCADE;
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Visualize CSM cascade regions\nRed=0, Green=1, Blue=2, Yellow=3");
 				}
 
 				// Axes system visibility
@@ -1033,17 +1060,17 @@ void Sandbox::createDescriptors() {
 	constexpr uint32_t MAX_MATERIAL_SETS = 4096;
 	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
 		// Global sets + shadow global + compute + material sets + shadow + slack
-		.setMaxSets(4 * MAX_FRAMES_IN_FLIGHT + (MAX_LIGHTS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS)
-		// Uniform buffers: global (per frame) + shadow global (per frame, per light) + compute (2x per frame)
-		.addPoolSize(vk::DescriptorType::eUniformBuffer, 4 * MAX_FRAMES_IN_FLIGHT + (MAX_LIGHTS * MAX_FRAMES_IN_FLIGHT) + MAX_MATERIAL_SETS + 1)
+		.setMaxSets(4 * MAX_FRAMES_IN_FLIGHT + (MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS)
+		// Uniform buffers: global (per frame) + shadow global (per frame, per layer) + compute (2x per frame)
+		.addPoolSize(vk::DescriptorType::eUniformBuffer, 4 * MAX_FRAMES_IN_FLIGHT + (MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT) + MAX_MATERIAL_SETS + 1)
 		// Combined image samplers: SimpleScene (~3) + per-material (5 per set) + skybox (3) + slack
 		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 3 * 3 + MAX_MATERIAL_SETS * 5)
-		// Samplers: shadow sampler (1 per frame) + slack
-		.addPoolSize(vk::DescriptorType::eSampler, MAX_FRAMES_IN_FLIGHT + 7)
+		// Samplers: shadow comparison sampler + raw sampler (2 per frame) + slack
+		.addPoolSize(vk::DescriptorType::eSampler, 2 * MAX_FRAMES_IN_FLIGHT + 7)
 		// Sampled images: shadow map array (1 per frame) + slack
 		.addPoolSize(vk::DescriptorType::eSampledImage, MAX_FRAMES_IN_FLIGHT + 7)
-		// Storage buffers: compute + instance SSBO (1 per frame for global + 1 per frame per shadow light)
-		.addPoolSize(vk::DescriptorType::eStorageBuffer, 22 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + MAX_SHADOW_LIGHTS * MAX_FRAMES_IN_FLIGHT)
+		// Storage buffers: compute + instance SSBO (1 per frame for global + 1 per frame per shadow layer)
+		.addPoolSize(vk::DescriptorType::eStorageBuffer, 22 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT)
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
 		.buildShared();
 
@@ -1127,8 +1154,8 @@ void Sandbox::initSystems() {
 		m_ve_device,
 		*m_global_pool,
 		m_material_set_layout->getDescriptorSetLayout(),
-		m_instance_buffers,
-		m_paths.shader("shadow_shader.spv")
+		m_paths.shader("shadow_shader.spv"),
+		m_paths.shader("shadow_csm_shader.spv")
 	);
 
 	m_depth_prepass_system = std::make_unique<DepthPrePassSystem>(
@@ -1175,14 +1202,14 @@ void Sandbox::initSystems() {
 		m_ve_renderer.getSampleCount(),
 		m_paths.shader("axes_shader.spv")
 	);
-	VE_LOGD("pl system: " << m_paths.shader("point_light_shader.spv"));
+	VE_LOGD("light billboard system: " << m_paths.shader("light_billboard_shader.spv"));
 	m_light_system = std::make_unique<LightSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
-		m_paths.shader("point_light_shader.spv")
+		m_paths.shader("light_billboard_shader.spv")
 	);
 	VE_LOGD("particle system: " << m_paths.shader("particle_compute.spv"));
 	m_particle_system = std::make_unique<ParticleSystem>(

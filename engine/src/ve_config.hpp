@@ -7,10 +7,31 @@
 namespace ve {
 
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+
+// lights
 constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.04f); // w indicates light intensity
 constexpr uint32_t MAX_LIGHTS = 160; // requirded for UBO alignment
-constexpr uint32_t MAX_SHADOW_LIGHTS = 3; // Maximum number of shadow-casting lights (independent of MAX_LIGHTS)
+constexpr uint32_t MAX_POINT_SHADOW_LIGHTS = 2; // Max point lights that can cast shadows
+constexpr uint32_t MAX_SHADOW_LIGHTS = MAX_POINT_SHADOW_LIGHTS;
 constexpr uint32_t MAX_DIR_LIGHTS = 4; // Maximum number of directional lights
+
+// Celestial billboard (sun/moon) configuration
+constexpr float CELESTIAL_DISTANCE = 200.0f;
+constexpr float CELESTIAL_SCALE = 22.0f;
+constexpr float CELESTIAL_INTENSITY_BOOST = 100.0f; // Intensity multiplier so bloom creates halo/corona
+
+// Shadow mapping configuration
+constexpr uint32_t SHADOW_MAP_RESOLUTION = 2048; // unified resolution for all shadow layers
+constexpr float SHADOW_BIAS = 0.0001f;
+constexpr float DIR_SHADOW_MAX_DISTANCE = 300.0f; // Max distance from camera for directional light shadows
+
+// Cascaded Shadow Maps (CSM) configuration
+constexpr uint32_t NUM_CSM_CASCADES = 3; // keep in sync with shader
+constexpr uint32_t CSM_SHADOW_MAP_RESOLUTION = SHADOW_MAP_RESOLUTION; // per-cascade resolution
+constexpr float CSM_SPLIT_LAMBDA = 0.80f; // practical split blend (0=linear, 1=logarithmic)
+constexpr uint32_t MAX_SHADOW_LAYERS = NUM_CSM_CASCADES + MAX_POINT_SHADOW_LIGHTS; // total shadow map array layers
+static_assert(SHADOW_MAP_RESOLUTION == CSM_SHADOW_MAP_RESOLUTION,
+	"Shadow map resolution and CSM resolution must match (unified shadow array)");
 
 constexpr bool MSAA_ENABLED = true;
 #ifdef __APPLE__
@@ -18,11 +39,6 @@ constexpr bool MSAA_ENABLED = true;
 #else
 	constexpr bool ENABLE_RAY_TRACING = false;
 #endif
-
-// Shadow mapping configuration
-constexpr uint32_t SHADOW_MAP_RESOLUTION = 2048*2;
-constexpr float SHADOW_BIAS = 0.0001f;
-constexpr float DIR_SHADOW_MAX_DISTANCE = 300.0f; // Max distance from camera for directional light shadows
 
 // Central list of required Vulkan device extensions
 inline const std::vector<const char*> REQUIRED_DEVICE_EXTENSIONS = {

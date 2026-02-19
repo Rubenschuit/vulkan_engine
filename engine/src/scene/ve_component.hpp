@@ -102,7 +102,7 @@ public:
 	glm::vec3 color{1.0f};
 	bool rotates{false};
 	bool casts_shadow{false};
-	float range{0.0f}; // 0 = infinite (plain 1/d²), >0 = KHR_lights_punctual smooth cutoff
+	float range{0.0f};
 
 	void update(float delta_time) override;
 };
@@ -143,12 +143,15 @@ private:
 // ---------------------------------------------------------------------------
 // DirectionalLightComponent
 // ---------------------------------------------------------------------------
+enum class CelestialType : uint8_t { Moon = 0, Sun = 1 };
+
 class VENGINE_API DirectionalLightComponent : public Component {
 public:
 	glm::vec3 direction{0.f, -1.f, -1.f};  // world-space light direction (toward surface)
 	glm::vec3 color{1.f};
 	float intensity{1.f};
 	bool casts_shadow{false};
+	CelestialType celestial_type{CelestialType::Sun};
 };
 
 // TODO: Add more components as needed (camera, animation, etc.)

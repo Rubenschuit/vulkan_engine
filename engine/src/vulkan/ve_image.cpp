@@ -123,6 +123,29 @@ vk::raii::ImageView VeImage::createLayerImageView(uint32_t layer) const {
 	return vk::raii::ImageView(m_ve_device.getDevice(), view_info);
 }
 
+vk::raii::ImageView VeImage::createMultiLayerImageView(uint32_t base_layer, uint32_t layer_count) const {
+	assert(*m_image != VK_NULL_HANDLE && "Image must be valid when creating multi-layer image view");
+	assert(base_layer + layer_count <= m_array_layers && "Layer range out of bounds");
+	assert(layer_count > 1 && "Use createLayerImageView for single layers");
+	vk::ImageViewCreateInfo view_info {
+		.sType = vk::StructureType::eImageViewCreateInfo,
+		.pNext = nullptr,
+		.flags = {},
+		.image = *m_image,
+		.viewType = vk::ImageViewType::e2DArray,
+		.format = m_format,
+		.components = {},
+		.subresourceRange = vk::ImageSubresourceRange {
+			.aspectMask = m_aspect_flags,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = base_layer,
+			.layerCount = layer_count
+		}
+	};
+	return vk::raii::ImageView(m_ve_device.getDevice(), view_info);
+}
+
 // Hardcoded: src and dst queue family indices to ignored, mip levels = 1
 void VeImage::transitionImageLayout(
 	vk::ImageLayout old_layout,

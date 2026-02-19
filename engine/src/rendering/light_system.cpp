@@ -10,14 +10,51 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <cmath>
+
 namespace ve {
+
+// Bias matrix: converts NDC [-1,1]^2 to texture coordinates [0,1]^2
+static const glm::mat4 s_bias_matrix(
+	0.5f, 0.0f, 0.0f, 0.0f,
+	0.0f, 0.5f, 0.0f, 0.0f,
+	0.0f, 0.0f, 1.0f, 0.0f,
+	0.5f, 0.5f, 0.0f, 1.0f
+);
+
+// Practical split scheme: blend between logarithmic and uniform distribution
+static void computeCascadeSplits(float near_z, float far_z, float lambda,
+                                  uint32_t count, float* out_splits) {
+	for (uint32_t i = 0; i < count; i++) {
+		float p = static_cast<float>(i + 1) / static_cast<float>(count);
+		float log_split = near_z * std::pow(far_z / near_z, p);
+		float lin_split = near_z + (far_z - near_z) * p;
+		out_splits[i] = lambda * log_split + (1.0f - lambda) * lin_split;
+	}
+}
+
+// Snap ortho projection to texel grid to eliminate sub-texel jitter
+static void applyTexelSnapping(glm::mat4& light_proj, const glm::mat4& light_view,
+                                uint32_t resolution) {
+	glm::mat4 shadow_matrix = light_proj * light_view;
+	glm::vec4 shadow_origin = shadow_matrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+	shadow_origin *= static_cast<float>(resolution) / 2.0f;
+
+	glm::vec2 rounded(std::round(shadow_origin.x), std::round(shadow_origin.y));
+	glm::vec2 offset = rounded - glm::vec2(shadow_origin.x, shadow_origin.y);
+	offset *= 2.0f / static_cast<float>(resolution);
+
+	light_proj[3][0] += offset.x;
+	light_proj[3][1] += offset.y;
+}
 
 //TODO put scale in pos.w
 struct SimplePushConstantData {
 	glm::vec4 position;
 	glm::vec4 color;
 	float scale;
-	uint32_t padding[3];
+	uint32_t billboard_type; // 0 = point light, 1 = moon, 2 = sun
+	uint32_t padding[2];
 };
 
 LightSystem::LightSystem( VeDevice& device,
@@ -115,6 +152,32 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 		push.position = glm::vec4{transform->getTranslation(), 1.0f};
 		push.scale = transform->getScale().x;
 		push.color = glm::vec4{pl.color, pl.intensity};
+		push.billboard_type = 0;
+		frame_info.command_buffer.pushConstants(
+			*m_pipeline_layout,
+			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+			0,
+			vk::ArrayProxy<const uint8_t>(sizeof(SimplePushConstantData), reinterpret_cast<const uint8_t*>(&push))
+		);
+		frame_info.command_buffer.draw(6, 1, 0, 0);
+	}
+
+	// Celestial billboards for directional lights (sun/moon)
+	glm::vec3 cam_pos = frame_info.camera.getPosition();
+	auto& dl_pool = registry.directionalLights();
+	for (uint32_t i = 0; i < dl_pool.size(); i++) {
+		uint32_t entity_idx = dl_pool.entityAt(i);
+		Entity entity = registry.entityFromIndex(entity_idx);
+		if (!registry.isActive(entity)) continue;
+
+		DirectionalLightComponent& dl = dl_pool.data()[i];
+		glm::vec3 celestial_pos = cam_pos - glm::normalize(dl.direction) * CELESTIAL_DISTANCE;
+
+		SimplePushConstantData push{};
+		push.position = glm::vec4{celestial_pos, 1.0f};
+		push.color = glm::vec4{dl.color, dl.intensity * CELESTIAL_INTENSITY_BOOST};
+		push.scale = CELESTIAL_SCALE;
+		push.billboard_type = (dl.celestial_type == CelestialType::Sun) ? 2 : 1;
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
@@ -156,7 +219,7 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 		ubo.point_lights[num_lights].color.z = color.z * pl.intensity;
 		ubo.point_lights[num_lights].color.w = pl.intensity;
 
-		if (pl.casts_shadow && num_shadow_lights < MAX_SHADOW_LIGHTS) {
+		if (pl.casts_shadow && num_shadow_lights < MAX_POINT_SHADOW_LIGHTS) {
 			glm::vec3 light_pos = transform->getTranslation();
 			glm::vec3 scene_center = glm::vec3(0.0f, 0.0f, 0.0f);
 			glm::vec3 view_up = glm::vec3(0.0f, 1.0f, 0.0f);
@@ -166,7 +229,9 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 			glm::mat4 light_proj = glm::perspective(glm::radians(100.0f), 1.0f, near_plane, far_plane);
 
 			ubo.shadow_lights[num_shadow_lights].light_index_padding = glm::vec4(
-				static_cast<float>(num_lights), 0.0f, 0.0f, 0.0f); // y=0 marks point light
+				static_cast<float>(num_lights), 0.0f,
+				static_cast<float>(NUM_CSM_CASCADES + num_shadow_lights), // z = actual array layer
+				0.0f);
 			ubo.shadow_lights[num_shadow_lights].light_view = light_view;
 			ubo.shadow_lights[num_shadow_lights].light_proj = light_proj;
 			num_shadow_lights++;
@@ -177,8 +242,9 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 
 	ubo.num_lights = num_lights;
 
-	// Directional lights
+	// Directional lights (first shadow-casting directional gets CSM)
 	uint32_t num_dir_lights = 0;
+	bool csm_assigned = false;
 	auto& dl_pool = registry.directionalLights();
 	for (uint32_t i = 0; i < dl_pool.size(); i++) {
 		uint32_t entity_idx = dl_pool.entityAt(i);
@@ -196,66 +262,89 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 		ubo.dir_lights[num_dir_lights].color.z = dl.color.z * dl.intensity;
 		ubo.dir_lights[num_dir_lights].color.w = dl.intensity;
 
-		if (dl.casts_shadow && num_shadow_lights < MAX_SHADOW_LIGHTS) {
-			// Camera-frustum-fitted orthographic shadow projection
+		// CSM for the first shadow-casting directional light
+		if (dl.casts_shadow && !csm_assigned) {
 			const auto& cam = frame_info.camera;
+			float shadow_near = std::max(cam.getNear(), 0.5f); // CSM near floor: avoid wasting cascade 0 on tiny near plane
 			float shadow_far = std::min(cam.getFar(), DIR_SHADOW_MAX_DISTANCE);
 			float tan_half_fov = std::tan(cam.getFovY() * 0.5f);
-			float nh = cam.getNear() * tan_half_fov;
-			float nw = nh * cam.getAspect();
-			float fh = shadow_far * tan_half_fov;
-			float fw = fh * cam.getAspect();
 
 			glm::vec3 cam_fwd = cam.getForward();
 			glm::vec3 cam_right = cam.getRight();
 			glm::vec3 cam_up = cam.getUp();
-			glm::vec3 nc = cam.getPosition() + cam_fwd * cam.getNear();
-			glm::vec3 fc = cam.getPosition() + cam_fwd * shadow_far;
 
-			// 8 frustum corners in world space
-			glm::vec3 corners[8] = {
-				nc - cam_up * nh - cam_right * nw, // near bottom-left
-				nc - cam_up * nh + cam_right * nw, // near bottom-right
-				nc + cam_up * nh + cam_right * nw, // near top-right
-				nc + cam_up * nh - cam_right * nw, // near top-left
-				fc - cam_up * fh - cam_right * fw, // far bottom-left
-				fc - cam_up * fh + cam_right * fw, // far bottom-right
-				fc + cam_up * fh + cam_right * fw, // far top-right
-				fc + cam_up * fh - cam_right * fw, // far top-left
-			};
+			// Compute cascade split distances
+			float splits[NUM_CSM_CASCADES];
+			computeCascadeSplits(shadow_near, shadow_far, CSM_SPLIT_LAMBDA,
+			                     NUM_CSM_CASCADES, splits);
 
-			// Frustum center for light view target
-			glm::vec3 center{0.0f};
-			for (const auto& c : corners)
-				center += c;
-			center /= 8.0f;
-
-			// Light view matrix
+			// Up vector for light view (avoid gimbal lock)
 			glm::vec3 up = std::abs(glm::dot(dir, glm::vec3(0.0f, 1.0f, 0.0f))) > 0.99f
 				? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
-			glm::mat4 light_view = glm::lookAt(center - dir, center, up);
 
-			// Transform corners to light space and compute AABB
-			glm::vec3 ls_min{std::numeric_limits<float>::max()};
-			glm::vec3 ls_max{std::numeric_limits<float>::lowest()};
-			for (const auto& c : corners) {
-				glm::vec3 ls = glm::vec3(light_view * glm::vec4(c, 1.0f));
-				ls_min = glm::min(ls_min, ls);
-				ls_max = glm::max(ls_max, ls);
-			}
-
-			// Extend near plane backward to catch shadow casters behind the camera frustum
 			constexpr float z_margin = 150.0f;
-			glm::mat4 light_proj = glm::ortho(
-				ls_min.x, ls_max.x,
-				ls_min.y, ls_max.y,
-				-ls_max.z - z_margin, -ls_min.z);
 
-			ubo.shadow_lights[num_shadow_lights].light_index_padding = glm::vec4(
-				static_cast<float>(num_dir_lights), 1.0f, 0.0f, 0.0f); // y=1 marks directional
-			ubo.shadow_lights[num_shadow_lights].light_view = light_view;
-			ubo.shadow_lights[num_shadow_lights].light_proj = light_proj;
-			num_shadow_lights++;
+			for (uint32_t cascade = 0; cascade < NUM_CSM_CASCADES; cascade++) {
+				float near_split = (cascade == 0) ? shadow_near : splits[cascade - 1];
+				float far_split = splits[cascade];
+
+				// Frustum slice corners
+				float nh = near_split * tan_half_fov;
+				float nw = nh * cam.getAspect();
+				float fh = far_split * tan_half_fov;
+				float fw = fh * cam.getAspect();
+				glm::vec3 nc = cam.getPosition() + cam_fwd * near_split;
+				glm::vec3 fc = cam.getPosition() + cam_fwd * far_split;
+
+				glm::vec3 corners[8] = {
+					nc - cam_up * nh - cam_right * nw,
+					nc - cam_up * nh + cam_right * nw,
+					nc + cam_up * nh + cam_right * nw,
+					nc + cam_up * nh - cam_right * nw,
+					fc - cam_up * fh - cam_right * fw,
+					fc - cam_up * fh + cam_right * fw,
+					fc + cam_up * fh + cam_right * fw,
+					fc + cam_up * fh - cam_right * fw,
+				};
+
+				// Bounding sphere for rotation-invariant ortho bounds
+				glm::vec3 center{0.0f};
+				for (const auto& c : corners) center += c;
+				center /= 8.0f;
+
+				float radius = 0.0f;
+				for (const auto& c : corners)
+					radius = std::max(radius, glm::length(c - center));
+
+				// Round radius up to texel boundary for stable sizing
+				float texels_per_unit = static_cast<float>(CSM_SHADOW_MAP_RESOLUTION) / (2.0f * radius);
+				radius = std::ceil(radius * texels_per_unit) / texels_per_unit;
+
+				// Light view: position light behind the sphere along light direction
+				glm::mat4 light_view = glm::lookAt(center - dir * (radius + z_margin), center, up);
+
+				// Ortho projection from sphere (rotation-invariant)
+				glm::mat4 light_proj = glm::ortho(
+					-radius, radius, -radius, radius,
+					0.0f, 2.0f * radius + z_margin);
+
+				// Texel snapping: eliminates sub-texel jitter → no more flickering
+				applyTexelSnapping(light_proj, light_view, CSM_SHADOW_MAP_RESOLUTION);
+
+				// Store in UBO (bias * proj * view for shader sampling)
+				ubo.csm_shadow_matrices[cascade] = s_bias_matrix * light_proj * light_view;
+				ubo.csm_split_distances[static_cast<int>(cascade)] = far_split;
+
+				// Store raw view/proj for shadow render pass
+				frame_info.csm_data.light_view[cascade] = light_view;
+				frame_info.csm_data.light_proj[cascade] = light_proj;
+			}
+			ubo.csm_cascade_count = NUM_CSM_CASCADES;
+			ubo.csm_base_layer = 0;
+			ubo.csm_shadow_map_size = static_cast<float>(CSM_SHADOW_MAP_RESOLUTION);
+			ubo.csm_dir_light_index = num_dir_lights;
+			frame_info.csm_data.active_cascade_count = NUM_CSM_CASCADES;
+			csm_assigned = true;
 		}
 
 		num_dir_lights++;

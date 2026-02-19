@@ -61,6 +61,8 @@ public:
 
 	uint32_t getVertexCount() const { return m_vertex_count; }
 	uint32_t getIndexCount() const { return m_index_count; }
+	VeBuffer& getShadowVertexBuffer() const { return *m_shadow_vertex_buffer; }
+	VeBuffer& getIndexBuffer() const { return *m_index_buffer; }
 
 	AABB getLocalAABB() const { return m_local_aabb; }
 

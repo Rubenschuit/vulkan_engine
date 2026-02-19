@@ -42,6 +42,9 @@ public:
 	// Create an image view for a specific layer (for rendering to array layers)
 	vk::raii::ImageView createLayerImageView(uint32_t layer) const;
 
+	// Create a 2DArray image view spanning multiple contiguous layers (for multiview rendering)
+	vk::raii::ImageView createMultiLayerImageView(uint32_t base_layer, uint32_t layer_count) const;
+
 	//debug
 	void printDebugInfo() const {
 		if (m_image_view_type == vk::ImageViewType::e2D)
