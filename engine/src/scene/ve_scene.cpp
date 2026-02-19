@@ -16,7 +16,7 @@ void VeScene::update(float dt) {
 	auto& pl_pool = m_registry.pointLights();
 	for (uint32_t i = 0; i < pl_pool.size(); i++) {
 		PointLightComponent& pl = pl_pool.data()[i];
-		if (!pl.rotates)
+		if (!pl.getRotates())
 			continue;
 		uint32_t entity_idx = pl_pool.entityAt(i);
 		Entity entity = m_registry.entityFromIndex(entity_idx);

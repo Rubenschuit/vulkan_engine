@@ -261,10 +261,8 @@ Entity Registry::createGameObject(const std::string& name) {
 Entity Registry::createPointLight(float intensity, float radius, glm::vec3 color) {
 	Entity e = createGameObject();
 	auto& pl = addComponent<PointLightComponent>(e);
-	pl.intensity = intensity;
-	pl.color = color;
-	pl.rotates = false;
-	pl.casts_shadow = false;
+	pl.setIntensity(intensity);
+	pl.setColor(color);
 
 	auto* transform = getComponent<TransformComponent>(e);
 	transform->setScale(glm::vec3(radius));

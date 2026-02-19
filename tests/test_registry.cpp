@@ -208,8 +208,8 @@ TEST_CASE("Registry createPointLight adds Transform + PointLight", "[ecs][regist
 	REQUIRE(reg.hasComponent<ve::PointLightComponent>(e));
 
 	auto* pl = reg.getComponent<ve::PointLightComponent>(e);
-	REQUIRE(pl->intensity == 5.0f);
-	REQUIRE(pl->color == glm::vec3(1.0f, 0.0f, 0.0f));
+	REQUIRE(pl->getIntensity() == 5.0f);
+	REQUIRE(pl->getColor() == glm::vec3(1.0f, 0.0f, 0.0f));
 
 	auto* tc = reg.getComponent<ve::TransformComponent>(e);
 	REQUIRE(tc->getScale().x == 2.0f);
@@ -255,7 +255,7 @@ TEST_CASE("Registry point light pool iteration", "[ecs][registry]") {
 
 	float intensity_sum = 0.0f;
 	for (uint32_t i = 0; i < pl_pool.size(); i++) {
-		intensity_sum += pl_pool.data()[i].intensity;
+		intensity_sum += pl_pool.data()[i].getIntensity();
 	}
 	REQUIRE(intensity_sum == 3.0f);
 }

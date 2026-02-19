@@ -70,8 +70,8 @@ TEST_CASE("Registry point light factory", "[entity][factory]") {
 	auto* pl = registry.getComponent<ve::PointLightComponent>(light);
 	auto* transform = registry.getComponent<ve::TransformComponent>(light);
 	REQUIRE(pl != nullptr);
-	REQUIRE(pl->intensity == 5.0f);
-	REQUIRE(pl->color == glm::vec3(1.0f, 0.0f, 0.0f));
+	REQUIRE(pl->getIntensity() == 5.0f);
+	REQUIRE(pl->getColor() == glm::vec3(1.0f, 0.0f, 0.0f));
 	REQUIRE(transform->getScale().x == 2.0f);
 }
 

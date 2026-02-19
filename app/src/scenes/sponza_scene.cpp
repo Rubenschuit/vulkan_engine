@@ -37,8 +37,8 @@ void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
         tc->setTranslation(pos);
         if (light_scale.x >= 0.0f) tc->setScale(light_scale);
         auto* pl = m_registry.getComponent<PointLightComponent>(e);
-        pl->rotates = rotates;
-        pl->casts_shadow = casts_shadow;
+        pl->setRotates(rotates);
+        pl->setCastsShadow(casts_shadow);
         return e;
     };
 

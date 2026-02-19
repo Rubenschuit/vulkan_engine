@@ -57,6 +57,7 @@ enum class RenderMode : uint32_t {
 	NORMAL_MAP = 4,
 	BRDF_MICROFACET = 5,
 	CSM_CASCADE = 6,
+	CLUSTER_HEATMAP = 7,
 };
 
 enum class ShadowMode : uint32_t {
@@ -152,6 +153,24 @@ struct CsmMultiviewUBO {
 static_assert(sizeof(CsmMultiviewUBO) == 192 * NUM_CSM_CASCADES,
 	"CsmMultiviewUBO must be 192 bytes per cascade");
 
+// Cluster shading parameters — uploaded to GPU as a UBO each frame.
+// Must match the ClusterParams struct in ve_cluster.slangh.
+struct ClusterParams {
+	alignas(16) glm::mat4 inv_proj{1.0f};       // inverse projection for cluster AABB computation
+	alignas(16) glm::mat4 view{1.0f};            // camera view matrix (world → view space for lights)
+	alignas(4)  float z_near = 0.1f;
+	alignas(4)  float z_far = 1000.0f;
+	alignas(4)  float log_depth_ratio = 1.0f;    // log(z_far / z_near)
+	alignas(4)  uint32_t num_lights = 0;
+	alignas(8)  glm::uvec2 screen_size{};        // viewport dimensions in pixels
+	alignas(8)  glm::uvec2 tile_size{};           // pixels per tile (e.g. 64×64)
+	alignas(16) glm::uvec4 grid_dims{};           // xyz = (tiles_x, tiles_y, z_slices), w = total clusters
+	alignas(4)  uint32_t cluster_enabled = 0;     // 0 = brute-force fallback
+	alignas(4)  uint32_t max_lights_per_cluster = ve::MAX_LIGHTS_PER_CLUSTER;
+	alignas(4)  uint32_t _pad0 = 0;
+	alignas(4)  uint32_t _pad1 = 0;
+};
+
 // CPU-side cascade data passed from LightSystem to ShadowRenderSystem
 struct CsmCascadeData {
 	glm::mat4 light_view[ve::NUM_CSM_CASCADES];
@@ -189,6 +208,9 @@ struct VeFrameInfo {
 	// Screen-space shadow mask descriptor set (Set 3, null when mask unavailable)
 	vk::raii::DescriptorSet* shadow_mask_descriptor_set = nullptr;
 	bool shadow_mask_active = false;  // true when mask pipeline variant should be used
+
+	// Clustered forward shading descriptor set (Set 4, null when clustering disabled)
+	vk::raii::DescriptorSet* cluster_descriptor_set = nullptr;
 
 	// GPU timing: compute systems write the start timestamp after their barriers resolve.
 	vk::QueryPool compute_query_pool = VK_NULL_HANDLE;

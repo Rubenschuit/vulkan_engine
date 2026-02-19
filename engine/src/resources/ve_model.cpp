@@ -1404,7 +1404,7 @@ void VeModel::addToScene(Registry& registry,
 			auto* tc = registry.getComponent<TransformComponent>(light);
 			tc->setTranslation(glm::vec3(wrapper_world * glm::vec4(L.position, 1.0f)));
 			auto* plc = registry.getComponent<PointLightComponent>(light);
-			if (plc) plc->range = L.range;
+			if (plc) plc->setRange(L.range);
 			registry.setActive(light, false);  // default OFF
 		}
 	}

@@ -11,7 +11,7 @@ setlocal
 set MODE=%~1
 if "%MODE%"=="" set MODE=release
 set VS_VERSION=%~2
-if "%VS_VERSION%"=="" set VS_VERSION=vs2022
+if "%VS_VERSION%"=="" set VS_VERSION=vs2026
 
 if /I "%MODE%"=="clean" (
 	if exist build rmdir /S /Q build

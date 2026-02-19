@@ -151,7 +151,7 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 		SimplePushConstantData push{};
 		push.position = glm::vec4{transform->getTranslation(), 1.0f};
 		push.scale = transform->getScale().x;
-		push.color = glm::vec4{pl.color, pl.intensity};
+		push.color = glm::vec4{pl.getColor(), pl.getIntensity()};
 		push.billboard_type = 0;
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
@@ -211,15 +211,16 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 		assert(num_lights < MAX_LIGHTS && "Number of point lights exceeds MAX_LIGHTS");
 
 		PointLightComponent& pl = pl_pool.data()[i];
-		glm::vec3 color = pl.color;
+		glm::vec3 color = pl.getColor();
+		float intensity = pl.getIntensity();
 
-		ubo.point_lights[num_lights].position = glm::vec4{transform->getTranslation(), pl.range};
-		ubo.point_lights[num_lights].color.x = color.x * pl.intensity;
-		ubo.point_lights[num_lights].color.y = color.y * pl.intensity;
-		ubo.point_lights[num_lights].color.z = color.z * pl.intensity;
-		ubo.point_lights[num_lights].color.w = pl.intensity;
+		ubo.point_lights[num_lights].position = glm::vec4{transform->getTranslation(), pl.getRange()};
+		ubo.point_lights[num_lights].color.x = color.x * intensity;
+		ubo.point_lights[num_lights].color.y = color.y * intensity;
+		ubo.point_lights[num_lights].color.z = color.z * intensity;
+		ubo.point_lights[num_lights].color.w = intensity;
 
-		if (pl.casts_shadow && num_shadow_lights < MAX_POINT_SHADOW_LIGHTS) {
+		if (pl.getCastsShadow() && num_shadow_lights < MAX_POINT_SHADOW_LIGHTS) {
 			glm::vec3 light_pos = transform->getTranslation();
 			glm::vec3 scene_center = glm::vec3(0.0f, 0.0f, 0.0f);
 			glm::vec3 view_up = glm::vec3(0.0f, 1.0f, 0.0f);

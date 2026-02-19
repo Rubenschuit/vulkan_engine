@@ -98,13 +98,35 @@ private:
 // ---------------------------------------------------------------------------
 class VENGINE_API PointLightComponent : public Component {
 public:
-	float intensity{1.0f};
-	glm::vec3 color{1.0f};
-	bool rotates{false};
-	bool casts_shadow{false};
-	float range{0.0f};
+	float getIntensity() const { return m_intensity; }
+	const glm::vec3& getColor() const { return m_color; }
+	float getRange() const { return m_range; }
+	bool getRotates() const { return m_rotates; }
+	bool getCastsShadow() const { return m_casts_shadow; }
+
+	void setIntensity(float v);
+	void setColor(const glm::vec3& v);
+	void setRange(float v);
+	void setRotates(bool v) { m_rotates = v; }
+	void setCastsShadow(bool v) { m_casts_shadow = v; }
+
+	/// Returns range if explicitly set, otherwise derives from intensity/color
+	/// using the KHR_lights_punctual cutoff threshold. Cached until dirty.
+	float getEffectiveRange() const;
 
 	void update(float delta_time) override;
+
+private:
+	void updateEffectiveRange() const;
+
+	float m_intensity{1.0f};
+	glm::vec3 m_color{1.0f};
+	float m_range{0.0f};
+	bool m_rotates{false};
+	bool m_casts_shadow{false};
+
+	mutable float m_effective_range{0.0f};
+	mutable bool m_range_dirty{true};
 };
 
 // ---------------------------------------------------------------------------

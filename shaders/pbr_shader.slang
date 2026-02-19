@@ -203,8 +203,9 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	else if (ubo.render_mode == RenderMode::NORMAL_MAP) // sampled normal
 		return float4(0.5 * world_normal + 0.5, 1.0f);
 
-	// View direction
+	// View direction and view-space depth (used by CSM and cluster lookup)
 	float3 view_dir = normalize(ubo.camera_position.xyz - in_vert.frag_pos_world);
+	float frag_view_z = -(mul(ubo.view, float4(in_vert.frag_pos_world, 1.0))).z;
 
 	// CSM shadow for directional light (first dir light with CSM)
 	float csm_shadow = 1.0;
@@ -212,20 +213,15 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	float csm_blend_t = 0.0;
 	if (SHADOW_MODE_SPEC != ShadowMode::DISABLED && ubo.csm_cascade_count > 0) {
 		if (SHADOW_MASK_SPEC != 0) {
-			// Shadow mask path: temporal reprojection + single texture sample
-			// Sampler uses clamp-to-edge, so off-screen UVs use nearest edge shadow value
 			float4 prev_clip = mul(ubo.prev_projection_view, float4(in_vert.frag_pos_world, 1.0));
 			float2 prev_ndc = prev_clip.xy / prev_clip.w;
 			float2 prev_uv = prev_ndc * 0.5 + 0.5;
 			csm_shadow = shadow_mask.SampleLevel(shadow_mask_sampler, prev_uv, 0);
 		} else {
-			// Inline CSM path: full cascade selection + shadow map sampling
-			float frag_view_z = -(mul(ubo.view, float4(in_vert.frag_pos_world, 1.0))).z;
 			csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, csm_cascade_idx, csm_blend_t);
 		}
 	}
 
-	// Cascade debug: tint each cascade a distinct color, lerp at blend boundaries
 	if (ubo.render_mode == RenderMode::CSM_CASCADE) {
 		if (SHADOW_MASK_SPEC != 0)
 			return float4(csm_shadow, csm_shadow, csm_shadow, 1.0);
@@ -237,37 +233,65 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	uint32_t shadow_for_light[MAX_SHADOW_LIGHTS];
 	calculatePointShadowTerms(in_vert.shadow_coord, shadow_terms, shadow_for_light);
 
-	// Accumulate light contribution
+	// Cluster heatmap debug: visualize lights-per-cluster as a heat gradient
+	if (ubo.render_mode == RenderMode::CLUSTER_HEATMAP && cluster_params.cluster_enabled != 0) {
+		uint cid = getClusterIndex(in_vert.pos.xy, frag_view_z, cluster_params);
+		uint count = cluster_light_counts[cid].y;
+		float3 heat = clusterHeatmapColor(in_vert.pos.xy, frag_view_z, count, cluster_params);
+		return float4(heat * albedo.rgb, albedo.a);
+	}
+
+	// Accumulate point light contribution
 	float3 Lo = float3(0.0);
-	for (uint32_t i = 0; i < ubo.num_lights; i++) {
-		float3 light_dir = ubo.point_lights[i].position.xyz - in_vert.frag_pos_world;
-		float3 L = normalize(light_dir);
+	if (cluster_params.cluster_enabled != 0) {
+		uint cid = getClusterIndex(in_vert.pos.xy, frag_view_z, cluster_params);
+		uint2 counts = cluster_light_counts[cid];
+		for (uint j = 0; j < counts.y; j++) {
+			uint light_idx = cluster_light_indices[counts.x + j];
+			PointLight light = cluster_lights[light_idx];
 
-		float NdotL = clamp(dot(world_normal, L), 0.0, 1.0);
-		if (NdotL <= 0.0)
-			continue;
+			float3 light_dir = light.position.xyz - in_vert.frag_pos_world;
+			float3 L = normalize(light_dir);
+			float NdotL = clamp(dot(world_normal, L), 0.0, 1.0);
+			if (NdotL <= 0.0) continue;
 
-		float NdotV = clamp(dot(world_normal, view_dir), 0.0, 1.0);
-		float3 H = normalize(view_dir + L);
+			float NdotV = clamp(dot(world_normal, view_dir), 0.0, 1.0);
+			float3 H = normalize(view_dir + L);
+			float distance_sq = dot(light_dir, light_dir);
+			float attenuation = calculateAttenuation(distance_sq, light.position.w);
+			float3 radiance = light.color.xyz * attenuation;
 
-		float distance_sq = dot(light_dir, light_dir);
-		float attenuation = calculateAttenuation(distance_sq, ubo.point_lights[i].position.w);
-		float3 radiance = ubo.point_lights[i].color.xyz * attenuation;
+			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0);
+			float D = distributionGGX(world_normal, H, roughness);
+			float G = geometrySmith(NdotV, NdotL, roughness);
+			float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
 
-		float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0);
-		float D = distributionGGX(world_normal, H, roughness);
-		float G = geometrySmith(NdotV, NdotL, roughness);
+			float3 kD = (1.0 - F) * (1.0 - metallic) * (1.0 - transmission);
+			float pt_shadow = getPointShadow(light_idx, shadow_terms, shadow_for_light);
+			Lo += (kD * albedo.rgb / PI + specular) * radiance * NdotL * pt_shadow;
+		}
+	} else {
+		for (uint32_t i = 0; i < ubo.num_lights; i++) {
+			float3 light_dir = ubo.point_lights[i].position.xyz - in_vert.frag_pos_world;
+			float3 L = normalize(light_dir);
+			float NdotL = clamp(dot(world_normal, L), 0.0, 1.0);
+			if (NdotL <= 0.0) continue;
 
-		float3 numerator = D * G * F;
-		float denominator = 4.0 * NdotV * NdotL;
-		float3 specular = numerator / max(denominator, 0.00001);
+			float NdotV = clamp(dot(world_normal, view_dir), 0.0, 1.0);
+			float3 H = normalize(view_dir + L);
+			float distance_sq = dot(light_dir, light_dir);
+			float attenuation = calculateAttenuation(distance_sq, ubo.point_lights[i].position.w);
+			float3 radiance = ubo.point_lights[i].color.xyz * attenuation;
 
-		float3 kD = float3(1.0, 1.0, 1.0) - F;
-		kD *= 1.0 - metallic;
-		kD *= 1.0 - transmission;
+			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0);
+			float D = distributionGGX(world_normal, H, roughness);
+			float G = geometrySmith(NdotV, NdotL, roughness);
+			float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
 
-		float pt_shadow = getPointShadow(i, shadow_terms, shadow_for_light);
-		Lo += (kD * albedo.rgb / PI + specular) * radiance * NdotL * pt_shadow;
+			float3 kD = (1.0 - F) * (1.0 - metallic) * (1.0 - transmission);
+			float pt_shadow = getPointShadow(i, shadow_terms, shadow_for_light);
+			Lo += (kD * albedo.rgb / PI + specular) * radiance * NdotL * pt_shadow;
+		}
 	}
 
 	// Directional lights (no distance attenuation)

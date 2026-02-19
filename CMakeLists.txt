@@ -7,6 +7,7 @@ cmake_minimum_required(VERSION 3.20)
 # Use consistent runtime library for both Debug and Release to avoid DLL conflicts
 if(MSVC)
 	set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL" CACHE STRING "" FORCE)
+	add_compile_definitions(NOMINMAX)
 endif()
 
 set(NAME VeApp)

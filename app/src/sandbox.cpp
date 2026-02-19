@@ -228,12 +228,13 @@ VeFrameInfo Sandbox::update() {
 	this->updateUniformBuffer(current_frame, ubo); // view/proj/camera location in application base class
 
 	// Always save UBO data so previous-frame matrices are ready when shadow mask is enabled.
-	// The compute shader reads prev-frame depth/shadow maps via timeline semaphore, so the
-	// UBO it uses must also contain prev-frame matrices for consistent world reconstruction.
 	m_shadow_mask_system->savePrevFrameUBO(ubo, current_frame);
 
-	// Record and submit compute work (particles + shadow mask)
-	// Write compute start timestamp before any dispatches so GPU timing captures all compute work
+	// Upload cluster light data (CPU-side, before compute recording)
+	uint32_t cluster_light_count = m_cluster_light_system->uploadLightData(frame_info);
+	m_cluster_light_system->setEnabled(ui_actions.cluster_enabled && cluster_light_count > 0);
+
+	// Record and submit compute work (particles + shadow mask + cluster assignment)
 	if (frame_info.compute_query_pool) {
 		frame_info.compute_command_buffer.writeTimestamp(
 			vk::PipelineStageFlagBits::eComputeShader, frame_info.compute_query_pool, frame_info.compute_start_query);
@@ -243,6 +244,9 @@ VeFrameInfo Sandbox::update() {
 	m_particle_system->recordComputeCommands(frame_info);
 	if (shadow_mask_active) {
 		m_shadow_mask_system->dispatch(frame_info);
+	}
+	if (m_cluster_light_system->isEnabled()) {
+		m_cluster_light_system->dispatch(frame_info, m_camera, extent);
 	}
 
 	m_ve_renderer.submitCompute(frame_info.compute_command_buffer);
@@ -255,6 +259,9 @@ VeFrameInfo Sandbox::update() {
 	else {
 		frame_info.shadow_mask_descriptor_set = &m_shadow_mask_system->getDummyOutputDescriptorSet();
 	}
+
+	// Always bind cluster descriptor set (shader checks cluster_enabled at runtime)
+	frame_info.cluster_descriptor_set = &m_cluster_light_system->getOutputDescriptorSet(current_frame);
 
 	return frame_info;
 }
@@ -404,6 +411,7 @@ void Sandbox::recreatePipelines() {
 	m_fireworks_system->recreatePipeline(offscreen_format, sample_count);
 
 	m_depth_prepass_system->recreatePipeline(sample_count);
+	m_cluster_light_system->recreate(*m_global_pool, extent);
 
 	{
 		auto mask_extent = extent;
@@ -546,6 +554,16 @@ void Sandbox::renderAppWindows() {
 								if (ImGui::Button("All off")) {
 									for (auto e : lights) registry.setActive(e, false);
 								}
+								// intensity slider for all lights in scene (disabled if no lights or all lights are off)
+
+								static float all_intensity = 0.f;
+								if (ImGui::DragFloat("All Intensity", &all_intensity, 0.2f, 0.0f, 500.0f, "%.1f")) {
+									for (auto e : lights) {
+										auto* pl = registry.getComponent<PointLightComponent>(e);
+										if (pl)
+											pl->setIntensity(all_intensity);
+									}
+								}
 							}
 
 							// Partition lights into groups by name prefix (before ": ")
@@ -564,7 +582,8 @@ void Sandbox::renderAppWindows() {
 							auto renderLightDetail = [&](Entity e, size_t idx) {
 								auto* pl = registry.getComponent<PointLightComponent>(e);
 								auto* transform = registry.getComponent<TransformComponent>(e);
-								if (!pl || !transform) return;
+								if (!pl || !transform)
+									return;
 								ImGui::PushID(static_cast<int>(e.id()));
 								const auto& name = registry.getName(e);
 								const std::string label = name.empty() ? ("Light " + std::to_string(static_cast<unsigned>(idx))) : name;
@@ -572,8 +591,12 @@ void Sandbox::renderAppWindows() {
 									bool active = registry.isActive(e);
 									ImGui::Checkbox("Active", &active);
 									registry.setActive(e, active);
-									ImGui::ColorEdit3("Color", &pl->color.r);
-									ImGui::DragFloat("Intensity", &pl->intensity, 1.0f, 0.0f, 5000.0f, "%.1f");
+									glm::vec3 color = pl->getColor();
+									if (ImGui::ColorEdit3("Color", &color.r))
+										pl->setColor(color);
+									float intensity = pl->getIntensity();
+									if (ImGui::DragFloat("Intensity", &intensity, 1.0f, 0.0f, 5000.0f, "%.1f"))
+										pl->setIntensity(intensity);
 									glm::vec3 pos = transform->getTranslation();
 									if (ImGui::DragFloat3("Position", &pos.x, 0.1f)) {
 										transform->setTranslation(pos);
@@ -582,9 +605,15 @@ void Sandbox::renderAppWindows() {
 									if (ImGui::SliderFloat("Size", &sz, 0.1f, 50.0f)) {
 										transform->setScale({sz, sz, sz});
 									}
-									ImGui::Checkbox("Rotates", &pl->rotates);
-									ImGui::Checkbox("Casts shadow", &pl->casts_shadow);
-									ImGui::DragFloat("Range", &pl->range, 0.5f, 0.0f, 1000.0f, "%.1f");
+									bool rotates = pl->getRotates();
+									if (ImGui::Checkbox("Rotates", &rotates))
+										pl->setRotates(rotates);
+									bool casts_shadow = pl->getCastsShadow();
+									if (ImGui::Checkbox("Casts shadow", &casts_shadow))
+										pl->setCastsShadow(casts_shadow);
+									float range = pl->getRange();
+									if (ImGui::DragFloat("Range", &range, 0.5f, 0.0f, 1000.0f, "%.1f"))
+										pl->setRange(range);
 									if (ImGui::IsItemHovered()) {
 										ImGui::SetTooltip("Attenuation range in world units (0 = infinite).");
 									}
@@ -607,7 +636,8 @@ void Sandbox::renderAppWindows() {
 								// Count active lights in group
 								int active_count = 0;
 								for (auto e : group_lights)
-									if (registry.isActive(e)) active_count++;
+									if (registry.isActive(e))
+										active_count++;
 								std::string header = group_name + " (" + std::to_string(group_lights.size()) + ")";
 								if (ImGui::TreeNode(header.c_str())) {
 									// Group toggle
@@ -617,7 +647,8 @@ void Sandbox::renderAppWindows() {
 										ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
 									}
 									if (ImGui::Checkbox("Enable group", &all_active)) {
-										for (auto e : group_lights) registry.setActive(e, all_active);
+										for (auto e : group_lights)
+											registry.setActive(e, all_active);
 									}
 									if (mixed) {
 										ImGui::PopItemFlag();
@@ -626,13 +657,13 @@ void Sandbox::renderAppWindows() {
 									float avg_intensity = 0.f;
 									for (auto e : group_lights) {
 										auto* pl = registry.getComponent<PointLightComponent>(e);
-										if (pl) avg_intensity += pl->intensity;
+										if (pl) avg_intensity += pl->getIntensity();
 									}
 									avg_intensity /= static_cast<float>(group_lights.size());
 									if (ImGui::DragFloat("Intensity", &avg_intensity, 1.0f, 0.0f, 5000.0f, "%.1f")) {
 										for (auto e : group_lights) {
 											auto* pl = registry.getComponent<PointLightComponent>(e);
-											if (pl) pl->intensity = avg_intensity;
+											if (pl) pl->setIntensity(avg_intensity);
 										}
 									}
 									// Individual lights
@@ -927,7 +958,7 @@ void Sandbox::renderAppWindows() {
 						if (ui_actions.pcf_samples == pcf_values[j])
 							pcf_idx = j;
 					}
-					if (ImGui::Combo("PCF Samples", &pcf_idx, "4\0008\00016\00032\0")) {
+					if (ImGui::Combo("PCF Samples", &pcf_idx, "4\0" "8\0" "16\0" "32\0")) {
 						ui_actions.pcf_samples = pcf_values[pcf_idx];
 					}
 					if (ImGui::IsItemHovered()) {
@@ -941,7 +972,7 @@ void Sandbox::renderAppWindows() {
 						if (ui_actions.pcss_filter_samples == pcss_values[j])
 							pcss_idx = j;
 					}
-					if (ImGui::Combo("PCSS Filter Samples", &pcss_idx, "8\00016\00032\0")) {
+					if (ImGui::Combo("PCSS Filter Samples", &pcss_idx, "8\0" "16\0" "32\0")) {
 						ui_actions.pcss_filter_samples = pcss_values[pcss_idx];
 					}
 					if (ImGui::IsItemHovered()) {
@@ -1022,6 +1053,11 @@ void Sandbox::renderAppWindows() {
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Visualize CSM cascade regions\nRed=0, Green=1, Blue=2, Yellow=3");
 				}
+				if (ImGui::RadioButton("Cluster Heatmap", &current_render_mode, static_cast<int>(RenderMode::CLUSTER_HEATMAP)))
+					ui_actions.render_mode = RenderMode::CLUSTER_HEATMAP;
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Visualize lights-per-cluster as a heat gradient\nBlue=few, Red=many, Dark=zero");
+				}
 
 				// Axes system visibility
 				ImGui::Separator();
@@ -1038,6 +1074,10 @@ void Sandbox::renderAppWindows() {
 					ImGui::SetTooltip("Skip drawing objects outside the camera view");
 				}
 				ImGui::Checkbox("Depth Pre-Pass", &ui_actions.depth_prepass_enabled);
+				ImGui::Checkbox("Clustered Lighting", &ui_actions.cluster_enabled);
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Use 3D cluster grid to cull lights per-fragment");
+				}
 
 				ImGui::Separator();
 				ImGui::Text("Post Processing: ");
@@ -1165,18 +1205,18 @@ void Sandbox::createDescriptors() {
 	// Material sets: SimpleScene ~3, Sponza ~170, Bistro 500+; allocate 4096 to avoid fragmentation / OUT_OF_POOL_MEMORY
 	constexpr uint32_t MAX_MATERIAL_SETS = 4096;
 	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
-		// Global sets + shadow global + compute + material sets + shadow + shadow mask (4 sets) + slack
-		.setMaxSets(4 * MAX_FRAMES_IN_FLIGHT + (MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS + 4 * MAX_FRAMES_IN_FLIGHT)
-		// Uniform buffers: global (per frame) + shadow global (per frame, per layer) + compute (2x per frame)
-		.addPoolSize(vk::DescriptorType::eUniformBuffer, 4 * MAX_FRAMES_IN_FLIGHT + (MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT) + MAX_MATERIAL_SETS + 1)
+		// Global sets + shadow global + compute + material sets + shadow + shadow mask (4 sets) + cluster (4 sets) + slack
+		.setMaxSets(4 * MAX_FRAMES_IN_FLIGHT + (MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS + 4 * MAX_FRAMES_IN_FLIGHT + 4 * MAX_FRAMES_IN_FLIGHT)
+		// Uniform buffers: global + shadow global + compute + cluster params (2x compute + 2x output) + material
+		.addPoolSize(vk::DescriptorType::eUniformBuffer, 4 * MAX_FRAMES_IN_FLIGHT + (MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT) + MAX_MATERIAL_SETS + 1 + 4 * MAX_FRAMES_IN_FLIGHT)
 		// Combined image samplers: SimpleScene (~3) + per-material (5 per set) + skybox (3) + slack
 		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 3 * 3 + MAX_MATERIAL_SETS * 5)
 		// Samplers: shadow comparison sampler + raw sampler (2 per frame) + shadow mask output sampler (per frame) + slack
 		.addPoolSize(vk::DescriptorType::eSampler, 2 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + 7)
 		// Sampled images: shadow map array (1 per frame) + shadow mask depth + output (2 per frame each) + slack
 		.addPoolSize(vk::DescriptorType::eSampledImage, MAX_FRAMES_IN_FLIGHT + 4 * MAX_FRAMES_IN_FLIGHT + 7)
-		// Storage buffers: compute + instance SSBO (1 per frame for global + 1 per frame per shadow layer)
-		.addPoolSize(vk::DescriptorType::eStorageBuffer, 22 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT)
+		// Storage buffers: compute + instance SSBO + shadow + cluster (4 SSBOs × 2 compute + 3 SSBOs × 2 output)
+		.addPoolSize(vk::DescriptorType::eStorageBuffer, 22 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT + 14 * MAX_FRAMES_IN_FLIGHT)
 		// Storage images: shadow mask output (1 per frame)
 		.addPoolSize(vk::DescriptorType::eStorageImage, MAX_FRAMES_IN_FLIGHT)
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
@@ -1296,6 +1336,15 @@ void Sandbox::initSystems() {
 		m_shadow_mask_half_res = ui_actions.shadow_mask_half_res;
 	}
 
+	VE_LOGD("cluster light system");
+	m_cluster_light_system = std::make_unique<ClusterLightSystem>(
+		m_ve_device,
+		*m_global_pool,
+		m_global_set_layout->getDescriptorSetLayout(),
+		m_paths.shader("cluster_assign_comp.spv"),
+		m_ve_renderer.getExtent()
+	);
+
 	VE_LOGD("simple system: " << m_paths.shader("simple_shader.spv"));
 	m_simple_render_system = std::make_unique<SimpleRenderSystem>(
 		m_ve_device,
@@ -1303,6 +1352,7 @@ void Sandbox::initSystems() {
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_shadow_render_system->getShadowSetLayout(),
 		m_shadow_mask_system->getShadowMaskSetLayout(),
+		m_cluster_light_system->getOutputSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
 		m_paths.shader("simple_shader.spv")
@@ -1314,6 +1364,7 @@ void Sandbox::initSystems() {
 		m_material_set_layout->getDescriptorSetLayout(),
 		m_shadow_render_system->getShadowSetLayout(),
 		m_shadow_mask_system->getShadowMaskSetLayout(),
+		m_cluster_light_system->getOutputSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
 		m_paths.shader("pbr_shader.spv")

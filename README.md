@@ -2,7 +2,7 @@
 ![PBR Rendering](screenshots/bistro_1.png)
 ![PBR Rendering](screenshots/sponza.png)
 
-Small modern cross-platform C++20 Vulkan 1.3+ renderer using GLFW and Slang. Produces a shared library (`VEngineLib`) and an app (`VeApp`). The goal of this project is for me to have fun and to learn more about graphics programming!
+Small modern cross-platform C++20 Vulkan 1.3+ clustered forward renderer using GLFW and Slang. Produces a shared library (`VEngineLib`) and an app (`VeApp`). The goal of this project is for me to have fun and to learn more about graphics programming!
 
 
 ## Table of Contents
@@ -31,7 +31,8 @@ Small modern cross-platform C++20 Vulkan 1.3+ renderer using GLFW and Slang. Pro
 - PBR for .gltf models like Sponza and Bistro
 - Particle system with compute shaders
 - Fireworks using the particle system
-- Point lights, directional lights
+- Clustered forward rendering
+- Point lights, Directional lights
 - Shadows: CSM, Screen Space Shadows with compute, PCF, PCSS
 - Post-processing effects like Bloom and Blur
 - Basic HDR, several tone mapping options
@@ -93,7 +94,7 @@ cd vulkan_engine
 ```
 
 - ##### Windows (cmd or PowerShell):
-Optional arguments include [release|debug|test|clean] and [vs2022|vs2026]. Default is release vs2022.
+Optional arguments include [release|debug|test|clean] and [vs2022|vs2026]. Default is release vs2026.
 ```cmd
 cd vulkan_engine
 .\windowsBuild.bat

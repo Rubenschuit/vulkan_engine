@@ -33,6 +33,14 @@ constexpr uint32_t MAX_SHADOW_LAYERS = NUM_CSM_CASCADES + MAX_POINT_SHADOW_LIGHT
 static_assert(SHADOW_MAP_RESOLUTION == CSM_SHADOW_MAP_RESOLUTION,
 	"Shadow map resolution and CSM resolution must match (unified shadow array)");
 
+// Clustered forward shading
+constexpr uint32_t CLUSTER_TILE_SIZE = 64;           // screen-space tile size in pixels
+constexpr uint32_t CLUSTER_Z_SLICES = 24;            // depth slices (logarithmic distribution)
+constexpr uint32_t MAX_LIGHTS_PER_CLUSTER = 64;      // max lights assignable per cluster
+constexpr uint32_t MAX_CLUSTER_LIGHTS = 1024;        // max total point lights for cluster path
+constexpr float CLUSTER_LIGHT_CUTOFF = 0.005f;       // intensity fraction for effective range (range=0 lights)
+constexpr float CLUSTER_MAX_EFFECTIVE_RANGE = 500.0f; // cap for derived effective range
+
 constexpr bool MSAA_ENABLED = true;
 #ifdef __APPLE__
 	constexpr bool ENABLE_RAY_TRACING = false; // not supported on moltenVK

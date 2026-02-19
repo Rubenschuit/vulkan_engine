@@ -61,8 +61,8 @@ void SimpleScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
 		};
 		m_registry.getComponent<TransformComponent>(light)->setTranslation(pos);
 		auto* pl = m_registry.getComponent<PointLightComponent>(light);
-		pl->casts_shadow = false;
-		pl->rotates = true;
+		pl->setCastsShadow(false);
+		pl->setRotates(true);
 	}
 
 	// floor
@@ -73,7 +73,7 @@ void SimpleScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
 			auto& tc = m_registry.addComponent<TransformComponent>(e);
 			tc.setTranslation({0.0f, 0.0f, 0.0f});
 			tc.setRotationEuler({glm::radians(-90.0f), 0.0f, 0.0f});
-			tc.setScale({80.0f, 1.0f, 80.0f});
+			tc.setScale({800.0f, 1.0f, 800.0f});
 			auto& mc = m_registry.addComponent<MeshComponent>(e, floor_data->mesh, floor_data->material);
 			mc.has_texture = 0.0f;
 			mc.has_shadow = false;

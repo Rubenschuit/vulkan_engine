@@ -1,11 +1,14 @@
 #include "scene/ve_component.hpp"
 #include "scene/ve_registry.hpp"
 #include "resources/ve_mesh.hpp"
+#include "ve_config.hpp"
 
 #define GLM_FORCE_RADIANS
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/euler_angles.hpp>
+#include <algorithm>
+#include <cmath>
 
 namespace ve {
 
@@ -79,6 +82,37 @@ void TransformComponent::updateTransform() const {
 // ---------------------------------------------------------------------------
 // PointLightComponent
 // ---------------------------------------------------------------------------
+
+void PointLightComponent::setIntensity(float v) {
+	m_intensity = v;
+	m_range_dirty = true;
+}
+
+void PointLightComponent::setColor(const glm::vec3& v) {
+	m_color = v;
+	m_range_dirty = true;
+}
+
+void PointLightComponent::setRange(float v) {
+	m_range = v;
+	m_range_dirty = true;
+}
+
+float PointLightComponent::getEffectiveRange() const {
+	if (m_range_dirty)
+		updateEffectiveRange();
+	return m_effective_range;
+}
+
+void PointLightComponent::updateEffectiveRange() const {
+	if (m_range > 0.0f) {
+		m_effective_range = m_range;
+	} else {
+		float max_i = std::max({m_color.r * m_intensity, m_color.g * m_intensity, m_color.b * m_intensity});
+		m_effective_range = std::min(std::sqrtf(max_i / CLUSTER_LIGHT_CUTOFF), CLUSTER_MAX_EFFECTIVE_RANGE);
+	}
+	m_range_dirty = false;
+}
 
 void PointLightComponent::update(float /*delta_time*/) {}
 

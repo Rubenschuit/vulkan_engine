@@ -1,5 +1,6 @@
 #pragma once
 #include "VEngine/VEngine.hpp"
+#include "rendering/cluster_light_system.hpp"
 #include "rendering/depth_prepass_system.hpp"
 #include "rendering/shadow_mask_system.hpp"
 #include "asset_paths.hpp"
@@ -72,6 +73,9 @@ private:
 		// Sun intensity (per scene; initialised from active scene in loadScene)
 		float sun_intensity = 0.0f;
 
+		// clustered lighting
+		bool cluster_enabled = true;
+
 		// particle system
 		ParticleMode current_mode = ParticleMode::COOL;
 		float speed = 1.0f;
@@ -127,6 +131,7 @@ private:
 	std::unique_ptr<PostProcessSystem> m_post_process_system;
 	std::unique_ptr<BloomSystem> m_bloom_system;
 	std::unique_ptr<ShadowMaskSystem> m_shadow_mask_system;
+	std::unique_ptr<ClusterLightSystem> m_cluster_light_system;
 };
 
 }

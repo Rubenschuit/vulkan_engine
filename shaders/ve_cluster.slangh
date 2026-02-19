@@ -1,0 +1,115 @@
+#ifndef VE_CLUSTER_SLANGH
+#define VE_CLUSTER_SLANGH
+
+#include "ve_constants.slangh"
+
+// Must match ClusterParams in ve_frame_info.hpp
+struct ClusterParams {
+	float4x4 inv_proj;
+	float4x4 view;
+	float z_near;
+	float z_far;
+	float log_depth_ratio;   // log(z_far / z_near)
+	uint num_lights;
+	uint2 screen_size;
+	uint2 tile_size;
+	uint4 grid_dims;         // xyz = (tiles_x, tiles_y, z_slices), w = total_clusters
+	uint cluster_enabled;
+	uint max_lights_per_cluster;
+	uint _pad0;
+	uint _pad1;
+};
+
+// Compute cluster index from screen position and linear view-space depth.
+uint getClusterIndex(float2 screen_pos, float linear_depth, ClusterParams params) {
+	uint2 tile = uint2(screen_pos) / params.tile_size;
+	tile = min(tile, params.grid_dims.xy - uint2(1, 1));
+
+	float z_ratio = max(linear_depth, params.z_near) / params.z_near;
+	uint z_slice = uint(log(z_ratio) / params.log_depth_ratio * float(params.grid_dims.z));
+	z_slice = min(z_slice, params.grid_dims.z - 1);
+
+	return tile.x
+	     + tile.y * params.grid_dims.x
+	     + z_slice * params.grid_dims.x * params.grid_dims.y;
+}
+
+// Compute view-space AABB for a cluster (used by compute shader)
+void getClusterAABB(uint3 cluster_id, ClusterParams params,
+                    out float3 aabb_min, out float3 aabb_max) {
+	// Screen-space bounds of the tile
+	float2 tile_min_ss = float2(cluster_id.xy) * float2(params.tile_size);
+	float2 tile_max_ss = min(tile_min_ss + float2(params.tile_size), float2(params.screen_size));
+
+	// Normalize to [0,1]
+	float2 tile_min_ndc = tile_min_ss / float2(params.screen_size);
+	float2 tile_max_ndc = tile_max_ss / float2(params.screen_size);
+
+	// Convert to clip space [-1,1] (Vulkan: Y is flipped, but inv_proj handles it)
+	float2 tile_min_clip = tile_min_ndc * 2.0 - 1.0;
+	float2 tile_max_clip = tile_max_ndc * 2.0 - 1.0;
+
+	// Depth slice bounds (exponential distribution)
+	float z_near = params.z_near;
+	float z_far  = params.z_far;
+	float slice_near = z_near * pow(z_far / z_near, float(cluster_id.z) / float(params.grid_dims.z));
+	float slice_far  = z_near * pow(z_far / z_near, float(cluster_id.z + 1) / float(params.grid_dims.z));
+
+	// Unproject 4 corners of the tile at near depth to get view-space XY bounds
+	// Using inv_proj to go from clip to view space
+	// At a given view-space depth z, the clip-space position is (x_clip, y_clip, z_ndc, 1)
+	// We only need the XY extents, which scale linearly with depth in a perspective projection.
+	// Shortcut: unproject at z=1, then scale by actual depth.
+	float4 corner00 = mul(params.inv_proj, float4(tile_min_clip.x, tile_min_clip.y, 0.0, 1.0));
+	float4 corner11 = mul(params.inv_proj, float4(tile_max_clip.x, tile_max_clip.y, 0.0, 1.0));
+	float3 view_min_near = corner00.xyz / corner00.w;
+	float3 view_max_near = corner11.xyz / corner11.w;
+
+	// Normalize XY to per-unit-depth directions.
+	// Unprojecting at z_ndc=0 gives view-space points on the near plane (z = -z_near).
+	// Divide XY by abs(z) to get direction-per-unit-depth, then scale by actual slice depth.
+	float2 dir_min = view_min_near.xy / -view_min_near.z;
+	float2 dir_max = view_max_near.xy / -view_max_near.z;
+
+	// Scale XY by depth range to get the tile frustum AABB in view space
+	float3 near_min = float3(min(dir_min, dir_max) * slice_near, -slice_far);
+	float3 near_max = float3(max(dir_min, dir_max) * slice_far, -slice_near);
+
+	aabb_min = near_min;
+	aabb_max = near_max;
+}
+
+// Cluster heatmap color: dark blue(0), blue(few), red(many), magenta(saturated).
+// 3D checkerboard makes individual clusters visible on geometry.
+float3 clusterHeatmapColor(float2 screen_pos, float linear_depth, uint count, ClusterParams params) {
+	float3 heat;
+	if (count >= params.max_lights_per_cluster) {
+		// Saturated: bright magenta with pixel checkerboard to make it unmistakable
+		bool pixel_check = ((uint(screen_pos.x) + uint(screen_pos.y)) & 1u) == 0;
+		heat = pixel_check ? float3(1.0, 0.0, 1.0) : float3(1.0, 1.0, 0.0);
+	} else if (count == 0) {
+		heat = float3(0.0, 0.0, 0.2);
+	} else {
+		float t = float(count) / float(params.max_lights_per_cluster);
+		heat = lerp(float3(0.0, 0.0, 1.0), float3(1.0, 0.0, 0.0), t);
+	}
+
+	// 3D checkerboard per cluster cell
+	uint2 tile = uint2(screen_pos) / params.tile_size;
+	tile = min(tile, params.grid_dims.xy - uint2(1, 1));
+	float z_ratio = max(linear_depth, params.z_near) / params.z_near;
+	uint z_slice = uint(log(z_ratio) / params.log_depth_ratio * float(params.grid_dims.z));
+	z_slice = min(z_slice, params.grid_dims.z - 1);
+	float checker = ((tile.x + tile.y + z_slice) & 1u) == 0 ? 1.0 : 0.8;
+
+	return heat * checker;
+}
+
+// Sphere-AABB overlap test
+bool sphereAABBIntersect(float3 center, float radius, float3 aabb_min, float3 aabb_max) {
+	float3 closest = clamp(center, aabb_min, aabb_max);
+	float3 diff = closest - center;
+	return dot(diff, diff) <= radius * radius;
+}
+
+#endif
