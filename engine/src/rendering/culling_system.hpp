@@ -12,6 +12,9 @@ public:
 	void setCamera(VeCamera& camera) { m_camera = &camera; }
 	void setCullingEnabled(bool enabled) { m_culling_enabled = enabled; }
 	bool isCullingEnabled() const { return m_culling_enabled; }
+	void setForceLodLevel(int level) { m_force_lod = level; }
+	void setLodThresholds(const float* thresholds) { for (int i = 0; i < 3; i++) m_lod_thresholds[i] = thresholds[i]; }
+	void setLodHysteresis(float h) { m_lod_hysteresis = h; }
 	void cullObjects(VeFrameInfo& frame_info);
 
 	std::vector<VisibleObject>& getVisibleObjectsRef() { return m_visible_objects; }
@@ -22,6 +25,9 @@ public:
 private:
 	VeCamera* m_camera;
 	bool m_culling_enabled = true;
+	int m_force_lod = -1;
+	float m_lod_thresholds[3] = {0.3f, 0.15f, 0.05f};
+	float m_lod_hysteresis = 0.2f;
 	std::vector<VisibleObject> m_visible_objects;
 	uint32_t m_last_total_mesh_objects = 0;
 	uint32_t m_last_visible_count = 0;

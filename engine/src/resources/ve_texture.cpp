@@ -288,7 +288,7 @@ bool VeTexture::createTextureImage(const std::filesystem::path& texture_path, vk
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 	);
 	staging_buffer.map();
-	staging_buffer.writeToBuffer(static_cast<void*>(data), static_cast<size_t>(total_size));
+	staging_buffer.writeToBuffer(data, static_cast<size_t>(total_size));
 	//VE_LOGD("Copied texture data to staging buffer");
 
 	// Create image with mip levels
@@ -357,7 +357,7 @@ void VeTexture::createTextureImageFromPixels(uint32_t width, uint32_t height, co
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 	);
 	staging_buffer.map();
-	staging_buffer.writeToBuffer(const_cast<void*>(static_cast<const void*>(pixels)));
+	staging_buffer.writeToBuffer(pixels);
 	m_texture_image = std::make_unique<ve::VeImage>(
 		m_ve_device,
 		static_cast<uint32_t>(width),
@@ -419,7 +419,7 @@ bool VeTexture::createTextureImageSTB(const std::filesystem::path& texture_path,
 
 	// Copy image data to staging buffer
 	staging_buffer.map();
-	staging_buffer.writeToBuffer((void*)pixels);
+	staging_buffer.writeToBuffer(pixels);
 	// unmap is called in the destructor of VeBuffer
 	stbi_image_free(pixels);
 

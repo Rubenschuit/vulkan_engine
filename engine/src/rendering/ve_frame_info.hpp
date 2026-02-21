@@ -30,6 +30,7 @@ static_assert(sizeof(InstanceData) == 112, "InstanceData must be 112 bytes for S
 struct VisibleObject {
 	Entity entity;
 	MeshComponent* mesh = nullptr;
+	uint32_t lod_level = 0;
 };
 
 struct PointLight {
@@ -58,6 +59,7 @@ enum class RenderMode : uint32_t {
 	BRDF_MICROFACET = 5,
 	CSM_CASCADE = 6,
 	CLUSTER_HEATMAP = 7,
+	LOD_LEVEL = 8,
 };
 
 enum class ShadowMode : uint32_t {

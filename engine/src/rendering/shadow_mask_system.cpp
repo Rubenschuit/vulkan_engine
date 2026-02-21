@@ -285,7 +285,7 @@ void ShadowMaskSystem::savePrevFrameUBO(const UniformBufferObject& ubo, uint32_t
 	// Write previous frame's UBO data to the CURRENT frame's compute buffer only.
 	// The other frame's buffer may still be read by an in-flight compute dispatch.
 	// The fence for current_frame guarantees its previous GPU work is complete.
-	m_compute_ubos[current_frame]->writeToBuffer(const_cast<UniformBufferObject*>(&m_prev_ubo_data));
+	m_compute_ubos[current_frame]->writeToBuffer(&m_prev_ubo_data);
 	// Save current frame data for use by next frame's dispatch
 	m_prev_ubo_data = ubo;
 }

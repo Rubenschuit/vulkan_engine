@@ -91,6 +91,7 @@ void DepthPrePassSystem::render(
 		0, {*frame_info.global_descriptor_set}, {});
 
 	VeMesh* bound_mesh = nullptr;
+	uint32_t bound_lod = UINT32_MAX;
 
 	for (const auto& group : opaque_groups) {
 		// Skip MASK groups: the depth-only shader cannot do alpha testing, so it would
@@ -116,15 +117,16 @@ void DepthPrePassSystem::render(
 			vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push))
 		);
 
-		// Bind shadow VBO + IBO (position-only, if mesh changed)
-		if (group.mesh != bound_mesh) {
+		// Bind shadow VBO + LOD IBO (position-only, if mesh or LOD changed)
+		if (group.mesh != bound_mesh || group.lod_level != bound_lod) {
 			bound_mesh = group.mesh;
+			bound_lod = group.lod_level;
 			bound_mesh->bindShadowVertexBuffer(cmd);
-			bound_mesh->bindIndexBuffer(cmd);
+			bound_mesh->bindLodIndexBuffer(cmd, bound_lod);
 		}
 
 		// Instanced draw
-		group.mesh->drawIndexed(cmd, group.instance_count, 0);
+		group.mesh->drawIndexedLod(cmd, group.lod_level, group.instance_count, 0);
 	}
 }
 

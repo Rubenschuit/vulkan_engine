@@ -339,13 +339,16 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 
 	// Culling pass
 	m_culling_system->setCullingEnabled(ui_actions.enable_frustum_culling);
+	m_culling_system->setForceLodLevel(ui_actions.lod_force_level);
+	m_culling_system->setLodThresholds(ui_actions.lod_screen_thresholds);
+	m_culling_system->setLodHysteresis(ui_actions.lod_hysteresis);
 	m_culling_system->cullObjects(frame_info);
 	ui_actions.cull_total_objects = m_culling_system->getLastTotalMeshObjects();
 	ui_actions.cull_visible_objects = m_culling_system->getLastVisibleCount();
 
 	uint32_t tri_count = 0;
 	for (auto& vo : m_culling_system->getVisibleObjectsRef()) {
-		tri_count += vo.mesh->getMeshHandle()->getIndexCount() / 3;
+		tri_count += vo.mesh->getMesh()->getLodIndexCount(vo.lod_level) / 3;
 	}
 	ui_actions.visible_triangles = tri_count;
 
@@ -1171,6 +1174,11 @@ void Sandbox::renderAppWindows() {
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Visualize lights-per-cluster as a heat gradient\nBlue=few, Red=many, Dark=zero");
 				}
+				if (ImGui::RadioButton("LOD Level", &current_render_mode, static_cast<int>(RenderMode::LOD_LEVEL)))
+					ui_actions.render_mode = RenderMode::LOD_LEVEL;
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Visualize mesh LOD levels\nGreen=0, Yellow=1, Orange=2, Red=3");
+				}
 
 				ImGui::Checkbox("Show Axes", &ui_actions.show_axes);
 				if (ImGui::IsItemHovered()) {
@@ -1190,6 +1198,23 @@ void Sandbox::renderAppWindows() {
 				ImGui::Checkbox("Clustered Lighting", &ui_actions.cluster_enabled);
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Use 3D cluster grid to cull lights per-fragment");
+				}
+
+				ImGui::Separator();
+				ImGui::Text("LOD:");
+				{
+					const char* lod_items[] = {"Auto", "LOD 0", "LOD 1", "LOD 2", "LOD 3"};
+					int lod_combo = ui_actions.lod_force_level + 1;
+					if (ImGui::Combo("Force LOD", &lod_combo, lod_items, 5))
+						ui_actions.lod_force_level = lod_combo - 1;
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("Force all meshes to a specific LOD level.\nAuto = normal distance-based selection.");
+					if (ui_actions.lod_force_level < 0) {
+						ImGui::SliderFloat("LOD 0->1", &ui_actions.lod_screen_thresholds[0], 0.01f, 1.0f, "%.3f");
+						ImGui::SliderFloat("LOD 1->2", &ui_actions.lod_screen_thresholds[1], 0.01f, 0.5f, "%.3f");
+						ImGui::SliderFloat("LOD 2->3", &ui_actions.lod_screen_thresholds[2], 0.001f, 0.2f, "%.3f");
+						ImGui::SliderFloat("Hysteresis", &ui_actions.lod_hysteresis, 0.0f, 0.5f, "%.2f");
+					}
 				}
 
 				ImGui::Separator();

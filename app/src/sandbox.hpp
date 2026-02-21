@@ -113,7 +113,7 @@ private:
 	std::filesystem::path m_pending_gltf_path;
 
 	std::chrono::steady_clock::time_point m_cpu_start;
-	bool m_shadow_mask_half_res = true; // tracks UI toggle for recreation
+	bool m_shadow_mask_half_res = false; // tracks UI toggle for recreation
 	bool m_gtao_half_res = true;        // tracks UI toggle for GTAO recreation
 	int m_pcf_samples = 8;
 	int m_pcss_filter_samples = 16;

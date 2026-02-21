@@ -13,6 +13,7 @@ struct PushConstantData {
 	[vk::offset(8)]  uint32_t material_flags;  // bits 0-1: alpha_mode, bit 2: double_sided, bit 3: flip_tex_coord_v, bit 4: use_spec_gloss_texture
 	[vk::offset(12)] uint32_t instance_offset;  // SSBO offset (SV_InstanceID is 0-based in Slang)
 	[vk::offset(16)] float    depth_offset;     // clip-space Z offset (>0 pushes towards camera)
+	[vk::offset(20)] uint32_t lod_level;        // LOD level for debug visualization
 };
 [push_constant]
 PushConstantData push_constants;
@@ -202,6 +203,8 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		return float4(0.5 * B + 0.5, 1.0f);
 	else if (ubo.render_mode == RenderMode::NORMAL_MAP) // sampled normal
 		return float4(0.5 * world_normal + 0.5, 1.0f);
+	else if (ubo.render_mode == RenderMode::LOD_LEVEL)
+		return float4(lodDebugColor(albedo.rgb, push_constants.lod_level), albedo.a);
 
 	// View direction and view-space depth (used by CSM and cluster lookup)
 	float3 view_dir = normalize(ubo.camera_position.xyz - in_vert.frag_pos_world);
@@ -217,16 +220,16 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 			float2 prev_ndc = prev_clip.xy / prev_clip.w;
 			float2 prev_uv = prev_ndc * 0.5 + 0.5;
 			csm_shadow = shadow_mask.SampleLevel(shadow_mask_sampler, prev_uv, 0);
+			// Compute cascade index for debug visualization
+			if (ubo.render_mode == RenderMode::CSM_CASCADE)
+				calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, csm_cascade_idx, csm_blend_t);
 		} else {
 			csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, csm_cascade_idx, csm_blend_t);
 		}
 	}
 
-	if (ubo.render_mode == RenderMode::CSM_CASCADE) {
-		if (SHADOW_MASK_SPEC != 0)
-			return float4(csm_shadow, csm_shadow, csm_shadow, 1.0);
+	if (ubo.render_mode == RenderMode::CSM_CASCADE)
 		return float4(csmDebugColor(albedo.rgb, csm_cascade_idx, csm_blend_t, csm_shadow), albedo.a);
-	}
 
 	// Point light shadow terms
 	float shadow_terms[MAX_SHADOW_LIGHTS];

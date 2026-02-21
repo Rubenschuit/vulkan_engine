@@ -7,6 +7,7 @@
 #include <tiny_gltf.h>
 
 #include <mikktspace.h>
+#include <meshoptimizer.h>
 
 #include <algorithm>
 #include <numeric>
@@ -1102,7 +1103,77 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 			out_center_extent->second = glm::length(mx - mn);
 		}
 
-		return resource_manager.createMesh(mesh_id, out_vertices, out_indices);
+		// Stage 4a: optimize base mesh for vertex cache and overdraw
+		meshopt_optimizeVertexCache(out_indices.data(), out_indices.data(),
+		                            out_indices.size(), out_vertices.size());
+		meshopt_optimizeOverdraw(out_indices.data(), out_indices.data(),
+		                         out_indices.size(),
+		                         &out_vertices[0].pos.x, out_vertices.size(),
+		                         sizeof(VeMesh::Vertex), 1.05f);
+
+		// Stage 4b: generate LOD levels via progressive simplification
+		std::vector<std::vector<uint32_t>> lod_indices;
+		size_t base_index_count = out_indices.size();
+
+		// Build attribute array (normals + UVs) for attribute-aware simplification
+		// This prevents collapsing edges across UV seams and normal discontinuities
+		const size_t attr_count = 5; // normal(3) + uv(2)
+		std::vector<float> vertex_attributes(out_vertices.size() * attr_count);
+		for (size_t v = 0; v < out_vertices.size(); v++) {
+			vertex_attributes[v * attr_count + 0] = out_vertices[v].normal.x;
+			vertex_attributes[v * attr_count + 1] = out_vertices[v].normal.y;
+			vertex_attributes[v * attr_count + 2] = out_vertices[v].normal.z;
+			vertex_attributes[v * attr_count + 3] = out_vertices[v].tex_coord.x;
+			vertex_attributes[v * attr_count + 4] = out_vertices[v].tex_coord.y;
+		}
+		const float attribute_weights[attr_count] = {0.5f, 0.5f, 0.5f, 1.0f, 1.0f};
+
+		for (uint32_t lod = 1; lod < ve::MAX_LOD_LEVELS; lod++) {
+			size_t target_count = static_cast<size_t>(
+				static_cast<float>(base_index_count) * ve::LOD_RATIOS[lod]);
+			target_count = std::max(target_count, static_cast<size_t>(ve::LOD_MIN_TRIANGLES * 3));
+			if (target_count >= base_index_count)
+				break;
+
+			// Always simplify from the base mesh to avoid accumulating error
+			if (target_count >= out_indices.size())
+				break;
+
+			std::vector<uint32_t> simplified(out_indices.size());
+			float result_error = 0.0f;
+			size_t result_count = meshopt_simplifyWithAttributes(
+				simplified.data(),
+				out_indices.data(),
+				out_indices.size(),
+				&out_vertices[0].pos.x,
+				out_vertices.size(),
+				sizeof(VeMesh::Vertex),
+				vertex_attributes.data(),
+				sizeof(float) * attr_count,
+				attribute_weights,
+				attr_count,
+				nullptr,
+				target_count,
+				ve::LOD_ERROR_THRESHOLD,
+				meshopt_SimplifyLockBorder,
+				&result_error
+			);
+			simplified.resize(result_count);
+
+			// Stop if simplification couldn't meaningfully reduce from the previous LOD
+			size_t prev_count = lod_indices.empty() ? base_index_count : lod_indices.back().size();
+			if (result_count >= prev_count * 95 / 100)
+				break;
+
+			meshopt_optimizeVertexCache(simplified.data(), simplified.data(),
+			                            simplified.size(), out_vertices.size());
+
+			lod_indices.push_back(std::move(simplified));
+		}
+
+		if (lod_indices.empty())
+			return resource_manager.createMesh(mesh_id, out_vertices, out_indices);
+		return resource_manager.createMesh(mesh_id, out_vertices, out_indices, lod_indices);
 	};
 
 	// Recursively create nodes.

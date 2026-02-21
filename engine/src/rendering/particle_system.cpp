@@ -67,7 +67,7 @@ void ParticleSystem::createShaderStorageBuffers() {
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 	);
 	staging_buffer.map();
-	staging_buffer.writeToBuffer((void*)particles.data());
+	staging_buffer.writeToBuffer(particles.data());
 
 	// Create per-frame SSBO and copy initial data
 	m_shader_storage_buffers.clear();

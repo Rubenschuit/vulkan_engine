@@ -229,12 +229,14 @@ void ClusterLightSystem::dispatch(VeFrameInfo& frame_info, const VeCamera& camer
 	uint32_t groups_xy = (clusters_per_slice + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
 	cmd.dispatch(groups_xy, 1, CLUSTER_Z_SLICES);
 
-	// Barrier: compute write → fragment read
+	// Make compute writes available before the semaphore signal.
+	// Cross-queue visibility (fragment shader reads) is handled by the
+	// semaphore wait in submitAndPresent.
 	vk::MemoryBarrier2 compute_to_frag{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+		.dstStageMask = vk::PipelineStageFlagBits2::eBottomOfPipe,
+		.dstAccessMask = vk::AccessFlagBits2::eNone,
 	};
 	vk::DependencyInfo compute_dep{
 		.memoryBarrierCount = 1,

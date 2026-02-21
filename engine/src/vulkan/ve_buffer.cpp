@@ -57,7 +57,7 @@ void VeBuffer::unmap() {
 	}
 }
 
-void VeBuffer::writeToBuffer(void* data, vk::DeviceSize size, vk::DeviceSize offset) {
+void VeBuffer::writeToBuffer(const void* data, vk::DeviceSize size, vk::DeviceSize offset) {
 	assert(m_mapped != VK_NULL_HANDLE && "Cannot write to unmapped buffer");
 	vk::DeviceSize effective_size = (size == VK_WHOLE_SIZE) ? m_buffer_size : size;
 	assert(effective_size <= m_buffer_size && "Size exceeds buffer size");

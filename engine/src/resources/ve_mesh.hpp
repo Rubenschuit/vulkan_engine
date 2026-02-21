@@ -44,9 +44,18 @@ public:
 		}
 	};
 
+	struct LodLevel {
+		std::unique_ptr<VeBuffer> index_buffer;
+		uint32_t index_count = 0;
+	};
+
 	// Create mesh from vertices and indices, extracted from glTF model for example.
 	VeMesh(VeDevice& device, const std::string& resource_id,
 	       const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
+	// Create mesh with additional LOD index buffers (lod_indices[0] = LOD 1, etc.)
+	VeMesh(VeDevice& device, const std::string& resource_id,
+	       const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices,
+	       const std::vector<std::vector<uint32_t>>& lod_indices);
 	~VeMesh() override;
 
 	VeMesh(const VeMesh&) = delete;
@@ -55,12 +64,18 @@ public:
 	void bindVertexBuffer(vk::raii::CommandBuffer& command_buffer) const;
 	void bindShadowVertexBuffer(vk::raii::CommandBuffer& command_buffer) const;
 	void bindIndexBuffer(vk::raii::CommandBuffer& command_buffer) const;
+	void bindLodIndexBuffer(vk::raii::CommandBuffer& command_buffer, uint32_t lod) const;
 	void draw(vk::raii::CommandBuffer& command_buffer) const;
 	void drawIndexed(vk::raii::CommandBuffer& command_buffer) const;
 	void drawIndexed(vk::raii::CommandBuffer& command_buffer, uint32_t instance_count, uint32_t first_instance) const;
+	void drawIndexedLod(vk::raii::CommandBuffer& command_buffer, uint32_t lod,
+	                    uint32_t instance_count, uint32_t first_instance) const;
 
 	uint32_t getVertexCount() const { return m_vertex_count; }
 	uint32_t getIndexCount() const { return m_index_count; }
+	uint32_t getLodCount() const { return 1 + static_cast<uint32_t>(m_lod_levels.size()); }
+	uint32_t getLodIndexCount(uint32_t lod) const;
+	VeBuffer& getLodIndexBuffer(uint32_t lod) const;
 	VeBuffer& getShadowVertexBuffer() const { return *m_shadow_vertex_buffer; }
 	VeBuffer& getIndexBuffer() const { return *m_index_buffer; }
 
@@ -74,12 +89,14 @@ private:
 	void createVertexBuffers(const std::vector<Vertex>& vertices);
 	void createShadowVertexBuffer(const std::vector<Vertex>& vertices);
 	void createIndexBuffers(const std::vector<uint32_t>& indices);
+	void createLodIndexBuffer(const std::vector<uint32_t>& indices);
 	void computeLocalAABB(const std::vector<Vertex>& vertices);
 
 	VeDevice& m_ve_device;
 	std::unique_ptr<VeBuffer> m_vertex_buffer;
 	std::unique_ptr<VeBuffer> m_shadow_vertex_buffer;
 	std::unique_ptr<VeBuffer> m_index_buffer;
+	std::vector<LodLevel> m_lod_levels;  // LODs 1+ (LOD 0 is m_index_buffer)
 	uint32_t m_vertex_count{0};
 	uint32_t m_index_count{0};
 	AABB m_local_aabb{};

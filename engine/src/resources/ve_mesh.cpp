@@ -32,6 +32,20 @@ VeMesh::VeMesh(VeDevice& device, const std::string& resource_id,
 	setLoaded(true);
 }
 
+VeMesh::VeMesh(VeDevice& device, const std::string& resource_id,
+               const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices,
+               const std::vector<std::vector<uint32_t>>& lod_indices)
+	: Resource(resource_id), m_ve_device(device) {
+	computeLocalAABB(vertices);
+	createVertexBuffers(vertices);
+	createShadowVertexBuffer(vertices);
+	createIndexBuffers(indices);
+	for (const auto& lod : lod_indices) {
+		createLodIndexBuffer(lod);
+	}
+	setLoaded(true);
+}
+
 VeMesh::~VeMesh() {
 	unload();
 }
@@ -45,6 +59,7 @@ void VeMesh::doUnload() {
 	m_vertex_buffer.reset();
 	m_shadow_vertex_buffer.reset();
 	m_index_buffer.reset();
+	m_lod_levels.clear();
 	m_vertex_count = 0;
 	m_index_count = 0;
 }
@@ -76,7 +91,7 @@ void VeMesh::createVertexBuffers(const std::vector<Vertex>& vertices) {
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 	);
 	staging_buffer.map();
-	staging_buffer.writeToBuffer(const_cast<void*>(static_cast<const void*>(vertices.data())));
+	staging_buffer.writeToBuffer(vertices.data());
 
 	m_vertex_buffer = std::make_unique<VeBuffer>(
 		m_ve_device,
@@ -131,7 +146,7 @@ void VeMesh::createIndexBuffers(const std::vector<uint32_t>& indices) {
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
 	);
 	staging_buffer.map();
-	staging_buffer.writeToBuffer(const_cast<void*>(static_cast<const void*>(indices.data())));
+	staging_buffer.writeToBuffer(indices.data());
 
 	m_index_buffer = std::make_unique<VeBuffer>(
 		m_ve_device,
@@ -143,6 +158,57 @@ void VeMesh::createIndexBuffers(const std::vector<uint32_t>& indices) {
 	);
 	m_ve_device.copyBuffer(staging_buffer.getBuffer(), m_index_buffer->getBuffer(),
 	                       sizeof(indices[0]) * m_index_count);
+}
+
+void VeMesh::createLodIndexBuffer(const std::vector<uint32_t>& indices) {
+	LodLevel lod;
+	lod.index_count = static_cast<uint32_t>(indices.size());
+
+	VeBuffer staging_buffer(
+		m_ve_device,
+		sizeof(indices[0]),
+		lod.index_count,
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+	);
+	staging_buffer.map();
+	staging_buffer.writeToBuffer(indices.data());
+
+	lod.index_buffer = std::make_unique<VeBuffer>(
+		m_ve_device,
+		sizeof(indices[0]),
+		lod.index_count,
+		vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		1
+	);
+	m_ve_device.copyBuffer(staging_buffer.getBuffer(), lod.index_buffer->getBuffer(),
+	                       sizeof(indices[0]) * lod.index_count);
+
+	m_lod_levels.push_back(std::move(lod));
+}
+
+uint32_t VeMesh::getLodIndexCount(uint32_t lod) const {
+	if (lod == 0)
+		return m_index_count;
+	assert(lod - 1 < m_lod_levels.size());
+	return m_lod_levels[lod - 1].index_count;
+}
+
+VeBuffer& VeMesh::getLodIndexBuffer(uint32_t lod) const {
+	if (lod == 0)
+		return *m_index_buffer;
+	assert(lod - 1 < m_lod_levels.size());
+	return *m_lod_levels[lod - 1].index_buffer;
+}
+
+void VeMesh::bindLodIndexBuffer(vk::raii::CommandBuffer& command_buffer, uint32_t lod) const {
+	command_buffer.bindIndexBuffer(*getLodIndexBuffer(lod).getBuffer(), 0, vk::IndexType::eUint32);
+}
+
+void VeMesh::drawIndexedLod(vk::raii::CommandBuffer& command_buffer, uint32_t lod,
+                            uint32_t instance_count, uint32_t first_instance) const {
+	command_buffer.drawIndexed(getLodIndexCount(lod), instance_count, 0, 0, first_instance);
 }
 
 void VeMesh::bindVertexBuffer(vk::raii::CommandBuffer& command_buffer) const {

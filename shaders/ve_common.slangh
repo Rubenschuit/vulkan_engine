@@ -38,6 +38,7 @@ enum RenderMode {
 	BRDF_MICROFACET = 5,
 	CSM_CASCADE = 6,
 	CLUSTER_HEATMAP = 7,
+	LOD_LEVEL = 8,
 };
 
 // ============================================================================
@@ -423,6 +424,17 @@ float3 csmDebugColor(float3 albedo, uint cascade, float blend_t, float shadow) {
 	if (blend_t > 0.0 && cascade < ubo.csm_cascade_count - 1)
 		tint = lerp(tint, CASCADE_COLORS[(cascade + 1) % 4], blend_t);
 	return albedo * tint * shadow;
+}
+
+// LOD level debug visualization: color-code by LOD level (green=0, yellow=1, orange=2, red=3)
+float3 lodDebugColor(float3 albedo, uint lod_level) {
+	static const float3 LOD_COLORS[4] = {
+		float3(0.2, 1.0, 0.2),  // green  = LOD 0 (full detail)
+		float3(1.0, 1.0, 0.2),  // yellow = LOD 1
+		float3(1.0, 0.5, 0.2),  // orange = LOD 2
+		float3(1.0, 0.2, 0.2),  // red    = LOD 3 (lowest detail)
+	};
+	return albedo * LOD_COLORS[min(lod_level, 3u)];
 }
 
 #endif

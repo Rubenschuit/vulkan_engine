@@ -31,9 +31,10 @@ Small modern cross-platform C++20 Vulkan 1.3+ clustered forward renderer using G
 - PBR for .gltf models like Sponza and Bistro
 - Particle system with compute shaders
 - Fireworks using the particle system
-- Clustered forward rendering
+- Clustered forward rendering with depth pre-pass
 - Point lights, Directional lights
 - Shadows: CSM, Screen Space Shadows with compute, PCF, PCSS
+- GTAO
 - Post-processing effects like Bloom and Blur
 - Basic HDR, several tone mapping options
 - Dear ImGui overlay
@@ -47,33 +48,28 @@ Small modern cross-platform C++20 Vulkan 1.3+ clustered forward renderer using G
 
 - Git
 - CMake ≥ 3.16
-- C++20 toolchain (Clang 14+/MSVC 2019+/GCC 11+)
-- Vulkan SDK ≥ 1.3
-- Slang compiler (included in Vulkan SDK since 1.3.296)
-- KTX library
-- GLFW 3.3+ (automatically fetched if missing)
-- GLM       (automatically fetched if missing)
-- TinyGLTF 				(included in external)
-- Dear ImGui 			(included in external)
-- Mikktspace 			(included in external)
-- Portable File Dialogs (included in external)
+- C++20 toolchain: Clang 14+, MSVC 2019+, or GCC 11+
+- Vulkan SDK ≥ 1.3 with Slang compiler
+
+Fetched automatically if not found on the system:
+- KTX, GLFW 3.3+, GLM, Meshoptimizer
+
+Included in `external/`:
+- TinyGLTF, Dear ImGui, Mikktspace, Portable File Dialogs
 
 
 #### Downloads:
-Besides git, cmake and a c++20 compiler, two dependencies will have to be installed manually: Vulkan SDK and KTX.
+Besides git, cmake and a c++20 compiler, the Vulkan SDK must be installed manually. KTX is fetched automatically if not found on the system.
 
 - Vulkan SDK (LunarG): https://vulkan.lunarg.com/sdk/home
 	- macOS and Windows: Check 'System global installation' component in the installer
 	- Linux: Consult https://vulkan.lunarg.com/doc/sdk/1.4.328.1/linux/getting_started.html (1.4.328) for instructions to install the tar file.
 
-- KTX: https://github.com/KhronosGroup/KTX-Software/releases
-	- macOS and Windows: Check 'add to path' and the 'Development' package in the installer
-	- Linux: Download the .deb file and install with `sudo apt install ./filename.deb`
-
-- Extra:
+- Extra (fetched automatically, but can be installed manually):
+	- KTX: https://github.com/KhronosGroup/KTX-Software/releases
 	- Slang (if not included in your Vulkan SDK): https://github.com/shader-slang/slang/releases
-	- GLFW (fetched automatically): https://www.glfw.org/download.html
-	- GLM (fetched automatically): https://github.com/g-truc/glm/releases
+	- GLFW: https://www.glfw.org/download.html
+	- GLM: https://github.com/g-truc/glm/releases
 
 - Additional packages for fresh ubuntu install:
 ```bash
@@ -116,7 +112,7 @@ cmake --build build/Release
 From command prompt:
 
 ```bat
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64
 cmake --build build --config Release
 build\Release\VeApp.exe
 ```
@@ -124,7 +120,7 @@ build\Release\VeApp.exe
 Or generate VeApp.sln to open with Visual Studio:
 
 ```bat
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64
 ```
 
 Then, in VS, right-click the VeApp target, set as startup project, build and then run (f5)

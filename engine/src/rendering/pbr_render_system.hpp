@@ -20,9 +20,10 @@ namespace ve {
 
 class VENGINE_API PbrRenderSystem {
 public:
-	// Instanced draw groups: opaque drawables merged by (mesh, material) for batched draws
+	// Instanced draw groups: opaque drawables merged by (mesh, lod, material) for batched draws
 	struct InstanceGroup {
 		VeMesh* mesh = nullptr;
+		uint32_t lod_level = 0;
 		VkDescriptorSet material_set = VK_NULL_HANDLE;
 		uint32_t first_instance = 0;  // offset into SSBO
 		uint32_t instance_count = 0;
@@ -87,7 +88,7 @@ private:
 		const vk::raii::DescriptorSetLayout& ao_set_layout);
 	void createPipelines(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
 	void renderOpaqueGroup(VeFrameInfo& frame_info, const InstanceGroup& group,
-		VkDescriptorSet& bound_material_set, VeMesh*& bound_mesh) const;
+		VkDescriptorSet& bound_material_set, VeMesh*& bound_mesh, uint32_t& bound_lod) const;
 
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;
@@ -111,6 +112,7 @@ private:
 		float dist_sq = 0.0f;
 		AlphaMode alpha_mode = AlphaMode::ALPHA_OPAQUE;
 		uint32_t ssbo_index = 0;  // index into instance SSBO (set in prepareFrame)
+		uint32_t lod_level = 0;
 	};
 	mutable std::vector<Drawable> m_opaque_drawables;
 	mutable std::vector<Drawable> m_transparent_drawables;

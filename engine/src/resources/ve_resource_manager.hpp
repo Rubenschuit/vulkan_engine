@@ -83,6 +83,11 @@ public:
 	ResourceHandle<VeMesh> createMesh(const std::string& resource_id,
 	                                  const std::vector<VeMesh::Vertex>& vertices,
 	                                  const std::vector<uint32_t>& indices);
+	// Create VeMesh with additional LOD index buffers
+	ResourceHandle<VeMesh> createMesh(const std::string& resource_id,
+	                                  const std::vector<VeMesh::Vertex>& vertices,
+	                                  const std::vector<uint32_t>& indices,
+	                                  const std::vector<std::vector<uint32_t>>& lod_indices);
 
 	// Create VeMaterial from texture paths. pool and layout can be null for untextured materials.
 	ResourceHandle<VeMaterial> createMaterial(const std::string& resource_id,

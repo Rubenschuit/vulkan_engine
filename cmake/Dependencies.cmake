@@ -173,6 +173,7 @@ if (KTX_PATH)
 			set(KTX_DLL_PATH "${KTX_PATH}/lib/ktx.dll" CACHE FILEPATH "Path to KTX DLL")
 		endif()
 	endif()
+	message(STATUS "KTX configured: ${KTX_LIBRARIES} | ${KTX_INCLUDE_DIRS}")
 else()
 	# Try to find KTX in system
 	find_library(KTX_LIBRARIES NAMES ktx HINTS
@@ -194,7 +195,6 @@ else()
 			"C:/Program Files/KTX-Software/include"
 		)
 		if (NOT KTX_INCLUDE_DIRS)
-			# Fallback to common locations
 			if (UNIX OR APPLE)
 				set(KTX_INCLUDE_DIRS "/usr/local/include")
 			elseif (WIN32)
@@ -203,31 +203,37 @@ else()
 		endif()
 		message(STATUS "Found KTX in system: ${KTX_LIBRARIES} | ${KTX_INCLUDE_DIRS}")
 
-		# On Windows, we need to copy the DLL to the executable directory
+		# On Windows, find the DLL for runtime copying
 		if(WIN32)
 			get_filename_component(KTX_LIB_DIR ${KTX_LIBRARIES} DIRECTORY)
-			message(STATUS "Looking for KTX DLL near: ${KTX_LIB_DIR}")
-			# Check for DLL in lib directory first, then in parallel bin directory
 			if(EXISTS "${KTX_LIB_DIR}/ktx.dll")
 				set(KTX_DLL_PATH "${KTX_LIB_DIR}/ktx.dll" CACHE FILEPATH "Path to KTX DLL")
-				message(STATUS "KTX DLL found at: ${KTX_DLL_PATH}")
 			elseif(EXISTS "${KTX_LIB_DIR}/../bin/ktx.dll")
 				get_filename_component(KTX_DLL_PATH "${KTX_LIB_DIR}/../bin/ktx.dll" ABSOLUTE)
 				set(KTX_DLL_PATH "${KTX_DLL_PATH}" CACHE FILEPATH "Path to KTX DLL")
-				message(STATUS "KTX DLL found at: ${KTX_DLL_PATH}")
 			else()
-				message(WARNING "KTX DLL not found. Checked:")
-				message(WARNING "  - ${KTX_LIB_DIR}/ktx.dll")
-				message(WARNING "  - ${KTX_LIB_DIR}/../bin/ktx.dll")
+				message(WARNING "KTX DLL not found near ${KTX_LIB_DIR}")
 			endif()
 		endif()
 	else()
-		message(FATAL_ERROR "KTX not found on system, aborting build")
-		return()
+		# Not found on system — fetch via FetchContent
+		message(STATUS "KTX not found on system, fetching from GitHub...")
+		include(FetchContent)
+		FetchContent_Declare(ktx
+			GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
+			GIT_TAG v4.4.2
+		)
+		# Disable features we don't use to minimize build time
+		set(KTX_FEATURE_TOOLS OFF CACHE BOOL "" FORCE)
+		set(KTX_FEATURE_TESTS OFF CACHE BOOL "" FORCE)
+		set(KTX_FEATURE_DOC OFF CACHE BOOL "" FORCE)
+		set(KTX_FEATURE_GL_UPLOAD OFF CACHE BOOL "" FORCE)
+		set(KTX_FEATURE_LOADTEST_APPS "" CACHE STRING "" FORCE)
+		set(KTX_FEATURE_STATIC_LIBRARY ON CACHE BOOL "" FORCE)
+		FetchContent_MakeAvailable(ktx)
+		message(STATUS "KTX fetched: ${ktx_SOURCE_DIR}")
 	endif()
 endif()
-
-message(STATUS "KTX configured: ${KTX_LIBRARIES} | ${KTX_INCLUDE_DIRS}")
 
 # Dear ImGui: prefer vendored source under external/imgui, otherwise fetch
 set(_VE_IMGUI_VENDORED_DIR "${CMAKE_SOURCE_DIR}/external/imgui")
@@ -245,3 +251,12 @@ else()
 	set(IMGUI_DIR ${imgui_SOURCE_DIR} CACHE PATH "Path to Dear ImGui sources")
 	message(STATUS "Fetched Dear ImGui from Git (docking): ${IMGUI_DIR}")
 endif()
+
+# meshoptimizer (mesh optimization and LOD generation)
+include(FetchContent)
+FetchContent_Declare(meshoptimizer
+	GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git
+	GIT_TAG v0.22
+)
+FetchContent_MakeAvailable(meshoptimizer)
+message(STATUS "meshoptimizer: ${meshoptimizer_SOURCE_DIR}")

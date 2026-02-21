@@ -31,7 +31,7 @@ public:
 
 	void map(vk::DeviceSize size = VK_WHOLE_SIZE, vk::DeviceSize offset = 0);
 	void unmap();
-	void writeToBuffer(void* data, vk::DeviceSize size = VK_WHOLE_SIZE, vk::DeviceSize offset = 0);
+	void writeToBuffer(const void* data, vk::DeviceSize size = VK_WHOLE_SIZE, vk::DeviceSize offset = 0);
 
 private:
 	void* m_mapped = nullptr;

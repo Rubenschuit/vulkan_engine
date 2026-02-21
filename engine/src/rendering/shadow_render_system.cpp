@@ -402,7 +402,9 @@ void ShadowRenderSystem::rebuildMegaBuffers(vk::raii::CommandBuffer& cmd, const 
 	uint32_t total_indices = 0;
 	for (VeMesh* mesh : unique_meshes) {
 		total_vertices += mesh->getVertexCount();
-		total_indices += mesh->getIndexCount();
+		// Sum indices for all LOD levels (LOD 0 = base, LOD 1+ = simplified)
+		for (uint32_t lod = 0; lod < mesh->getLodCount(); lod++)
+			total_indices += mesh->getLodIndexCount(lod);
 	}
 
 	if (total_vertices == 0 || total_indices == 0) {
@@ -443,9 +445,8 @@ void ShadowRenderSystem::rebuildMegaBuffers(vk::raii::CommandBuffer& cmd, const 
 
 	for (VeMesh* mesh : unique_meshes) {
 		uint32_t vc = mesh->getVertexCount();
-		uint32_t ic = mesh->getIndexCount();
 
-		// Copy shadow VBO region
+		// Copy shadow VBO region (shared across all LODs)
 		vk::BufferCopy vbo_copy{
 			.srcOffset = 0,
 			.dstOffset = static_cast<vk::DeviceSize>(vertex_offset) * sizeof(glm::vec3),
@@ -454,18 +455,27 @@ void ShadowRenderSystem::rebuildMegaBuffers(vk::raii::CommandBuffer& cmd, const 
 		cmd.copyBuffer(*mesh->getShadowVertexBuffer().getBuffer(),
 		               *m_mega_shadow_vbo->getBuffer(), vbo_copy);
 
-		// Copy IBO region
-		vk::BufferCopy ibo_copy{
-			.srcOffset = 0,
-			.dstOffset = static_cast<vk::DeviceSize>(index_offset) * sizeof(uint32_t),
-			.size = static_cast<vk::DeviceSize>(ic) * sizeof(uint32_t)
-		};
-		cmd.copyBuffer(*mesh->getIndexBuffer().getBuffer(),
-		               *m_mega_ibo->getBuffer(), ibo_copy);
+		// Copy all LOD index buffers into mega-IBO
+		MeshMegaEntry mega_entry;
+		mega_entry.vertex_offset = vertex_offset;
+		mega_entry.lod_entries.reserve(mesh->getLodCount());
 
-		m_mega_entries[mesh] = {vertex_offset, index_offset, ic};
+		for (uint32_t lod = 0; lod < mesh->getLodCount(); lod++) {
+			uint32_t ic = mesh->getLodIndexCount(lod);
+			vk::BufferCopy ibo_copy{
+				.srcOffset = 0,
+				.dstOffset = static_cast<vk::DeviceSize>(index_offset) * sizeof(uint32_t),
+				.size = static_cast<vk::DeviceSize>(ic) * sizeof(uint32_t)
+			};
+			cmd.copyBuffer(*mesh->getLodIndexBuffer(lod).getBuffer(),
+			               *m_mega_ibo->getBuffer(), ibo_copy);
+
+			mega_entry.lod_entries.push_back({index_offset, ic});
+			index_offset += ic;
+		}
+
+		m_mega_entries[mesh] = std::move(mega_entry);
 		vertex_offset += vc;
-		index_offset += ic;
 	}
 
 	VE_LOGD("Shadow mega-buffer: " << unique_meshes.size() << " unique meshes, " << m_shadow_drawables.size() << " drawables, "
@@ -492,13 +502,20 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 			if (!registry.isActive(entity)) continue;
 			auto* transform = registry.getComponent<TransformComponent>(entity);
 			if (!transform) continue;
-			m_shadow_drawables.emplace_back(entity, &mesh);
+			// Shadow LOD: at least one step coarser than the visible mesh, clamped to available LODs
+			uint32_t shadow_lod = std::min(std::max(1u, mesh.cached_lod),
+			                               mesh.getMesh()->getLodCount() - 1);
+			m_shadow_drawables.push_back({entity, &mesh, shadow_lod});
 		}
 
-		// Sort by mesh pointer for instanced batching (only when list changes)
+		// Sort by (mesh pointer, lod_level) for instanced batching
 		std::sort(m_shadow_drawables.begin(), m_shadow_drawables.end(),
 			[](const ShadowDrawable& a, const ShadowDrawable& b) {
-				return a.mesh->getMesh() < b.mesh->getMesh();
+				VeMesh* ma = a.mesh->getMesh();
+				VeMesh* mb = b.mesh->getMesh();
+				if (ma != mb)
+					return ma < mb;
+				return a.lod_level < b.lod_level;
 			});
 
 		m_shadow_drawables_dirty = false;
@@ -574,10 +591,12 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 			shadow_instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
 
 			VeMesh* mesh_ptr = d.mesh->getMesh();
-			if (!m_csm_instance_groups.empty() && m_csm_instance_groups.back().mesh == mesh_ptr) {
+			if (!m_csm_instance_groups.empty()
+				&& m_csm_instance_groups.back().mesh == mesh_ptr
+				&& m_csm_instance_groups.back().lod_level == d.lod_level) {
 				m_csm_instance_groups.back().instance_count++;
 			} else {
-				m_csm_instance_groups.push_back({mesh_ptr, idx, 1});
+				m_csm_instance_groups.emplace_back(mesh_ptr, d.lod_level, idx, 1);
 			}
 		}
 	}
@@ -596,10 +615,12 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 		shadow_instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
 
 		VeMesh* mesh_ptr = d.mesh->getMesh();
-		if (!m_shadow_instance_groups.empty() && m_shadow_instance_groups.back().mesh == mesh_ptr) {
+		if (!m_shadow_instance_groups.empty()
+			&& m_shadow_instance_groups.back().mesh == mesh_ptr
+			&& m_shadow_instance_groups.back().lod_level == d.lod_level) {
 			m_shadow_instance_groups.back().instance_count++;
 		} else {
-			m_shadow_instance_groups.push_back({mesh_ptr, idx, 1});
+			m_shadow_instance_groups.emplace_back(mesh_ptr, d.lod_level, idx, 1);
 		}
 	}
 
@@ -676,7 +697,9 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 		for (const auto& group : m_csm_instance_groups) {
 			auto it = m_mega_entries.find(group.mesh);
 			assert(it != m_mega_entries.end());
-			const auto& entry = it->second;
+			const auto& mega = it->second;
+			uint32_t lod = std::min(group.lod_level, static_cast<uint32_t>(mega.lod_entries.size()) - 1);
+			const auto& lod_entry = mega.lod_entries[lod];
 
 			ShadowPushConstantData push{};
 			push.instance_offset = group.first_instance;
@@ -688,8 +711,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 			);
 
 			command_buffer.drawIndexed(
-				entry.index_count, group.instance_count,
-				entry.first_index, static_cast<int32_t>(entry.vertex_offset), 0);
+				lod_entry.index_count, group.instance_count,
+				lod_entry.first_index, static_cast<int32_t>(mega.vertex_offset), 0);
 		}
 
 		command_buffer.endRendering();
@@ -816,7 +839,9 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 			auto it = m_mega_entries.find(group.mesh);
 			if (it == m_mega_entries.end())
 				continue;
-			const auto& entry = it->second;
+			const auto& mega = it->second;
+			uint32_t lod = std::min(group.lod_level, static_cast<uint32_t>(mega.lod_entries.size()) - 1);
+			const auto& lod_entry = mega.lod_entries[lod];
 
 			ShadowPushConstantData push{};
 			push.instance_offset = group.first_instance;
@@ -828,8 +853,8 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 			);
 
 			frame_info.command_buffer.drawIndexed(
-				entry.index_count, group.instance_count,
-				entry.first_index, static_cast<int32_t>(entry.vertex_offset), 0);
+				lod_entry.index_count, group.instance_count,
+				lod_entry.first_index, static_cast<int32_t>(mega.vertex_offset), 0);
 		}
 	}
 }

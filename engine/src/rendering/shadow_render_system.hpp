@@ -59,10 +59,12 @@ private:
 	struct ShadowDrawable {
 		Entity entity;
 		MeshComponent* mesh = nullptr;
+		uint32_t lod_level = 0;
 	};
 
 	struct ShadowInstanceGroup {
 		VeMesh* mesh = nullptr;
+		uint32_t lod_level = 0;
 		uint32_t first_instance = 0;
 		uint32_t instance_count = 0;
 	};
@@ -135,10 +137,13 @@ private:
 	uint32_t m_mega_total_vertices = 0;
 	uint32_t m_mega_total_indices = 0;
 
+	struct LodMegaEntry {
+		uint32_t first_index;
+		uint32_t index_count;
+	};
 	struct MeshMegaEntry {
 		uint32_t vertex_offset;  // first vertex in mega-VBO
-		uint32_t first_index;    // first index in mega-IBO
-		uint32_t index_count;
+		std::vector<LodMegaEntry> lod_entries; // [0]=LOD 0, [1]=LOD 1, ...
 	};
 	std::unordered_map<VeMesh*, MeshMegaEntry> m_mega_entries;
 };

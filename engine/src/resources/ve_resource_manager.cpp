@@ -199,6 +199,25 @@ ResourceHandle<VeMesh> VeResourceManager::createMesh(const std::string& resource
 	return ResourceHandle<VeMesh>(resource_id, this);
 }
 
+ResourceHandle<VeMesh> VeResourceManager::createMesh(const std::string& resource_id,
+                                                    const std::vector<VeMesh::Vertex>& vertices,
+                                                    const std::vector<uint32_t>& indices,
+                                                    const std::vector<std::vector<uint32_t>>& lod_indices) {
+	auto type_idx = typeid(VeMesh).hash_code();
+	auto& type_resources = m_resources[type_idx];
+	auto it = type_resources.find(resource_id);
+
+	if (it != type_resources.end()) {
+		m_ref_counts[type_idx][resource_id]++;
+		return ResourceHandle<VeMesh>(resource_id, this);
+	}
+
+	auto resource = std::make_shared<VeMesh>(m_device, resource_id, vertices, indices, lod_indices);
+	type_resources[resource_id] = std::move(resource);
+	m_ref_counts[type_idx][resource_id] = 1;
+	return ResourceHandle<VeMesh>(resource_id, this);
+}
+
 ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& resource_id,
                                                              const std::filesystem::path& albedo_path,
                                                              const std::filesystem::path& normal_path,

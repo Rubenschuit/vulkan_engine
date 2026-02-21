@@ -19,7 +19,8 @@ namespace ve {
 struct SimplePushConstantData {
 	alignas(4) float has_texture;
 	alignas(4) uint32_t instance_offset; // SSBO offset for this batch
-	alignas(4) float padding[2];
+	alignas(4) uint32_t lod_level;       // LOD level for debug visualization
+	alignas(4) float padding;
 };
 static_assert(sizeof(SimplePushConstantData) == 16, "Push constants must be 16 bytes");
 
@@ -103,6 +104,7 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		VkDescriptorSet material_set;
 		Entity entity;
 		MeshComponent* mesh = nullptr;
+		uint32_t lod_level = 0;
 	};
 	std::vector<Drawable> drawables;
 	drawables.reserve(frame_info.visible_objects.size());
@@ -116,16 +118,18 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		vk::raii::DescriptorSet& mat_set = mat->hasDescriptorSet()
 			? mat->getDescriptorSet()
 			: frame_info.material_descriptor_set;
-		drawables.push_back({*mat_set, entry.entity, mesh});
+		drawables.push_back({*mat_set, entry.entity, mesh, entry.lod_level});
 	}
 
-	// Sort by (mesh pointer, material set) for batching
+	// Sort by (mesh pointer, lod, material set) for batching
 	std::sort(drawables.begin(), drawables.end(),
 		[](const Drawable& a, const Drawable& b) {
 			VeMesh* mesh_a = a.mesh->getMesh();
 			VeMesh* mesh_b = b.mesh->getMesh();
 			if (mesh_a != mesh_b)
 				return mesh_a < mesh_b;
+			if (a.lod_level != b.lod_level)
+				return a.lod_level < b.lod_level;
 			return a.material_set < b.material_set;
 		});
 
@@ -147,7 +151,7 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		VeMesh* mesh_ptr = d.mesh->getMesh();
 		if (!m_instance_groups.empty()) {
 			auto& group = m_instance_groups.back();
-			if (group.mesh == mesh_ptr && group.material_set == d.material_set) {
+			if (group.mesh == mesh_ptr && group.lod_level == d.lod_level && group.material_set == d.material_set) {
 				group.instance_count++;
 				continue;
 			}
@@ -155,6 +159,7 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 
 		InstanceGroup group{
 			.mesh = mesh_ptr,
+			.lod_level = d.lod_level,
 			.material_set = d.material_set,
 			.first_instance = idx,
 			.instance_count = 1,
@@ -189,6 +194,7 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 	// Render instance groups
 	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
 	VeMesh* bound_mesh = nullptr;
+	uint32_t bound_lod = UINT32_MAX;
 
 	for (const auto& group : m_instance_groups) {
 		// Bind material descriptor set (set 1) only when it changes
@@ -205,7 +211,8 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 
 		SimplePushConstantData push{
 				.has_texture = group.has_texture,
-				.instance_offset = group.first_instance
+				.instance_offset = group.first_instance,
+				.lod_level = group.lod_level
 		};
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
@@ -214,13 +221,14 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 			vk::ArrayProxy<const uint8_t>(sizeof(SimplePushConstantData), reinterpret_cast<const uint8_t*>(&push))
 		);
 
-		if (group.mesh != bound_mesh) {
+		if (group.mesh != bound_mesh || group.lod_level != bound_lod) {
 			bound_mesh = group.mesh;
+			bound_lod = group.lod_level;
 			bound_mesh->bindVertexBuffer(frame_info.command_buffer);
-			bound_mesh->bindIndexBuffer(frame_info.command_buffer);
+			bound_mesh->bindLodIndexBuffer(frame_info.command_buffer, bound_lod);
 		}
 
-		group.mesh->drawIndexed(frame_info.command_buffer, group.instance_count, 0);
+		group.mesh->drawIndexedLod(frame_info.command_buffer, group.lod_level, group.instance_count, 0);
 	}
 }
 

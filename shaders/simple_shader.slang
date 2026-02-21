@@ -9,7 +9,8 @@ struct VertexInput {
 struct PushConstantData {
 	[vk::offset(0)] float    has_texture;       // 4
 	[vk::offset(4)] uint32_t instance_offset;   // 4 (SSBO offset, SV_InstanceID is 0-based in Slang)
-	[vk::offset(8)] float    padding[2];        // 8 (pad to 16)
+	[vk::offset(8)] uint32_t lod_level;         // 4 (LOD level for debug visualization)
+	[vk::offset(12)] float   padding;           // 4 (pad to 16)
 };
 [push_constant]
 PushConstantData push_constants;
@@ -79,6 +80,8 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	// visualize normal vector
 	if (ubo.render_mode == RenderMode::NORMAL_VECTOR)
 		return float4(0.5 * normal + 0.5, 1.0f);
+	if (ubo.render_mode == RenderMode::LOD_LEVEL)
+		return float4(lodDebugColor(float3(1.0), push_constants.lod_level), 1.0);
 
 	// Base color for untextured objects
 	float4 base_color = float4(1.0, 1.0, 1.0, 1.0);
@@ -104,16 +107,16 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 			float2 prev_ndc = prev_clip.xy / prev_clip.w;
 			float2 prev_uv = prev_ndc * 0.5 + 0.5;
 			csm_shadow = shadow_mask.SampleLevel(shadow_mask_sampler, prev_uv, 0);
+			// Compute cascade index for debug visualization
+			if (ubo.render_mode == RenderMode::CSM_CASCADE)
+				calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, csm_cascade_idx, csm_blend_t);
 		} else {
 			csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, csm_cascade_idx, csm_blend_t);
 		}
 	}
 
-	if (ubo.render_mode == RenderMode::CSM_CASCADE) {
-		if (SHADOW_MASK_SPEC != 0)
-			return float4(csm_shadow, csm_shadow, csm_shadow, 1.0);
+	if (ubo.render_mode == RenderMode::CSM_CASCADE)
 		return float4(csmDebugColor(base_color.rgb, csm_cascade_idx, csm_blend_t, csm_shadow), base_color.a);
-	}
 
 	// Point light shadow terms
 	float shadow_terms[MAX_SHADOW_LIGHTS];

@@ -41,6 +41,18 @@ constexpr uint32_t MAX_CLUSTER_LIGHTS = 1024;        // max total point lights f
 constexpr float CLUSTER_LIGHT_CUTOFF = 0.005f;       // intensity fraction for effective range (range=0 lights)
 constexpr float CLUSTER_MAX_EFFECTIVE_RANGE = 500.0f; // cap for derived effective range
 
+// LOD (Level of Detail) configuration
+constexpr uint32_t MAX_LOD_LEVELS = 4;           // LOD 0 = full, LOD 1..3 = simplified
+constexpr float LOD_RATIOS[] = {1.0f, 0.5f, 0.25f, 0.125f};  // target triangle ratio per LOD
+constexpr float LOD_ERROR_THRESHOLD = 0.01f;     // meshoptimizer simplification error threshold
+constexpr float LOD_SCREEN_THRESHOLDS[] = {0.3f, 0.15f, 0.05f}; // screen fraction: LOD 0->1, 1->2, 2->3
+constexpr float LOD_HYSTERESIS = 0.2f;             // 20% band to prevent LOD oscillation
+constexpr uint32_t LOD_MIN_TRIANGLES = 64;        // never simplify below this triangle count
+static_assert(std::size(LOD_RATIOS) == MAX_LOD_LEVELS,
+              "LOD_RATIOS must have MAX_LOD_LEVELS entries");
+static_assert(std::size(LOD_SCREEN_THRESHOLDS) == MAX_LOD_LEVELS - 1,
+              "LOD_SCREEN_THRESHOLDS must have MAX_LOD_LEVELS-1 entries");
+
 constexpr bool MSAA_ENABLED = true;
 #ifdef __APPLE__
 	constexpr bool ENABLE_RAY_TRACING = false; // not supported on moltenVK

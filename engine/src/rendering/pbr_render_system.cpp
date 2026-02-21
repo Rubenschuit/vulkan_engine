@@ -24,8 +24,9 @@ struct PbrPushConstantData {
 	alignas(4) uint32_t material_flags;  // bits 0-1: alpha_mode, bit 2: double_sided, bit 3: flip_tex_coord_v, bit 4: use_spec_gloss_texture
 	alignas(4) uint32_t instance_offset; // SSBO offset for this batch
 	alignas(4) float depth_offset;       // clip-space Z offset (>0 pushes towards camera)
+	alignas(4) uint32_t lod_level;       // LOD level for debug visualization
 };
-static_assert(sizeof(PbrPushConstantData) == 20, "Push constants must be 20 bytes");
+static_assert(sizeof(PbrPushConstantData) == 24, "Push constants must be 24 bytes");
 
 // Clip-space depth offset for MASK (alpha-tested) decal overlays.
 // Multiplied by W in the vertex shader, making it distance-proportional.
@@ -133,13 +134,24 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info) const {
 		glm::vec3 obj_pos = (aabb.min + aabb.max) * 0.5f;
 		// View-space depth: distance along camera look direction.
 		float dist = glm::dot(obj_pos - camera_pos, camera_fwd);
+		Drawable d{
+			.material_set = *mat_set,
+			.entity = entry.entity,
+			.mesh = mesh,
+			.mesh_ptr = mesh_ptr,
+			.material_ptr = mat,
+			.dist_sq = dist,
+			.alpha_mode = alpha_props.alpha_mode,
+			.ssbo_index = 0,
+			.lod_level = entry.lod_level
+		};
 		if (use_transparent_pass)
-			m_transparent_drawables.emplace_back(*mat_set, entry.entity, mesh, mesh_ptr, mat, dist, alpha_props.alpha_mode);
+			m_transparent_drawables.push_back(d);
 		else
-			m_opaque_drawables.emplace_back(*mat_set, entry.entity, mesh, mesh_ptr, mat, dist, alpha_props.alpha_mode);
+			m_opaque_drawables.push_back(d);
 	}
 
-	// 2. Sort opaques: non-MASK before MASK (rendering order), then by mesh/material (batching).
+	// 2. Sort opaques: non-MASK before MASK (rendering order), then by mesh/lod/material (batching).
 	//    This ensures base geometry writes depth before alpha-tested overlays, while
 	//    keeping mesh/material batching intact within each category.
 	std::sort(m_opaque_drawables.begin(), m_opaque_drawables.end(),
@@ -150,6 +162,8 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info) const {
 				return !a_mask; // non-MASK first
 			if (a.mesh_ptr != b.mesh_ptr)
 				return a.mesh_ptr < b.mesh_ptr;
+			if (a.lod_level != b.lod_level)
+				return a.lod_level < b.lod_level;
 			return a.material_set < b.material_set;
 		});
 
@@ -174,7 +188,7 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info) const {
 		// Check if we can merge with the current group
 		if (!m_opaque_groups.empty()) {
 			auto& group = m_opaque_groups.back();
-			if (group.mesh == d.mesh_ptr && group.material_set == d.material_set) {
+			if (group.mesh == d.mesh_ptr && group.lod_level == d.lod_level && group.material_set == d.material_set) {
 				group.instance_count++;
 				continue;
 			}
@@ -182,17 +196,19 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info) const {
 
 		// Start a new group
 		MaterialAlphaProps alpha_props = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};
-		InstanceGroup group{};
-		group.mesh = d.mesh_ptr;
-		group.material_set = d.material_set;
-		group.first_instance = idx;
-		group.instance_count = 1;
-		group.has_texture = d.mesh->has_texture;
-		group.alpha_cutoff = (alpha_props.alpha_mode == AlphaMode::MASK) ? alpha_props.alpha_cutoff : 0.0f;
-		group.material_flags = static_cast<uint32_t>(alpha_props.alpha_mode) | (alpha_props.double_sided ? 4u : 0u)
-			| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? 8u : 0u)
-			| (alpha_props.use_spec_gloss_texture ? 16u : 0u);
-		group.double_sided = alpha_props.double_sided;
+		InstanceGroup group{
+			.mesh = d.mesh_ptr,
+			.lod_level = d.lod_level,
+			.material_set = d.material_set,
+			.first_instance = idx,
+			.instance_count = 1,
+			.has_texture = d.mesh->has_texture,
+			.alpha_cutoff = (alpha_props.alpha_mode == AlphaMode::MASK) ? alpha_props.alpha_cutoff : 0.0f,
+			.material_flags = static_cast<uint32_t>(alpha_props.alpha_mode) | (alpha_props.double_sided ? 4u : 0u)
+				| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? 8u : 0u)
+				| (alpha_props.use_spec_gloss_texture ? 16u : 0u),
+			.double_sided = alpha_props.double_sided
+		};
 		m_opaque_groups.push_back(group);
 	}
 
@@ -219,7 +235,8 @@ void PbrRenderSystem::renderOpaqueGroup(
 	VeFrameInfo& frame_info,
 	const InstanceGroup& group,
 	VkDescriptorSet& bound_material_set,
-	VeMesh*& bound_mesh) const {
+	VeMesh*& bound_mesh,
+	uint32_t& bound_lod) const {
 
 	// Bind material descriptor set (set 1) only when it changes
 	if (group.material_set != bound_material_set) {
@@ -245,7 +262,8 @@ void PbrRenderSystem::renderOpaqueGroup(
 		.alpha_cutoff = group.alpha_cutoff,
 		.material_flags = group.material_flags,
 		.instance_offset = group.first_instance,
-		.depth_offset = (group.alpha_cutoff > 0.0f) ? MASK_DEPTH_OFFSET : 0.0f
+		.depth_offset = (group.alpha_cutoff > 0.0f) ? MASK_DEPTH_OFFSET : 0.0f,
+		.lod_level = group.lod_level
 	};
 	frame_info.command_buffer.pushConstants(
 		*m_pipeline_layout,
@@ -254,15 +272,16 @@ void PbrRenderSystem::renderOpaqueGroup(
 		vk::ArrayProxy<const uint8_t>(sizeof(PbrPushConstantData), reinterpret_cast<const uint8_t*>(&push))
 	);
 
-	// Bind VBO/IBO (if mesh changed)
-	if (group.mesh != bound_mesh) {
+	// Bind VBO/IBO (if mesh or LOD changed)
+	if (group.mesh != bound_mesh || group.lod_level != bound_lod) {
 		bound_mesh = group.mesh;
+		bound_lod = group.lod_level;
 		bound_mesh->bindVertexBuffer(frame_info.command_buffer);
-		bound_mesh->bindIndexBuffer(frame_info.command_buffer);
+		bound_mesh->bindLodIndexBuffer(frame_info.command_buffer, bound_lod);
 	}
 
 	// Instanced draw (firstInstance=0, shader uses instance_offset push constant for SSBO indexing)
-	group.mesh->drawIndexed(frame_info.command_buffer, group.instance_count, 0);
+	group.mesh->drawIndexedLod(frame_info.command_buffer, group.lod_level, group.instance_count, 0);
 }
 
 void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info) const {
@@ -296,6 +315,7 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info) const {
 
 	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
 	VeMesh* bound_mesh = nullptr;
+	uint32_t bound_lod = UINT32_MAX;
 
 	// Initial state for non-MASK geometry
 	frame_info.command_buffer.setDepthCompareOp(
@@ -312,7 +332,7 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info) const {
 			frame_info.command_buffer.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
 			mask_state = true;
 		}
-		renderOpaqueGroup(frame_info, group, bound_material_set, bound_mesh);
+		renderOpaqueGroup(frame_info, group, bound_material_set, bound_mesh, bound_lod);
 	}
 }
 
@@ -352,6 +372,7 @@ void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
 
 	VkDescriptorSet bound_material_set = VK_NULL_HANDLE;
 	VeMesh* bound_mesh = nullptr;
+	uint32_t bound_lod = UINT32_MAX;
 
 	for (const auto& d : m_transparent_drawables) {
 		// Bind material descriptor set (set 1) only when it changes
@@ -386,7 +407,8 @@ void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
 				| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? 8u : 0u)
 				| (alpha_props.use_spec_gloss_texture ? 16u : 0u),
 			.instance_offset = d.ssbo_index,
-			.depth_offset = 0.0f
+			.depth_offset = 0.0f,
+			.lod_level = d.lod_level
 		};
 		frame_info.command_buffer.pushConstants(
 			*m_pipeline_layout,
@@ -395,15 +417,16 @@ void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
 			vk::ArrayProxy<const uint8_t>(sizeof(PbrPushConstantData), reinterpret_cast<const uint8_t*>(&push))
 		);
 
-		// Bind VBO/IBO (if mesh changed)
-		if (d.mesh_ptr != bound_mesh) {
+		// Bind VBO/IBO (if mesh or LOD changed)
+		if (d.mesh_ptr != bound_mesh || d.lod_level != bound_lod) {
 			bound_mesh = d.mesh_ptr;
+			bound_lod = d.lod_level;
 			bound_mesh->bindVertexBuffer(frame_info.command_buffer);
-			bound_mesh->bindIndexBuffer(frame_info.command_buffer);
+			bound_mesh->bindLodIndexBuffer(frame_info.command_buffer, bound_lod);
 		}
 
 		// Single-instance draw (transparent objects not batched, preserve back-to-front order)
-		d.mesh_ptr->drawIndexed(frame_info.command_buffer, 1, 0);
+		d.mesh_ptr->drawIndexedLod(frame_info.command_buffer, d.lod_level, 1, 0);
 	}
 }
 

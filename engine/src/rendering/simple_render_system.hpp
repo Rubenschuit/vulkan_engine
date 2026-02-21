@@ -86,6 +86,7 @@ private:
 	// Instanced draw groups
 	struct InstanceGroup {
 		VeMesh* mesh = nullptr;
+		uint32_t lod_level = 0;
 		VkDescriptorSet material_set = VK_NULL_HANDLE;
 		uint32_t first_instance = 0;
 		uint32_t instance_count = 0;

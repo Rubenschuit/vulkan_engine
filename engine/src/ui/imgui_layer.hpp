@@ -48,8 +48,8 @@ struct VENGINE_API UIContext {
 	bool depth_prepass_enabled = true;
 
 	// screen-space shadow mask (async compute)
-	bool shadow_mask_enabled = false;
-	bool shadow_mask_half_res = true;
+	bool shadow_mask_enabled = true;
+	bool shadow_mask_half_res = false;
 
 	// GTAO (screen-space ambient occlusion)
 	bool gtao_enabled = true;
@@ -61,6 +61,11 @@ struct VENGINE_API UIContext {
 	bool enable_frustum_culling = true;
 	uint32_t cull_total_objects = 0;
 	uint32_t cull_visible_objects = 0;
+
+	// LOD override
+	int lod_force_level = -1;  // -1 = auto (normal LOD selection), 0..3 = force specific LOD
+	float lod_screen_thresholds[3] = {0.3f, 0.15f, 0.05f};
+	float lod_hysteresis = 0.2f;
 
 	// scene stats
 	uint32_t visible_triangles = 0;

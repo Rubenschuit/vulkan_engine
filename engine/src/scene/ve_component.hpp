@@ -152,6 +152,7 @@ public:
 
 	float has_texture{0.0f};
 	bool has_shadow{true};
+	mutable uint32_t cached_lod{0};
 
 private:
 	void updateWorldAABB() const;

@@ -45,6 +45,8 @@ elseif(KTX_LIBRARIES)
 	message(STATUS "Linking with system KTX library: ${KTX_LIBRARIES}")
 endif()
 
+target_link_libraries(VEngineLib PUBLIC meshoptimizer)
+
 target_link_libraries(${PROJECT_NAME} PRIVATE VEngine::Lib)
 
 # For MinGW, prevent exception symbol conflicts when linking against DLL
