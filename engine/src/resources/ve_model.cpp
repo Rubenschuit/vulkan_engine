@@ -160,7 +160,7 @@ static const glm::mat4 ZUP_TO_YUP(1.0f, 0.0f, 0.0f, 0.0f,
 static constexpr float BLENDER_EMISSIVE_FACTOR = 638.0f;
 
 // Emissive-derived point lights scaling
-static constexpr float EMISSIVE_LIGHT_INTENSITY_SCALE = 20.0f;
+static constexpr float EMISSIVE_LIGHT_INTENSITY_SCALE = 10.0f;
 
 // KHR_lights_punctual uses physical units (lux for directional, candela for point).
 // Our engine uses arbitrary intensity values (~1-10 for directional, ~50-200 for point).
@@ -252,23 +252,37 @@ static std::vector<glm::mat4> computeNodeWorldMatrices(
 }
 
 // Cluster vertex positions along dominant axis. Returns centroids.
-// For small meshes (extent < extent_threshold on all axes), returns single centroid.
+// For small or compact meshes, returns single centroid.
+// For elongated meshes (e.g. string lights with multiple bulbs), uses adaptive
+// gap detection to find natural breaks in the vertex distribution.
 static std::vector<glm::vec3> clusterVertices(
     const std::vector<glm::vec3>& positions, float gap_threshold, float extent_threshold = 0.02f) {
-	if (positions.empty()) return {};
+	if (positions.empty())
+		return {};
 
 	// Find bounding box extent
 	glm::vec3 mn = positions[0], mx = positions[0];
-	for (const auto& p : positions) { mn = glm::min(mn, p); mx = glm::max(mx, p); }
+	for (const auto& p : positions) {
+		mn = glm::min(mn, p);
+		mx = glm::max(mx, p);
+	}
 	glm::vec3 ext = mx - mn;
 
 	// Find dominant axis
 	int dom = 0;
-	if (ext.y > ext[dom]) dom = 1;
-	if (ext.z > ext[dom]) dom = 2;
+	if (ext.y > ext[dom])
+		dom = 1;
+	if (ext.z > ext[dom])
+		dom = 2;
 
 	if (ext[dom] < extent_threshold) {
 		// Small mesh: single centroid
+		return {(mn + mx) * 0.5f};
+	}
+
+	// Compact bounding box (roughly cubic/spherical): single light source.
+	float min_ext = std::min({ext.x, ext.y, ext.z});
+	if (min_ext > 1e-6f && ext[dom] / min_ext < 3.0f) {
 		return {(mn + mx) * 0.5f};
 	}
 
@@ -278,13 +292,42 @@ static std::vector<glm::vec3> clusterVertices(
 	std::sort(sorted_idx.begin(), sorted_idx.end(),
 	          [&](size_t a, size_t b) { return positions[a][dom] < positions[b][dom]; });
 
+	// Compute consecutive gaps along dominant axis
+	std::vector<float> gaps(sorted_idx.size() - 1);
+	for (size_t i = 0; i + 1 < sorted_idx.size(); i++)
+		gaps[i] = positions[sorted_idx[i + 1]][dom] - positions[sorted_idx[i]][dom];
+
+	// Adaptive gap detection: find natural breaks in the gap distribution.
+	std::vector<float> sorted_gaps(gaps);
+	std::sort(sorted_gaps.begin(), sorted_gaps.end());
+
+	float best_ratio = 1.0f;
+	size_t best_idx = 0;
+	for (size_t i = 0; i + 1 < sorted_gaps.size(); i++) {
+		if (sorted_gaps[i] < 1e-7f) continue;
+		float ratio = sorted_gaps[i + 1] / sorted_gaps[i];
+		if (ratio > best_ratio) {
+			best_ratio = ratio;
+			best_idx = i;
+		}
+	}
+
+	constexpr float JUMP_RATIO_THRESHOLD = 5.0f;
+	if (best_ratio <= JUMP_RATIO_THRESHOLD) {
+		// No clear separation between gap sizes: single light source
+		return {(mn + mx) * 0.5f};
+	}
+
+	// Bimodal distribution: use geometric mean at the boundary as threshold
+	float effective_gap = std::max(gap_threshold,
+	    std::sqrt(sorted_gaps[best_idx] * sorted_gaps[best_idx + 1]));
+
 	// Cluster: split when gap between consecutive sorted vertices > threshold
 	std::vector<glm::vec3> centroids;
 	glm::vec3 sum = positions[sorted_idx[0]];
 	size_t count = 1;
 	for (size_t i = 1; i < sorted_idx.size(); i++) {
-		float gap = positions[sorted_idx[i]][dom] - positions[sorted_idx[i - 1]][dom];
-		if (gap > gap_threshold) {
+		if (gaps[i - 1] > effective_gap) {
 			centroids.push_back(sum / static_cast<float>(count));
 			sum = glm::vec3(0.f);
 			count = 0;
@@ -354,111 +397,6 @@ static std::vector<VeModel::ExtractedLight> extractPunctualLights(
 	return punctual_lights;
 }
 
-// Extract lights from fixture nodes identified by name patterns.
-// Places lights at descendant emissive mesh positions, with vertex clustering for multi-bulb meshes.
-static std::vector<VeModel::ExtractedLight> extractFixtureLights(
-    const tinygltf::Model& gltf,
-    const std::vector<glm::mat4>& node_world_engine,
-    const std::vector<MaterialFactors>& material_factors,
-    PosDedup& dedup) {
-
-	std::vector<VeModel::ExtractedLight> fixture_lights;
-
-	struct FixturePattern { std::string substring; std::string group; };
-	const std::vector<FixturePattern> fixture_patterns = {
-		{"streetlight",  "Streetlights"},
-		{"wall_light",   "Wall Lights"},
-		{"ceiling_light","Ceiling Lights"},
-		{"lantern",      "Lanterns"},
-		{"spotlight",    "Spotlights"},
-		{"stringlights", "String Lights"},
-	};
-
-	constexpr float BULB_CLUSTER_GAP = 0.008f;
-
-	auto extractEmissiveDescendants = [&](int node_idx, const std::string& group_name,
-	                                      auto& self) -> void {
-		if (node_idx < 0 || node_idx >= static_cast<int>(gltf.nodes.size())) return;
-		const auto& node = gltf.nodes[static_cast<size_t>(node_idx)];
-
-		if (node.mesh >= 0) {
-			const auto& mesh = gltf.meshes[static_cast<size_t>(node.mesh)];
-			for (const auto& prim : mesh.primitives) {
-				if (prim.material < 0 || static_cast<size_t>(prim.material) >= material_factors.size()) continue;
-				const auto& mf = material_factors[static_cast<size_t>(prim.material)];
-				float len = glm::length(mf.emissive_factor);
-				if (len < 0.01f) continue;
-				if (prim.attributes.find("POSITION") == prim.attributes.end()) continue;
-
-				const auto& pos_acc = gltf.accessors[static_cast<size_t>(prim.attributes.at("POSITION"))];
-				const auto& pos_bv = gltf.bufferViews[static_cast<size_t>(pos_acc.bufferView)];
-				const auto& pos_buf = gltf.buffers[static_cast<size_t>(pos_bv.buffer)];
-				const uint8_t* pos_data = pos_buf.data.data() + pos_bv.byteOffset + pos_acc.byteOffset;
-				int stride_val = pos_acc.ByteStride(pos_bv);
-				size_t stride = static_cast<size_t>(stride_val > 0 ? stride_val : 12);
-
-				std::vector<glm::vec3> positions(pos_acc.count);
-				for (size_t vi = 0; vi < pos_acc.count; vi++) {
-					const float* fp = reinterpret_cast<const float*>(pos_data + vi * stride);
-					positions[vi] = glm::vec3(fp[0], fp[1], fp[2]);
-				}
-
-				const glm::mat4& W = node_world_engine[static_cast<size_t>(node_idx)];
-				const glm::mat4 to_world = W * YUP_TO_ZUP;
-				glm::vec3 color = mf.emissive_factor / len;
-				float intensity = std::clamp(len * mf.emissive_strength * 10.0f, 0.5f, 5.0f);
-
-				std::vector<glm::vec3> centroids = clusterVertices(positions, BULB_CLUSTER_GAP);
-
-				for (size_t ci = 0; ci < centroids.size(); ci++) {
-					glm::vec3 world_pos = glm::vec3(to_world * glm::vec4(centroids[ci], 1.0f));
-					PosKey pk = quantize(world_pos);
-					if (!dedup.insert(pk).second) continue;
-					std::string name = group_name + ": " + node.name;
-					if (centroids.size() > 1)
-						name += " [" + std::to_string(ci) + "]";
-					fixture_lights.push_back({
-						.type = VeModel::ExtractedLightType::Point,
-						.position = world_pos,
-						.direction = glm::vec3(0.0f, 0.0f, -1.0f),
-						.color = color,
-						.intensity = intensity,
-						.range = 0.f,
-						.name = std::move(name)
-					});
-				}
-				break;
-			}
-		}
-
-		for (int child_idx : node.children)
-			self(child_idx, group_name, self);
-	};
-
-	for (size_t node_idx = 0; node_idx < gltf.nodes.size(); node_idx++) {
-		const auto& node = gltf.nodes[node_idx];
-		if (node.name.empty()) continue;
-
-		std::string name_lower = node.name;
-		std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
-		               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-		std::string matched_group;
-		for (const auto& pat : fixture_patterns) {
-			if (name_lower.find(pat.substring) != std::string::npos) {
-				matched_group = pat.group;
-				break;
-			}
-		}
-		if (matched_group.empty()) continue;
-
-		for (int child_idx : node.children)
-			extractEmissiveDescendants(child_idx, matched_group, extractEmissiveDescendants);
-	}
-
-	return fixture_lights;
-}
-
 // Extract lights from emissive materials, with vertex clustering for large meshes
 static std::vector<VeModel::ExtractedLight> extractEmissiveLights(
     const tinygltf::Model& gltf,
@@ -471,12 +409,13 @@ static std::vector<VeModel::ExtractedLight> extractEmissiveLights(
 	std::vector<VeModel::ExtractedLight> emissive_lights;
 	uint32_t emissive_light_count = 0;
 	const float emissive_light_threshold = 0.1f;
-	constexpr float EMISSIVE_CLUSTER_GAP = 0.008f;
+	constexpr float EMISSIVE_CLUSTER_GAP = 0.005f;
 	constexpr float EMISSIVE_CLUSTER_EXTENT = 0.02f;
 
 	auto findPositionAccessor = [&](const NodePrim& np) -> const tinygltf::Accessor* {
 		int mesh_idx = gltf.nodes[static_cast<size_t>(np.node_idx)].mesh;
-		if (mesh_idx < 0) return nullptr;
+		if (mesh_idx < 0)
+			return nullptr;
 		const auto& mesh = gltf.meshes[static_cast<size_t>(mesh_idx)];
 		for (const auto& prim : mesh.primitives) {
 			size_t pmat = (prim.material >= 0) ? static_cast<size_t>(prim.material) : 0;
@@ -514,7 +453,8 @@ static std::vector<VeModel::ExtractedLight> extractEmissiveLights(
 			if (diag < EMISSIVE_CLUSTER_EXTENT) {
 				const glm::vec3& center = ce_it->second.first;
 				glm::vec3 world_pos = glm::vec3(W * glm::vec4(center, 1.f));
-				if (!dedup.insert(quantize(world_pos)).second) continue;
+				if (!dedup.insert(quantize(world_pos)).second)
+					continue;
 				emissive_lights.push_back({
 					.type = VeModel::ExtractedLightType::Point,
 					.position = world_pos,
@@ -530,7 +470,8 @@ static std::vector<VeModel::ExtractedLight> extractEmissiveLights(
 				if (!pos_acc) {
 					const glm::vec3& center = ce_it->second.first;
 					glm::vec3 world_pos = glm::vec3(W * glm::vec4(center, 1.f));
-					if (!dedup.insert(quantize(world_pos)).second) continue;
+					if (!dedup.insert(quantize(world_pos)).second)
+						continue;
 					emissive_lights.push_back({
 						.type = VeModel::ExtractedLightType::Point,
 						.position = world_pos,
@@ -552,7 +493,7 @@ static std::vector<VeModel::ExtractedLight> extractEmissiveLights(
 				std::vector<glm::vec3> positions(pos_acc->count);
 				for (size_t vi = 0; vi < pos_acc->count; vi++) {
 					const float* fp = reinterpret_cast<const float*>(data + vi * stride);
-					positions[vi] = {fp[0], -fp[2], fp[1]};  // Y-up → Z-up
+					positions[vi] = {fp[0], -fp[2], fp[1]};  // Y-up to Z-up
 				}
 
 				std::vector<glm::vec3> centroids = clusterVertices(positions, EMISSIVE_CLUSTER_GAP, EMISSIVE_CLUSTER_EXTENT);
@@ -588,10 +529,10 @@ static std::vector<VeModel::ExtractedLight> extractEmissiveLights(
 std::unique_ptr<VeModel> VeModel::load(VeResourceManager& resource_manager,
                                        const std::filesystem::path& model_path,
                                        VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout,
-                                       bool extract_lights, bool extract_fixture_lights,
+                                       bool extract_lights,
                                        bool flip_tex_coord_v) {
 	auto model = std::make_unique<VeModel>();
-	model->loadFromGltf(model_path, resource_manager, pool, material_layout, extract_lights, extract_fixture_lights, flip_tex_coord_v);
+	model->loadFromGltf(model_path, resource_manager, pool, material_layout, extract_lights, flip_tex_coord_v);
 	return model;
 }
 
@@ -602,8 +543,7 @@ VeModel::~VeModel() = default;
 // TODO: add .glb support
 void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceManager& resource_manager,
                            VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout,
-                           bool extract_lights, bool extract_fixture_lights,
-                           bool flip_tex_coord_v) {
+                           bool extract_lights, bool flip_tex_coord_v) {
 	tinygltf::Model gltf;
 	tinygltf::TinyGLTF loader;
 	// Accept KTX2/other formats as-is: we load textures via VeTexture from URI, not tinygltf's decoded data
@@ -955,7 +895,7 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	// Compute node world matrices when any light extraction is needed
 	std::vector<glm::mat4> node_world_engine;
 	PosDedup light_pos_dedup;
-	if (extract_lights || extract_fixture_lights) {
+	if (extract_lights) {
 		node_world_engine = computeNodeWorldMatrices(gltf, root_nodes);
 	}
 
@@ -964,11 +904,6 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 		m_punctual_lights = extractPunctualLights(gltf, node_world_engine);
 		for (const auto& L : m_punctual_lights)
 			light_pos_dedup.insert(quantize(L.position));
-	}
-
-	// Name-based fixture extraction (streetlights, lanterns, etc.)
-	if (extract_fixture_lights) {
-		m_fixture_lights = extractFixtureLights(gltf, node_world_engine, material_factors, light_pos_dedup);
 	}
 
 	// Geometry key for mesh deduplication: same geometry+material shares one VeMesh.
@@ -1251,16 +1186,12 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 
 	// Emissive-as-lights extraction (after mesh processing so node_primitives is populated)
 	if (extract_lights) {
-		// Seed dedup from fixture lights so emissive doesn't overlap
-		for (const auto& L : m_fixture_lights)
-			light_pos_dedup.insert(quantize(L.position));
 		m_emissive_lights = extractEmissiveLights(gltf, node_world_engine,
 			node_primitives, geometry_center_extent, material_factors, light_pos_dedup);
 	}
 
 	VE_LOGI("Loaded model " << model_path << " with " << m_nodes.size() << " nodes, "
-	        << m_punctual_lights.size() << " punctual, " << m_emissive_lights.size() << " emissive, "
-	        << m_fixture_lights.size() << " fixture lights");
+	        << m_punctual_lights.size() << " punctual, " << m_emissive_lights.size() << " emissive lights");
 }
 
 void VeModel::addToScene(Registry& registry,
@@ -1384,10 +1315,9 @@ void VeModel::addToScene(Registry& registry,
 	for (const ExtractedLight& L : m_emissive_lights) {
 		Entity light = registry.createPointLight(L.intensity * EMISSIVE_LIGHT_INTENSITY_SCALE, size, L.color);
 		registry.setName(light, L.name.empty() ? "Light (emissive)" : L.name);
+		registry.setLightSource(light, LightSource::Emissive);
 		auto* tc = registry.getComponent<TransformComponent>(light);
 		tc->setTranslation(glm::vec3(wrapper_world * glm::vec4(L.position, 1.0f)));
-		//auto* plc = registry.getComponent<PointLightComponent>(light);
-		//plc->color = glm::vec3(1.0f, 0.21f, 0.0f);
 		registry.setActive(light, false);  // default OFF (MAX_LIGHTS constraint)
 	}
 	for (const ExtractedLight& L : m_punctual_lights) {
@@ -1397,10 +1327,12 @@ void VeModel::addToScene(Registry& registry,
 			glm::vec3 world_dir = glm::normalize(glm::mat3(wrapper_world) * L.direction);
 			Entity light = registry.createDirectionalLight(scaled_intensity, L.color, world_dir);
 			registry.setName(light, L.name.empty() ? "Light (directional)" : L.name);
+			registry.setLightSource(light, LightSource::Punctual);
 			registry.setActive(light, false);  // default OFF
 		} else {
 			Entity light = registry.createPointLight(scaled_intensity, size, L.color);
 			registry.setName(light, L.name.empty() ? "Light (imported)" : L.name);
+			registry.setLightSource(light, LightSource::Punctual);
 			auto* tc = registry.getComponent<TransformComponent>(light);
 			tc->setTranslation(glm::vec3(wrapper_world * glm::vec4(L.position, 1.0f)));
 			auto* plc = registry.getComponent<PointLightComponent>(light);
@@ -1408,20 +1340,13 @@ void VeModel::addToScene(Registry& registry,
 			registry.setActive(light, false);  // default OFF
 		}
 	}
-	for (const ExtractedLight& L : m_fixture_lights) {
-		Entity light = registry.createPointLight(L.intensity, size, L.color);
-		registry.setName(light, L.name);
-		auto* tc = registry.getComponent<TransformComponent>(light);
-		tc->setTranslation(glm::vec3(wrapper_world * glm::vec4(L.position, 1.0f)));
-		registry.setActive(light, false);  // default OFF
-	}
 }
 
 std::optional<VeModel::SingleMeshData> VeModel::loadSingleMesh(
 	VeResourceManager& resource_manager,
 	const std::filesystem::path& model_path,
 	bool flip_tex_coord_v) {
-	auto model = load(resource_manager, model_path.lexically_normal(), nullptr, nullptr, false, false, flip_tex_coord_v);
+	auto model = load(resource_manager, model_path.lexically_normal(), nullptr, nullptr, false, flip_tex_coord_v);
 	for (const auto& node : model->m_nodes) {
 		if (node.mesh.isValid() && node.material.isValid()) {
 			return SingleMeshData{node.mesh, node.material};

@@ -16,10 +16,17 @@
 
 namespace ve {
 
+enum class LightSource : uint8_t {
+	Manual = 0,   // manually created in scene code
+	Punctual,     // KHR_lights_punctual extension
+	Emissive      // extracted from emissive materials
+};
+
 struct EntityMeta {
 	std::string name;
 	bool active = true;
 	uint16_t generation = 0;
+	LightSource light_source = LightSource::Manual;
 };
 
 struct HierarchyEntry {
@@ -51,6 +58,8 @@ public:
 	void setName(Entity e, std::string name);
 	bool isActive(Entity e) const;
 	void setActive(Entity e, bool active);
+	LightSource getLightSource(Entity e) const;
+	void setLightSource(Entity e, LightSource source);
 
 	// Component access (typed, dispatched via if-constexpr)
 	template <typename T, typename... Args>
@@ -77,9 +86,11 @@ public:
 
 	ComponentPool<PointLightComponent>& pointLights() { return m_point_lights; }
 	const ComponentPool<PointLightComponent>& pointLights() const { return m_point_lights; }
+	uint32_t activePointLightCount() const;
 
 	ComponentPool<DirectionalLightComponent>& directionalLights() { return m_directional_lights; }
 	const ComponentPool<DirectionalLightComponent>& directionalLights() const { return m_directional_lights; }
+	uint32_t activeDirectionalLightCount() const;
 
 	// Hierarchy
 	void   setParent(Entity child, Entity parent);
@@ -121,6 +132,10 @@ private:
 	ComponentPool<PointLightComponent>       m_point_lights;
 	ComponentPool<DirectionalLightComponent> m_directional_lights;
 
+	// Active light counters (maintained by setActive / addComponent / removeComponent)
+	uint32_t m_active_point_lights = 0;
+	uint32_t m_active_directional_lights = 0;
+
 	// Hierarchy (indexed by entity index)
 	std::vector<HierarchyEntry> m_hierarchy;
 
@@ -141,8 +156,10 @@ T& Registry::addComponent(Entity e, Args&&... args) {
 		comp = &m_meshes.emplace(idx, std::forward<Args>(args)...);
 	} else if constexpr (std::is_same_v<T, PointLightComponent>) {
 		comp = &m_point_lights.emplace(idx, std::forward<Args>(args)...);
+		if (m_meta[idx].active) m_active_point_lights++;
 	} else if constexpr (std::is_same_v<T, DirectionalLightComponent>) {
 		comp = &m_directional_lights.emplace(idx, std::forward<Args>(args)...);
+		if (m_meta[idx].active) m_active_directional_lights++;
 	} else {
 		static_assert(sizeof(T) == 0, "Unknown component type");
 	}
@@ -159,8 +176,12 @@ void Registry::removeComponent(Entity e) {
 	} else if constexpr (std::is_same_v<T, MeshComponent>) {
 		m_meshes.remove(idx);
 	} else if constexpr (std::is_same_v<T, PointLightComponent>) {
+		if (m_meta[idx].active) 
+			m_active_point_lights--;
 		m_point_lights.remove(idx);
 	} else if constexpr (std::is_same_v<T, DirectionalLightComponent>) {
+		if (m_meta[idx].active) 
+			m_active_directional_lights--;
 		m_directional_lights.remove(idx);
 	} else {
 		static_assert(sizeof(T) == 0, "Unknown component type");

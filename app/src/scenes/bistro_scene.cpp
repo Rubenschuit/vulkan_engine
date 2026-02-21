@@ -38,7 +38,6 @@ void BistroScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
 			&pool,
 			&material_layout,
 			true,
-			false,
 			true
 		);
 		assert(m_bistro_model && "Failed to load Bistro model");

@@ -24,7 +24,7 @@ GltfScene::GltfScene(VeDevice& device, VeResourceManager& resource_manager, VeDe
 void GltfScene::addModel(const std::filesystem::path& gltf_path) {
 
 	auto model = VeModel::load(m_resource_manager, gltf_path.lexically_normal(), &m_pool, &m_material_layout,
-		/*extract_lights=*/true, /*extract_fixture_lights=*/false, /*flip_tex_coord_v=*/true);
+		/*extract_lights=*/true, /*flip_tex_coord_v=*/false);
 
 	if (model) {
 		model->addToScene(m_registry, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f});

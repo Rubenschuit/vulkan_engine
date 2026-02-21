@@ -51,10 +51,21 @@ struct VENGINE_API UIContext {
 	bool shadow_mask_enabled = false;
 	bool shadow_mask_half_res = true;
 
+	// GTAO (screen-space ambient occlusion)
+	bool gtao_enabled = true;
+	bool gtao_half_res = true;
+	float gtao_radius = 0.5f;
+	float gtao_intensity = 1.5f;
+
 	// culling
 	bool enable_frustum_culling = true;
 	uint32_t cull_total_objects = 0;
 	uint32_t cull_visible_objects = 0;
+
+	// scene stats
+	uint32_t visible_triangles = 0;
+	uint32_t num_point_lights = 0;
+	uint32_t num_directional_lights = 0;
 
 	// post process
 	int blur_radius = 0;

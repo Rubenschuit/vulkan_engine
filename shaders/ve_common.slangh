@@ -126,6 +126,15 @@ StructuredBuffer<uint> cluster_light_indices;
 ConstantBuffer<ClusterParams> cluster_params;
 
 // ============================================================================
+// GTAO ambient occlusion bindings (set 5)
+// ============================================================================
+
+[vk::binding(0, 5)]
+Texture2D<float> ao_texture;
+[vk::binding(1, 5)]
+SamplerState ao_sampler;
+
+// ============================================================================
 // Utilities
 // ============================================================================
 

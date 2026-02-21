@@ -96,8 +96,6 @@ public:
 	bool hasHdrColorSpaceExtension() const { return m_has_hdr_instance_extension; }
 	bool supportsBC() const { return m_supports_bc; }
 	bool supportsASTC() const { return m_supports_astc; }
-	bool supportsStorageImageMultisample() const { return m_supports_storage_image_ms; }
-
 	// Single-time command buffer helpers (select queue/pool)
 	std::unique_ptr<vk::raii::CommandBuffer> beginSingleTimeCommands(QueueKind kind = QueueKind::Graphics);
 	void endSingleTimeCommands(vk::raii::CommandBuffer& cmd, QueueKind kind = QueueKind::Graphics);
@@ -143,7 +141,6 @@ private:
 	bool m_has_hdr_instance_extension = false;
 	bool m_supports_bc = false;
 	bool m_supports_astc = false;
-	bool m_supports_storage_image_ms = false;
 
 	const std::vector<const char *> m_validation_layers = ve::VALIDATION_LAYERS;
 	std::vector<const char*> m_required_device_extensions = ve::REQUIRED_DEVICE_EXTENSIONS;

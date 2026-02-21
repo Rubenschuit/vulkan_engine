@@ -225,6 +225,9 @@ void ImGuiLayer::renderEngineWindows(UIContext& context) {
 			: 0;
 		ImGui::Text("Objects: %u total, %u visible, %u culled",
 			context.cull_total_objects, context.cull_visible_objects, culled);
+		ImGui::Text("Triangles: %u", context.visible_triangles);
+		ImGui::Text("Lights: %u point, %u directional",
+			context.num_point_lights, context.num_directional_lights);
 
 		ImGui::Separator();
 		//resolution

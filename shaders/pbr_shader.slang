@@ -314,8 +314,12 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		Lo += (kD * albedo.rgb / PI + specular) * radiance * NdotL * dir_shadow;
 	}
 
-	// Ambient lighting (scaled by occlusion: white = full ambient, black = no ambient)
-	float3 ambient = ubo.ambient_light_color.xyz * albedo.rgb * occlusion_sample.r;
+	// Sample screen-space ambient occlusion (GTAO)
+	float2 screen_uv = in_vert.pos.xy / ubo.screen_size;
+	float ssao = ao_texture.SampleLevel(ao_sampler, screen_uv, 0);
+
+	// Ambient lighting (scaled by material occlusion, SSAO, and transmission)
+	float3 ambient = ubo.ambient_light_color.xyz * albedo.rgb * occlusion_sample.r * ssao;
 	// Glass / high-transmission: reduce ambient so it doesn't look flat
 	ambient *= 1.0 - transmission;
 

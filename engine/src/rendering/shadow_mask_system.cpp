@@ -25,15 +25,13 @@ ShadowMaskSystem::ShadowMaskSystem(
 	std::filesystem::path shader_path,
 	vk::Extent2D mask_extent,
 	vk::Extent2D depth_extent,
-	vk::SampleCountFlagBits depth_sample_count,
 	const vk::raii::ImageView& depth_image_view,
 	const vk::raii::Image& depth_image)
 	: m_ve_device(device), m_shader_path(std::move(shader_path)),
-	  m_extent(mask_extent), m_depth_extent(depth_extent), m_depth_sample_count(depth_sample_count) {
+	  m_extent(mask_extent), m_depth_extent(depth_extent) {
 
 	m_depth_image = *depth_image;
 	m_depth_image_view = *depth_image_view;
-	m_has_ms_support = m_ve_device.supportsStorageImageMultisample();
 	m_default_mask_texture = resource_manager.load<VeTexture>("default_albedo");
 	createShadowMaskImage(m_extent);
 	createComputeSetLayout();
@@ -135,7 +133,6 @@ void ShadowMaskSystem::createPipelineLayout(
 }
 
 void ShadowMaskSystem::createPipelines() {
-	// Load SPIR-V for both non-MSAA and MSAA variants
 	auto load_module = [&](const std::filesystem::path& path) {
 		auto code = VeFileSystem::readFile(path);
 		vk::ShaderModuleCreateInfo info{
@@ -145,42 +142,32 @@ void ShadowMaskSystem::createPipelines() {
 		return vk::raii::ShaderModule(m_ve_device.getDevice(), info);
 	};
 	m_shader_module = load_module(m_shader_path / "shadow_mask_comp.spv");
-	if (m_has_ms_support) {
-		m_shader_module_ms = load_module(m_shader_path / "shadow_mask_ms_comp.spv");
-	}
 
-	// Create one pipeline per shadow mode × depth type (non-MSAA + MSAA)
-	auto create_variants = [&](vk::raii::ShaderModule& module,
-							   std::array<vk::raii::Pipeline, SHADOW_MODE_COUNT>& out) {
-		for (uint32_t mode = 0; mode < SHADOW_MODE_COUNT; mode++) {
-			std::array<uint32_t, 3> spec_data = {mode, m_pcf_samples, m_pcss_filter_samples};
-			std::array<vk::SpecializationMapEntry, 3> spec_entries = {{
-				{0, 0 * sizeof(uint32_t), sizeof(uint32_t)},
-				{1, 1 * sizeof(uint32_t), sizeof(uint32_t)},
-				{2, 2 * sizeof(uint32_t), sizeof(uint32_t)},
-			}};
-			vk::SpecializationInfo spec_info{
-				.mapEntryCount = static_cast<uint32_t>(spec_entries.size()),
-				.pMapEntries = spec_entries.data(),
-				.dataSize = spec_data.size() * sizeof(uint32_t),
-				.pData = spec_data.data(),
-			};
-			vk::PipelineShaderStageCreateInfo stage_info{
-				.stage = vk::ShaderStageFlagBits::eCompute,
-				.module = *module,
-				.pName = "compMain",
-				.pSpecializationInfo = &spec_info,
-			};
-			vk::ComputePipelineCreateInfo pipeline_info{
-				.stage = stage_info,
-				.layout = *m_pipeline_layout,
-			};
-			out[mode] = vk::raii::Pipeline(m_ve_device.getDevice(), nullptr, pipeline_info);
-		}
-	};
-	create_variants(m_shader_module, m_pipelines);
-	if (m_has_ms_support) {
-		create_variants(m_shader_module_ms, m_pipelines_ms);
+	// Create one pipeline per shadow mode (always single-sample resolved depth)
+	for (uint32_t mode = 0; mode < SHADOW_MODE_COUNT; mode++) {
+		std::array<uint32_t, 3> spec_data = {mode, m_pcf_samples, m_pcss_filter_samples};
+		std::array<vk::SpecializationMapEntry, 3> spec_entries = {{
+			{0, 0 * sizeof(uint32_t), sizeof(uint32_t)},
+			{1, 1 * sizeof(uint32_t), sizeof(uint32_t)},
+			{2, 2 * sizeof(uint32_t), sizeof(uint32_t)},
+		}};
+		vk::SpecializationInfo spec_info{
+			.mapEntryCount = static_cast<uint32_t>(spec_entries.size()),
+			.pMapEntries = spec_entries.data(),
+			.dataSize = spec_data.size() * sizeof(uint32_t),
+			.pData = spec_data.data(),
+		};
+		vk::PipelineShaderStageCreateInfo stage_info{
+			.stage = vk::ShaderStageFlagBits::eCompute,
+			.module = *m_shader_module,
+			.pName = "compMain",
+			.pSpecializationInfo = &spec_info,
+		};
+		vk::ComputePipelineCreateInfo pipeline_info{
+			.stage = stage_info,
+			.layout = *m_pipeline_layout,
+		};
+		m_pipelines[mode] = vk::raii::Pipeline(m_ve_device.getDevice(), nullptr, pipeline_info);
 	}
 }
 
@@ -345,9 +332,7 @@ void ShadowMaskSystem::dispatch(VeFrameInfo& frame_info) {
 	cmd.pipelineBarrier2(pre_dep);
 
 	// Bind pipeline and descriptor sets (using prev-frame compute UBO for Set 0)
-	bool msaa = m_depth_sample_count != vk::SampleCountFlagBits::e1;
-	auto& pipelines = msaa ? m_pipelines_ms : m_pipelines;
-	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, *pipelines[mode]);
+	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, *m_pipelines[mode]);
 
 	std::array<vk::DescriptorSet, 3> sets{
 		*m_compute_global_descriptor_sets[frame],
@@ -372,7 +357,7 @@ void ShadowMaskSystem::dispatch(VeFrameInfo& frame_info) {
 	uint32_t groups_y = (m_extent.height + 15) / 16;
 	cmd.dispatch(groups_x, groups_y, 1);
 
-	// Post-dispatch barriers: shadow mask to read-only + depth back to attachment
+	// Post-dispatch barriers: shadow mask to read-only + depth back to attachment.
 	vk::ImageMemoryBarrier2 mask_to_read{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
@@ -408,12 +393,11 @@ void ShadowMaskSystem::dispatch(VeFrameInfo& frame_info) {
 }
 
 void ShadowMaskSystem::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D mask_extent,
-	vk::Extent2D depth_extent, vk::SampleCountFlagBits depth_sample_count,
+	vk::Extent2D depth_extent,
 	const vk::raii::ImageView& depth_image_view, const vk::raii::Image& depth_image) {
 	m_ve_device.getDevice().waitIdle();
 	m_extent = mask_extent;
 	m_depth_extent = depth_extent;
-	m_depth_sample_count = depth_sample_count;
 	m_depth_image = *depth_image;
 	m_depth_image_view = *depth_image_view;
 	createShadowMaskImage(mask_extent);

@@ -292,8 +292,6 @@ void VeDevice::pickPhysicalDevice() {
 	auto dev_features = m_physical_device.getFeatures();
 	m_supports_bc   = dev_features.textureCompressionBC;
 	m_supports_astc = dev_features.textureCompressionASTC_LDR;
-	m_supports_storage_image_ms = dev_features.shaderStorageImageMultisample;
-
 	// print the name of the selected physical device
 	auto properties = m_physical_device.getProperties();
 	VE_LOGI("Using device: " << properties.deviceName);
@@ -317,7 +315,7 @@ void VeDevice::createLogicalDevice() {
 					vk::PhysicalDeviceVulkan13Features,
 					vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
 					vk::PhysicalDeviceTimelineSemaphoreFeatures> feature_chain = {
-		{.features = {.depthClamp = true, .samplerAnisotropy = true, .shaderStorageImageMultisample = m_supports_storage_image_ms}},
+		{.features = {.depthClamp = true, .samplerAnisotropy = true}},
 		{.multiview = true, .shaderDrawParameters = true},
 		{.synchronization2 = true, .dynamicRendering = true},
 		{.extendedDynamicState = true },

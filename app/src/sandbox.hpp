@@ -2,6 +2,7 @@
 #include "VEngine/VEngine.hpp"
 #include "rendering/cluster_light_system.hpp"
 #include "rendering/depth_prepass_system.hpp"
+#include "rendering/gtao_system.hpp"
 #include "rendering/shadow_mask_system.hpp"
 #include "asset_paths.hpp"
 #include "scenes/bistro_scene.hpp"
@@ -113,6 +114,7 @@ private:
 
 	std::chrono::steady_clock::time_point m_cpu_start;
 	bool m_shadow_mask_half_res = true; // tracks UI toggle for recreation
+	bool m_gtao_half_res = true;        // tracks UI toggle for GTAO recreation
 	int m_pcf_samples = 8;
 	int m_pcss_filter_samples = 16;
 
@@ -131,6 +133,7 @@ private:
 	std::unique_ptr<PostProcessSystem> m_post_process_system;
 	std::unique_ptr<BloomSystem> m_bloom_system;
 	std::unique_ptr<ShadowMaskSystem> m_shadow_mask_system;
+	std::unique_ptr<GtaoSystem> m_gtao_system;
 	std::unique_ptr<ClusterLightSystem> m_cluster_light_system;
 };
 

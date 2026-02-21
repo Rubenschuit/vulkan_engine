@@ -128,8 +128,12 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		return float4(heat * base_color.rgb, base_color.a);
 	}
 
-	// Apply lighting with shadows
-	float3 diffuse_light = ubo.ambient_light_color.xyz;
+	// Sample screen-space ambient occlusion (GTAO)
+	float2 screen_uv = in_vert.pos.xy / ubo.screen_size;
+	float ssao = ao_texture.SampleLevel(ao_sampler, screen_uv, 0);
+
+	// Apply lighting with shadows (ambient scaled by SSAO)
+	float3 diffuse_light = ubo.ambient_light_color.xyz * ssao;
 	float3 specular_light = float3(0.0, 0.0, 0.0);
 	float3 view_dir = normalize(ubo.camera_position.xyz - in_vert.frag_pos_world);
 

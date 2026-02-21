@@ -37,11 +37,23 @@ void Registry::destroyEntity(Entity e) {
 	assert(isAlive(e) && "Destroying dead entity");
 	uint32_t idx = e.index();
 
+	// Adjust active light counters before removing components
+	if (m_meta[idx].active) {
+		if (m_point_lights.has(idx))
+			m_active_point_lights--;
+		if (m_directional_lights.has(idx))
+			m_active_directional_lights--;
+	}
+
 	// Remove all components
-	if (m_transforms.has(idx))        m_transforms.remove(idx);
-	if (m_meshes.has(idx))            m_meshes.remove(idx);
-	if (m_point_lights.has(idx))      m_point_lights.remove(idx);
-	if (m_directional_lights.has(idx)) m_directional_lights.remove(idx);
+	if (m_transforms.has(idx))
+		m_transforms.remove(idx);
+	if (m_meshes.has(idx))
+		m_meshes.remove(idx);
+	if (m_point_lights.has(idx))
+		m_point_lights.remove(idx);
+	if (m_directional_lights.has(idx))
+		m_directional_lights.remove(idx);
 
 	// Detach from hierarchy: unlink from parent's child list
 	auto& h = m_hierarchy[idx];
@@ -89,9 +101,11 @@ void Registry::destroyEntity(Entity e) {
 }
 
 bool Registry::isAlive(Entity e) const {
-	if (e.isNull()) return false;
+	if (e.isNull())
+		return false;
 	uint32_t idx = e.index();
-	if (idx >= m_meta.size()) return false;
+	if (idx >= m_meta.size())
+		return false;
 	return m_meta[idx].generation == e.generation();
 }
 
@@ -108,13 +122,35 @@ void Registry::setName(Entity e, std::string name) {
 }
 
 bool Registry::isActive(Entity e) const {
-	if (!isAlive(e)) return false;
+	if (!isAlive(e))
+		return false;
 	return m_meta[e.index()].active;
 }
 
 void Registry::setActive(Entity e, bool active) {
 	assert(isAlive(e));
-	m_meta[e.index()].active = active;
+	uint32_t idx = e.index();
+	bool was_active = m_meta[idx].active;
+	m_meta[idx].active = active;
+	if (was_active != active) {
+		if (m_point_lights.has(idx))
+			active ? m_active_point_lights++ : m_active_point_lights--;
+		else if (m_directional_lights.has(idx))
+			active ? m_active_directional_lights++ : m_active_directional_lights--;
+	}
+}
+
+uint32_t Registry::activePointLightCount() const { return m_active_point_lights; }
+uint32_t Registry::activeDirectionalLightCount() const { return m_active_directional_lights; }
+
+LightSource Registry::getLightSource(Entity e) const {
+	assert(isAlive(e));
+	return m_meta[e.index()].light_source;
+}
+
+void Registry::setLightSource(Entity e, LightSource source) {
+	assert(isAlive(e));
+	m_meta[e.index()].light_source = source;
 }
 
 // ── Hierarchy ───────────────────────────────────────────────────────────────
@@ -161,22 +197,26 @@ void Registry::setParent(Entity child, Entity parent) {
 }
 
 Entity Registry::getParent(Entity e) const {
-	if (e.isNull() || e.index() >= m_hierarchy.size()) return Entity::null();
+	if (e.isNull() || e.index() >= m_hierarchy.size())
+		return Entity::null();
 	return m_hierarchy[e.index()].parent;
 }
 
 Entity Registry::firstChild(Entity e) const {
-	if (e.isNull() || e.index() >= m_hierarchy.size()) return Entity::null();
+	if (e.isNull() || e.index() >= m_hierarchy.size())
+		return Entity::null();
 	return m_hierarchy[e.index()].first_child;
 }
 
 Entity Registry::nextSibling(Entity e) const {
-	if (e.isNull() || e.index() >= m_hierarchy.size()) return Entity::null();
+	if (e.isNull() || e.index() >= m_hierarchy.size())
+		return Entity::null();
 	return m_hierarchy[e.index()].next_sibling;
 }
 
 bool Registry::hasParent(Entity e) const {
-	if (e.isNull() || e.index() >= m_hierarchy.size()) return false;
+	if (e.isNull() || e.index() >= m_hierarchy.size())
+		return false;
 	return !m_hierarchy[e.index()].parent.isNull();
 }
 
@@ -225,7 +265,8 @@ const glm::mat3& Registry::getWorldNormal(Entity e) const {
 }
 
 void Registry::invalidateWorldTransform(Entity e) {
-	if (e.isNull() || e.index() >= m_world_cache.size()) return;
+	if (e.isNull() || e.index() >= m_world_cache.size())
+		return;
 	uint32_t idx = e.index();
 	auto& cache = m_world_cache[idx];
 	cache.transform_dirty = true;
@@ -291,6 +332,8 @@ void Registry::clear() {
 	m_world_cache.clear();
 	m_free_indices.clear();
 	m_alive_count = 0;
+	m_active_point_lights = 0;
+	m_active_directional_lights = 0;
 }
 
 Entity Registry::entityFromIndex(uint32_t index) const {

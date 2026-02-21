@@ -30,7 +30,6 @@ public:
 		std::filesystem::path shader_path,
 		vk::Extent2D mask_extent,
 		vk::Extent2D depth_extent,
-		vk::SampleCountFlagBits depth_sample_count,
 		const vk::raii::ImageView& depth_image_view,
 		const vk::raii::Image& depth_image);
 	~ShadowMaskSystem();
@@ -51,7 +50,7 @@ public:
 
 	/// Recreate shadow mask image for swapchain resize or resolution change
 	void recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D mask_extent,
-		vk::Extent2D depth_extent, vk::SampleCountFlagBits depth_sample_count,
+		vk::Extent2D depth_extent,
 		const vk::raii::ImageView& depth_image_view, const vk::raii::Image& depth_image);
 
 	/// Descriptor set layout for Set 3 (shadow mask output for PBR/simple)
@@ -68,9 +67,6 @@ public:
 	vk::raii::DescriptorSet& getDummyOutputDescriptorSet() {
 		return m_dummy_output_descriptor_set;
 	}
-
-	/// Whether the MSAA compute path is available (requires shaderStorageImageMultisample)
-	bool hasMsaaSupport() const { return m_has_ms_support; }
 
 	void setShadowSamples(uint32_t pcf_samples, uint32_t pcss_filter_samples);
 
@@ -92,10 +88,8 @@ private:
 	std::filesystem::path m_shader_path;
 	vk::Extent2D m_extent{};       // shadow mask resolution (may be half-res)
 	vk::Extent2D m_depth_extent{}; // depth buffer resolution (always full screen)
-	vk::SampleCountFlagBits m_depth_sample_count;
 	uint32_t m_pcf_samples = 8;
 	uint32_t m_pcss_filter_samples = 16;
-	bool m_has_ms_support = false;
 
 	// Shadow mask image (R8_UNORM, screen resolution)
 	std::unique_ptr<VeImage> m_shadow_mask_image;
@@ -109,13 +103,10 @@ private:
 	std::unique_ptr<VeDescriptorSetLayout> m_compute_set_layout;  // Set 1: depth + mask storage
 	std::unique_ptr<VeDescriptorSetLayout> m_output_set_layout;   // Set 3: mask sampled + sampler
 
-	// Pipeline (one set of 4 shadow-mode variants per depth type: non-MSAA + MSAA)
+	// Pipeline (one per shadow mode variant, always single-sample depth)
 	static constexpr uint32_t SHADOW_MODE_COUNT = 4;
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::array<vk::raii::Pipeline, SHADOW_MODE_COUNT> m_pipelines{
-		vk::raii::Pipeline{nullptr}, vk::raii::Pipeline{nullptr},
-		vk::raii::Pipeline{nullptr}, vk::raii::Pipeline{nullptr}};
-	std::array<vk::raii::Pipeline, SHADOW_MODE_COUNT> m_pipelines_ms{
 		vk::raii::Pipeline{nullptr}, vk::raii::Pipeline{nullptr},
 		vk::raii::Pipeline{nullptr}, vk::raii::Pipeline{nullptr}};
 
@@ -136,13 +127,12 @@ private:
 	UniformBufferObject m_prev_ubo_data{};
 	bool m_has_prev_data = false;
 
-	// Cached depth image (from swapchain depth buffer) for barriers + descriptor
+	// Cached depth image (single-sample resolved depth) for barriers + descriptor
 	vk::Image m_depth_image{};
 	vk::ImageView m_depth_image_view{};
 
-	// SPIR-V shader modules (kept alive for pipeline recreation)
+	// SPIR-V shader module
 	vk::raii::ShaderModule m_shader_module{nullptr};
-	vk::raii::ShaderModule m_shader_module_ms{nullptr};
 };
 
 } // namespace ve

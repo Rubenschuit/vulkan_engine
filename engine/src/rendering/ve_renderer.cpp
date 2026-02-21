@@ -228,6 +228,30 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
 		.storeOp = vk::AttachmentStoreOp::eStore,
 		.clearValue = vk::ClearDepthStencilValue(1.0f, 0)
 	};
+
+	// When MSAA is active, resolve depth to a single-sample image at endRendering().
+	// Compute shaders (GTAO, shadow mask) read from the resolved depth instead of MSAA depth.
+	if (m_ve_swap_chain->hasResolvedDepth()) {
+		// Prepare resolved depth for resolve target.
+		vk::ImageMemoryBarrier2 prep{
+			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
+			.dstStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
+			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+			.oldLayout = vk::ImageLayout::eUndefined,
+			.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = *m_ve_swap_chain->getResolvedDepthImage(),
+			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
+		};
+		vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &prep};
+		command_buffer.pipelineBarrier2(dep);
+
+		depth_attachment_info.resolveMode = vk::ResolveModeFlagBits::eSampleZero;
+		depth_attachment_info.resolveImageView = *m_ve_swap_chain->getResolvedDepthImageView();
+		depth_attachment_info.resolveImageLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+	}
 	vk::RenderingInfo rendering_info = {
 		.renderArea = { .offset = { 0, 0 }, .extent = extent },
 		.layerCount = 1,
@@ -315,6 +339,15 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer, bool 
 		.storeOp = vk::AttachmentStoreOp::eStore,
 		.clearValue = vk::ClearDepthStencilValue(1.0f, 0)
 	};
+
+	// Resolve MSAA depth at end of scene render so the resolved depth includes
+	// all geometry (opaque + MASK alpha-tested).
+	if (m_ve_swap_chain->hasResolvedDepth()) {
+		depth_attachment_info.resolveMode = vk::ResolveModeFlagBits::eSampleZero;
+		depth_attachment_info.resolveImageView = *m_ve_swap_chain->getResolvedDepthImageView();
+		depth_attachment_info.resolveImageLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+	}
+
 	vk::RenderingInfo rendering_info = {
 		.renderArea = { .offset = { 0, 0 }, .extent = extent },
 		.layerCount = 1,

@@ -41,6 +41,14 @@ public:
 	const vk::raii::ImageView& getResolveTargetImageView() const { return m_resolve_target_image->getImageView(); }
 	const vk::raii::ImageView& getDepthImageView() const { return m_depth_image->getImageView(); }
 	const vk::raii::Image& getDepthImage() const { return m_depth_image->getImage(); }
+	/// Single-sample depth (resolved from MSAA prepass, or same as depth when no MSAA)
+	const vk::raii::ImageView& getResolvedDepthImageView() const {
+		return m_resolved_depth_image ? m_resolved_depth_image->getImageView() : m_depth_image->getImageView();
+	}
+	const vk::raii::Image& getResolvedDepthImage() const {
+		return m_resolved_depth_image ? m_resolved_depth_image->getImage() : m_depth_image->getImage();
+	}
+	bool hasResolvedDepth() const { return m_resolved_depth_image != nullptr; }
 	const std::vector<vk::Image>& getSwapChainImages() const { return m_swap_chain_images; }
 	const std::vector<vk::raii::ImageView>& getSwapChainImageViews() const { return m_swap_chain_image_views; }
 	float getExtentAspectRatio() const;
@@ -97,6 +105,7 @@ private:
 	std::unique_ptr<VeImage> m_color_image;
 	std::unique_ptr<VeImage> m_resolve_target_image;
 	std::unique_ptr<VeImage> m_depth_image;
+	std::unique_ptr<VeImage> m_resolved_depth_image;  // 1x resolve target when MSAA active
 	vk::PresentModeKHR m_present_mode;
 	vk::SampleCountFlagBits m_desired_num_samples;
 	bool m_hdr_enabled;

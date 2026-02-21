@@ -1,21 +1,13 @@
 // Screen-space shadow mask: evaluates CSM shadows once per pixel from the depth buffer.
 // Dispatched on the compute queue with one-frame latency (reads previous frame's depth).
 // Output is a R8_UNORM image sampled by PBR/simple shaders instead of per-fragment CSM.
-// Define DEPTH_MSAA before including to use Texture2DMS (MSAA depth path).
-
-#ifndef SHADOW_MASK_COMP_INCLUDED
-#define SHADOW_MASK_COMP_INCLUDED
+// Always reads single-sample depth (resolved from MSAA if active).
 
 #include "ve_common.slangh"
 
 // Set 1: Compute I/O (depth input + shadow mask output)
-#ifdef DEPTH_MSAA
 [vk::binding(0, 1)]
-Texture2DMS<float> depth_texture;    // depth buffer (MSAA, sample 0)
-#else
-[vk::binding(0, 1)]
-Texture2D<float> depth_texture;      // depth buffer (non-MSAA)
-#endif
+Texture2D<float> depth_texture;      // depth buffer (single-sample resolved)
 [vk::binding(1, 1)]
 RWTexture2D<float> shadow_mask_out;  // R8 output
 
@@ -34,11 +26,7 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	float2 uv = (float2(id.xy) + 0.5) / push.mask_size;
 	int2 depth_coord = int2(uv * push.depth_size);
 
-#ifdef DEPTH_MSAA
-	float depth = depth_texture.Load(depth_coord, 0);
-#else
 	float depth = depth_texture.Load(int3(depth_coord, 0));
-#endif
 
 	// Sky / far plane: fully lit
 	if (depth >= 1.0) {
@@ -59,5 +47,3 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	float blend_unused;
 	shadow_mask_out[id.xy] = calculateCSMShadow(world.xyz, view_z, cascade_unused, blend_unused);
 }
-
-#endif // SHADOW_MASK_COMP_INCLUDED

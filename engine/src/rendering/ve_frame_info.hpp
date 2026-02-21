@@ -209,6 +209,9 @@ struct VeFrameInfo {
 	vk::raii::DescriptorSet* shadow_mask_descriptor_set = nullptr;
 	bool shadow_mask_active = false;  // true when mask pipeline variant should be used
 
+	// GTAO ambient occlusion descriptor set (Set 5, dummy white when AO disabled)
+	vk::raii::DescriptorSet* ao_descriptor_set = nullptr;
+
 	// Clustered forward shading descriptor set (Set 4, null when clustering disabled)
 	vk::raii::DescriptorSet* cluster_descriptor_set = nullptr;
 

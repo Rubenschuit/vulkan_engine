@@ -284,6 +284,34 @@ void VeSwapChain::createDepthResources() {
 		vk::PipelineStageFlagBits2::eEarlyFragmentTests // dst stage
 	);
 
+	// Create single-sample resolve target when MSAA is active.
+	// Resolved during depth prepass via VkRenderingAttachmentInfo::resolveMode.
+	// Compute shaders (GTAO, shadow mask) read from this instead of MSAA depth.
+	if (m_desired_num_samples != vk::SampleCountFlagBits::e1) {
+		m_resolved_depth_image = std::make_unique<VeImage>(
+			m_ve_device,
+			m_swap_chain_extent.width,
+			m_swap_chain_extent.height,
+			vk::SampleCountFlagBits::e1,
+			depth_format,
+			vk::ImageTiling::eOptimal,
+			vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			vk::ImageAspectFlagBits::eDepth,
+			false, 1
+		);
+		m_resolved_depth_image->transitionImageLayout(
+			vk::ImageLayout::eUndefined,
+			vk::ImageLayout::eDepthAttachmentOptimal,
+			{},
+			vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+			vk::PipelineStageFlagBits2::eTopOfPipe,
+			vk::PipelineStageFlagBits2::eEarlyFragmentTests
+		);
+	} else {
+		m_resolved_depth_image.reset();
+	}
+
 	VE_LOGD("Depth resource created");
 }
 

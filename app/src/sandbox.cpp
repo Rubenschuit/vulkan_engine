@@ -213,16 +213,29 @@ VeFrameInfo Sandbox::update() {
 			mask_extent.height = std::max(1u, mask_extent.height / 2);
 		}
 		m_shadow_mask_system->recreate(*m_global_pool, mask_extent,
-			extent, m_ve_renderer.getSampleCount(),
-			m_ve_renderer.getDepthImageView(), m_ve_renderer.getDepthImage());
+			extent,
+			m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage());
+	}
+
+	// GTAO: forward parameters and handle half-res recreation
+	m_gtao_system->setRadius(ui_actions.gtao_radius);
+	m_gtao_system->setIntensity(ui_actions.gtao_intensity);
+	if (ui_actions.gtao_half_res != m_gtao_half_res) {
+		m_gtao_half_res = ui_actions.gtao_half_res;
+		auto ao_extent = extent;
+		if (m_gtao_half_res) {
+			ao_extent.width  = std::max(1u, ao_extent.width / 2);
+			ao_extent.height = std::max(1u, ao_extent.height / 2);
+		}
+		m_gtao_system->recreate(*m_global_pool, ao_extent,
+			extent,
+			m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage());
 	}
 
 	// Screen-space shadow mask UBO fields
-	bool msaa_active = m_ve_renderer.getSampleCount() != vk::SampleCountFlagBits::e1;
 	bool shadow_mask_active = ui_actions.shadow_mask_enabled
 		&& ui_actions.depth_prepass_enabled
-		&& ui_actions.shadow_mode != ShadowMode::DISABLED
-		&& (!msaa_active || m_shadow_mask_system->hasMsaaSupport());
+		&& ui_actions.shadow_mode != ShadowMode::DISABLED;
 	ubo.screen_size = glm::vec2(static_cast<float>(extent.width), static_cast<float>(extent.height));
 
 	this->updateUniformBuffer(current_frame, ubo); // view/proj/camera location in application base class
@@ -262,6 +275,14 @@ VeFrameInfo Sandbox::update() {
 
 	// Always bind cluster descriptor set (shader checks cluster_enabled at runtime)
 	frame_info.cluster_descriptor_set = &m_cluster_light_system->getOutputDescriptorSet(current_frame);
+
+	// GTAO: set AO descriptor set (dummy white when disabled)
+	bool gtao_active = ui_actions.gtao_enabled && ui_actions.depth_prepass_enabled;
+	if (gtao_active) {
+		frame_info.ao_descriptor_set = &m_gtao_system->getOutputDescriptorSet(current_frame);
+	} else {
+		frame_info.ao_descriptor_set = &m_gtao_system->getDummyOutputDescriptorSet();
+	}
 
 	return frame_info;
 }
@@ -322,6 +343,16 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	ui_actions.cull_total_objects = m_culling_system->getLastTotalMeshObjects();
 	ui_actions.cull_visible_objects = m_culling_system->getLastVisibleCount();
 
+	uint32_t tri_count = 0;
+	for (auto& vo : m_culling_system->getVisibleObjectsRef()) {
+		tri_count += vo.mesh->getMeshHandle()->getIndexCount() / 3;
+	}
+	ui_actions.visible_triangles = tri_count;
+
+	auto& registry = m_active_scene->getRegistry();
+	ui_actions.num_point_lights = registry.activePointLightCount();
+	ui_actions.num_directional_lights = registry.activeDirectionalLightCount();
+
 	// Shadow pass: render a shadow map for each light
 	if (ui_actions.shadow_mode != ShadowMode::DISABLED) {
 		m_shadow_render_system->renderShadowMaps(frame_info);
@@ -341,6 +372,12 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 			m_ve_renderer.beginDepthPrePass(command_buffer);
 			m_depth_prepass_system->render(frame_info, m_pbr_render_system->getOpaqueGroups());
 			m_ve_renderer.endDepthPrePass(command_buffer);
+
+			// GTAO: inline compute dispatch after depth pre-pass, before scene render.
+			// Transitions resolved depth to read-only, dispatches GTAO+blur.
+			if (ui_actions.gtao_enabled) {
+				m_gtao_system->dispatch(frame_info);
+			}
 		}
 
 		m_pbr_render_system->setDepthPrePassActive(ui_actions.depth_prepass_enabled);
@@ -420,8 +457,19 @@ void Sandbox::recreatePipelines() {
 			mask_extent.height = std::max(1u, mask_extent.height / 2);
 		}
 		m_shadow_mask_system->recreate(*m_global_pool, mask_extent,
-			extent, sample_count,
-			m_ve_renderer.getDepthImageView(), m_ve_renderer.getDepthImage());
+			extent,
+			m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage());
+	}
+
+	{
+		auto ao_extent = extent;
+		if (m_gtao_half_res) {
+			ao_extent.width  = std::max(1u, ao_extent.width / 2);
+			ao_extent.height = std::max(1u, ao_extent.height / 2);
+		}
+		m_gtao_system->recreate(*m_global_pool, ao_extent,
+			extent,
+			m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage());
 	}
 
 	m_post_process_system->recreatePipeline(color_format, m_ve_renderer.getResolveTargetImageView(), m_bloom_system->getBloomTexture());
@@ -566,19 +614,7 @@ void Sandbox::renderAppWindows() {
 								}
 							}
 
-							// Partition lights into groups by name prefix (before ": ")
-							std::map<std::string, std::vector<Entity>> groups;
-							for (auto e : lights) {
-								const auto& name = registry.getName(e);
-								auto sep = name.find(": ");
-								if (sep != std::string::npos) {
-									groups[name.substr(0, sep)].push_back(e);
-								} else {
-									groups["Scene"].push_back(e);
-								}
-							}
-
-							// Per-light detail UI (reused in both scene and group contexts)
+							// Per-light detail UI (reused across all groups)
 							auto renderLightDetail = [&](Entity e, size_t idx) {
 								auto* pl = registry.getComponent<PointLightComponent>(e);
 								auto* transform = registry.getComponent<TransformComponent>(e);
@@ -622,53 +658,108 @@ void Sandbox::renderAppWindows() {
 								ImGui::PopID();
 							};
 
-							// List "Scene" group lights directly (manually created lights without ": " in name)
-							auto scene_it = groups.find("Scene");
-							if (scene_it != groups.end()) {
-								for (size_t i = 0; i < scene_it->second.size(); i++)
-									renderLightDetail(scene_it->second[i], i);
+							// Render a set of lights with name-prefix sub-groups and group controls
+							auto renderLightGroup = [&](const std::vector<Entity>& group_lights) {
+								// Sub-partition by name prefix (before ": ")
+								std::map<std::string, std::vector<Entity>> sub_groups;
+								for (auto e : group_lights) {
+									const auto& name = registry.getName(e);
+									auto sep = name.find(": ");
+									if (sep != std::string::npos) {
+										sub_groups[name.substr(0, sep)].push_back(e);
+									} else {
+										sub_groups["Ungrouped"].push_back(e);
+									}
+								}
+
+								// Ungrouped lights listed directly
+								auto ungrouped_it = sub_groups.find("Ungrouped");
+								if (ungrouped_it != sub_groups.end()) {
+									for (size_t i = 0; i < ungrouped_it->second.size(); i++)
+										renderLightDetail(ungrouped_it->second[i], i);
+								}
+
+								// Sub-groups with controls
+								for (auto& [sub_name, sub_lights] : sub_groups) {
+									if (sub_name == "Ungrouped") continue;
+									ImGui::PushID(sub_name.c_str());
+									int active_count = 0;
+									for (auto e : sub_lights)
+										if (registry.isActive(e))
+											active_count++;
+									std::string header = sub_name + " (" + std::to_string(sub_lights.size()) + ")";
+									if (ImGui::TreeNode(header.c_str())) {
+										bool all_active = (active_count == static_cast<int>(sub_lights.size()));
+										bool mixed = active_count > 0 && !all_active;
+										if (mixed)
+											ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
+										if (ImGui::Checkbox("Enable group", &all_active)) {
+											for (auto e : sub_lights)
+												registry.setActive(e, all_active);
+										}
+										if (mixed)
+											ImGui::PopItemFlag();
+										float avg_intensity = 0.f;
+										for (auto e : sub_lights) {
+											auto* pl = registry.getComponent<PointLightComponent>(e);
+											if (pl) avg_intensity += pl->getIntensity();
+										}
+										avg_intensity /= static_cast<float>(sub_lights.size());
+										if (ImGui::DragFloat("Intensity", &avg_intensity, 1.0f, 0.0f, 5000.0f, "%.1f")) {
+											for (auto e : sub_lights) {
+												auto* pl = registry.getComponent<PointLightComponent>(e);
+												if (pl) pl->setIntensity(avg_intensity);
+											}
+										}
+										for (size_t i = 0; i < sub_lights.size(); i++)
+											renderLightDetail(sub_lights[i], i);
+										ImGui::TreePop();
+									}
+									ImGui::PopID();
+								}
+							};
+
+							// Partition lights by source into top-level groups
+							std::vector<Entity> scene_lights, punctual_lights, emissive_lights;
+							for (auto e : lights) {
+								switch (registry.getLightSource(e)) {
+									case ve::LightSource::Punctual: punctual_lights.push_back(e); break;
+									case ve::LightSource::Emissive: emissive_lights.push_back(e); break;
+									default:                        scene_lights.push_back(e); break;
+								}
 							}
 
-							// Render fixture/imported groups with group controls
-							for (auto& [group_name, group_lights] : groups) {
-								if (group_name == "Scene") continue;
-								ImGui::PushID(group_name.c_str());
-								// Count active lights in group
+							// Scene lights (manually created) listed directly
+							for (size_t i = 0; i < scene_lights.size(); i++)
+								renderLightDetail(scene_lights[i], i);
+
+							// Top-level source groups
+							struct SourceGroup { const char* label; std::vector<Entity>& entities; };
+							SourceGroup source_groups[] = {
+								{"KHR Punctual", punctual_lights},
+								{"Emissive",     emissive_lights},
+							};
+							for (auto& [label, entities] : source_groups) {
+								if (entities.empty()) continue;
+								ImGui::PushID(label);
 								int active_count = 0;
-								for (auto e : group_lights)
+								for (auto e : entities)
 									if (registry.isActive(e))
 										active_count++;
-								std::string header = group_name + " (" + std::to_string(group_lights.size()) + ")";
+								std::string header = std::string(label) + " (" + std::to_string(entities.size()) + ")";
 								if (ImGui::TreeNode(header.c_str())) {
-									// Group toggle
-									bool all_active = (active_count == static_cast<int>(group_lights.size()));
+									// Top-level group toggle
+									bool all_active = (active_count == static_cast<int>(entities.size()));
 									bool mixed = active_count > 0 && !all_active;
-									if (mixed) {
+									if (mixed)
 										ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
-									}
-									if (ImGui::Checkbox("Enable group", &all_active)) {
-										for (auto e : group_lights)
+									if (ImGui::Checkbox("Enable all", &all_active)) {
+										for (auto e : entities)
 											registry.setActive(e, all_active);
 									}
-									if (mixed) {
+									if (mixed)
 										ImGui::PopItemFlag();
-									}
-									// Group intensity slider
-									float avg_intensity = 0.f;
-									for (auto e : group_lights) {
-										auto* pl = registry.getComponent<PointLightComponent>(e);
-										if (pl) avg_intensity += pl->getIntensity();
-									}
-									avg_intensity /= static_cast<float>(group_lights.size());
-									if (ImGui::DragFloat("Intensity", &avg_intensity, 1.0f, 0.0f, 5000.0f, "%.1f")) {
-										for (auto e : group_lights) {
-											auto* pl = registry.getComponent<PointLightComponent>(e);
-											if (pl) pl->setIntensity(avg_intensity);
-										}
-									}
-									// Individual lights
-									for (size_t i = 0; i < group_lights.size(); i++)
-										renderLightDetail(group_lights[i], i);
+									renderLightGroup(entities);
 									ImGui::TreePop();
 								}
 								ImGui::PopID();
@@ -1001,6 +1092,28 @@ void Sandbox::renderAppWindows() {
 					}
 				}
 
+				// GTAO (Screen-Space Ambient Occlusion)
+				ImGui::Checkbox("GTAO (Ambient Occlusion)", &ui_actions.gtao_enabled);
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Ground Truth Ambient Occlusion:\ndarkens corners, crevices, and contact areas.\nRequires depth pre-pass enabled.");
+				}
+				if (ui_actions.gtao_enabled) {
+					ImGui::Indent();
+					ImGui::Checkbox("Half Resolution##gtao", &ui_actions.gtao_half_res);
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Compute AO at half screen resolution.\n4x fewer compute invocations, bilinear upsampled.");
+					}
+					ImGui::SliderFloat("AO Radius", &ui_actions.gtao_radius, 0.1f, 3.0f, "%.2f");
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("World-space sampling radius for AO.\nLarger = broader occlusion, smaller = finer detail.");
+					}
+					ImGui::SliderFloat("AO Intensity", &ui_actions.gtao_intensity, 0.5f, 5.0f, "%.2f");
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Power curve applied to AO.\nHigher = darker/stronger occlusion effect.");
+					}
+					ImGui::Unindent();
+				}
+
 				// Topology selection. Requires pipeline recreation
 				ImGui::Text("Topology: ");
 				ImGui::SameLine();
@@ -1021,7 +1134,7 @@ void Sandbox::renderAppWindows() {
 
 
 				ImGui::Separator();
-				ImGui::Text("Render mode (sponza): ");
+				ImGui::Text("Render mode (pbr): ");
 				int current_render_mode = static_cast<int>(ui_actions.render_mode);
 				if (ImGui::RadioButton("BRDF Microfacets", &current_render_mode, static_cast<int>(RenderMode::BRDF_MICROFACET)))
 					ui_actions.render_mode = RenderMode::BRDF_MICROFACET;
@@ -1059,8 +1172,6 @@ void Sandbox::renderAppWindows() {
 					ImGui::SetTooltip("Visualize lights-per-cluster as a heat gradient\nBlue=few, Red=many, Dark=zero");
 				}
 
-				// Axes system visibility
-				ImGui::Separator();
 				ImGui::Checkbox("Show Axes", &ui_actions.show_axes);
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Display XYZ coordinate axes in the scene.\nRed=X, Green=Y, Blue=Z");
@@ -1069,6 +1180,8 @@ void Sandbox::renderAppWindows() {
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Display wireframe bounding boxes for visible objects");
 				}
+
+				ImGui::Separator();
 				ImGui::Checkbox("Frustum culling", &ui_actions.enable_frustum_culling);
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Skip drawing objects outside the camera view");
@@ -1205,20 +1318,20 @@ void Sandbox::createDescriptors() {
 	// Material sets: SimpleScene ~3, Sponza ~170, Bistro 500+; allocate 4096 to avoid fragmentation / OUT_OF_POOL_MEMORY
 	constexpr uint32_t MAX_MATERIAL_SETS = 4096;
 	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
-		// Global sets + shadow global + compute + material sets + shadow + shadow mask (4 sets) + cluster (4 sets) + slack
-		.setMaxSets(4 * MAX_FRAMES_IN_FLIGHT + (MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS + 4 * MAX_FRAMES_IN_FLIGHT + 4 * MAX_FRAMES_IN_FLIGHT)
+		// Global sets + shadow global + compute + material sets + shadow + shadow mask (4 sets) + cluster (4 sets) + GTAO (10 sets) + slack
+		.setMaxSets(4 * MAX_FRAMES_IN_FLIGHT + (MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS + 4 * MAX_FRAMES_IN_FLIGHT + 4 * MAX_FRAMES_IN_FLIGHT + 10)
 		// Uniform buffers: global + shadow global + compute + cluster params (2x compute + 2x output) + material
 		.addPoolSize(vk::DescriptorType::eUniformBuffer, 4 * MAX_FRAMES_IN_FLIGHT + (MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT) + MAX_MATERIAL_SETS + 1 + 4 * MAX_FRAMES_IN_FLIGHT)
 		// Combined image samplers: SimpleScene (~3) + per-material (5 per set) + skybox (3) + slack
 		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 3 * 3 + MAX_MATERIAL_SETS * 5)
-		// Samplers: shadow comparison sampler + raw sampler (2 per frame) + shadow mask output sampler (per frame) + slack
-		.addPoolSize(vk::DescriptorType::eSampler, 2 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + 7)
-		// Sampled images: shadow map array (1 per frame) + shadow mask depth + output (2 per frame each) + slack
-		.addPoolSize(vk::DescriptorType::eSampledImage, MAX_FRAMES_IN_FLIGHT + 4 * MAX_FRAMES_IN_FLIGHT + 7)
+		// Samplers: shadow comparison sampler + raw sampler (2 per frame) + shadow mask output sampler (per frame) + GTAO output (per frame + 1 dummy) + slack
+		.addPoolSize(vk::DescriptorType::eSampler, 2 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + 10)
+		// Sampled images: shadow map array (1 per frame) + shadow mask depth + output (2 per frame each) + GTAO (depth+AO reads, ~8 per frame) + slack
+		.addPoolSize(vk::DescriptorType::eSampledImage, MAX_FRAMES_IN_FLIGHT + 4 * MAX_FRAMES_IN_FLIGHT + 8 * MAX_FRAMES_IN_FLIGHT + 10)
 		// Storage buffers: compute + instance SSBO + shadow + cluster (4 SSBOs × 2 compute + 3 SSBOs × 2 output)
 		.addPoolSize(vk::DescriptorType::eStorageBuffer, 22 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT + 14 * MAX_FRAMES_IN_FLIGHT)
-		// Storage images: shadow mask output (1 per frame)
-		.addPoolSize(vk::DescriptorType::eStorageImage, MAX_FRAMES_IN_FLIGHT)
+		// Storage images: shadow mask output (1 per frame) + GTAO (3 per frame: compute out, blur H out, blur V out)
+		.addPoolSize(vk::DescriptorType::eStorageImage, MAX_FRAMES_IN_FLIGHT + 3 * MAX_FRAMES_IN_FLIGHT)
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
 		.buildShared();
 
@@ -1329,11 +1442,31 @@ void Sandbox::initSystems() {
 			m_paths.shaders_dir,
 			mask_extent,
 			m_ve_renderer.getExtent(),
-			m_ve_renderer.getSampleCount(),
-			m_ve_renderer.getDepthImageView(),
-			m_ve_renderer.getDepthImage()
+			m_ve_renderer.getResolvedDepthImageView(),
+			m_ve_renderer.getResolvedDepthImage()
 		);
 		m_shadow_mask_half_res = ui_actions.shadow_mask_half_res;
+	}
+
+	VE_LOGD("GTAO system");
+	{
+		auto ao_extent = m_ve_renderer.getExtent();
+		if (ui_actions.gtao_half_res) {
+			ao_extent.width  = std::max(1u, ao_extent.width / 2);
+			ao_extent.height = std::max(1u, ao_extent.height / 2);
+		}
+		m_gtao_system = std::make_unique<GtaoSystem>(
+			m_ve_device,
+			*m_global_pool,
+			*m_resource_manager,
+			m_global_set_layout->getDescriptorSetLayout(),
+			m_paths.shaders_dir,
+			ao_extent,
+			m_ve_renderer.getExtent(),
+			m_ve_renderer.getResolvedDepthImageView(),
+			m_ve_renderer.getResolvedDepthImage()
+		);
+		m_gtao_half_res = ui_actions.gtao_half_res;
 	}
 
 	VE_LOGD("cluster light system");
@@ -1353,6 +1486,7 @@ void Sandbox::initSystems() {
 		m_shadow_render_system->getShadowSetLayout(),
 		m_shadow_mask_system->getShadowMaskSetLayout(),
 		m_cluster_light_system->getOutputSetLayout(),
+		m_gtao_system->getAoSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
 		m_paths.shader("simple_shader.spv")
@@ -1365,6 +1499,7 @@ void Sandbox::initSystems() {
 		m_shadow_render_system->getShadowSetLayout(),
 		m_shadow_mask_system->getShadowMaskSetLayout(),
 		m_cluster_light_system->getOutputSetLayout(),
+		m_gtao_system->getAoSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
 		m_paths.shader("pbr_shader.spv")

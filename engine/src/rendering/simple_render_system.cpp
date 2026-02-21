@@ -30,12 +30,13 @@ SimpleRenderSystem::SimpleRenderSystem(
 	const vk::raii::DescriptorSetLayout& shadow_set_layout,
 	const vk::raii::DescriptorSetLayout& shadow_mask_set_layout,
 	const vk::raii::DescriptorSetLayout& cluster_set_layout,
+	const vk::raii::DescriptorSetLayout& ao_set_layout,
 	vk::Format color_format,
 	vk::SampleCountFlagBits sample_count,
 	std::filesystem::path shader_path)
 	: m_ve_device(device), m_shader_path(shader_path), m_color_format(color_format), m_sample_count(sample_count) {
 
-	createPipelineLayout(global_set_layout, material_set_layout, shadow_set_layout, shadow_mask_set_layout, cluster_set_layout);
+	createPipelineLayout(global_set_layout, material_set_layout, shadow_set_layout, shadow_mask_set_layout, cluster_set_layout, ao_set_layout);
 	createPipelines(m_color_format, m_sample_count);
 }
 
@@ -47,18 +48,19 @@ void SimpleRenderSystem::createPipelineLayout(
 	const vk::raii::DescriptorSetLayout& material_set_layout,
 	const vk::raii::DescriptorSetLayout& shadow_set_layout,
 	const vk::raii::DescriptorSetLayout& shadow_mask_set_layout,
-	const vk::raii::DescriptorSetLayout& cluster_set_layout) {
+	const vk::raii::DescriptorSetLayout& cluster_set_layout,
+	const vk::raii::DescriptorSetLayout& ao_set_layout) {
 	vk::PushConstantRange push_constant_range{
 		.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 		.offset = 0,
 		.size = sizeof(SimplePushConstantData)
 	};
-	vk::DescriptorSetLayout layouts[5] = {
+	vk::DescriptorSetLayout layouts[6] = {
 		*global_set_layout, *material_set_layout, *shadow_set_layout,
-		*shadow_mask_set_layout, *cluster_set_layout};
+		*shadow_mask_set_layout, *cluster_set_layout, *ao_set_layout};
 	vk::PipelineLayoutCreateInfo pipeline_layout_info{
 		.sType = vk::StructureType::ePipelineLayoutCreateInfo,
-		.setLayoutCount = 5,
+		.setLayoutCount = 6,
 		.pSetLayouts = layouts,
 		.pushConstantRangeCount = 1,
 		.pPushConstantRanges = &push_constant_range
@@ -177,6 +179,11 @@ void SimpleRenderSystem::renderObjects(VeFrameInfo& frame_info) const {
 		frame_info.command_buffer.bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			4, {**frame_info.cluster_descriptor_set}, {});
+	}
+	if (frame_info.ao_descriptor_set) {
+		frame_info.command_buffer.bindDescriptorSets(
+			vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+			5, {**frame_info.ao_descriptor_set}, {});
 	}
 
 	// Render instance groups
