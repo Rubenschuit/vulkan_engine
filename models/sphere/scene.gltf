@@ -94,27 +94,20 @@
       "uri": "scene.bin"
     }
   ],
-  "extensionsUsed": [
-    "KHR_materials_transmission"
-  ],
   "materials": [
     {
-      "extensions": {
-        "KHR_materials_transmission": {
-          "transmissionFactor": 0.0
-        }
-      },
-      "name": "GLASS",
+      "name": "Polished",
       "pbrMetallicRoughness": {
         "baseColorFactor": [
-          0.99,
-          0.99,
-          0.99,
+          0.9,
+          0.85,
+          0.95,
           1.0
         ],
         "metallicFactor": 0.0,
-        "roughnessFactor": 0.0
-      }
+        "roughnessFactor": 0.1
+      },
+      "alphaMode": "OPAQUE"
     }
   ],
   "meshes": [

@@ -63,8 +63,11 @@ ResourceHandle<VeTexture> VeTexture::loadOrDefault(VeResourceManager& resource_m
 	std::string key = path.lexically_normal().generic_string();
 	auto fn = path.filename().string();
 	bool is_default = (fn == "default_albedo.png" || fn == "default_normal.png" || fn == "default_metallic_roughness.png" ||
-	                   fn == "default_occlusion.png" || fn == "default_emissive.png" || fn == "white.png" || fn == "black.png");
+	                   fn == "default_occlusion.png" || fn == "default_emissive.png" || fn == "default_mr_unit.png" ||
+	                   fn == "white.png" || fn == "black.png");
 	if (is_default || !std::filesystem::exists(path)) {
+		if (fn == "default_mr_unit.png")
+			return resource_manager.load<VeTexture>("default_mr_unit");
 		const char* default_id = "default_metallic_roughness";
 		if (fallback_type == TextureType::ALBEDO) default_id = "default_albedo";
 		else if (fallback_type == TextureType::NORMAL) default_id = "default_normal";
@@ -102,6 +105,20 @@ bool VeTexture::doLoad() {
 	}
 	if (m_resource_id == "default_metallic_roughness") {
 		stbi_uc* pixels = generateDefaultTexture(4, 4, TextureType::METALLIC_ROUGHNESS);
+		createTextureImageFromPixels(4, 4, pixels, vk::Format::eR8G8B8A8Unorm);
+		free(pixels);
+		createTextureSampler();
+		return true;
+	}
+	if (m_resource_id == "default_mr_unit") {
+		// Full metallic (B=255) and full roughness (G=255) so MaterialFactors alone control the values
+		stbi_uc* pixels = (stbi_uc*)malloc(4 * 4 * 4);
+		for (size_t i = 0; i < 16; i++) {
+			pixels[i * 4 + 0] = 0;
+			pixels[i * 4 + 1] = 255;  // roughness = 1.0
+			pixels[i * 4 + 2] = 255;  // metallic = 1.0
+			pixels[i * 4 + 3] = 255;
+		}
 		createTextureImageFromPixels(4, 4, pixels, vk::Format::eR8G8B8A8Unorm);
 		free(pixels);
 		createTextureSampler();

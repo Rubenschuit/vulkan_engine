@@ -12,7 +12,6 @@ ConstantBuffer<UniformBuffer> ubo;
 struct PushConstantData {
 	float4x4 transform;
 	float4 params;  // x=exposure, yzw=tint (RGB)
-	float output_depth_one;  // 1.0 = output depth 1.0 for background pass (eEqual test)
 };
 [push_constant]
 PushConstantData push_constants;
@@ -38,19 +37,10 @@ VertexOutput vertMain(VertexInput input) {
 [vk::binding(0, 1)] // binding 0, set 1
 SamplerCube cube_texture;
 
-struct FragmentOutput {
-	float4 color : SV_Target;
-	float depth : SV_Depth;
-};
-
 [shader("fragment")]
-FragmentOutput fragMain(VertexOutput in_vert, uint id : SV_SampleIndex) {
+float4 fragMain(VertexOutput in_vert, uint id : SV_SampleIndex) : SV_Target {
 	float4 sampled = cube_texture.Sample(in_vert.cube_dir);
 	float exposure = push_constants.params.x;
 	float3 tint = push_constants.params.yzw;
-	FragmentOutput o;
-	o.color = float4(sampled.rgb * exposure * tint, sampled.a);
-	// When output_depth_one > 0 (background pass), output 1.0 so depth test eEqual passes only where buffer is clear.
-	o.depth = (push_constants.output_depth_one > 0.0) ? 1.0 : in_vert.pos.z;
-	return o;
+	return float4(sampled.rgb * exposure * tint, sampled.a);
 }

@@ -13,8 +13,6 @@ namespace ve {
 
 class VENGINE_API VeScene {
 public:
-    enum class Type { SIMPLE, PBR };
-
     VeScene(VeDevice& device, const std::string& name);
     virtual ~VeScene();
 
@@ -25,7 +23,6 @@ public:
     const Registry& getRegistry() const { return m_registry; }
 
     virtual vk::raii::DescriptorSet& getDescriptorSet() = 0;
-    virtual Type getType() const = 0;
     virtual void update(float dt);
 
     // Sun light intensity. Scenes without a sun return 0.

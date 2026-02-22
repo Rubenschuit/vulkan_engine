@@ -25,12 +25,12 @@
       "min": [
         0,
         0,
-        -1
+        1
       ],
       "max": [
         0,
         0,
-        -1
+        1
       ],
       "type": "VEC3",
       "bufferView": 1,
@@ -75,7 +75,7 @@
     {
       "name": "quad",
       "byteLength": 140,
-      "uri": "data:application/octet-stream;base64,AACAvwAAgL8AAAAAAACAPwAAgD8AAAAAAACAvwAAgD8AAAAAAACAPwAAgL8AAAAAAAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAgD8AAIA/AAAAAAAAAAAAAAAAAACAPwAAgD8AAAEAAgABAAAAAwA="
+      "uri": "data:application/octet-stream;base64,AACAvwAAgL8AAAAAAACAPwAAgD8AAAAAAACAvwAAgD8AAAAAAACAPwAAgL8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAgD8AAIA/AAAAAAAAAAAAAAAAAACAPwAAgD8AAAEAAgABAAAAAwA="
     }
   ],
   "bufferViews": [

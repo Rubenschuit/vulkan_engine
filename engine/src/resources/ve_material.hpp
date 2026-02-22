@@ -43,6 +43,7 @@ public:
 	bool hasDescriptorSet() const { return m_descriptor_set.has_value(); }
 
 	MaterialAlphaProps getAlphaProps() const { return m_alpha_props; }
+	void setAlphaProps(const MaterialAlphaProps& props) { m_alpha_props = props; }
 	MaterialFactors getMaterialFactors() const { return m_factors; }
 	// When true, vertex shader flips tex coord v. Required for some gltf exporters.
 	bool getFlipTexCoordV() const { return m_flip_tex_coord_v; }

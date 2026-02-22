@@ -17,6 +17,13 @@ struct ShadowMaskPush {
 };
 [[vk::push_constant]] ShadowMaskPush push;
 
+// Reconstruct world position from UV + depth via inverse projection-view
+float3 worldFromDepth(float2 uv, float d) {
+	float2 ndc = uv * 2.0 - 1.0;
+	float4 w = mul(ubo.inverse_projection_view, float4(ndc, d, 1.0));
+	return w.xyz / w.w;
+}
+
 [numthreads(16, 16, 1)]
 void compMain(uint3 id : SV_DispatchThreadID) {
 	if (id.x >= uint(push.mask_size.x) || id.y >= uint(push.mask_size.y))
@@ -35,15 +42,19 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	}
 
 	// Reconstruct world position from depth
-	float2 ndc = uv * 2.0 - 1.0;
-	float4 world = mul(ubo.inverse_projection_view, float4(ndc, depth, 1.0));
-	world /= world.w;
+	float3 world_pos = worldFromDepth(uv, depth);
+
+	// Reconstruct geometric normal from depth buffer neighbors
+	float2 texel = 1.0 / push.depth_size;
+	float3 pos_r = worldFromDepth(uv + float2(texel.x, 0), depth_texture.Load(int3(depth_coord + int2(1, 0), 0)));
+	float3 pos_u = worldFromDepth(uv + float2(0, texel.y), depth_texture.Load(int3(depth_coord + int2(0, 1), 0)));
+	float3 world_normal = normalize(cross(pos_u - world_pos, pos_r - world_pos));
 
 	// View-space depth for cascade selection
-	float view_z = -mul(ubo.view, float4(world.xyz, 1.0)).z;
+	float view_z = -mul(ubo.view, float4(world_pos, 1.0)).z;
 
 	// Evaluate CSM shadow
 	uint cascade_unused;
 	float blend_unused;
-	shadow_mask_out[id.xy] = calculateCSMShadow(world.xyz, view_z, cascade_unused, blend_unused);
+	shadow_mask_out[id.xy] = calculateCSMShadow(world_pos, view_z, world_normal, cascade_unused, blend_unused);
 }

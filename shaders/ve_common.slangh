@@ -72,6 +72,7 @@ struct UniformBuffer {
 	uint32_t csm_dir_light_index;
 	float    pcss_light_size;
 	uint32_t csm_blend_dithered;
+	float    csm_normal_bias;
 
 	// Screen-space shadow mask
 	float4x4 inverse_projection_view;
@@ -303,8 +304,9 @@ float calculatePCSS(uint32_t layer, float4 shadow_coord, float texel_size) {
 }
 
 // Sample shadow from a specific CSM cascade
-float sampleCascadeShadow(uint cascade, float3 frag_pos_world) {
-	float4 shadow_coord = mul(ubo.csm_shadow_matrices[cascade], float4(frag_pos_world, 1.0));
+float sampleCascadeShadow(uint cascade, float3 frag_pos_world, float3 normal_offset) {
+	float3 biased_pos = frag_pos_world + normal_offset;
+	float4 shadow_coord = mul(ubo.csm_shadow_matrices[cascade], float4(biased_pos, 1.0));
 	shadow_coord /= shadow_coord.w;
 
 	uint layer_index = ubo.csm_base_layer + cascade;
@@ -319,7 +321,8 @@ float sampleCascadeShadow(uint cascade, float3 frag_pos_world) {
 }
 
 // CSM shadow lookup: select cascade based on view-space depth, blend near boundaries
-float calculateCSMShadow(float3 frag_pos_world, float frag_view_z, out uint out_cascade, out float out_blend) {
+float calculateCSMShadow(float3 frag_pos_world, float frag_view_z, float3 world_normal,
+                          out uint out_cascade, out float out_blend) {
 	out_cascade = 0;
 	out_blend = 0.0;
 	if (ubo.csm_cascade_count == 0)
@@ -357,7 +360,11 @@ float calculateCSMShadow(float3 frag_pos_world, float frag_view_z, out uint out_
 
 	out_cascade = cascade;
 
-	float shadow = sampleCascadeShadow(cascade, frag_pos_world);
+	// Normal-offset bias: push sample position along surface normal to reduce shadow acne.
+	// Coarser cascades get proportionally more offset since their texels cover more world space.
+	float3 normal_offset = world_normal * ubo.csm_normal_bias * (1.0 + float(cascade));
+
+	float shadow = sampleCascadeShadow(cascade, frag_pos_world, normal_offset);
 
 	// Linear blend: smooth lerp with next cascade in blend zone (2x sample cost)
 	if (ubo.csm_blend_dithered == 1 && cascade < ubo.csm_cascade_count - 1) {
@@ -366,7 +373,8 @@ float calculateCSMShadow(float3 frag_pos_world, float frag_view_z, out uint out_
 		float blend_zone = (split - cascade_start) * BLEND_FRACTION;
 
 		if (frag_view_z > split - blend_zone) {
-			float next_shadow = sampleCascadeShadow(cascade + 1, frag_pos_world);
+			float3 next_offset = world_normal * ubo.csm_normal_bias * (2.0 + float(cascade));
+			float next_shadow = sampleCascadeShadow(cascade + 1, frag_pos_world, next_offset);
 			float t = (frag_view_z - (split - blend_zone)) / blend_zone;
 			shadow = lerp(shadow, next_shadow, t);
 			out_blend = t;

@@ -22,7 +22,8 @@ constexpr float CELESTIAL_INTENSITY_BOOST = 100.0f; // Intensity multiplier so b
 
 // Shadow mapping configuration
 constexpr uint32_t SHADOW_MAP_RESOLUTION = 2048; // unified resolution for all shadow layers
-constexpr float SHADOW_BIAS = 0.0001f;
+constexpr float SHADOW_BIAS = 0.00042f;
+constexpr float CSM_NORMAL_BIAS = 0.08f; // world-space normal offset for CSM, scaled per cascade
 constexpr float DIR_SHADOW_MAX_DISTANCE = 300.0f; // Max distance from camera for directional light shadows
 
 // Cascaded Shadow Maps (CSM) configuration

@@ -29,6 +29,8 @@ struct VENGINE_API UIContext {
 	int pcf_samples = 8; // multiples of 4 between 4 and 64, or 0 to disable PCF
 	int pcss_filter_samples = 16;
 	int csm_blend_mode = 2; // 0=off, 1=linear, 2=dithered TODO: enum
+	float shadow_bias = ve::SHADOW_BIAS;
+	float csm_normal_bias = ve::CSM_NORMAL_BIAS;
 	Topology topology = Topology::TRIANGLE_LIST;
 	bool hdr_enabled = false;
 	bool msaa = false;

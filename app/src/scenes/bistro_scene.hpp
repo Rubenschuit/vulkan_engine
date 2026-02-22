@@ -20,7 +20,6 @@ public:
 	}
 
 	vk::raii::DescriptorSet& getDescriptorSet() override;
-	Type getType() const override { return Type::PBR; }
 	glm::vec4 getDefaultAmbient() const override { return {1.0f, 1.0f, 1.0f, 0.05f}; }
 
 	void setSunIntensity(float intensity) override;

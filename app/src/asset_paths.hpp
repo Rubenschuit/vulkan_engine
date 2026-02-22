@@ -18,6 +18,7 @@ struct AssetPaths {
 	std::filesystem::path fire_texture;
 	std::filesystem::path smoke_texture;
 	std::filesystem::path mots_texture;
+	std::filesystem::path grid_texture;
 	std::filesystem::path skybox_dir;
 	// shaders
 	std::filesystem::path shaders_dir;
@@ -38,6 +39,7 @@ struct AssetPaths {
 		  fire_texture(root / "textures" / "fire_ball.ktx"),
 		  smoke_texture(root / "textures" / "smoke_atlas.ktx2"),
 		  mots_texture(root / "textures" / "mots.png"),
+		  grid_texture(root / "textures" / "grid.ktx"),
 		  skybox_dir(root / "textures" / "skybox"),
 		  shaders_dir(root / "shaders") {}
 };

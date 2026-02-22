@@ -190,6 +190,8 @@ VeFrameInfo Sandbox::update() {
 	ubo.render_mode = ui_actions.render_mode;
 	ubo.shadow_mode = ui_actions.shadow_mode;
 	ubo.pcss_light_size = ui_actions.pcss_light_size;
+	ubo.shadow_bias = ui_actions.shadow_bias;
+	ubo.csm_normal_bias = ui_actions.csm_normal_bias;
 	ubo.csm_blend_dithered = static_cast<uint32_t>(ui_actions.csm_blend_mode);
 	ubo.ambient_light_color = glm::vec4(ui_actions.ambient_light_color, ui_actions.ambient_light_intensity);
 	m_light_system->updateUniformBuffer(frame_info, ubo); // update UBO with light data
@@ -200,7 +202,6 @@ VeFrameInfo Sandbox::update() {
 		m_pcf_samples = ui_actions.pcf_samples;
 		m_pcss_filter_samples = ui_actions.pcss_filter_samples;
 		m_pbr_render_system->setShadowSamples(static_cast<uint32_t>(m_pcf_samples), static_cast<uint32_t>(m_pcss_filter_samples));
-		m_simple_render_system->setShadowSamples(static_cast<uint32_t>(m_pcf_samples), static_cast<uint32_t>(m_pcss_filter_samples));
 		m_shadow_mask_system->setShadowSamples(static_cast<uint32_t>(m_pcf_samples), static_cast<uint32_t>(m_pcss_filter_samples));
 	}
 
@@ -264,7 +265,7 @@ VeFrameInfo Sandbox::update() {
 
 	m_ve_renderer.submitCompute(frame_info.compute_command_buffer);
 
-	// Set shadow mask descriptor set and pipeline selection flag for PBR/simple
+	// Set shadow mask descriptor set and pipeline selection flag for PBR system
 	frame_info.shadow_mask_active = shadow_mask_active;
 	if (shadow_mask_active) {
 		frame_info.shadow_mask_descriptor_set = &m_shadow_mask_system->getOutputDescriptorSet(current_frame);
@@ -346,6 +347,7 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	ui_actions.cull_total_objects = m_culling_system->getLastTotalMeshObjects();
 	ui_actions.cull_visible_objects = m_culling_system->getLastVisibleCount();
 
+	// Get ui info for visible triangles and light counts
 	uint32_t tri_count = 0;
 	for (auto& vo : m_culling_system->getVisibleObjectsRef()) {
 		tri_count += vo.mesh->getMesh()->getLodIndexCount(vo.lod_level) / 3;
@@ -362,34 +364,27 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	}
 
 	// Main scene pass
-	if (m_active_scene->getType() == VeScene::Type::SIMPLE) {
-		m_ve_renderer.beginSceneRender(command_buffer);
-		m_skybox_render_system->render(frame_info);
-		m_simple_render_system->renderObjects(frame_info);
-		m_particle_system->render(frame_info);
-	} else {
-		m_pbr_render_system->prepareFrame(frame_info);
+	m_pbr_render_system->prepareFrame(frame_info);
 
-		// Depth pre-pass: render opaque depth before color pass
-		if (ui_actions.depth_prepass_enabled) {
-			m_ve_renderer.beginDepthPrePass(command_buffer);
-			m_depth_prepass_system->render(frame_info, m_pbr_render_system->getOpaqueGroups());
-			m_ve_renderer.endDepthPrePass(command_buffer);
+	// Depth pre-pass: render opaque depth before color pass
+	if (ui_actions.depth_prepass_enabled) {
+		m_ve_renderer.beginDepthPrePass(command_buffer);
+		m_depth_prepass_system->render(frame_info, m_pbr_render_system->getOpaqueGroups());
+		m_ve_renderer.endDepthPrePass(command_buffer);
 
-			// GTAO: inline compute dispatch after depth pre-pass, before scene render.
-			// Transitions resolved depth to read-only, dispatches GTAO+blur.
-			if (ui_actions.gtao_enabled) {
-				m_gtao_system->dispatch(frame_info);
-			}
-		}
-
-		m_pbr_render_system->setDepthPrePassActive(ui_actions.depth_prepass_enabled);
-		m_ve_renderer.beginSceneRender(command_buffer, ui_actions.depth_prepass_enabled);
-
-		m_pbr_render_system->renderOpaque(frame_info);
-		m_skybox_render_system->renderAsBackground(frame_info);
-		m_pbr_render_system->renderTransparent(frame_info);
+		// GTAO: inline compute dispatch after depth pre-pass, before scene render.
+		// Transitions resolved depth to read-only, dispatches GTAO+blur.
+		if (ui_actions.gtao_enabled)
+			m_gtao_system->dispatch(frame_info);
 	}
+
+	m_pbr_render_system->setDepthPrePassActive(ui_actions.depth_prepass_enabled);
+	m_ve_renderer.beginSceneRender(command_buffer, ui_actions.depth_prepass_enabled);
+
+	m_pbr_render_system->renderOpaque(frame_info);
+	m_skybox_render_system->render(frame_info);
+	m_pbr_render_system->renderTransparent(frame_info);
+	m_particle_system->render(frame_info);
 	if (ui_actions.show_axes) {
 		m_axes_render_system->render(frame_info);
 	}
@@ -441,7 +436,6 @@ void Sandbox::recreatePipelines() {
 
 	m_bloom_system->recreateResources(extent, m_ve_renderer.getResolveTargetImageView());
 
-	m_simple_render_system->recreatePipeline(offscreen_format, sample_count);
 	m_light_system->recreatePipeline(offscreen_format, sample_count);
 	m_pbr_render_system->recreatePipeline(offscreen_format, sample_count);
 	m_aabb_debug_render_system->recreatePipeline(offscreen_format, sample_count);
@@ -1074,6 +1068,12 @@ void Sandbox::renderAppWindows() {
 					}
 				}
 				if (ui_actions.shadow_mode != ShadowMode::DISABLED) {
+					ImGui::SliderFloat("Shadow Bias", &ui_actions.shadow_bias, 0.0f, 0.01f, "%.5f");
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("Depth comparison bias.\nHigher = less acne but more Peter panning.");
+					ImGui::SliderFloat("Normal Bias", &ui_actions.csm_normal_bias, 0.0f, 1.0f, "%.3f");
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("World-space normal offset for CSM shadows.\nPushes shadow lookup along surface normal.\nHigher = less acne on angled surfaces.");
 					ImGui::Text("CSM Blend: ");
 					ImGui::SameLine();
 					ImGui::RadioButton("Off", &ui_actions.csm_blend_mode, 0);
@@ -1123,14 +1123,12 @@ void Sandbox::renderAppWindows() {
 				int topology_int = static_cast<int>(ui_actions.topology);
 				if (ImGui::RadioButton("Triangle List", &topology_int, static_cast<int>(Topology::TRIANGLE_LIST))) {
 					ui_actions.topology = Topology::TRIANGLE_LIST;
-					m_simple_render_system->setTopology(vk::PrimitiveTopology::eTriangleList);
 					m_pbr_render_system->setTopology(vk::PrimitiveTopology::eTriangleList);
 					m_ve_renderer.setSwapChainNeedsRecreation();
 				}
 				ImGui::SameLine();
 				if (ImGui::RadioButton("Line List", &topology_int, static_cast<int>(Topology::LINE_LIST))) {
 					ui_actions.topology = Topology::LINE_LIST;
-					m_simple_render_system->setTopology(vk::PrimitiveTopology::eLineList);
 					m_pbr_render_system->setTopology(vk::PrimitiveTopology::eLineList);
 					m_ve_renderer.setSwapChainNeedsRecreation();
 				}
@@ -1503,19 +1501,6 @@ void Sandbox::initSystems() {
 		m_ve_renderer.getExtent()
 	);
 
-	VE_LOGD("simple system: " << m_paths.shader("simple_shader.spv"));
-	m_simple_render_system = std::make_unique<SimpleRenderSystem>(
-		m_ve_device,
-		m_global_set_layout->getDescriptorSetLayout(),
-		m_material_set_layout->getDescriptorSetLayout(),
-		m_shadow_render_system->getShadowSetLayout(),
-		m_shadow_mask_system->getShadowMaskSetLayout(),
-		m_cluster_light_system->getOutputSetLayout(),
-		m_gtao_system->getAoSetLayout(),
-		m_ve_renderer.getOffscreenImageFormat(),
-		m_ve_renderer.getSampleCount(),
-		m_paths.shader("simple_shader.spv")
-	);
 	VE_LOGD("pbr system: " << m_paths.shader("pbr_shader.spv"));
 	m_pbr_render_system = std::make_unique<PbrRenderSystem>(
 		m_ve_device,

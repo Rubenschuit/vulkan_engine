@@ -222,9 +222,9 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 			csm_shadow = shadow_mask.SampleLevel(shadow_mask_sampler, prev_uv, 0);
 			// Compute cascade index for debug visualization
 			if (ubo.render_mode == RenderMode::CSM_CASCADE)
-				calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, csm_cascade_idx, csm_blend_t);
+				calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, world_normal, csm_cascade_idx, csm_blend_t);
 		} else {
-			csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, csm_cascade_idx, csm_blend_t);
+			csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, world_normal, csm_cascade_idx, csm_blend_t);
 		}
 	}
 

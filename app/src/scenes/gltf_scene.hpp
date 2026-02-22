@@ -29,7 +29,6 @@ public:
 	void addModel(const std::filesystem::path& gltf_path);
 
 	vk::raii::DescriptorSet& getDescriptorSet() override;
-	Type getType() const override { return Type::PBR; }
 	glm::vec4 getDefaultAmbient() const override { return {1.0f, 1.0f, 1.0f, 0.04f}; }
 
 	void setSunIntensity(float intensity) override;

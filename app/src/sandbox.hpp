@@ -121,7 +121,6 @@ private:
 	// Render systems
 	std::unique_ptr<CullingSystem> m_culling_system;
 	std::unique_ptr<SkyboxRenderSystem> m_skybox_render_system;
-	std::unique_ptr<SimpleRenderSystem> m_simple_render_system;
 	std::unique_ptr<PbrRenderSystem> m_pbr_render_system;
 	std::unique_ptr<AabbDebugRenderSystem> m_aabb_debug_render_system;
 	std::unique_ptr<AxesRenderSystem> m_axes_render_system;

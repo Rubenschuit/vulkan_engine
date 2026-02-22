@@ -127,6 +127,7 @@ struct UniformBufferObject {
 	alignas(4)  uint32_t csm_dir_light_index = 0xFFFFFFFF; // which dir_lights[] index has CSM (0xFFFFFFFF = none)
 	alignas(4)  float pcss_light_size = 0.04f;  // world-space light radius for PCSS penumbra
 	alignas(4)  uint32_t csm_blend_dithered = 0; // 0 = off, 1 = linear, 2 = dithered
+	alignas(4)  float csm_normal_bias = ve::CSM_NORMAL_BIAS;
 
 	// Screen-space shadow mask
 	alignas(16) glm::mat4 inverse_projection_view{1.0f};  // for depth → world reconstruction
