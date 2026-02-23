@@ -61,8 +61,10 @@ public:
 			p.reset();
 		createPipelines(color_format, sample_count);
 	}
-	void setTopology(vk::PrimitiveTopology topology) {
-		m_topology = topology;
+	void setTopology(Topology topo) {
+		m_topology = (topo == Topology::LINE_LIST)
+			? vk::PrimitiveTopology::eLineList
+			: vk::PrimitiveTopology::eTriangleList;
 	}
 	void setShadowSamples(uint32_t pcf_samples, uint32_t pcss_filter_samples) {
 		m_pcf_samples = pcf_samples;

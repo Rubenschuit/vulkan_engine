@@ -2,6 +2,7 @@
 #pragma once
 
 #include "application/ve_application.hpp"
+#include "application/ve_engine_config.hpp"
 
 #include "ve_export.hpp" // for VENGINE_API
 
@@ -23,6 +24,7 @@
 #include "scene/ve_camera.hpp"
 #include "resources/ve_model.hpp"
 #include "scene/ve_scene.hpp"
+#include "scene/gltf_scene.hpp"
 
 #include "utils/ve_log.hpp"
 #include "input/input_controller.hpp"

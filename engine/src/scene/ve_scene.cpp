@@ -8,11 +8,9 @@
 
 namespace ve {
 
-VeScene::VeScene(VeDevice& device, VeResourceManager& resource_manager,
-                 VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout,
-                 const std::string& name)
-    : m_device(device), m_resource_manager(resource_manager),
-      m_pool(pool), m_material_layout(material_layout),
+VeScene::VeScene(const SceneContext& ctx, const std::string& name)
+    : m_device(ctx.device), m_resource_manager(ctx.resource_manager),
+      m_pool(ctx.pool), m_material_layout(ctx.material_layout),
       m_name(name), m_num_lights(0), m_num_shadow_casting_lights(0) {}
 
 VeScene::~VeScene() {

@@ -28,10 +28,10 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	float dt = std::chrono::duration<float, std::chrono::seconds::period>(now - m_last_time).count();
 	m_last_time = now;
 
-	m_cpu_time_sum += context.cpu_time;
-	m_gpu_time_sum += context.gpu_time;
-	m_compute_gpu_time_sum += context.compute_gpu_time;
-	m_gpu_overlap_sum += context.gpu_overlap;
+	m_cpu_time_sum += context.stats.cpu_time;
+	m_gpu_time_sum += context.stats.gpu_time;
+	m_compute_gpu_time_sum += context.stats.compute_gpu_time;
+	m_gpu_overlap_sum += context.stats.gpu_overlap;
 	m_accumulated_dt += dt;
 	m_frame_count++;
 
@@ -83,9 +83,9 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 			}
 
 			char tri_buf[16];
-			formatCount(tri_buf, sizeof(tri_buf), context.visible_triangles);
+			formatCount(tri_buf, sizeof(tri_buf), context.stats.visible_triangles);
 			ImGui::TextDisabled("%s triangles  |  %u/%u objects",
-				tri_buf, context.cull_visible_objects, context.cull_total_objects);
+				tri_buf, context.stats.cull_visible_objects, context.stats.cull_total_objects);
 		}
 		ImGui::End();
 		return;
@@ -152,16 +152,16 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 	// --- Scene stats ---
 	char tri_buf[16];
-	formatCount(tri_buf, sizeof(tri_buf), context.visible_triangles);
-	uint32_t culled = (context.cull_total_objects >= context.cull_visible_objects)
-		? (context.cull_total_objects - context.cull_visible_objects) : 0;
+	formatCount(tri_buf, sizeof(tri_buf), context.stats.visible_triangles);
+	uint32_t culled = (context.stats.cull_total_objects >= context.stats.cull_visible_objects)
+		? (context.stats.cull_total_objects - context.stats.cull_visible_objects) : 0;
 
 	snprintf(val, sizeof(val), "%u / %u (%u culled)",
-		context.cull_visible_objects, context.cull_total_objects, culled);
+		context.stats.cull_visible_objects, context.stats.cull_total_objects, culled);
 	row("Objects", val);
 	row("Triangles", tri_buf);
 	snprintf(val, sizeof(val), "%u point, %u dir",
-		context.num_point_lights, context.num_directional_lights);
+		context.stats.num_point_lights, context.stats.num_directional_lights);
 	row("Lights", val);
 
 	ImGui::Spacing();

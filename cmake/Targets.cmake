@@ -71,7 +71,7 @@ if (IMGUI_DIR)
 	# Also add ImGui headers to app target so app code can use ImGui API
 	target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 	# Portable File Dialogs (header-only) for native open/save dialogs
-	target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/external/portable-file-dialogs)
+	target_include_directories(VEngineLib SYSTEM PUBLIC ${PROJECT_SOURCE_DIR}/external/portable-file-dialogs)
 
 	# Suppress noisy conversion/sign warnings for ImGui sources only
 	if (MSVC)

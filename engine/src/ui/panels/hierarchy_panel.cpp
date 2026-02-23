@@ -1,9 +1,12 @@
 #include "pch.hpp"
 #include "ui/panels/hierarchy_panel.hpp"
 #include "ui/imgui_layer.hpp"
+#include "application/ve_application.hpp"
 #include "scene/ve_registry.hpp"
+#include "scene/ve_scene.hpp"
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <portable-file-dialogs.h>
 #include <glm/gtc/type_ptr.hpp>
 #include <algorithm>
 #include <map>
@@ -22,12 +25,8 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 		return;
 	}
 
-	// App-injected header (scene selection)
-	if (m_header_callback) {
-		m_header_callback();
-		ImGui::Separator();
-		ImGui::Spacing();
-	}
+	// Scene management (scene selector, GLTF loading)
+	renderSceneSelector();
 
 	if (!registry) {
 		ImGui::Text("No scene loaded");
@@ -389,6 +388,68 @@ void HierarchyPanel::renderLightGroup(Registry& registry, const std::string& sou
 		}
 		ImGui::PopID();
 	}
+}
+
+void HierarchyPanel::setSceneRegistry(const std::vector<SceneEntry>* entries, int* current_index, SceneLoadRequest* request) {
+	m_scene_entries = entries;
+	m_current_scene_index = current_index;
+	m_scene_load_request = request;
+}
+
+void HierarchyPanel::renderSceneSelector() {
+	if (!m_scene_entries || !m_current_scene_index || !m_scene_load_request)
+		return;
+
+	// Show loading indicator
+	if (m_scene_load_request->type != SceneLoadRequest::Type::NONE)
+		ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Loading...");
+
+	// Radio buttons for registered scenes
+	int current = *m_current_scene_index;
+	for (int i = 0; i < static_cast<int>(m_scene_entries->size()); i++) {
+		if (ImGui::RadioButton((*m_scene_entries)[static_cast<size_t>(i)].name.c_str(), &current, i)) {
+			*m_current_scene_index = i;
+			m_scene_load_request->type = SceneLoadRequest::Type::LOAD_REGISTERED;
+			m_scene_load_request->scene_index = i;
+		}
+		if (i < static_cast<int>(m_scene_entries->size()) - 1 && i < 2)
+			ImGui::SameLine();
+	}
+
+	if (ImGui::Button("New Empty Scene")) {
+		m_scene_load_request->type = SceneLoadRequest::Type::NEW_EMPTY;
+		m_scene_load_request->scene_index = -1;
+		*m_current_scene_index = -1;
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Load GLTF...")) {
+		auto selection = pfd::open_file(
+			"Select GLTF Model", "",
+			{"glTF Files", "*.gltf *.glb"},
+			pfd::opt::none
+		).result();
+		if (!selection.empty()) {
+			m_scene_load_request->type = SceneLoadRequest::Type::LOAD_GLTF_PATH;
+			m_scene_load_request->scene_index = -1;
+			m_scene_load_request->gltf_path = selection[0];
+			*m_current_scene_index = -1;
+		}
+	}
+
+	if (ImGui::Button("Add Model...")) {
+		auto selection = pfd::open_file(
+			"Add GLTF Model", "",
+			{"glTF Files", "*.gltf *.glb"},
+			pfd::opt::none
+		).result();
+		if (!selection.empty()) {
+			m_scene_load_request->type = SceneLoadRequest::Type::ADD_MODEL;
+			m_scene_load_request->gltf_path = selection[0];
+		}
+	}
+
+	ImGui::Separator();
+	ImGui::Spacing();
 }
 
 } // namespace ve

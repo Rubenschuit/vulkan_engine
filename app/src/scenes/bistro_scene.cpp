@@ -3,8 +3,8 @@
 
 namespace ve {
 
-BistroScene::BistroScene(VeDevice& device, VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths)
-	: VeScene(device, resource_manager, pool, material_layout, "Bistro Scene") {
+BistroScene::BistroScene(const SceneContext& ctx, const AssetPaths& paths)
+	: VeScene(ctx, "Bistro Scene") {
 	loadGameObjects(paths);
 }
 

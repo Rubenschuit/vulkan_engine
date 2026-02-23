@@ -2,6 +2,7 @@
 #include "ui/editor.hpp"
 #include "ui/imgui_layer.hpp"
 #include "rendering/ve_renderer.hpp"
+#include "application/ve_application.hpp"
 #include <imgui.h>
 #include <cmath>
 
@@ -10,6 +11,8 @@ namespace ve {
 Editor::Editor(VeRenderer& renderer, ImGuiLayer& imgui_layer)
 	: m_renderer(renderer), m_imgui_layer(imgui_layer) {
 	m_performance_panel = std::make_unique<PerformancePanel>(renderer);
+	m_graphics_panel = std::make_unique<GraphicsPanel>(renderer);
+	m_environment_panel = std::make_unique<EnvironmentPanel>();
 	registerViewportImage();
 }
 
@@ -57,12 +60,15 @@ void Editor::registerViewportImage() {
 	}
 }
 
-void Editor::renderUI(UIContext& context, Registry* registry) {
+void Editor::renderUI(UIContext& context, Registry* registry, VeScene* active_scene) {
 	bool editor_mode = m_state.editor_mode;
 
 	// Auto-show inspector when an entity is selected
 	if (m_state.selection_changed && !m_state.selected_entity.isNull())
 		m_state.show_inspector = true;
+
+	// Update per-frame state on panels
+	m_hierarchy_panel.setActiveScene(active_scene);
 
 	m_imgui_layer.renderUI(context, m_state, [this, registry, editor_mode](UIContext& ctx) {
 		if (editor_mode) {
@@ -75,6 +81,8 @@ void Editor::renderUI(UIContext& context, Registry* registry) {
 			m_hierarchy_panel.render(registry, m_state, ctx);
 			m_inspector_panel.render(registry, m_state, ctx);
 			m_performance_panel->render(registry, m_state, ctx);
+			m_graphics_panel->render(registry, m_state, ctx);
+			m_environment_panel->render(registry, m_state, ctx);
 
 			if (m_app_ui_callback)
 				m_app_ui_callback();
@@ -84,6 +92,15 @@ void Editor::renderUI(UIContext& context, Registry* registry) {
 	});
 
 	m_state.selection_changed = false;
+}
+
+void Editor::setSceneRegistry(const std::vector<SceneEntry>* entries, int* current_index, SceneLoadRequest* request) {
+	m_hierarchy_panel.setSceneRegistry(entries, current_index, request);
+}
+
+void Editor::setSkyboxSystem(SkyboxRenderSystem* skybox) {
+	if (m_environment_panel)
+		m_environment_panel->setSkyboxSystem(skybox);
 }
 
 void Editor::onSwapChainRecreated() {

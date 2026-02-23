@@ -2,8 +2,8 @@
 
 namespace ve {
 
-SponzaScene::SponzaScene(VeDevice& device, VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths, const char* variant)
-    : VeScene(device, resource_manager, pool, material_layout, "Sponza Scene") {
+SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths, const char* variant)
+    : VeScene(ctx, "Sponza Scene") {
     loadGameObjects(paths, variant);
 }
 

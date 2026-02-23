@@ -12,6 +12,8 @@ It manages the swap chain and command buffers. Default present mode is immediate
 
 namespace ve {
 
+enum class HDRColorMode : int;
+
 class VENGINE_API VeRenderer {
 public:
 	VeRenderer(VeDevice& device, VeWindow& window);
@@ -90,6 +92,14 @@ public:
 		m_present_mode = present_mode;
 		m_swap_chain_needs_recreation = true;
 		VE_LOGI("Present mode set to " + std::to_string(static_cast<int>(present_mode)) + " with MSAA " + std::to_string(static_cast<int>(m_desired_num_samples))); }
+
+	// --- App-facing wrappers ---
+	std::vector<int> getAvailableSampleCounts() const;
+	int getCurrentSampleCountInt() const { return static_cast<int>(m_desired_num_samples); }
+	void setSampleCountInt(int count);
+	void setVSync(bool enabled) { setPresentMode(enabled ? vk::PresentModeKHR::eFifo : vk::PresentModeKHR::eImmediate); }
+	HDRColorMode getHDRColorMode() const;
+	const char* getHDRColorModeString() const;
 	void recreateSwapChain();
 	void setSwapChainNeedsRecreation() { m_swap_chain_needs_recreation = true; }
 

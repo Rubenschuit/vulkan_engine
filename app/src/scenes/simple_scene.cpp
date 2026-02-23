@@ -4,8 +4,8 @@
 
 namespace ve {
 
-SimpleScene::SimpleScene(VeDevice& device, VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths, vk::raii::DescriptorSet* default_material_descriptor_set)
-	: VeScene(device, resource_manager, pool, material_layout, "Simple Scene"), m_default_material_descriptor_set(default_material_descriptor_set) {
+SimpleScene::SimpleScene(const SceneContext& ctx, const AssetPaths& paths)
+	: VeScene(ctx, "Simple Scene"), m_default_material_descriptor_set(ctx.default_material_descriptor_set) {
 	assert(m_default_material_descriptor_set && "Default material descriptor set must not be null");
 	loadGameObjects(paths);
 }
@@ -137,7 +137,12 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 					"default_mr_unit.png",
 					"default_occlusion.png",
 					"default_emissive.png",
-					MaterialAlphaProps{AlphaMode::ALPHA_OPAQUE, 0.5f, true},
+					MaterialAlphaProps{
+						.alpha_mode = AlphaMode::ALPHA_OPAQUE,
+						.alpha_cutoff = 0.5f,
+						.double_sided = false,
+						.use_spec_gloss_texture = false
+					},
 					factors, &m_pool, &m_material_layout);
 
 				Entity e = m_registry.createEntity(name + "_r" + std::to_string(j) + "_m" + std::to_string(i));

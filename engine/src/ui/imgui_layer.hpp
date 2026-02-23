@@ -4,6 +4,7 @@
 #include "rendering/particle_system.hpp"
 
 #include <cstdint>
+#include <glm/glm.hpp>
 #include <vulkan/vulkan.hpp>
 #define VULKAN_HPP_ENABLE_RAII
 #include <vulkan/vulkan_raii.hpp>
@@ -34,19 +35,29 @@ struct VENGINE_API UIContext {
 	float shadow_bias = ve::SHADOW_BIAS;
 	float csm_normal_bias = ve::CSM_NORMAL_BIAS;
 	Topology topology = Topology::TRIANGLE_LIST;
+	RenderMode render_mode = RenderMode::BRDF_MICROFACET;
 	bool hdr_enabled = false;
 	bool msaa = false;
 	bool vsync = false;
 
-	// timing
-	float cpu_time = 0.0f;
-	float gpu_time = 0.0f;
-	float compute_gpu_time = 0.0f;
-	float gpu_overlap = 0.0f;
+	// lighting
+	glm::vec3 ambient_light_color = glm::vec3(1.0f);
+	float ambient_light_intensity = 0.006f;
+	bool cluster_enabled = true;
 
-	// particle systems
-	bool particles_enabled = true;
-	bool fireworks_enabled = true;
+	// read-only stats (engine writes, UI reads)
+	struct Stats {
+		float cpu_time = 0.0f;
+		float gpu_time = 0.0f;
+		float compute_gpu_time = 0.0f;
+		float gpu_overlap = 0.0f;
+		uint32_t cull_total_objects = 0;
+		uint32_t cull_visible_objects = 0;
+		uint32_t visible_triangles = 0;
+		uint32_t num_point_lights = 0;
+		uint32_t num_directional_lights = 0;
+	};
+	Stats stats;
 
 	// depth pre-pass
 	bool depth_prepass_enabled = true;
@@ -63,18 +74,11 @@ struct VENGINE_API UIContext {
 
 	// culling
 	bool enable_frustum_culling = true;
-	uint32_t cull_total_objects = 0;
-	uint32_t cull_visible_objects = 0;
 
 	// LOD override
 	int lod_force_level = -1;  // -1 = auto (normal LOD selection), 0..3 = force specific LOD
 	float lod_screen_thresholds[3] = {0.3f, 0.15f, 0.05f};
 	float lod_hysteresis = 0.2f;
-
-	// scene stats
-	uint32_t visible_triangles = 0;
-	uint32_t num_point_lights = 0;
-	uint32_t num_directional_lights = 0;
 
 	// post process
 	int blur_radius = 0;
@@ -113,6 +117,10 @@ public:
 
     void recreatePipeline();
 
+	// Set the app-specific settings window name
+	void setAppSettingsWindowName(const std::string& name) { m_app_settings_window_name = name; }
+	const std::string& getAppSettingsWindowName() const { return m_app_settings_window_name; }
+
 private:
 	void renderDockSpace();
 	void applyEditorTheme();
@@ -123,5 +131,6 @@ private:
     VkDescriptorPool m_descriptor_pool = VK_NULL_HANDLE;
     VkFormat m_color_format = VK_FORMAT_UNDEFINED;
 	VkDescriptorSet m_viewport_texture_id = VK_NULL_HANDLE;
+	std::string m_app_settings_window_name = "Settings";
 };
 }

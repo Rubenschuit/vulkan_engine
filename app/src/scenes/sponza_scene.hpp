@@ -10,7 +10,7 @@ class VeModel;
 class SponzaScene : public VeScene {
 public:
     // variant: selects KTX2 quality preset (sponza or sponza_low (ETC1S))
-    SponzaScene(VeDevice& device, VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths, const char* variant = "sponza");
+    SponzaScene(const SceneContext& ctx, const AssetPaths& paths, const char* variant = "sponza");
 
     vk::raii::DescriptorSet& getDescriptorSet() override;
     glm::vec4 getDefaultAmbient() const override { return {1.0f, 1.0f, 1.0f, 0.04f}; }

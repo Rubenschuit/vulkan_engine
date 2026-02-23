@@ -74,6 +74,12 @@ enum class Topology : uint32_t {
 	LINE_LIST = 1,
 };
 
+enum class HDRColorMode : int {
+	SDR = 0,
+	SCRGB = 1,        // Extended sRGB linear (scRGB)
+	HDR10_PQ = 2,     // HDR10 ST2084 (PQ)
+};
+
 enum ToneMapMode : int {
 	TONEMAP_NONE         = 0,
 	TONEMAP_REINHARD     = 1,

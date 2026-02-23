@@ -1,7 +1,7 @@
 #pragma once
 #include "ui/editor_panel.hpp"
 #include "ui/editor_state.hpp"
-#include <functional>
+#include <filesystem>
 #include <glm/vec3.hpp>
 #include <string>
 #include <unordered_map>
@@ -9,14 +9,20 @@
 
 namespace ve {
 
+struct SceneEntry;
+struct SceneLoadRequest;
+class VeScene;
+
 class VENGINE_API HierarchyPanel : public EditorPanel {
 public:
 	void render(Registry* registry, EditorState& state, UIContext& context) override;
 	const char* getName() const override { return "Scene Hierarchy"; }
 
-	void setHeaderCallback(std::function<void()> callback) { m_header_callback = std::move(callback); }
+	void setSceneRegistry(const std::vector<SceneEntry>* entries, int* current_index, SceneLoadRequest* request);
+	void setActiveScene(VeScene* scene) { m_active_scene = scene; }
 
 private:
+	void renderSceneSelector();
 	void renderEntityNode(Registry& registry, Entity entity, EditorState& state);
 	void renderLightsSection(Registry& registry, EditorState& state);
 	void renderLightGroup(Registry& registry, const std::string& source_key, const std::vector<Entity>& group_lights, EditorState& state);
@@ -33,7 +39,12 @@ private:
 		bool initialized = false;
 	};
 
-	std::function<void()> m_header_callback;
+	// Scene registry pointers
+	const std::vector<SceneEntry>* m_scene_entries = nullptr;
+	int* m_current_scene_index = nullptr;
+	SceneLoadRequest* m_scene_load_request = nullptr;
+	VeScene* m_active_scene = nullptr;
+
 	std::unordered_map<std::string, LightGroupState> m_group_states;
 	Registry* m_last_registry = nullptr;
 	Entity m_pending_delete = Entity::null();

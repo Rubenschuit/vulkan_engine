@@ -9,7 +9,7 @@ class VeModel;
 
 class BistroScene : public VeScene {
 public:
-	BistroScene(VeDevice& device, VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths);
+	BistroScene(const SceneContext& ctx, const AssetPaths& paths);
 
 	vk::raii::DescriptorSet& getDescriptorSet() override;
 	glm::vec4 getDefaultAmbient() const override { return {1.0f, 1.0f, 1.0f, 0.05f}; }

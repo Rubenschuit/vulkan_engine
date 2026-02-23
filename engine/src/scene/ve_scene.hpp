@@ -19,11 +19,17 @@ class VeModel;
 class VeDescriptorPool;
 class VeDescriptorSetLayout;
 
+struct VENGINE_API SceneContext {
+    VeDevice& device;
+    VeResourceManager& resource_manager;
+    VeDescriptorPool& pool;
+    VeDescriptorSetLayout& material_layout;
+    vk::raii::DescriptorSet* default_material_descriptor_set = nullptr;
+};
+
 class VENGINE_API VeScene {
 public:
-    VeScene(VeDevice& device, VeResourceManager& resource_manager,
-            VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout,
-            const std::string& name);
+    VeScene(const SceneContext& ctx, const std::string& name);
     virtual ~VeScene();
 
     VeScene(const VeScene&) = delete;

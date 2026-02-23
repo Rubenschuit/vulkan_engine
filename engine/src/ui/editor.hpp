@@ -5,8 +5,11 @@
 #include "ui/panels/hierarchy_panel.hpp"
 #include "ui/panels/inspector_panel.hpp"
 #include "ui/panels/performance_panel.hpp"
+#include "ui/panels/graphics_panel.hpp"
+#include "ui/panels/environment_panel.hpp"
 #include <functional>
 #include <memory>
+#include <vector>
 
 #define VULKAN_HPP_ENABLE_RAII
 #include <vulkan/vulkan_raii.hpp>
@@ -16,7 +19,11 @@ namespace ve {
 class ImGuiLayer;
 class VeRenderer;
 class Registry;
+class VeScene;
+class SkyboxRenderSystem;
 struct UIContext;
+struct SceneEntry;
+struct SceneLoadRequest;
 
 class VENGINE_API Editor {
 public:
@@ -31,7 +38,7 @@ public:
 	bool beginFrame();
 
 	// Full UI render cycle: dockspace, built-in panels, app callback, selection logic.
-	void renderUI(UIContext& context, Registry* registry);
+	void renderUI(UIContext& context, Registry* registry, VeScene* active_scene = nullptr);
 
 	// Re-register viewport image after swapchain recreation.
 	void onSwapChainRecreated();
@@ -43,6 +50,12 @@ public:
 
 	// App-specific UI rendered inside the editor dockspace
 	void setAppUICallback(std::function<void()> cb) { m_app_ui_callback = std::move(cb); }
+
+	// Scene registry (set by VeApplication after registerScene calls)
+	void setSceneRegistry(const std::vector<SceneEntry>* entries, int* current_index, SceneLoadRequest* request);
+
+	// Skybox system access for environment panel
+	void setSkyboxSystem(SkyboxRenderSystem* skybox);
 
 	// Panel access for app-side customization
 	HierarchyPanel& getHierarchyPanel() { return m_hierarchy_panel; }
@@ -66,6 +79,8 @@ private:
 	HierarchyPanel m_hierarchy_panel;
 	InspectorPanel m_inspector_panel;
 	std::unique_ptr<PerformancePanel> m_performance_panel;
+	std::unique_ptr<GraphicsPanel> m_graphics_panel;
+	std::unique_ptr<EnvironmentPanel> m_environment_panel;
 
 	// App callback
 	std::function<void()> m_app_ui_callback;

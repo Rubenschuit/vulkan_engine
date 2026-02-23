@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "rendering/ve_renderer.hpp"
+#include "rendering/ve_frame_info.hpp"
 
 #include <stdexcept>
 #include <algorithm>
@@ -635,6 +636,41 @@ void VeRenderer::submitCompute(vk::raii::CommandBuffer& compute_command_buffer) 
 	compute_command_buffer.end();
 
 	m_ve_swap_chain->submitComputeWork(*compute_command_buffer);
+}
+
+// --- App-facing wrappers ---
+
+std::vector<int> VeRenderer::getAvailableSampleCounts() const {
+	std::vector<int> counts;
+	counts.push_back(1);
+	vk::SampleCountFlagBits max_samples = m_ve_device.getSampleCount();
+	for (int i = 2; i <= 64; i *= 2)
+		if (static_cast<vk::SampleCountFlagBits>(i) <= max_samples)
+			counts.push_back(i);
+	return counts;
+}
+
+void VeRenderer::setSampleCountInt(int count) {
+	setSampleCount(static_cast<vk::SampleCountFlagBits>(count));
+}
+
+HDRColorMode VeRenderer::getHDRColorMode() const {
+	if (!m_hdr_enabled)
+		return HDRColorMode::SDR;
+	auto cs = getSwapChainColorSpace();
+	if (cs == vk::ColorSpaceKHR::eExtendedSrgbLinearEXT)
+		return HDRColorMode::SCRGB;
+	if (cs == vk::ColorSpaceKHR::eHdr10St2084EXT)
+		return HDRColorMode::HDR10_PQ;
+	return HDRColorMode::SDR;
+}
+
+const char* VeRenderer::getHDRColorModeString() const {
+	switch (getHDRColorMode()) {
+		case HDRColorMode::SCRGB:    return "Extended sRGB (scRGB)";
+		case HDRColorMode::HDR10_PQ: return "HDR10 (PQ)";
+		default:                     return "";
+	}
 }
 
 }

@@ -167,9 +167,10 @@ void ImGuiLayer::renderDockSpace() {
 		ImGuiID dock_right_bottom = ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Down, 0.45f, nullptr, &dock_right);
 
 		ImGui::DockBuilderDockWindow("Scene Hierarchy", dock_left);
-		ImGui::DockBuilderDockWindow("Settings", dock_left);
+		ImGui::DockBuilderDockWindow(m_app_settings_window_name.c_str(), dock_left);
 		ImGui::DockBuilderDockWindow("Viewport", dock_main);
 		ImGui::DockBuilderDockWindow("Inspector", dock_left_bottom);
+		ImGui::DockBuilderDockWindow("Environment", dock_left_bottom);
 		ImGui::DockBuilderDockWindow("Graphics", dock_right);
 		ImGui::DockBuilderDockWindow("Performance", dock_right_bottom);
 		ImGui::DockBuilderFinish(dockspace_id);
