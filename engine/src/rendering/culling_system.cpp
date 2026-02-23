@@ -30,16 +30,11 @@ void CullingSystem::cullObjects(VeFrameInfo& frame_info) {
 	const float half_tan_fov = std::tan(m_camera->getFovY() * 0.5f);
 
 	auto& registry = *frame_info.registry;
-	auto& mesh_pool = registry.meshes();
-	m_visible_objects.reserve(mesh_pool.size());
-	for (uint32_t i = 0; i < mesh_pool.size(); i++) {
-		MeshComponent& mesh = mesh_pool.data()[i];
+	auto view = registry.view<MeshComponent, TransformComponent>();
+	m_visible_objects.reserve(view.sizeHint());
+	for (auto [entity, mesh, tc] : view) {
 		if (!mesh.hasMesh() || !mesh.hasMaterial())
 			continue;
-
-		uint32_t entity_idx = mesh_pool.entityAt(i);
-		Entity entity = registry.entityFromIndex(entity_idx);
-		if (!registry.isActive(entity)) continue;
 
 		m_last_total_mesh_objects++;
 

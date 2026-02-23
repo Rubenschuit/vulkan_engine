@@ -52,7 +52,9 @@ public:
 	const std::vector<vk::Image>& getSwapChainImages() const { return m_swap_chain_images; }
 	const std::vector<vk::raii::ImageView>& getSwapChainImageViews() const { return m_swap_chain_image_views; }
 	float getExtentAspectRatio() const;
+	vk::Extent2D getOffscreenExtent() const { return m_offscreen_extent; }
 
+	void resizeOffscreenResources(vk::Extent2D extent);
 	bool compareSwapFormats(const VeSwapChain& other) const;
 	vk::Result acquireNextImage(uint32_t* imageIndex);
 	void submitComputeWork(vk::CommandBuffer commandBuffer);
@@ -129,6 +131,7 @@ private:
 	SwapChainSupportDetails m_swap_chain_support;
 	vk::SurfaceFormatKHR m_surface_format;
 	vk::Extent2D m_swap_chain_extent;
+	vk::Extent2D m_offscreen_extent;  // scene render resolution (may differ from swapchain in editor mode)
 	vk::Format m_swap_chain_image_format;
 	vk::Format m_offscreen_image_format;
 

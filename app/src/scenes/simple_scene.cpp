@@ -1,35 +1,21 @@
 #include "simple_scene.hpp"
-#include "resources/ve_model.hpp"
-#include "resources/ve_material_properties.hpp"
-#include "scene/ve_component.hpp"
 #include <string>
 #include <glm/gtc/constants.hpp>
 
 namespace ve {
 
 SimpleScene::SimpleScene(VeDevice& device, VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths, vk::raii::DescriptorSet* default_material_descriptor_set)
-	: VeScene(device, "Simple Scene"), m_default_material_descriptor_set(default_material_descriptor_set) {
+	: VeScene(device, resource_manager, pool, material_layout, "Simple Scene"), m_default_material_descriptor_set(default_material_descriptor_set) {
 	assert(m_default_material_descriptor_set && "Default material descriptor set must not be null");
-	loadGameObjects(resource_manager, pool, material_layout, paths);
+	loadGameObjects(paths);
 }
 
-void SimpleScene::setSunIntensity(float intensity) {
-	auto* dl = m_registry.getComponent<DirectionalLightComponent>(m_sun);
-	if (dl) dl->intensity = intensity;
-}
-
-float SimpleScene::getSunIntensity() const {
-	const auto* dl = m_registry.getComponent<DirectionalLightComponent>(m_sun);
-	return dl ? dl->intensity : DEFAULT_SUN_INTENSITY;
-}
-
-void SimpleScene::loadGameObjects(VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths) {
-	// sun light (directional)
+void SimpleScene::loadGameObjects(const AssetPaths& paths) {
+	// Directional light
 	{
-		Entity sun = m_registry.createDirectionalLight(DEFAULT_SUN_INTENSITY, glm::vec3(0.2f), glm::vec3(0.6f, 0.7f, -1.0f));
-		m_registry.setName(sun, "Sun");
-		m_registry.getComponent<DirectionalLightComponent>(sun)->casts_shadow = true;
-		m_sun = sun;
+		Entity dl = m_registry.createDirectionalLight(3.0f, glm::vec3(0.2f), glm::vec3(0.6f, 0.7f, -1.0f));
+		m_registry.setName(dl, "Directional Light");
+		m_registry.getComponent<DirectionalLightComponent>(dl)->casts_shadow = true;
 	}
 
 	// Create some lights with ranging colors
@@ -78,12 +64,12 @@ void SimpleScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
 			{{ half, -half, 0.0f}, n, {tile_uv, tile_uv}, t},
 		};
 		std::vector<uint32_t> floor_indices = {0, 1, 2, 0, 3, 1};
-		auto floor_mesh = resource_manager.createMesh("simple_scene::floor_mesh", floor_verts, floor_indices);
+		auto floor_mesh = m_resource_manager.createMesh("simple_scene::floor_mesh", floor_verts, floor_indices);
 
 		MaterialFactors floor_factors{};
 		floor_factors.roughness_factor = 0.3f;
 		floor_factors.metallic_factor = 0.0f;
-		auto floor_mat = resource_manager.createMaterial(
+		auto floor_mat = m_resource_manager.createMaterial(
 			"simple_scene::floor",
 			paths.grid_texture.lexically_normal(),
 			"default_normal.png",
@@ -91,7 +77,7 @@ void SimpleScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
 			"default_occlusion.png",
 			"default_emissive.png",
 			MaterialAlphaProps{AlphaMode::ALPHA_OPAQUE, 0.5f, false},
-			floor_factors, &pool, &material_layout);
+			floor_factors, &m_pool, &m_material_layout);
 
 		Entity e = m_registry.createEntity("floor");
 		auto& tc = m_registry.addComponent<TransformComponent>(e);
@@ -103,19 +89,19 @@ void SimpleScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
 
 	// Textured quad
 	{
-		auto quad_data = VeModel::loadSingleMesh(resource_manager, paths.quad_model.lexically_normal());
+		auto quad_data = VeModel::loadSingleMesh(m_resource_manager, paths.quad_model.lexically_normal());
 		if (quad_data) {
 			auto default_dir = paths.quad_model.parent_path();
-			auto mat_handle = resource_manager.createMaterial(
+			auto mat_handle = m_resource_manager.createMaterial(
 				"simple_scene::mots_quad",
 				paths.mots_texture.lexically_normal(),
 				default_dir / "default_normal.png",
 				default_dir / "default_metallic_roughness.png",
 				default_dir / "default_occlusion.png",
 				default_dir / "default_emissive.png",
-				MaterialAlphaProps{AlphaMode::MASK, 0.5f, true}, MaterialFactors{}, &pool, &material_layout);
+				MaterialAlphaProps{AlphaMode::MASK, 0.5f, true}, MaterialFactors{}, &m_pool, &m_material_layout);
 
-			Entity quad_entity = m_registry.createEntity();
+			Entity quad_entity = m_registry.createEntity("tex_quad");
 			auto& tc = m_registry.addComponent<TransformComponent>(quad_entity);
 			tc.setTranslation({0.0f, 60.0f, 40.0f});
 			tc.setScale({18.0f, 18.0f, 18.0f});
@@ -130,11 +116,11 @@ void SimpleScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
 	                         int rows, int cols,
 	                         glm::vec3 base_translation, glm::vec3 base_rotation, glm::vec3 base_scale,
 	                         float spacing_x, float spacing_y, float z_offset) {
-		auto mesh_data = VeModel::loadSingleMesh(resource_manager, model_path.lexically_normal());
+		auto mesh_data = VeModel::loadSingleMesh(m_resource_manager, model_path.lexically_normal());
 		if (!mesh_data)
 			return;
 
-		std::string stem = model_path.stem().string();
+		std::string name = model_path.stem().string();
 		for (int j = 0; j < rows; j++) {
 			for (int i = 0; i < cols; i++) {
 				float roughness = glm::max(1.0f - static_cast<float>(j) / static_cast<float>(rows - 1), 0.05f);
@@ -144,17 +130,17 @@ void SimpleScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
 				factors.roughness_factor = roughness;
 				factors.metallic_factor = metallic;
 
-				auto mat_handle = resource_manager.createMaterial(
-					"pbr_grid::" + stem + "_r" + std::to_string(j) + "_m" + std::to_string(i),
+				auto mat_handle = m_resource_manager.createMaterial(
+					"pbr_grid::" + name + "_r" + std::to_string(j) + "_m" + std::to_string(i),
 					"default_albedo.png",
 					"default_normal.png",
 					"default_mr_unit.png",
 					"default_occlusion.png",
 					"default_emissive.png",
 					MaterialAlphaProps{AlphaMode::ALPHA_OPAQUE, 0.5f, true},
-					factors, &pool, &material_layout);
+					factors, &m_pool, &m_material_layout);
 
-				Entity e = m_registry.createEntity();
+				Entity e = m_registry.createEntity(name + "_r" + std::to_string(j) + "_m" + std::to_string(i));
 				auto& tc = m_registry.addComponent<TransformComponent>(e);
 				tc.setTranslation(base_translation + glm::vec3{(float)i * spacing_x, (float)j * spacing_y, z_offset});
 				tc.setRotationEuler(base_rotation);

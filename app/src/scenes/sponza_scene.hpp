@@ -1,11 +1,7 @@
 #pragma once
+#include "VEngine/VEngine.hpp"
 #include "../asset_paths.hpp"
-#include "scene/ve_scene.hpp"
-#include "vulkan/ve_descriptors.hpp"
-#include "resources/ve_resource_manager.hpp"
-#include "resources/ve_material.hpp"
 #include <memory>
-#include <filesystem>
 
 namespace ve {
 
@@ -16,27 +12,13 @@ public:
     // variant: selects KTX2 quality preset (sponza or sponza_low (ETC1S))
     SponzaScene(VeDevice& device, VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths, const char* variant = "sponza");
 
-	~SponzaScene() override {
-		// Release before destroying game objects so we don't unload a material
-		// that is still referenced by MeshComponents during destruction
-		m_default_material_handle = ResourceHandle<VeMaterial>{};
-	}
-
     vk::raii::DescriptorSet& getDescriptorSet() override;
     glm::vec4 getDefaultAmbient() const override { return {1.0f, 1.0f, 1.0f, 0.04f}; }
 
-    void setSunIntensity(float intensity) override;
-    float getSunIntensity() const override;
-    Entity getSun() const override { return m_sun; }
-
 private:
-    void loadGameObjects(VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths, const char* variant);
-
-    static constexpr float DEFAULT_SUN_INTENSITY = 3.0f;
+    void loadGameObjects(const AssetPaths& paths, const char* variant);
 
     std::unique_ptr<VeModel> m_sponza_model;
-    ResourceHandle<VeMaterial> m_default_material_handle;
-    Entity m_sun;
 };
 
 }

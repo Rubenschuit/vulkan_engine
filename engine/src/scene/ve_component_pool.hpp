@@ -84,6 +84,9 @@ public:
 		return m_dense_to_entity[dense_idx];
 	}
 
+	// Raw entity-index array (used by View iterator for driver iteration)
+	const uint32_t* entityIndexData() const { return m_dense_to_entity.data(); }
+
 	// Get dense index for a given entity index
 	uint32_t denseIndex(uint32_t entity_index) const {
 		assert(has(entity_index));

@@ -14,10 +14,11 @@ namespace ve {
 	class VePipeline;
 	class VeMesh;
 	class MeshComponent;
-    class VeBuffer;
-    class VeDescriptorPool;
-    class VeDescriptorSetLayout;
-    class VeImage;
+	class VeBuffer;
+	class VeDescriptorPool;
+	class VeDescriptorSetLayout;
+	class VeImage;
+	class Registry;
 }
 
 namespace ve {
@@ -54,6 +55,9 @@ public:
 
 	// Invalidate cached shadow drawables (e.g. after scene switch); next render will rebuild.
 	void invalidateShadowDrawables();
+
+	// Subscribe to registry events for automatic cache invalidation.
+	void subscribeToRegistry(Registry& registry);
 
 private:
 	struct ShadowDrawable {

@@ -31,7 +31,7 @@ struct AssetPaths {
 		: project_root(root),
 		  cube_model(root / "models" / "cube.gltf"),
 		  quad_model(root / "models" / "quad.gltf"),
-		  sphere_model(root / "models" / "sphere" / "scene.gltf"),
+		  sphere_model(root / "models" / "sphere" / "sphere.gltf"),
 		  flat_vase_model(root / "models" / "flat_vase.gltf"),
 		  smooth_vase_model(root / "models" / "smooth_vase.gltf"),
 		  viking_room_model(root / "models" / "viking_room.gltf"),

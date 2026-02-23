@@ -140,17 +140,10 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 	);
 
 	auto& registry = *frame_info.registry;
-	auto& pl_pool = registry.pointLights();
-	for (uint32_t i = 0; i < pl_pool.size(); i++) {
-		uint32_t entity_idx = pl_pool.entityAt(i);
-		Entity entity = registry.entityFromIndex(entity_idx);
-		if (!registry.isActive(entity)) continue;
-		auto* transform = registry.getComponent<TransformComponent>(entity);
-		if (!transform) continue;
-		PointLightComponent& pl = pl_pool.data()[i];
+	for (auto [entity, pl, tc] : registry.view<PointLightComponent, TransformComponent>()) {
 		SimplePushConstantData push{};
-		push.position = glm::vec4{transform->getTranslation(), 1.0f};
-		push.scale = transform->getScale().x;
+		push.position = glm::vec4{tc.getTranslation(), 1.0f};
+		push.scale = tc.getScale().x;
 		push.color = glm::vec4{pl.getColor(), pl.getIntensity()};
 		push.billboard_type = 0;
 		frame_info.command_buffer.pushConstants(
@@ -164,13 +157,7 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 
 	// Celestial billboards for directional lights (sun/moon)
 	glm::vec3 cam_pos = frame_info.camera.getPosition();
-	auto& dl_pool = registry.directionalLights();
-	for (uint32_t i = 0; i < dl_pool.size(); i++) {
-		uint32_t entity_idx = dl_pool.entityAt(i);
-		Entity entity = registry.entityFromIndex(entity_idx);
-		if (!registry.isActive(entity)) continue;
-
-		DirectionalLightComponent& dl = dl_pool.data()[i];
+	for (auto [entity, dl] : registry.view<DirectionalLightComponent>()) {
 		glm::vec3 celestial_pos = cam_pos - glm::normalize(dl.direction) * CELESTIAL_DISTANCE;
 
 		SimplePushConstantData push{};
@@ -199,29 +186,20 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 	ubo.ambient_light_color.z *= ubo.ambient_light_color.w;
 
 	auto& registry = *frame_info.registry;
-	auto& pl_pool = registry.pointLights();
-	for (uint32_t i = 0; i < pl_pool.size(); i++) {
-		uint32_t entity_idx = pl_pool.entityAt(i);
-		Entity entity = registry.entityFromIndex(entity_idx);
-		if (!registry.isActive(entity))
-			continue;
-		auto* transform = registry.getComponent<TransformComponent>(entity);
-		if (!transform)
-			continue;
+	for (auto [entity, pl, tc] : registry.view<PointLightComponent, TransformComponent>()) {
 		assert(num_lights < MAX_LIGHTS && "Number of point lights exceeds MAX_LIGHTS");
 
-		PointLightComponent& pl = pl_pool.data()[i];
 		glm::vec3 color = pl.getColor();
 		float intensity = pl.getIntensity();
 
-		ubo.point_lights[num_lights].position = glm::vec4{transform->getTranslation(), pl.getRange()};
+		ubo.point_lights[num_lights].position = glm::vec4{tc.getTranslation(), pl.getRange()};
 		ubo.point_lights[num_lights].color.x = color.x * intensity;
 		ubo.point_lights[num_lights].color.y = color.y * intensity;
 		ubo.point_lights[num_lights].color.z = color.z * intensity;
 		ubo.point_lights[num_lights].color.w = intensity;
 
 		if (pl.getCastsShadow() && num_shadow_lights < MAX_POINT_SHADOW_LIGHTS) {
-			glm::vec3 light_pos = transform->getTranslation();
+			glm::vec3 light_pos = tc.getTranslation();
 			glm::vec3 scene_center = glm::vec3(0.0f, 0.0f, 0.0f);
 			glm::vec3 view_up = glm::vec3(0.0f, 1.0f, 0.0f);
 			glm::mat4 light_view = glm::lookAt(light_pos, scene_center, view_up);
@@ -246,15 +224,9 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 	// Directional lights (first shadow-casting directional gets CSM)
 	uint32_t num_dir_lights = 0;
 	bool csm_assigned = false;
-	auto& dl_pool = registry.directionalLights();
-	for (uint32_t i = 0; i < dl_pool.size(); i++) {
-		uint32_t entity_idx = dl_pool.entityAt(i);
-		Entity entity = registry.entityFromIndex(entity_idx);
-		if (!registry.isActive(entity))
-			continue;
+	for (auto [entity, dl] : registry.view<DirectionalLightComponent>()) {
 		assert(num_dir_lights < MAX_DIR_LIGHTS && "Number of directional lights exceeds MAX_DIR_LIGHTS");
 
-		DirectionalLightComponent& dl = dl_pool.data()[i];
 		glm::vec3 dir = glm::normalize(dl.direction);
 
 		ubo.dir_lights[num_dir_lights].direction = glm::vec4{dir, 0.0f};

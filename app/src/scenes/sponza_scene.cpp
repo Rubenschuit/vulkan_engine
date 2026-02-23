@@ -1,12 +1,10 @@
 #include "sponza_scene.hpp"
-#include "resources/ve_model.hpp"
-#include "scene/ve_component.hpp"
 
 namespace ve {
 
 SponzaScene::SponzaScene(VeDevice& device, VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths, const char* variant)
-    : VeScene(device, "Sponza Scene") {
-    loadGameObjects(resource_manager, pool, material_layout, paths, variant);
+    : VeScene(device, resource_manager, pool, material_layout, "Sponza Scene") {
+    loadGameObjects(paths, variant);
 }
 
 vk::raii::DescriptorSet& SponzaScene::getDescriptorSet() {
@@ -14,17 +12,7 @@ vk::raii::DescriptorSet& SponzaScene::getDescriptorSet() {
     return m_default_material_handle.get()->getDescriptorSet();
 }
 
-void SponzaScene::setSunIntensity(float intensity) {
-    auto* dl = m_registry.getComponent<DirectionalLightComponent>(m_sun);
-    if (dl) dl->intensity = intensity;
-}
-
-float SponzaScene::getSunIntensity() const {
-    const auto* dl = m_registry.getComponent<DirectionalLightComponent>(m_sun);
-    return dl ? dl->intensity : DEFAULT_SUN_INTENSITY;
-}
-
-void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescriptorPool& pool, VeDescriptorSetLayout& material_layout, const AssetPaths& paths, const char* variant) {
+void SponzaScene::loadGameObjects(const AssetPaths& paths, const char* variant) {
     glm::vec3 sponza_translation = {0.0f, 0.0f, 300.0f};
 
     // Helper: create a point light entity in Registry
@@ -45,7 +33,7 @@ void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
     // Sponza model (variant: sponza, sponza_low, sponza_high)
     {
         std::filesystem::path sponza_model_path = paths.sponza_model(variant);
-        m_sponza_model = VeModel::load(resource_manager, sponza_model_path.lexically_normal(), &pool, &material_layout);
+        m_sponza_model = VeModel::load(m_resource_manager, sponza_model_path.lexically_normal(), &m_pool, &m_material_layout);
         assert(m_sponza_model && "Failed to load Sponza model");
 
         glm::vec3 root_translation = glm::vec3{0.0f, 0.0f, -350.0f} + sponza_translation;
@@ -62,13 +50,12 @@ void SponzaScene::loadGameObjects(VeResourceManager& resource_manager, VeDescrip
         }
     }
 
-    // sponza sun light (directional)
+    // Directional light
     {
-        Entity sun = m_registry.createDirectionalLight(DEFAULT_SUN_INTENSITY, glm::vec3(1.0f),
+        Entity dl = m_registry.createDirectionalLight(3.0f, glm::vec3(1.0f),
             glm::normalize(glm::vec3(0.5f, -1.0f, -3.0f)));
-        m_registry.setName(sun, "Sun");
-        m_registry.getComponent<DirectionalLightComponent>(sun)->casts_shadow = true;
-        m_sun = sun;
+        m_registry.setName(dl, "Directional Light");
+        m_registry.getComponent<DirectionalLightComponent>(dl)->casts_shadow = true;
     }
 
     // sponza fire lights

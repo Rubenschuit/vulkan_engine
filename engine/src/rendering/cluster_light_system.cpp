@@ -152,21 +152,14 @@ uint32_t ClusterLightSystem::uploadLightData(VeFrameInfo& frame_info) {
 	uint32_t count = 0;
 
 	auto& registry = *frame_info.registry;
-	auto& pl_pool = registry.pointLights();
 
 	// Must iterate in same order as LightSystem::updateUniformBuffer()
-	// so light indices match for shadow lookups.
-	for (uint32_t i = 0; i < pl_pool.size() && count < MAX_CLUSTER_LIGHTS; i++) {
-		uint32_t entity_idx = pl_pool.entityAt(i);
-		Entity entity = registry.entityFromIndex(entity_idx);
-		if (!registry.isActive(entity)) continue;
-		auto* transform = registry.getComponent<TransformComponent>(entity);
-		if (!transform) continue;
-
-		PointLightComponent& pl = pl_pool.data()[i];
+	for (auto [entity, pl, tc] : registry.view<PointLightComponent, TransformComponent>()) {
+		if (count >= MAX_CLUSTER_LIGHTS)
+			break;
 		glm::vec3 color = pl.getColor();
 		float intensity = pl.getIntensity();
-		buffer[count].position = glm::vec4{transform->getTranslation(), pl.getEffectiveRange()};
+		buffer[count].position = glm::vec4{tc.getTranslation(), pl.getEffectiveRange()};
 		buffer[count].color.x = color.x * intensity;
 		buffer[count].color.y = color.y * intensity;
 		buffer[count].color.z = color.z * intensity;

@@ -1,13 +1,13 @@
 #include "rendering/ve_frame_info.hpp"
 #include "pch.hpp"
 #include "ui/imgui_layer.hpp"
+#include "ui/editor_state.hpp"
 #include "platform/ve_window.hpp"
 #include "vulkan/ve_device.hpp"
 #include "rendering/ve_renderer.hpp"
 
-#include <cmath>
-#include <chrono>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_vulkan.h>
 
@@ -49,11 +49,13 @@ ImGuiLayer::ImGuiLayer(VeWindow& window, VeDevice& device, VeRenderer& renderer)
     // Create ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-	// Set style
-	//ImGui::StyleColorsLight();
-    //ImGui::StyleColorsDark();
-	ImGui::StyleColorsClassic();
 
+	// Enable docking
+	ImGuiIO& io = ImGui::GetIO();
+	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+	// Set style
+	applyEditorTheme();
 
     // Init GLFW backend
     ImGui_ImplGlfw_InitForVulkan(window.getGLFWwindow(), true);
@@ -89,6 +91,7 @@ ImGuiLayer::ImGuiLayer(VeWindow& window, VeDevice& device, VeRenderer& renderer)
 }
 
 ImGuiLayer::~ImGuiLayer() {
+	unregisterViewportImage();
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
@@ -104,7 +107,7 @@ void ImGuiLayer::beginFrame() {
     ImGui::NewFrame();
 }
 
-void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd) {
+void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd, bool clear_target) {
     ImGui::Render();
     ImDrawData* draw_data = ImGui::GetDrawData();
     // Render on top of the current swapchain image view
@@ -112,10 +115,11 @@ void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd) {
     const vk::RenderingAttachmentInfo color_attachment{
         .imageView = color_view,
         .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-        .loadOp = vk::AttachmentLoadOp::eLoad,
-        .storeOp = vk::AttachmentStoreOp::eStore
+        .loadOp = clear_target ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad,
+        .storeOp = vk::AttachmentStoreOp::eStore,
+        .clearValue = vk::ClearColorValue(0.1f, 0.1f, 0.1f, 1.0f)
     };
-    const auto extent = m_renderer.getExtent();
+    const auto extent = m_renderer.getSwapChainExtent();
 
     const vk::RenderingInfo rendering_info{
         .renderArea = { {0, 0}, extent },
@@ -128,127 +132,203 @@ void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd) {
     cmd.endRendering();
 }
 
-void ImGuiLayer::renderEngineWindows(UIContext& context) {
+void ImGuiLayer::renderDockSpace() {
+	ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking |
+		ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
+		ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+		ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
+		ImGuiWindowFlags_NoBackground;
 
-	if (!context.show_performance) return;
+	const ImGuiViewport* viewport = ImGui::GetMainViewport();
+	ImGui::SetNextWindowPos(viewport->WorkPos);
+	ImGui::SetNextWindowSize(viewport->WorkSize);
+	ImGui::SetNextWindowViewport(viewport->ID);
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 
-	static auto s_last_time = std::chrono::high_resolution_clock::now();
-	auto now = std::chrono::high_resolution_clock::now();
-	float dt = std::chrono::duration<float, std::chrono::seconds::period>(now - s_last_time).count();
-	s_last_time = now;
+	ImGui::Begin("DockSpace", nullptr, window_flags);
+	ImGui::PopStyleVar(3);
 
-	static int frame_count = 0;
-	static float fps = 0.0f;
-	static float frame_time_ms = 0.0f;
-	static float cpu_time_ms = 0.0f;
-	static float gpu_time_ms = 0.0f;
-	static float compute_gpu_time_ms = 0.0f;
-	static float gpu_overlap_ms = 0.0f;
-	static float cpu_time_sum = 0.0f;
-	static float gpu_time_sum = 0.0f;
-	static float compute_gpu_time_sum = 0.0f;
-	static float gpu_overlap_sum = 0.0f;
-	static float accumulated_dt = 0.0f;
-	static float fps_history[120] = {};
-	static int history_offset = 0;
-	static float graph_update_timer = 0.0f;
-	static int graph_frames = 0;
+	ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
+	ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
 
-	// Text display updates (every 60 frames)
-	cpu_time_sum += context.cpu_time;
-	gpu_time_sum += context.gpu_time;
-	compute_gpu_time_sum += context.compute_gpu_time;
-	gpu_overlap_sum += context.gpu_overlap;
-	accumulated_dt += dt;
-	frame_count++;
+	// Set default layout if dockspace has no configured layout
+	ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockspace_id);
+	if (!node || !node->ChildNodes[0]) {
+		ImGui::DockBuilderRemoveNode(dockspace_id);
+		ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+		ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->WorkSize);
 
-	if (frame_count >= 60) {
-		fps = (accumulated_dt > 0.0f) ? (60.0f / accumulated_dt) : 0.0f;
-		frame_time_ms = (accumulated_dt / 60.0f) * 1000.0f;
-		cpu_time_ms = cpu_time_sum / 60.0f;
-		gpu_time_ms = gpu_time_sum / 60.0f;
-		compute_gpu_time_ms = compute_gpu_time_sum / 60.0f;
-		gpu_overlap_ms = gpu_overlap_sum / 60.0f;
-		frame_count = 0;
-		cpu_time_sum = 0.0f;
-		gpu_time_sum = 0.0f;
-		compute_gpu_time_sum = 0.0f;
-		gpu_overlap_sum = 0.0f;
-		accumulated_dt = 0.0f;
+		ImGuiID dock_main = dockspace_id;
+		ImGuiID dock_left = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Left, 0.28f, nullptr, &dock_main);
+		ImGuiID dock_right = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.22f, nullptr, &dock_main);
+		ImGuiID dock_left_bottom = ImGui::DockBuilderSplitNode(dock_left, ImGuiDir_Down, 0.5f, nullptr, &dock_left);
+		ImGuiID dock_right_bottom = ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Down, 0.45f, nullptr, &dock_right);
+
+		ImGui::DockBuilderDockWindow("Scene Hierarchy", dock_left);
+		ImGui::DockBuilderDockWindow("Settings", dock_left);
+		ImGui::DockBuilderDockWindow("Viewport", dock_main);
+		ImGui::DockBuilderDockWindow("Inspector", dock_left_bottom);
+		ImGui::DockBuilderDockWindow("Graphics", dock_right);
+		ImGui::DockBuilderDockWindow("Performance", dock_right_bottom);
+		ImGui::DockBuilderFinish(dockspace_id);
 	}
 
-	// Graph updates (every 0.1 seconds)
-	graph_update_timer += dt;
-	graph_frames++;
-	if (graph_update_timer >= 0.1f) {
-		fps_history[history_offset] = (float)graph_frames / graph_update_timer;
-		history_offset = (history_offset + 1) % 120;
-		graph_update_timer = 0.0f;
-		graph_frames = 0;
-	}
-
-	ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 10.0f, 10.0f), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
-
-	ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs;
-	if (context.visible) {
-		flags = ImGuiWindowFlags_AlwaysAutoResize;
-	}
-
-	if (ImGui::Begin("Performance", &context.show_performance, flags)) {
-		ImGui::Text("FPS: %.1f", fps);
-		ImGui::Text("Frame Time: %.2f ms", frame_time_ms);
-		ImGui::Text("CPU Time:       %.2f ms", cpu_time_ms);
-		ImGui::Text("GPU Graphics:   %.2f ms", gpu_time_ms);
-		ImGui::Text("GPU Compute:    %.2f ms", compute_gpu_time_ms);
-		if (gpu_overlap_ms > 0.001f) {
-			ImGui::Text("GPU Overlap:    %.2f ms", gpu_overlap_ms);
-		}
-
-		float max_fps = 0.0f;
-		for (float f : fps_history) if (f > max_fps) max_fps = f;
-		if (max_fps < 60.0f) max_fps = 60.0f;
-
-		// Axis labels and graph
-		ImGui::BeginGroup();
-		ImGui::Text("%.0f", max_fps);
-		ImGui::Dummy(ImVec2(0.0f, 42.0f)); // Spacer
-		ImGui::Text("0");
-		ImGui::EndGroup();
-		ImGui::SameLine();
-
-		ImGui::PlotLines("##FPS", fps_history, 120, history_offset, "FPS", 0.0f, max_fps * 1.1f, ImVec2(250, 80));
-
-		ImGui::Separator();
-		// Culling stats
-		uint32_t culled = (context.cull_total_objects >= context.cull_visible_objects)
-			? (context.cull_total_objects - context.cull_visible_objects)
-			: 0;
-		ImGui::Text("Objects: %u total, %u visible, %u culled",
-			context.cull_total_objects, context.cull_visible_objects, culled);
-		ImGui::Text("Triangles: %u", context.visible_triangles);
-		ImGui::Text("Lights: %u point, %u directional",
-			context.num_point_lights, context.num_directional_lights);
-
-		ImGui::Separator();
-		//resolution
-		auto extent = m_renderer.getExtent();
-		ImGui::Text("Resolution: %d x %d", extent.width, extent.height);
-	}
 	ImGui::End();
 }
 
-void ImGuiLayer::renderUI(UIContext& context, std::function<void(UIContext&)> appUiCallback) {
+void ImGuiLayer::applyEditorTheme() {
+	ImGui::StyleColorsDark();
+	ImGuiStyle& style = ImGui::GetStyle();
+	style.WindowRounding = 4.0f;
+	style.FrameRounding = 3.0f;
+	style.GrabRounding = 3.0f;
+	style.TabRounding = 3.0f;
+	style.ChildRounding = 3.0f;
+	style.PopupRounding = 3.0f;
+	style.ScrollbarRounding = 3.0f;
+	style.FrameBorderSize = 0.0f;
+	style.WindowBorderSize = 1.0f;
+	style.WindowPadding = ImVec2(8, 8);
+	style.FramePadding = ImVec2(5, 3);
+	style.ItemSpacing = ImVec2(8, 4);
+
+	const ImVec4 orange       = ImVec4(0.88f, 0.40f, 0.10f, 1.0f);
+	const ImVec4 orange_hover = ImVec4(0.98f, 0.48f, 0.14f, 1.0f);
+	const ImVec4 orange_dim   = ImVec4(0.65f, 0.30f, 0.07f, 1.0f);
+	const ImVec4 orange_bg    = ImVec4(0.88f, 0.40f, 0.10f, 0.40f);
+
+	auto& colors = style.Colors;
+
+	// Backgrounds
+	colors[ImGuiCol_WindowBg]       = ImVec4(0.05f, 0.05f, 0.06f, 1.0f);
+	colors[ImGuiCol_ChildBg]        = ImVec4(0.05f, 0.05f, 0.06f, 1.0f);
+	colors[ImGuiCol_PopupBg]        = ImVec4(0.04f, 0.04f, 0.05f, 0.95f);
+	colors[ImGuiCol_DockingEmptyBg] = ImVec4(0.03f, 0.03f, 0.03f, 1.0f);
+	colors[ImGuiCol_MenuBarBg]      = ImVec4(0.07f, 0.07f, 0.08f, 1.0f);
+
+	// Title bar
+	colors[ImGuiCol_TitleBg]          = ImVec4(0.03f, 0.03f, 0.04f, 1.0f);
+	colors[ImGuiCol_TitleBgActive]    = ImVec4(0.05f, 0.05f, 0.06f, 1.0f);
+	colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.03f, 0.03f, 0.04f, 0.75f);
+
+	// Tabs
+	colors[ImGuiCol_Tab]                 = ImVec4(0.07f, 0.07f, 0.08f, 1.0f);
+	colors[ImGuiCol_TabHovered]          = orange;
+	colors[ImGuiCol_TabSelected]         = orange_dim;
+	colors[ImGuiCol_TabSelectedOverline] = orange;
+	colors[ImGuiCol_TabDimmed]           = ImVec4(0.05f, 0.05f, 0.06f, 1.0f);
+	colors[ImGuiCol_TabDimmedSelected]   = ImVec4(0.10f, 0.10f, 0.11f, 1.0f);
+
+	// Headers
+	colors[ImGuiCol_Header]        = orange_bg;
+	colors[ImGuiCol_HeaderHovered] = ImVec4(0.88f, 0.40f, 0.10f, 0.65f);
+	colors[ImGuiCol_HeaderActive]  = orange;
+
+	// Frame backgrounds
+	colors[ImGuiCol_FrameBg]        = ImVec4(0.10f, 0.10f, 0.11f, 1.0f);
+	colors[ImGuiCol_FrameBgHovered] = ImVec4(0.14f, 0.14f, 0.15f, 1.0f);
+	colors[ImGuiCol_FrameBgActive]  = ImVec4(0.18f, 0.18f, 0.19f, 1.0f);
+
+	// Buttons
+	colors[ImGuiCol_Button]        = ImVec4(0.12f, 0.12f, 0.13f, 1.0f);
+	colors[ImGuiCol_ButtonHovered] = orange;
+	colors[ImGuiCol_ButtonActive]  = orange_hover;
+
+	// Sliders / grabs
+	colors[ImGuiCol_SliderGrab]       = orange_dim;
+	colors[ImGuiCol_SliderGrabActive] = orange;
+	colors[ImGuiCol_CheckMark]        = orange;
+
+	// Scrollbar
+	colors[ImGuiCol_ScrollbarBg]          = ImVec4(0.04f, 0.04f, 0.05f, 0.5f);
+	colors[ImGuiCol_ScrollbarGrab]        = ImVec4(0.16f, 0.16f, 0.17f, 1.0f);
+	colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.24f, 0.24f, 0.25f, 1.0f);
+	colors[ImGuiCol_ScrollbarGrabActive]  = orange_dim;
+
+	// Separators
+	colors[ImGuiCol_Separator]        = ImVec4(0.12f, 0.12f, 0.13f, 1.0f);
+	colors[ImGuiCol_SeparatorHovered] = orange;
+	colors[ImGuiCol_SeparatorActive]  = orange_hover;
+
+	// Resize grip
+	colors[ImGuiCol_ResizeGrip]        = ImVec4(0.88f, 0.40f, 0.10f, 0.20f);
+	colors[ImGuiCol_ResizeGripHovered] = ImVec4(0.88f, 0.40f, 0.10f, 0.60f);
+	colors[ImGuiCol_ResizeGripActive]  = orange;
+
+	// Docking
+	colors[ImGuiCol_DockingPreview] = ImVec4(0.88f, 0.40f, 0.10f, 0.70f);
+
+	// Text
+	colors[ImGuiCol_Text]         = ImVec4(0.92f, 0.92f, 0.92f, 1.0f);
+	colors[ImGuiCol_TextDisabled] = ImVec4(0.45f, 0.45f, 0.45f, 1.0f);
+
+	// Borders
+	colors[ImGuiCol_Border]       = ImVec4(0.12f, 0.12f, 0.13f, 1.0f);
+	colors[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+
+	// Nav / selection
+	colors[ImGuiCol_NavHighlight]   = orange;
+	colors[ImGuiCol_TextSelectedBg] = ImVec4(0.88f, 0.40f, 0.10f, 0.30f);
+
+	// Plot
+	colors[ImGuiCol_PlotLines]            = orange;
+	colors[ImGuiCol_PlotLinesHovered]     = orange_hover;
+	colors[ImGuiCol_PlotHistogram]        = orange;
+	colors[ImGuiCol_PlotHistogramHovered] = orange_hover;
+
+	// Table
+	colors[ImGuiCol_TableHeaderBg]     = ImVec4(0.08f, 0.08f, 0.09f, 1.0f);
+	colors[ImGuiCol_TableBorderStrong] = ImVec4(0.12f, 0.12f, 0.13f, 1.0f);
+	colors[ImGuiCol_TableBorderLight]  = ImVec4(0.08f, 0.08f, 0.09f, 1.0f);
+	colors[ImGuiCol_TableRowBg]        = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+	colors[ImGuiCol_TableRowBgAlt]     = ImVec4(1.0f, 1.0f, 1.0f, 0.02f);
+}
+
+void ImGuiLayer::renderUI(UIContext& context, EditorState& editor_state,
+						   std::function<void(UIContext&)> appUiCallback) {
 	beginFrame();
-	renderEngineWindows(context);
-	if (context.visible) {
-		if (appUiCallback) {
+
+	if (editor_state.editor_mode) {
+		renderDockSpace();
+		if (appUiCallback)
 			appUiCallback(context);
-		}
+
+		// In editor mode: transition swapchain for ImGui, then clear-render onto it
+		m_renderer.beginEditorUIRender(m_renderer.getCurrentCommandBuffer());
+		endFrame(m_renderer.getCurrentCommandBuffer(), true);
+		m_renderer.endEditorUIRender(m_renderer.getCurrentCommandBuffer());
+	} else {
+		// Fullscreen mode: render app callback (performance panel, etc.)
+		if (appUiCallback)
+			appUiCallback(context);
+		endFrame(m_renderer.getCurrentCommandBuffer());
 	}
-	endFrame(m_renderer.getCurrentCommandBuffer());
+}
+
+void ImGuiLayer::registerViewportImage(VkSampler sampler, VkImageView image_view, VkImageLayout layout) {
+	unregisterViewportImage();
+	m_viewport_texture_id = ImGui_ImplVulkan_AddTexture(sampler, image_view, layout);
+}
+
+void ImGuiLayer::unregisterViewportImage() {
+	if (m_viewport_texture_id != VK_NULL_HANDLE) {
+		ImGui_ImplVulkan_RemoveTexture(m_viewport_texture_id);
+		m_viewport_texture_id = VK_NULL_HANDLE;
+	}
 }
 
 void ImGuiLayer::recreatePipeline() {
+	// Viewport texture will be invalidated by ImGui_ImplVulkan_Shutdown
+	m_viewport_texture_id = VK_NULL_HANDLE;
+
+	// Save main viewport's platform handle — ImGui_ImplVulkan_Shutdown() calls
+	// DestroyPlatformWindows() which clears PlatformHandle on all viewports,
+	// but the GLFW window is still alive (only the Vulkan backend is being recreated).
+	ImGuiViewport* main_vp = ImGui::GetMainViewport();
+	void* saved_platform_handle = main_vp->PlatformHandle;
+
 	ImGui_ImplVulkan_Shutdown();
 
 	ImGui_ImplVulkan_InitInfo init_info{};
@@ -277,6 +357,9 @@ void ImGuiLayer::recreatePipeline() {
 	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 
 	ImGui_ImplVulkan_Init(&init_info);
+
+	// Restore platform handle so GLFW backend can still access the window
+	main_vp->PlatformHandle = saved_platform_handle;
 }
 
 void ImGuiLayer::uploadFonts() {}

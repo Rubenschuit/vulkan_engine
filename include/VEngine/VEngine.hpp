@@ -1,7 +1,6 @@
 // Included by application using VEngine
 #pragma once
 
-#include "application/ve_entry_point.hpp"
 #include "application/ve_application.hpp"
 
 #include "ve_export.hpp" // for VENGINE_API
@@ -42,3 +41,10 @@
 #include "rendering/fireworks_system.hpp"
 #include "rendering/bloom_system.hpp"
 #include "rendering/post_process_system.hpp"
+#include "rendering/cluster_light_system.hpp"
+#include "rendering/gtao_system.hpp"
+#include "rendering/shadow_mask_system.hpp"
+
+#include "resources/ve_material_properties.hpp"
+#include "utils/ve_random.hpp"
+#include "ui/editor.hpp"

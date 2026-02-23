@@ -1,9 +1,5 @@
 #pragma once
 #include "VEngine/VEngine.hpp"
-#include "rendering/cluster_light_system.hpp"
-#include "rendering/depth_prepass_system.hpp"
-#include "rendering/gtao_system.hpp"
-#include "rendering/shadow_mask_system.hpp"
 #include "asset_paths.hpp"
 #include "scenes/bistro_scene.hpp"
 #include "scenes/gltf_scene.hpp"
@@ -32,12 +28,11 @@ private:
 
 	void initSystems();
 	void initUI();
-	void loadGameObjects();
 
 	void updateParticles(InputActions& actions);
 	void renderAppWindows();
-	void renderControlsWindow();
 	void recreatePipelines();
+	void recreateResolutionDependentSystems();
 
 	AssetPaths m_paths;
 
@@ -71,9 +66,6 @@ private:
 		glm::vec3 ambient_light_color = glm::vec3(1.0f, 1.0f, 1.0f);
 		float ambient_light_intensity = 0.006f;
 
-		// Sun intensity (per scene; initialised from active scene in loadScene)
-		float sun_intensity = 0.0f;
-
 		// clustered lighting
 		bool cluster_enabled = true;
 
@@ -101,6 +93,7 @@ private:
 		int emit_count = 1000;
 	};
 	SandboxUIContext ui_actions;
+	std::unique_ptr<Editor> m_editor;
 
 	// Scenes - dynamically loaded/unloaded based on active selection
 	std::unique_ptr<VeScene> m_active_scene;

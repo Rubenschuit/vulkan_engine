@@ -8,7 +8,12 @@
 
 namespace ve {
 
-Registry::Registry() = default;
+Registry::Registry() {
+	m_events.subscribe<DeleteEntityRequest>([this](const DeleteEntityRequest& req) {
+		m_pending_deletions.push_back(req);
+	});
+}
+
 Registry::~Registry() = default;
 
 // ── Entity lifecycle ────────────────────────────────────────────────────────
@@ -27,15 +32,27 @@ Entity Registry::createEntity(const std::string& name) {
 	auto& meta = m_meta[index];
 	meta.name = name;
 	meta.active = true;
+	meta.alive = true;
 	// generation was already incremented on destroy (or is 0 for fresh slots)
 
 	m_alive_count++;
-	return Entity(index, meta.generation);
+	Entity e(index, meta.generation);
+	m_events.emit(EntityCreatedEvent{e});
+	return e;
 }
 
 void Registry::destroyEntity(Entity e) {
 	assert(isAlive(e) && "Destroying dead entity");
 	uint32_t idx = e.index();
+
+	// Emit events before teardown so subscribers can still inspect the entity
+	m_events.emit(EntityDestroyedEvent{e});
+	if (m_meshes.has(idx))
+		m_events.emit(ComponentRemovedEvent<MeshComponent>{e});
+	if (m_point_lights.has(idx))
+		m_events.emit(ComponentRemovedEvent<PointLightComponent>{e});
+	if (m_directional_lights.has(idx))
+		m_events.emit(ComponentRemovedEvent<DirectionalLightComponent>{e});
 
 	// Adjust active light counters before removing components
 	if (m_meta[idx].active) {
@@ -94,10 +111,50 @@ void Registry::destroyEntity(Entity e) {
 	// Increment generation to invalidate outstanding Entity handles
 	m_meta[idx].generation = static_cast<uint16_t>((m_meta[idx].generation + 1) & Entity::GEN_MASK);
 	m_meta[idx].active = false;
+	m_meta[idx].alive = false;
 	m_meta[idx].name.clear();
 
 	m_free_indices.push_back(idx);
 	m_alive_count--;
+}
+
+void Registry::destroyEntityRecursive(Entity e) {
+	if (!isAlive(e))
+		return;
+
+	// Collect entire subtree first
+	std::vector<Entity> to_destroy;
+	std::vector<Entity> stack = {e};
+	while (!stack.empty()) {
+		Entity cur = stack.back();
+		stack.pop_back();
+		to_destroy.push_back(cur);
+		Entity child = firstChild(cur);
+		while (!child.isNull()) {
+			stack.push_back(child);
+			child = nextSibling(child);
+		}
+	}
+
+	// Destroy leaves first
+	for (auto it = to_destroy.rbegin(); it != to_destroy.rend(); ++it)
+		destroyEntity(*it);
+}
+
+void Registry::processPendingDeletions() {
+	if (m_pending_deletions.empty())
+		return;
+	// Move to local to allow re-entrant emit during destruction
+	auto deletions = std::move(m_pending_deletions);
+	m_pending_deletions.clear();
+	for (auto& req : deletions) {
+		if (!isAlive(req.entity))
+			continue;
+		if (req.recursive)
+			destroyEntityRecursive(req.entity);
+		else
+			destroyEntity(req.entity);
+	}
 }
 
 bool Registry::isAlive(Entity e) const {
@@ -107,6 +164,12 @@ bool Registry::isAlive(Entity e) const {
 	if (idx >= m_meta.size())
 		return false;
 	return m_meta[idx].generation == e.generation();
+}
+
+bool Registry::isAliveAtIndex(uint32_t index) const {
+	if (index >= m_meta.size())
+		return false;
+	return m_meta[index].alive;
 }
 
 // ── Entity metadata ─────────────────────────────────────────────────────────

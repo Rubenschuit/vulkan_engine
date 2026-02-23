@@ -10,6 +10,7 @@ namespace ve {
 VeRenderer::VeRenderer(VeDevice& device, VeWindow& window) : m_ve_device(device), m_ve_window(window) {
 	m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, m_ve_window.getExtent(), m_desired_num_samples, m_present_mode, m_hdr_enabled);
 	createCommandBuffers();
+	createViewportResources();
 
 	// Create query pool for GPU timing (4 per frame: compute start/end, graphics start/end)
 	vk::QueryPoolCreateInfo query_pool_info{
@@ -23,12 +24,20 @@ VeRenderer::VeRenderer(VeDevice& device, VeWindow& window) : m_ve_device(device)
 
 VeRenderer::~VeRenderer() {}
 
-float VeRenderer::getExtentAspectRatio() const { return m_ve_swap_chain->getExtentAspectRatio(); }
+float VeRenderer::getExtentAspectRatio() const {
+	auto extent = getExtent();
+	return static_cast<float>(extent.width) / static_cast<float>(extent.height);
+}
 vk::Format VeRenderer::getSwapChainImageFormat() const { return m_ve_swap_chain->getSwapChainImageFormat(); }
 vk::ColorSpaceKHR VeRenderer::getSwapChainColorSpace() const { return m_ve_swap_chain->getSwapChainColorSpace(); }
 vk::Format VeRenderer::getOffscreenImageFormat() const { return m_ve_swap_chain->getOffscreenImageFormat(); }
 size_t VeRenderer::getImageCount() const { return m_ve_swap_chain->getImageCount(); }
-vk::Extent2D VeRenderer::getExtent() const { return m_ve_swap_chain->getSwapChainExtent(); }
+vk::Extent2D VeRenderer::getExtent() const {
+	if (m_scene_render_extent.width > 0 && m_scene_render_extent.height > 0)
+		return m_scene_render_extent;
+	return m_ve_swap_chain->getSwapChainExtent();
+}
+vk::Extent2D VeRenderer::getSwapChainExtent() const { return m_ve_swap_chain->getSwapChainExtent(); }
 uint32_t VeRenderer::getCurrentFrame() const {
 	assert(m_is_frame_started && "Frame is not in progress");
 	return m_ve_swap_chain->getCurrentFrame();
@@ -81,6 +90,10 @@ void VeRenderer::recreateSwapChain() {
 		m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent, m_desired_num_samples, m_present_mode, m_hdr_enabled, old_swap_chain);
 	}
 	m_swap_chain_needs_recreation = false;
+	// Re-apply scene render extent if editor mode has a custom extent set
+	if (m_scene_render_extent.width > 0 && m_scene_render_extent.height > 0)
+		m_ve_swap_chain->resizeOffscreenResources(m_scene_render_extent);
+	createViewportResources();
 	VE_LOGI("Swap chain recreated: " << extent.width << "x" << extent.height);
 }
 
@@ -219,7 +232,7 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
 	assert(m_is_frame_started && "Can't begin depth pre-pass while frame is not in progress");
 	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin depth pre-pass on command buffer from a different frame");
 
-	auto extent = m_ve_swap_chain->getSwapChainExtent();
+	auto extent = getExtent();
 
 	vk::RenderingAttachmentInfo depth_attachment_info = {
 		.imageView = *m_ve_swap_chain->getDepthImageView(),
@@ -290,7 +303,7 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer, bool 
 	assert(m_is_frame_started && "Can't call beginRender while frame is not in progress");
 	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin render on command buffer from a different frame");
 
-	auto extent = m_ve_swap_chain->getSwapChainExtent();
+	auto extent = getExtent();
 	auto height = extent.height;
 	auto width = extent.width;
 
@@ -381,13 +394,104 @@ void VeRenderer::endSceneRender(vk::raii::CommandBuffer& command_buffer) {
 	);
 }
 
-void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer) {
+void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode) {
 	assert(m_is_frame_started && "Can't call beginPostProcessRender while frame is not in progress");
 	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin post-process on command buffer from a different frame");
 
-	auto extent = m_ve_swap_chain->getSwapChainExtent();
+	if (editor_mode && m_viewport_image) {
+		// Editor mode: render to viewport image
+		auto vp_extent = m_viewport_image->getExtent2D();
 
-	// Transition the swap chain image to eColorAttachmentOptimal
+		m_viewport_image->transitionImageLayout(
+			command_buffer,
+			vk::ImageLayout::eUndefined,
+			vk::ImageLayout::eColorAttachmentOptimal,
+			{},
+			vk::AccessFlagBits2::eColorAttachmentWrite,
+			vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+			vk::PipelineStageFlagBits2::eColorAttachmentOutput
+		);
+
+		vk::RenderingAttachmentInfo color_attachment_info = {
+			.sType = vk::StructureType::eRenderingAttachmentInfo,
+			.imageView = *m_viewport_image->getImageView(),
+			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+			.loadOp = vk::AttachmentLoadOp::eClear,
+			.storeOp = vk::AttachmentStoreOp::eStore,
+			.clearValue = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f)
+		};
+
+		vk::RenderingInfo rendering_info = {
+			.renderArea = { .offset = { 0, 0 }, .extent = vp_extent },
+			.layerCount = 1,
+			.colorAttachmentCount = 1,
+			.pColorAttachments = &color_attachment_info
+		};
+
+		command_buffer.beginRendering(rendering_info);
+		command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(vp_extent.width), static_cast<float>(vp_extent.height), 0.0f, 1.0f));
+		command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), vp_extent));
+	} else {
+		// Fullscreen mode: render to swapchain (current behavior)
+		auto extent = m_ve_swap_chain->getSwapChainExtent();
+
+		m_ve_swap_chain->transitionImageLayout(
+			command_buffer,
+			m_current_image_index,
+			vk::ImageLayout::eUndefined,
+			vk::ImageLayout::eColorAttachmentOptimal,
+			{},
+			vk::AccessFlagBits2::eColorAttachmentWrite,
+			vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+			vk::PipelineStageFlagBits2::eColorAttachmentOutput
+		);
+
+		vk::RenderingAttachmentInfo color_attachment_info = {
+			.sType = vk::StructureType::eRenderingAttachmentInfo,
+			.imageView = *m_ve_swap_chain->getSwapChainImageViews()[m_current_image_index],
+			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+			.loadOp = vk::AttachmentLoadOp::eClear,
+			.storeOp = vk::AttachmentStoreOp::eStore,
+			.clearValue = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f)
+		};
+
+		vk::RenderingInfo rendering_info = {
+			.renderArea = { .offset = { 0, 0 }, .extent = extent },
+			.layerCount = 1,
+			.colorAttachmentCount = 1,
+			.pColorAttachments = &color_attachment_info
+		};
+
+		command_buffer.beginRendering(rendering_info);
+		command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f));
+		command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), extent));
+	}
+}
+
+void VeRenderer::endPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode) {
+	assert(m_is_frame_started && "Can't call endPostProcessRender while frame is not in progress");
+	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end post-process on command buffer from a different frame");
+
+	command_buffer.endRendering();
+
+	if (editor_mode && m_viewport_image) {
+		// Transition viewport image to shader read for ImGui sampling
+		m_viewport_image->transitionImageLayout(
+			command_buffer,
+			vk::ImageLayout::eColorAttachmentOptimal,
+			vk::ImageLayout::eShaderReadOnlyOptimal,
+			vk::AccessFlagBits2::eColorAttachmentWrite,
+			vk::AccessFlagBits2::eShaderRead,
+			vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+			vk::PipelineStageFlagBits2::eFragmentShader
+		);
+	}
+}
+
+void VeRenderer::beginEditorUIRender(vk::raii::CommandBuffer& command_buffer) {
+	assert(m_is_frame_started && "Can't call beginEditorUIRender while frame is not in progress");
+
+	// Transition swapchain for ImGui rendering
 	m_ve_swap_chain->transitionImageLayout(
 		command_buffer,
 		m_current_image_index,
@@ -398,33 +502,110 @@ void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer)
 		vk::PipelineStageFlagBits2::eColorAttachmentOutput,
 		vk::PipelineStageFlagBits2::eColorAttachmentOutput
 	);
-
-	vk::RenderingAttachmentInfo color_attachment_info = {
-		.sType = vk::StructureType::eRenderingAttachmentInfo,
-		.imageView = *m_ve_swap_chain->getSwapChainImageViews()[m_current_image_index],
-		.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-		.loadOp = vk::AttachmentLoadOp::eClear,
-		.storeOp = vk::AttachmentStoreOp::eStore,
-		.clearValue = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f)
-	};
-
-	vk::RenderingInfo rendering_info = {
-		.renderArea = { .offset = { 0, 0 }, .extent = extent },
-		.layerCount = 1,
-		.colorAttachmentCount = 1,
-		.pColorAttachments = &color_attachment_info
-	};
-
-	command_buffer.beginRendering(rendering_info);
-	command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f));
-	command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), extent));
 }
 
-void VeRenderer::endPostProcessRender(vk::raii::CommandBuffer& command_buffer) {
-	assert(m_is_frame_started && "Can't call endPostProcessRender while frame is not in progress");
-	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end post-process on command buffer from a different frame");
+void VeRenderer::endEditorUIRender(vk::raii::CommandBuffer& /*command_buffer*/) {
+	// Nothing extra needed — transitionToPresent handles the final transition
+}
 
-	command_buffer.endRendering();
+void VeRenderer::createViewportResources() {
+	auto extent = m_ve_swap_chain->getSwapChainExtent();
+	auto format = m_ve_swap_chain->getSwapChainImageFormat();
+
+	m_viewport_image = std::make_unique<VeImage>(
+		m_ve_device,
+		extent.width, extent.height,
+		vk::SampleCountFlagBits::e1,
+		format,
+		vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		vk::ImageAspectFlagBits::eColor,
+		false, 1
+	);
+
+	// Transition to SHADER_READ_ONLY so it's safe to sample before first render
+	m_viewport_image->transitionImageLayout(
+		vk::ImageLayout::eUndefined,
+		vk::ImageLayout::eShaderReadOnlyOptimal,
+		{},
+		vk::AccessFlagBits2::eShaderRead,
+		vk::PipelineStageFlagBits2::eTopOfPipe,
+		vk::PipelineStageFlagBits2::eFragmentShader
+	);
+
+	if (!*m_viewport_sampler) {
+		vk::SamplerCreateInfo sampler_info{
+			.magFilter = vk::Filter::eLinear,
+			.minFilter = vk::Filter::eLinear,
+			.mipmapMode = vk::SamplerMipmapMode::eLinear,
+			.addressModeU = vk::SamplerAddressMode::eClampToEdge,
+			.addressModeV = vk::SamplerAddressMode::eClampToEdge,
+			.addressModeW = vk::SamplerAddressMode::eClampToEdge,
+			.mipLodBias = 0.0f,
+			.anisotropyEnable = vk::False,
+			.maxAnisotropy = 1.0f,
+			.compareEnable = vk::False,
+			.compareOp = vk::CompareOp::eAlways,
+			.minLod = 0.0f,
+			.maxLod = 1.0f,
+			.borderColor = vk::BorderColor::eIntOpaqueBlack,
+			.unnormalizedCoordinates = vk::False
+		};
+		m_viewport_sampler = vk::raii::Sampler(m_ve_device.getDevice(), sampler_info);
+	}
+}
+
+VkImageView VeRenderer::getViewportImageView() const {
+	return m_viewport_image ? static_cast<VkImageView>(*m_viewport_image->getImageView()) : VK_NULL_HANDLE;
+}
+
+VkSampler VeRenderer::getViewportSampler() const {
+	return *m_viewport_sampler ? static_cast<VkSampler>(*m_viewport_sampler) : VK_NULL_HANDLE;
+}
+
+void VeRenderer::resizeSceneRender(uint32_t w, uint32_t h) {
+	if (w == 0 || h == 0)
+		return;
+	m_scene_render_extent = {w, h};
+	m_ve_swap_chain->resizeOffscreenResources({w, h});
+}
+
+void VeRenderer::resetSceneRenderExtent() {
+	m_scene_render_extent = {0, 0};
+	m_ve_swap_chain->resizeOffscreenResources(m_ve_swap_chain->getSwapChainExtent());
+}
+
+void VeRenderer::resizeViewportImage(uint32_t width, uint32_t height) {
+	if (width == 0 || height == 0)
+		return;
+	if (m_viewport_image && m_viewport_image->getWidth() == width && m_viewport_image->getHeight() == height)
+		return;
+
+	m_ve_device.getDevice().waitIdle();
+	auto format = m_ve_swap_chain->getSwapChainImageFormat();
+
+	m_viewport_image = std::make_unique<VeImage>(
+		m_ve_device,
+		width, height,
+		vk::SampleCountFlagBits::e1,
+		format,
+		vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		vk::ImageAspectFlagBits::eColor,
+		false, 1
+	);
+
+	// Transition to SHADER_READ_ONLY so it's safe to sample before first render
+	m_viewport_image->transitionImageLayout(
+		vk::ImageLayout::eUndefined,
+		vk::ImageLayout::eShaderReadOnlyOptimal,
+		{},
+		vk::AccessFlagBits2::eShaderRead,
+		vk::PipelineStageFlagBits2::eTopOfPipe,
+		vk::PipelineStageFlagBits2::eFragmentShader
+	);
 }
 
 void VeRenderer::transitionToPresent(vk::raii::CommandBuffer& command_buffer) {

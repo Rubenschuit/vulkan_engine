@@ -389,6 +389,23 @@ void ShadowRenderSystem::invalidateShadowDrawables() {
 	m_cached_unique_meshes.clear();
 }
 
+void ShadowRenderSystem::subscribeToRegistry(Registry& registry) {
+	invalidateShadowDrawables();
+
+	registry.events().subscribe<ComponentAddedEvent<MeshComponent>>(
+		[this](const ComponentAddedEvent<MeshComponent>&) {
+			invalidateShadowDrawables();
+		});
+	registry.events().subscribe<ComponentRemovedEvent<MeshComponent>>(
+		[this](const ComponentRemovedEvent<MeshComponent>&) {
+			invalidateShadowDrawables();
+		});
+	registry.events().subscribe<EntityDestroyedEvent>(
+		[this](const EntityDestroyedEvent&) {
+			m_shadow_drawables_dirty = true;
+		});
+}
+
 void ShadowRenderSystem::growShadowInstanceBuffers(uint32_t new_capacity) {
 	VE_LOGI("Shadow instance buffer growing: " << m_shadow_instance_capacity << " -> " << new_capacity);
 	m_shadow_instance_capacity = new_capacity;
@@ -492,16 +509,11 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 	if (m_shadow_drawables_dirty) {
 		m_shadow_drawables.clear();
 		auto& registry = *frame_info.registry;
-		auto& mesh_pool = registry.meshes();
-		m_shadow_drawables.reserve(mesh_pool.size());
-		for (uint32_t i = 0; i < mesh_pool.size(); i++) {
-			MeshComponent& mesh = mesh_pool.data()[i];
-			if (!mesh.getMesh() || !mesh.has_shadow) continue;
-			uint32_t entity_idx = mesh_pool.entityAt(i);
-			Entity entity = registry.entityFromIndex(entity_idx);
-			if (!registry.isActive(entity)) continue;
-			auto* transform = registry.getComponent<TransformComponent>(entity);
-			if (!transform) continue;
+		auto view = registry.view<MeshComponent, TransformComponent>();
+		m_shadow_drawables.reserve(view.sizeHint());
+		for (auto [entity, mesh, tc] : view) {
+			if (!mesh.getMesh() || !mesh.has_shadow)
+				continue;
 			// Shadow LOD: at least one step coarser than the visible mesh, clamped to available LODs
 			uint32_t shadow_lod = std::min(std::max(1u, mesh.cached_lod),
 			                               mesh.getMesh()->getLodCount() - 1);

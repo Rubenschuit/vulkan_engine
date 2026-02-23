@@ -33,6 +33,7 @@ VeSwapChain::~VeSwapChain() {
 
 void VeSwapChain::init() {
 	createSwapChain();
+	m_offscreen_extent = m_swap_chain_extent;
 	createSwapChainImageViews();
 	createColorResources();
 	createDepthResources();
@@ -213,8 +214,8 @@ void VeSwapChain::createSwapChainImageViews() {
 void VeSwapChain::createColorResources() {
 	m_color_image = std::make_unique<VeImage>(
 		m_ve_device,
-		m_swap_chain_extent.width,
-		m_swap_chain_extent.height,
+		m_offscreen_extent.width,
+		m_offscreen_extent.height,
 		m_desired_num_samples,
 		m_offscreen_image_format,
 		vk::ImageTiling::eOptimal,
@@ -235,8 +236,8 @@ void VeSwapChain::createColorResources() {
 
 	m_resolve_target_image = std::make_unique<VeImage>(
 		m_ve_device,
-		m_swap_chain_extent.width,
-		m_swap_chain_extent.height,
+		m_offscreen_extent.width,
+		m_offscreen_extent.height,
 		vk::SampleCountFlagBits::e1,
 		m_offscreen_image_format,
 		vk::ImageTiling::eOptimal,
@@ -262,8 +263,8 @@ void VeSwapChain::createDepthResources() {
 	vk::Format depth_format = m_ve_device.findDepthFormat();
 	m_depth_image = std::make_unique<VeImage>(
 		m_ve_device,
-		m_swap_chain_extent.width,
-		m_swap_chain_extent.height,
+		m_offscreen_extent.width,
+		m_offscreen_extent.height,
 		m_desired_num_samples,
 		depth_format,
 		vk::ImageTiling::eOptimal,
@@ -290,8 +291,8 @@ void VeSwapChain::createDepthResources() {
 	if (m_desired_num_samples != vk::SampleCountFlagBits::e1) {
 		m_resolved_depth_image = std::make_unique<VeImage>(
 			m_ve_device,
-			m_swap_chain_extent.width,
-			m_swap_chain_extent.height,
+			m_offscreen_extent.width,
+			m_offscreen_extent.height,
 			vk::SampleCountFlagBits::e1,
 			depth_format,
 			vk::ImageTiling::eOptimal,
@@ -529,6 +530,14 @@ void VeSwapChain::transitionResolveTargetLayout(
 		.pImageMemoryBarriers = &barrier
 	};
 	command_buffer.pipelineBarrier2(dependency_info);
+}
+
+void VeSwapChain::resizeOffscreenResources(vk::Extent2D extent) {
+	m_offscreen_extent = extent;
+	m_ve_device.getDevice().waitIdle();
+	createColorResources();
+	createDepthResources();
+	VE_LOGI("Offscreen resources resized to " << extent.width << "x" << extent.height);
 }
 
 float VeSwapChain::getExtentAspectRatio() const {

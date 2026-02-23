@@ -99,6 +99,17 @@ void VeMaterial::doUnload() {
 	m_emissive_texture = ResourceHandle<VeTexture>{};
 }
 
+void VeMaterial::setMaterialFactors(const MaterialFactors& factors) {
+	m_factors = factors;
+	if (m_material_ubo) {
+		float ubo_data[16];
+		writeMaterialUBO(ubo_data, m_factors);
+		m_material_ubo->map();
+		m_material_ubo->writeToBuffer(ubo_data, MATERIAL_UBO_SIZE);
+		m_material_ubo->unmap();
+	}
+}
+
 vk::raii::DescriptorSet& VeMaterial::getDescriptorSet() {
 	assert(m_descriptor_set && "VeMaterial has no descriptor set (created without pool/layout)");
 	return *m_descriptor_set;

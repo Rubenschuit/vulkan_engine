@@ -3,6 +3,7 @@ It manages the swap chain and command buffers. Default present mode is immediate
 #pragma once
 #include "ve_export.hpp"
 #include "vulkan/ve_device.hpp"
+#include "vulkan/ve_image.hpp"
 #include "platform/ve_window.hpp"
 #include "vulkan/ve_swap_chain.hpp"
 #include <memory>
@@ -26,6 +27,7 @@ public:
 	vk::Format getOffscreenImageFormat() const;
 	size_t getImageCount() const;
 	vk::Extent2D getExtent() const;
+	vk::Extent2D getSwapChainExtent() const;
 	uint32_t getCurrentFrame() const;
 	uint32_t getCurrentImageIndex() const { assert(m_is_frame_started); return m_current_image_index; }
 	vk::raii::CommandBuffer& getCurrentCommandBuffer();
@@ -50,9 +52,24 @@ public:
 	// Ends dynamic rendering for the scene but does not transition to Present.
 	void endSceneRender(vk::raii::CommandBuffer& command_buffer);
 
-	// Start rendering to the swapchain image, sampling from the offscreen resolve target.
-	void beginPostProcessRender(vk::raii::CommandBuffer& command_buffer);
-	void endPostProcessRender(vk::raii::CommandBuffer& command_buffer);
+	// Start rendering to the swapchain (editor_mode=false) or viewport image (editor_mode=true).
+	void beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode = false);
+	void endPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode = false);
+
+	// In editor mode: prepare swapchain for ImGui rendering (transition + clear)
+	void beginEditorUIRender(vk::raii::CommandBuffer& command_buffer);
+	void endEditorUIRender(vk::raii::CommandBuffer& command_buffer);
+
+	// Scene render extent (editor viewport resolution)
+	void resizeSceneRender(uint32_t w, uint32_t h);
+	void resetSceneRenderExtent();
+
+	// Viewport image accessors
+	VkImageView getViewportImageView() const;
+	VkSampler getViewportSampler() const;
+	void resizeViewportImage(uint32_t width, uint32_t height);
+	uint32_t getViewportWidth() const { return m_viewport_image ? m_viewport_image->getWidth() : 0; }
+	uint32_t getViewportHeight() const { return m_viewport_image ? m_viewport_image->getHeight() : 0; }
 
 	// Transition the current swapchain image to PresentSrcKHR, submits and presents it,
 	// and advances the current frame.
@@ -88,6 +105,7 @@ public:
 
 private:
 	void createCommandBuffers();
+	void createViewportResources();
 	void transitionToPresent(vk::raii::CommandBuffer& command_buffer);
 
 	VeDevice& m_ve_device;
@@ -104,12 +122,17 @@ private:
 	bool m_msaa_enabled = false;
 	bool m_hdr_enabled = false;
 	vk::SampleCountFlagBits m_desired_num_samples = vk::SampleCountFlagBits::e1;
+	vk::Extent2D m_scene_render_extent{0, 0};  // 0 = use swapchain extent
 
 	vk::raii::QueryPool m_query_pool = nullptr;
 	float m_gpu_time = 0.0f;         // graphics-only GPU time
 	float m_compute_gpu_time = 0.0f; // compute-only GPU time
 	float m_gpu_overlap = 0.0f;      // compute/graphics overlap
 	std::vector<bool> m_query_active;
+
+	// Viewport image for editor mode (render-to-texture)
+	std::unique_ptr<VeImage> m_viewport_image;
+	vk::raii::Sampler m_viewport_sampler{nullptr};
 };
 }
 

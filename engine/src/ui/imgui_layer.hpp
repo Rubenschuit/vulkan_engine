@@ -1,9 +1,10 @@
 #pragma once
 #include "ve_export.hpp"
 #include "rendering/ve_frame_info.hpp"
+#include "rendering/particle_system.hpp"
+
 #include <cstdint>
 #include <vulkan/vulkan.hpp>
-#include "rendering/particle_system.hpp"
 #define VULKAN_HPP_ENABLE_RAII
 #include <vulkan/vulkan_raii.hpp>
 #include <functional>
@@ -13,6 +14,7 @@ namespace ve {
 class VeWindow;
 class VeDevice;
 class VeRenderer;
+struct EditorState;
 
 struct VENGINE_API UIContext {
 	// general
@@ -96,24 +98,30 @@ public:
 
     // Call once per frame before your rendering
     void beginFrame();
-    // Record UI draw data into the active command buffer
-    void endFrame(vk::raii::CommandBuffer& cmd);
+    // Record UI draw data into the active command buffer.
+    // When clear_target is true, the swapchain attachment uses eClear (editor mode, swapchain is fresh).
+    void endFrame(vk::raii::CommandBuffer& cmd, bool clear_target = false);
 
-	// Render the UI. If appUiCallback is provided, it will be called after the engine windows are rendered.
-	void renderUI(UIContext& context, std::function<void(UIContext&)> appUiCallback = nullptr);
+	// Render the UI. appUiCallback renders all panels and app-specific windows.
+	void renderUI(UIContext& context, EditorState& editor_state,
+				  std::function<void(UIContext&)> appUiCallback = nullptr);
 
-    // Render engine-specific windows (Settings, Performance).
-    // Should be called between beginFrame() and endFrame().
-    void renderEngineWindows(UIContext& context);
+	// Viewport image registration for render-to-texture
+	void registerViewportImage(VkSampler sampler, VkImageView image_view, VkImageLayout layout);
+	void unregisterViewportImage();
+	VkDescriptorSet getViewportTextureId() const { return m_viewport_texture_id; }
 
     void recreatePipeline();
 
 private:
+	void renderDockSpace();
+	void applyEditorTheme();
     void uploadFonts();
 
     VeDevice& m_device;
     VeRenderer& m_renderer;
     VkDescriptorPool m_descriptor_pool = VK_NULL_HANDLE;
     VkFormat m_color_format = VK_FORMAT_UNDEFINED;
+	VkDescriptorSet m_viewport_texture_id = VK_NULL_HANDLE;
 };
 }

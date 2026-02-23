@@ -7,6 +7,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "ve_entity.hpp"
+#include "ve_event.hpp"
 #include "ve_component_pool.hpp"
 #include "ve_component.hpp"
 
@@ -25,6 +26,7 @@ enum class LightSource : uint8_t {
 struct EntityMeta {
 	std::string name;
 	bool active = true;
+	bool alive = false;
 	uint16_t generation = 0;
 	LightSource light_source = LightSource::Manual;
 };
@@ -50,8 +52,11 @@ public:
 	// Entity lifecycle
 	Entity createEntity(const std::string& name = "");
 	void destroyEntity(Entity e);
+	void destroyEntityRecursive(Entity e);
 	bool isAlive(Entity e) const;
 	uint32_t entityCount() const { return m_alive_count; }
+	uint32_t maxEntityIndex() const { return static_cast<uint32_t>(m_meta.size()); }
+	bool isAliveAtIndex(uint32_t index) const;
 
 	// Entity metadata
 	const std::string& getName(Entity e) const;
@@ -77,6 +82,12 @@ public:
 	template <typename T>
 	bool hasComponent(Entity e) const;
 
+	// Generic pool accessor
+	template <typename T>
+	ComponentPool<T>& pool();
+	template <typename T>
+	const ComponentPool<T>& pool() const;
+
 	// Direct pool access (for system iteration)
 	ComponentPool<TransformComponent>& transforms() { return m_transforms; }
 	const ComponentPool<TransformComponent>& transforms() const { return m_transforms; }
@@ -91,6 +102,15 @@ public:
 	ComponentPool<DirectionalLightComponent>& directionalLights() { return m_directional_lights; }
 	const ComponentPool<DirectionalLightComponent>& directionalLights() const { return m_directional_lights; }
 	uint32_t activeDirectionalLightCount() const;
+
+	// Fast active check (skips generation validation)
+	bool isActiveAtIndex(uint32_t index) const {
+		return index < m_meta.size() && m_meta[index].active;
+	}
+
+	// Multi-component view factory
+	template <typename... Components>
+	auto view();
 
 	// Hierarchy
 	void   setParent(Entity child, Entity parent);
@@ -114,8 +134,16 @@ public:
 
 	void clear();
 
+	// Deferred deletion (queued by DeleteEntityRequest events, processed at safe frame boundary)
+	bool hasPendingDeletions() const { return !m_pending_deletions.empty(); }
+	void processPendingDeletions();
+
 	// Entity for a given raw entity index (reconstructs with current generation)
 	Entity entityFromIndex(uint32_t index) const;
+
+	// Event dispatcher (scoped to this registry's lifetime)
+	EventDispatcher& events() { return m_events; }
+	const EventDispatcher& events() const { return m_events; }
 
 private:
 	void ensureSlotSize(uint32_t index);
@@ -141,9 +169,30 @@ private:
 
 	// World transform cache (indexed by entity index)
 	mutable std::vector<WorldTransformCache> m_world_cache;
+
+	EventDispatcher m_events;
+	std::vector<DeleteEntityRequest> m_pending_deletions;
 };
 
 // ── Template implementations ────────────────────────────────────────────────
+
+template <typename T>
+ComponentPool<T>& Registry::pool() {
+	if constexpr (std::is_same_v<T, TransformComponent>)            return m_transforms;
+	else if constexpr (std::is_same_v<T, MeshComponent>)            return m_meshes;
+	else if constexpr (std::is_same_v<T, PointLightComponent>)      return m_point_lights;
+	else if constexpr (std::is_same_v<T, DirectionalLightComponent>) return m_directional_lights;
+	else static_assert(sizeof(T) == 0, "Unknown component type");
+}
+
+template <typename T>
+const ComponentPool<T>& Registry::pool() const {
+	if constexpr (std::is_same_v<T, TransformComponent>)            return m_transforms;
+	else if constexpr (std::is_same_v<T, MeshComponent>)            return m_meshes;
+	else if constexpr (std::is_same_v<T, PointLightComponent>)      return m_point_lights;
+	else if constexpr (std::is_same_v<T, DirectionalLightComponent>) return m_directional_lights;
+	else static_assert(sizeof(T) == 0, "Unknown component type");
+}
 
 template <typename T, typename... Args>
 T& Registry::addComponent(Entity e, Args&&... args) {
@@ -164,12 +213,14 @@ T& Registry::addComponent(Entity e, Args&&... args) {
 		static_assert(sizeof(T) == 0, "Unknown component type");
 	}
 	comp->setContext(e, this);
+	m_events.emit(ComponentAddedEvent<T>{e, *comp});
 	return *comp;
 }
 
 template <typename T>
 void Registry::removeComponent(Entity e) {
 	assert(isAlive(e) && "Entity is not alive");
+	m_events.emit(ComponentRemovedEvent<T>{e});
 	uint32_t idx = e.index();
 	if constexpr (std::is_same_v<T, TransformComponent>) {
 		m_transforms.remove(idx);
@@ -242,4 +293,14 @@ bool Registry::hasComponent(Entity e) const {
 	}
 }
 
+} // namespace ve
+
+// View included after Registry is fully defined (View references Registry)
+#include "ve_view.hpp"
+
+namespace ve {
+template <typename... Components>
+auto Registry::view() {
+	return View<Components...>(*this, pool<Components>()...);
+}
 } // namespace ve

@@ -43,21 +43,29 @@ void TransformComponent::setRotationEuler(glm::vec3 euler_rad) {
 	// Match previous Euler order: R = Rz(z) * Ry(y) * Rx(x)
 	rotation = glm::quat_cast(glm::eulerAngleZYX(euler_rad.z, euler_rad.y, euler_rad.x));
 	m_transform_dirty = true;
+	if (m_registry)
+		m_registry->invalidateWorldTransform(m_entity);
 }
 
 void TransformComponent::setTranslation(glm::vec3 pos) {
 	translation = pos;
 	m_transform_dirty = true;
+	if (m_registry)
+		m_registry->invalidateWorldTransform(m_entity);
 }
 
 void TransformComponent::setRotation(glm::quat q) {
 	rotation = q;
 	m_transform_dirty = true;
+	if (m_registry)
+		m_registry->invalidateWorldTransform(m_entity);
 }
 
 void TransformComponent::setScale(glm::vec3 s) {
 	scale = s;
 	m_transform_dirty = true;
+	if (m_registry)
+		m_registry->invalidateWorldTransform(m_entity);
 }
 
 // Updates mutable private members m_cached_transform, m_cached_normal_transform

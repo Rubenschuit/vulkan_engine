@@ -235,22 +235,12 @@ else()
 	endif()
 endif()
 
-# Dear ImGui: prefer vendored source under external/imgui, otherwise fetch
-set(_VE_IMGUI_VENDORED_DIR "${CMAKE_SOURCE_DIR}/external/imgui")
-if (EXISTS "${_VE_IMGUI_VENDORED_DIR}/imgui.h")
-	set(IMGUI_DIR "${_VE_IMGUI_VENDORED_DIR}")
-	message(STATUS "Using vendored Dear ImGui at: ${IMGUI_DIR}")
-else()
-	message(STATUS "IMGUI_DIR not specified; fetching Dear ImGui via FetchContent")
-	include(FetchContent)
-	FetchContent_Declare(imgui
-		GIT_REPOSITORY https://github.com/ocornut/imgui.git
-		GIT_TAG v1.90.9-docking
-	)
-	FetchContent_MakeAvailable(imgui)
-	set(IMGUI_DIR ${imgui_SOURCE_DIR} CACHE PATH "Path to Dear ImGui sources")
-	message(STATUS "Fetched Dear ImGui from Git (docking): ${IMGUI_DIR}")
+# Dear ImGui: vendored source under external/imgui
+set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/external/imgui")
+if (NOT EXISTS "${IMGUI_DIR}/imgui.h")
+	message(FATAL_ERROR "Dear ImGui not found at ${IMGUI_DIR}. Ensure external/imgui is populated.")
 endif()
+message(STATUS "Using vendored Dear ImGui at: ${IMGUI_DIR}")
 
 # meshoptimizer (mesh optimization and LOD generation)
 include(FetchContent)

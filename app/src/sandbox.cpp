@@ -5,7 +5,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "sandbox.hpp"
-#include "utils/ve_random.hpp"
+#include "application/ve_entry_point.hpp" // defines main() and createApp()
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <portable-file-dialogs.h>
@@ -13,7 +13,6 @@
 #include <string>
 #include <vector>
 #include <cstdlib>
-#include <map>
 
 namespace ve {
 
@@ -70,8 +69,7 @@ void Sandbox::loadScene(SandboxUIContext::SceneType scene_type) {
 			return;
 	}
 	m_loaded_scene_type = scene_type;
-	m_shadow_render_system->invalidateShadowDrawables();
-	ui_actions.sun_intensity = m_active_scene->getSunIntensity();
+	m_shadow_render_system->subscribeToRegistry(m_active_scene->getRegistry());
 	glm::vec4 ambient = m_active_scene->getDefaultAmbient();
 	ui_actions.ambient_light_color = glm::vec3(ambient);
 	ui_actions.ambient_light_intensity = ambient.w;
@@ -114,6 +112,13 @@ VeFrameInfo Sandbox::update() {
 		m_pending_scene_load = SandboxUIContext::SceneType::NONE;
 	} else if (ui_actions.current_scene != m_loaded_scene_type) {
 		m_pending_scene_load = ui_actions.current_scene;
+	}
+
+	// Process deferred entity deletions (from UI) at a safe point before rendering
+	auto& registry = m_active_scene->getRegistry();
+	if (registry.hasPendingDeletions()) {
+		m_ve_device.getDevice().waitIdle();
+		registry.processPendingDeletions();
 	}
 
 	vk::raii::DescriptorSet& material_descriptor_set = m_active_scene->getDescriptorSet();
@@ -169,20 +174,18 @@ VeFrameInfo Sandbox::update() {
 	auto input_actions = m_input_controller.processInput(m_frame_time, m_camera);
 
 	// Update UI state
-	// Tab toggles "UI Mode" (cursor visible). Settings window is ONLY visible in UI mode.
+	// Tab toggles editor mode (docking editor vs fullscreen)
 	ui_actions.visible = input_actions.ui_visible;
+	m_editor->getState().editor_mode = input_actions.ui_visible;
 
-	// P key toggles performance and controls windows
-	if (input_actions.toggle_performance_ui) {
+	// P key toggles performance window
+	if (input_actions.toggle_performance_ui)
 		ui_actions.show_performance = !ui_actions.show_performance;
-		ui_actions.show_controls = !ui_actions.show_controls;
-	}
 
 	updateCamera(glm::radians(ui_actions.fov));
 	updateParticles(input_actions);
 
 	// update scene
-	m_active_scene->setSunIntensity(ui_actions.sun_intensity);
 	m_active_scene->update(m_frame_time);
 
 	// update ubos
@@ -358,7 +361,12 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	ui_actions.num_point_lights = registry.activePointLightCount();
 	ui_actions.num_directional_lights = registry.activeDirectionalLightCount();
 
-	// Shadow pass: render a shadow map for each light
+	// Handle editor mode transitions and viewport resize before scene rendering
+	if (m_editor->beginFrame())
+		recreateResolutionDependentSystems();
+	bool editor_mode = m_editor->isEditorMode();
+
+	// Shadow pass: render a shadow map for each shadow casting light
 	if (ui_actions.shadow_mode != ShadowMode::DISABLED) {
 		m_shadow_render_system->renderShadowMaps(frame_info);
 	}
@@ -402,10 +410,10 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 		m_bloom_system->render(command_buffer);
 	}
 
-	// Post-processing pass
-	m_ve_renderer.beginPostProcessRender(command_buffer);
+	// Post-processing pass: editor mode renders to viewport image, fullscreen to swapchain
+	m_ve_renderer.beginPostProcessRender(command_buffer, editor_mode);
 	m_post_process_system->render(command_buffer, frame_info.post_process_push);
-	m_ve_renderer.endPostProcessRender(command_buffer);
+	m_ve_renderer.endPostProcessRender(command_buffer, editor_mode);
 
 	// Record CPU time before UI rendering
 	auto cpu_end = std::chrono::steady_clock::now();
@@ -416,35 +424,21 @@ void Sandbox::render(VeFrameInfo& frame_info) {
 	ui_actions.compute_gpu_time = m_ve_renderer.getComputeGpuTime();
 	ui_actions.gpu_overlap = m_ve_renderer.getGpuOverlap();
 
-	// Draw UI: begin frame, render app-specific windows, render engine windows, end frame
-	m_imgui_layer->renderUI(ui_actions, [this](UIContext&) {
-		this->renderAppWindows();
-		this->renderControlsWindow();
-	});
+	// Draw UI (editor panels + app windows)
+	Registry* ui_registry = m_active_scene ? &m_active_scene->getRegistry() : nullptr;
+	m_editor->renderUI(ui_actions, ui_registry);
 }
 
 void Sandbox::onSwapChainRecreated() {
 	recreatePipelines();
+	m_editor->onSwapChainRecreated();
 }
 
-void Sandbox::recreatePipelines() {
-	m_ve_device.getDevice().waitIdle();
-	auto color_format = m_ve_renderer.getSwapChainImageFormat();
-	auto offscreen_format = m_ve_renderer.getOffscreenImageFormat();
-	auto sample_count = m_ve_renderer.getSampleCount();
+void Sandbox::recreateResolutionDependentSystems() {
 	auto extent = m_ve_renderer.getExtent();
+	auto color_format = m_ve_renderer.getSwapChainImageFormat();
 
 	m_bloom_system->recreateResources(extent, m_ve_renderer.getResolveTargetImageView());
-
-	m_light_system->recreatePipeline(offscreen_format, sample_count);
-	m_pbr_render_system->recreatePipeline(offscreen_format, sample_count);
-	m_aabb_debug_render_system->recreatePipeline(offscreen_format, sample_count);
-	m_axes_render_system->recreatePipeline(offscreen_format, sample_count);
-	m_skybox_render_system->recreatePipeline(offscreen_format, sample_count);
-	m_particle_system->recreatePipeline(offscreen_format, sample_count);
-	m_fireworks_system->recreatePipeline(offscreen_format, sample_count);
-
-	m_depth_prepass_system->recreatePipeline(sample_count);
 	m_cluster_light_system->recreate(*m_global_pool, extent);
 
 	{
@@ -470,6 +464,24 @@ void Sandbox::recreatePipelines() {
 	}
 
 	m_post_process_system->recreatePipeline(color_format, m_ve_renderer.getResolveTargetImageView(), m_bloom_system->getBloomTexture());
+}
+
+void Sandbox::recreatePipelines() {
+	m_ve_device.getDevice().waitIdle();
+	auto offscreen_format = m_ve_renderer.getOffscreenImageFormat();
+	auto sample_count = m_ve_renderer.getSampleCount();
+
+	m_light_system->recreatePipeline(offscreen_format, sample_count);
+	m_pbr_render_system->recreatePipeline(offscreen_format, sample_count);
+	m_aabb_debug_render_system->recreatePipeline(offscreen_format, sample_count);
+	m_axes_render_system->recreatePipeline(offscreen_format, sample_count);
+	m_skybox_render_system->recreatePipeline(offscreen_format, sample_count);
+	m_particle_system->recreatePipeline(offscreen_format, sample_count);
+	m_fireworks_system->recreatePipeline(offscreen_format, sample_count);
+	m_depth_prepass_system->recreatePipeline(sample_count);
+
+	recreateResolutionDependentSystems();
+
 	m_imgui_layer->recreatePipeline();
 	// Shadow render system pipeline does not depend on swap chain MSAA
 }
@@ -477,294 +489,9 @@ void Sandbox::recreatePipelines() {
 // Should be called between beginFrame() and endFrame() of imgui_layer
 void Sandbox::renderAppWindows() {
 	// Settings window with tabs
-	if (ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+	if (ImGui::Begin("Settings")) {
 		if (ImGui::BeginTabBar("SettingsTabs")) {
 			if (ImGui::BeginTabItem("Scene")) {
-				ImGui::Text("Scene selection");
-				ImGui::Separator();
-				if (m_pending_scene_load != SandboxUIContext::SceneType::NONE) {
-					ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Loading...");
-				}
-				// Select exactly 1 scene
-				int current_scene_int = static_cast<int>(ui_actions.current_scene);
-				if (ImGui::RadioButton("Simple", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::SIMPLE))) {
-					ui_actions.current_scene = SandboxUIContext::SceneType::SIMPLE;
-				}
-				if (ImGui::RadioButton("Sponza", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::SPONZA))) {
-					ui_actions.current_scene = SandboxUIContext::SceneType::SPONZA;
-				}
-				if (ImGui::RadioButton("Sponza (compressed textures)", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::SPONZA_LOW))) {
-					ui_actions.current_scene = SandboxUIContext::SceneType::SPONZA_LOW;
-				}
-				if (ImGui::RadioButton("Bistro", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::BISTRO))) {
-					ui_actions.current_scene = SandboxUIContext::SceneType::BISTRO;
-				}
-				ImGui::Spacing();
-				if (ImGui::Button("New Empty Scene")) {
-					m_pending_gltf_path.clear();
-					ui_actions.current_scene = SandboxUIContext::SceneType::GLTF;
-					m_loaded_scene_type = SandboxUIContext::SceneType::NONE;
-					m_pending_scene_load = SandboxUIContext::SceneType::GLTF;
-				}
-				ImGui::SameLine();
-				if (ImGui::Button("Load GLTF...")) {
-					auto selection = pfd::open_file(
-						"Select GLTF Model", "",
-						{"glTF Files", "*.gltf *.glb"},
-						pfd::opt::none
-					).result();
-					if (!selection.empty()) {
-						m_pending_gltf_path = selection[0];
-						ui_actions.current_scene = SandboxUIContext::SceneType::GLTF;
-						m_loaded_scene_type = SandboxUIContext::SceneType::NONE;
-						m_pending_scene_load = SandboxUIContext::SceneType::GLTF;
-					}
-				}
-				if (m_loaded_scene_type == SandboxUIContext::SceneType::GLTF) {
-					if (ImGui::Button("Add Model...")) {
-						auto selection = pfd::open_file(
-							"Add GLTF Model", "",
-							{"glTF Files", "*.gltf *.glb"},
-							pfd::opt::none
-						).result();
-						if (!selection.empty()) {
-							static_cast<GltfScene*>(m_active_scene.get())->addModel(selection[0]);
-							m_shadow_render_system->invalidateShadowDrawables();
-						}
-					}
-				}
-				ImGui::Separator();
-				ImGui::Text("Scene Settings");
-				ImGui::SliderFloat("Sun Intensity", &ui_actions.sun_intensity, 0.0f, 20.0f);
-				ImGui::Separator();
-				if (ImGui::CollapsingHeader("Lights")) {
-					if (m_active_scene) {
-						auto& registry = m_active_scene->getRegistry();
-						const Entity scene_sun = m_active_scene->getSun();
-
-						// --- Directional Lights ---
-						auto& dl_pool = registry.directionalLights();
-						if (dl_pool.size() > 0) {
-							ImGui::Text("Directional Lights");
-							ImGui::Separator();
-							for (uint32_t i = 0; i < dl_pool.size(); i++) {
-								Entity e = registry.entityFromIndex(dl_pool.entityAt(i));
-								auto& dl = dl_pool.data()[i];
-								ImGui::PushID(static_cast<int>(e.id()));
-								const auto& name = registry.getName(e);
-								const std::string label = name.empty() ? ("Dir Light " + std::to_string(i)) : name;
-								if (ImGui::TreeNode(label.c_str())) {
-									bool active = registry.isActive(e);
-									ImGui::Checkbox("Active", &active);
-									registry.setActive(e, active);
-									ImGui::ColorEdit3("Color", &dl.color.r);
-									ImGui::DragFloat("Intensity", &dl.intensity, 0.1f, 0.0f, 20.0f, "%.2f");
-									if (!scene_sun.isNull() && e == scene_sun)
-										ui_actions.sun_intensity = dl.intensity;
-									ImGui::DragFloat3("Direction", &dl.direction.x, 0.01f, -1.0f, 1.0f);
-									dl.direction = glm::normalize(dl.direction);
-									ImGui::Checkbox("Casts shadow", &dl.casts_shadow);
-									int celestial = static_cast<int>(dl.celestial_type);
-									if (ImGui::Combo("Celestial", &celestial, "Moon\0Sun\0"))
-										dl.celestial_type = static_cast<ve::CelestialType>(celestial);
-									ImGui::TreePop();
-								}
-								ImGui::PopID();
-							}
-							ImGui::Spacing();
-						}
-
-						// --- Point Lights ---
-						auto& pl_pool = registry.pointLights();
-
-						if (pl_pool.size() > 0) {
-							ImGui::Text("Point Lights");
-							ImGui::Separator();
-
-							// Collect light entities sorted by id for stable UI order
-							std::vector<Entity> lights;
-							lights.reserve(pl_pool.size());
-							for (uint32_t i = 0; i < pl_pool.size(); i++) {
-								Entity e = registry.entityFromIndex(pl_pool.entityAt(i));
-								if (registry.hasComponent<TransformComponent>(e))
-									lights.push_back(e);
-							}
-							std::sort(lights.begin(), lights.end());
-
-							if (!lights.empty()) {
-								if (ImGui::Button("All on")) {
-									for (auto e : lights) registry.setActive(e, true);
-								}
-								ImGui::SameLine();
-								if (ImGui::Button("All off")) {
-									for (auto e : lights) registry.setActive(e, false);
-								}
-								// intensity slider for all lights in scene (disabled if no lights or all lights are off)
-
-								static float all_intensity = 0.f;
-								if (ImGui::DragFloat("All Intensity", &all_intensity, 0.2f, 0.0f, 500.0f, "%.1f")) {
-									for (auto e : lights) {
-										auto* pl = registry.getComponent<PointLightComponent>(e);
-										if (pl)
-											pl->setIntensity(all_intensity);
-									}
-								}
-							}
-
-							// Per-light detail UI (reused across all groups)
-							auto renderLightDetail = [&](Entity e, size_t idx) {
-								auto* pl = registry.getComponent<PointLightComponent>(e);
-								auto* transform = registry.getComponent<TransformComponent>(e);
-								if (!pl || !transform)
-									return;
-								ImGui::PushID(static_cast<int>(e.id()));
-								const auto& name = registry.getName(e);
-								const std::string label = name.empty() ? ("Light " + std::to_string(static_cast<unsigned>(idx))) : name;
-								if (ImGui::TreeNode(label.c_str())) {
-									bool active = registry.isActive(e);
-									ImGui::Checkbox("Active", &active);
-									registry.setActive(e, active);
-									glm::vec3 color = pl->getColor();
-									if (ImGui::ColorEdit3("Color", &color.r))
-										pl->setColor(color);
-									float intensity = pl->getIntensity();
-									if (ImGui::DragFloat("Intensity", &intensity, 1.0f, 0.0f, 5000.0f, "%.1f"))
-										pl->setIntensity(intensity);
-									glm::vec3 pos = transform->getTranslation();
-									if (ImGui::DragFloat3("Position", &pos.x, 0.1f)) {
-										transform->setTranslation(pos);
-									}
-									float sz = transform->getScale().x;
-									if (ImGui::SliderFloat("Size", &sz, 0.1f, 50.0f)) {
-										transform->setScale({sz, sz, sz});
-									}
-									bool rotates = pl->getRotates();
-									if (ImGui::Checkbox("Rotates", &rotates))
-										pl->setRotates(rotates);
-									bool casts_shadow = pl->getCastsShadow();
-									if (ImGui::Checkbox("Casts shadow", &casts_shadow))
-										pl->setCastsShadow(casts_shadow);
-									float range = pl->getRange();
-									if (ImGui::DragFloat("Range", &range, 0.5f, 0.0f, 1000.0f, "%.1f"))
-										pl->setRange(range);
-									if (ImGui::IsItemHovered()) {
-										ImGui::SetTooltip("Attenuation range in world units (0 = infinite).");
-									}
-									ImGui::TreePop();
-								}
-								ImGui::PopID();
-							};
-
-							// Render a set of lights with name-prefix sub-groups and group controls
-							auto renderLightGroup = [&](const std::vector<Entity>& group_lights) {
-								// Sub-partition by name prefix (before ": ")
-								std::map<std::string, std::vector<Entity>> sub_groups;
-								for (auto e : group_lights) {
-									const auto& name = registry.getName(e);
-									auto sep = name.find(": ");
-									if (sep != std::string::npos) {
-										sub_groups[name.substr(0, sep)].push_back(e);
-									} else {
-										sub_groups["Ungrouped"].push_back(e);
-									}
-								}
-
-								// Ungrouped lights listed directly
-								auto ungrouped_it = sub_groups.find("Ungrouped");
-								if (ungrouped_it != sub_groups.end()) {
-									for (size_t i = 0; i < ungrouped_it->second.size(); i++)
-										renderLightDetail(ungrouped_it->second[i], i);
-								}
-
-								// Sub-groups with controls
-								for (auto& [sub_name, sub_lights] : sub_groups) {
-									if (sub_name == "Ungrouped") continue;
-									ImGui::PushID(sub_name.c_str());
-									int active_count = 0;
-									for (auto e : sub_lights)
-										if (registry.isActive(e))
-											active_count++;
-									std::string header = sub_name + " (" + std::to_string(sub_lights.size()) + ")";
-									if (ImGui::TreeNode(header.c_str())) {
-										bool all_active = (active_count == static_cast<int>(sub_lights.size()));
-										bool mixed = active_count > 0 && !all_active;
-										if (mixed)
-											ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
-										if (ImGui::Checkbox("Enable group", &all_active)) {
-											for (auto e : sub_lights)
-												registry.setActive(e, all_active);
-										}
-										if (mixed)
-											ImGui::PopItemFlag();
-										float avg_intensity = 0.f;
-										for (auto e : sub_lights) {
-											auto* pl = registry.getComponent<PointLightComponent>(e);
-											if (pl) avg_intensity += pl->getIntensity();
-										}
-										avg_intensity /= static_cast<float>(sub_lights.size());
-										if (ImGui::DragFloat("Intensity", &avg_intensity, 1.0f, 0.0f, 5000.0f, "%.1f")) {
-											for (auto e : sub_lights) {
-												auto* pl = registry.getComponent<PointLightComponent>(e);
-												if (pl) pl->setIntensity(avg_intensity);
-											}
-										}
-										for (size_t i = 0; i < sub_lights.size(); i++)
-											renderLightDetail(sub_lights[i], i);
-										ImGui::TreePop();
-									}
-									ImGui::PopID();
-								}
-							};
-
-							// Partition lights by source into top-level groups
-							std::vector<Entity> scene_lights, punctual_lights, emissive_lights;
-							for (auto e : lights) {
-								switch (registry.getLightSource(e)) {
-									case ve::LightSource::Punctual: punctual_lights.push_back(e); break;
-									case ve::LightSource::Emissive: emissive_lights.push_back(e); break;
-									default:                        scene_lights.push_back(e); break;
-								}
-							}
-
-							// Scene lights (manually created) listed directly
-							for (size_t i = 0; i < scene_lights.size(); i++)
-								renderLightDetail(scene_lights[i], i);
-
-							// Top-level source groups
-							struct SourceGroup { const char* label; std::vector<Entity>& entities; };
-							SourceGroup source_groups[] = {
-								{"KHR Punctual", punctual_lights},
-								{"Emissive",     emissive_lights},
-							};
-							for (auto& [label, entities] : source_groups) {
-								if (entities.empty()) continue;
-								ImGui::PushID(label);
-								int active_count = 0;
-								for (auto e : entities)
-									if (registry.isActive(e))
-										active_count++;
-								std::string header = std::string(label) + " (" + std::to_string(entities.size()) + ")";
-								if (ImGui::TreeNode(header.c_str())) {
-									// Top-level group toggle
-									bool all_active = (active_count == static_cast<int>(entities.size()));
-									bool mixed = active_count > 0 && !all_active;
-									if (mixed)
-										ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
-									if (ImGui::Checkbox("Enable all", &all_active)) {
-										for (auto e : entities)
-											registry.setActive(e, all_active);
-									}
-									if (mixed)
-										ImGui::PopItemFlag();
-									renderLightGroup(entities);
-									ImGui::TreePop();
-								}
-								ImGui::PopID();
-							}
-						}
-					}
-				}
-
 				ImGui::Separator();
 				ImGui::Text("Skybox");
 				ImGui::Separator();
@@ -952,12 +679,15 @@ void Sandbox::renderAppWindows() {
 
 				ImGui::EndTabItem();
 			}
-			if (ImGui::BeginTabItem("Graphics")) {
-				ImGui::Text("Graphics Quality Settings");
-				ImGui::Separator();
+		}
+		ImGui::EndTabBar();
+	}
+	ImGui::End();
 
-				// MSAA slider with discrete sample counts
-				{
+	// Graphics window (separate, docked right with Inspector)
+	if (ImGui::Begin("Graphics")) {
+		// MSAA slider with discrete sample counts
+		{
 					ImGui::Text("MSAA:");
 
 					// Get device max and current sample count
@@ -1264,13 +994,7 @@ void Sandbox::renderAppWindows() {
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Bloom effect creates glow around bright areas.\nSimulates light bleeding in cameras");
 				}
-				ImGui::DragFloat("Bloom Strength", &ui_actions.bloom_strength, 0.001f, 0.0f, 0.4f);
-
-				ImGui::EndTabItem();
-			}
-
-		}
-		ImGui::EndTabBar();
+			ImGui::DragFloat("Bloom Strength", &ui_actions.bloom_strength, 0.001f, 0.0f, 0.4f);
 	}
 	ImGui::End();
 }
@@ -1595,6 +1319,8 @@ void Sandbox::initSystems() {
 void Sandbox::initUI() {
 	VE_LOGD("Initialising UI");
 	m_imgui_layer = std::make_unique<ImGuiLayer>(m_ve_window, m_ve_device, m_ve_renderer);
+	m_editor = std::make_unique<Editor>(m_ve_renderer, *m_imgui_layer);
+	m_editor->setAppUICallback([this]() { renderAppWindows(); });
 
 	ui_actions.hdr_enabled = m_ve_renderer.hasHdrSupport() && m_ve_renderer.isHdrEnabled();
 	ui_actions.fov = glm::degrees(m_fov);
@@ -1608,39 +1334,56 @@ void Sandbox::initUI() {
 	ui_actions.should_respawn = m_particle_system->getShouldRespawn();
 	ui_actions.ambient_light_color = glm::vec3(DEFAULT_AMBIENT_LIGHT_COLOR);
 	ui_actions.ambient_light_intensity = DEFAULT_AMBIENT_LIGHT_COLOR.w;
-}
 
+	// Scene selection in hierarchy panel header
+	m_editor->getHierarchyPanel().setHeaderCallback([this]() {
+		if (m_pending_scene_load != SandboxUIContext::SceneType::NONE)
+			ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Loading...");
 
-void Sandbox::renderControlsWindow() {
-	if (!ui_actions.show_controls) return;
+		int current_scene_int = static_cast<int>(ui_actions.current_scene);
+		if (ImGui::RadioButton("Simple", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::SIMPLE)))
+			ui_actions.current_scene = SandboxUIContext::SceneType::SIMPLE;
+		ImGui::SameLine();
+		if (ImGui::RadioButton("Sponza", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::SPONZA)))
+			ui_actions.current_scene = SandboxUIContext::SceneType::SPONZA;
+		ImGui::SameLine();
+		if (ImGui::RadioButton("Bistro", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::BISTRO)))
+			ui_actions.current_scene = SandboxUIContext::SceneType::BISTRO;
 
-	ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 10.0f, ImGui::GetIO().DisplaySize.y - 10.0f), ImGuiCond_Always, ImVec2(1.0f, 1.0f));
-	ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs;
-	// If UI is visible (mouse unlocked), allow interaction and decoration (close button)
-	if (ui_actions.visible) {
-		flags = ImGuiWindowFlags_AlwaysAutoResize;
-	}
+		if (ImGui::RadioButton("Sponza (compressed)", &current_scene_int, static_cast<int>(SandboxUIContext::SceneType::SPONZA_LOW)))
+			ui_actions.current_scene = SandboxUIContext::SceneType::SPONZA_LOW;
 
-	if (ImGui::Begin("Controls", &ui_actions.show_controls, flags)) {
-		ImGui::Text("WASD: Move | Space/C: Up/Down | Shift: Sprint");
-		ImGui::Separator();
-		ImGui::Text("Particle simulation mode: ");
-		// Modes correspond to the ParticleMode enum in particle_system.hpp
-		const char* modes[] = { "Earth Gravity", "Cool Gravity", "Succ mode", "Stasis", "Galaxy" };
-		for (int i = 0; i < 5; i++) {
-			ParticleMode mode = static_cast<ParticleMode>(i + 1);
-			bool is_active = (ui_actions.current_mode == mode);
-			if (is_active) ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "> %d: %s", i + 1, modes[i]);
-			else ImGui::Text("  %d: %s", i + 1, modes[i]);
+		if (ImGui::Button("New Empty Scene")) {
+			m_pending_gltf_path.clear();
+			ui_actions.current_scene = SandboxUIContext::SceneType::GLTF;
+			m_loaded_scene_type = SandboxUIContext::SceneType::NONE;
+			m_pending_scene_load = SandboxUIContext::SceneType::GLTF;
 		}
-		ImGui::Text("E/G: Reset particles in front of camera");
-		ImGui::Separator();
-		ImGui::Text("F: Launch Firework");
-		ImGui::Separator();
-		ImGui::Text("P: Toggle controls/performance ui");
-		ImGui::Text("Tab: Toggle Settings");
-	}
-	ImGui::End();
+		ImGui::SameLine();
+		if (ImGui::Button("Load GLTF...")) {
+			auto selection = pfd::open_file(
+				"Select GLTF Model", "",
+				{"glTF Files", "*.gltf *.glb"},
+				pfd::opt::none
+			).result();
+			if (!selection.empty()) {
+				m_pending_gltf_path = selection[0];
+				ui_actions.current_scene = SandboxUIContext::SceneType::GLTF;
+				m_loaded_scene_type = SandboxUIContext::SceneType::NONE;
+				m_pending_scene_load = SandboxUIContext::SceneType::GLTF;
+			}
+		}
+
+		if (ImGui::Button("Add Model...")) {
+			auto selection = pfd::open_file(
+				"Add GLTF Model", "",
+				{"glTF Files", "*.gltf *.glb"},
+				pfd::opt::none
+			).result();
+			if (!selection.empty())
+				static_cast<GltfScene*>(m_active_scene.get())->addModel(selection[0]);
+		}
+	});
 }
 
 } // namespace ve
