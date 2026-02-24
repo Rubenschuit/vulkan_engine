@@ -2,6 +2,7 @@
 #include "ui/panels/viewport_panel.hpp"
 #include "scene/ve_registry.hpp"
 #include "scene/ve_camera.hpp"
+#include "utils/ve_ray.hpp"
 #include <imgui.h>
 #include <ImGuizmo.h>
 #include <glm/gtc/type_ptr.hpp>
@@ -36,6 +37,27 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 
 		// Gizmo overlay (drawn on top of the image)
 		renderGizmo(registry, state, image_pos.x, image_pos.y, size.x, size.y);
+
+		// Raycast picking (left-click in viewport selects entity)
+		if (state.viewport_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
+		    && !state.gizmo_active && !ImGuizmo::IsOver() && m_camera && registry) {
+			ImVec2 mouse = ImGui::GetMousePos();
+			float uv_x = (mouse.x - image_pos.x) / size.x;
+			float uv_y = (mouse.y - image_pos.y) / size.y;
+
+			if (uv_x >= 0.0f && uv_x <= 1.0f && uv_y >= 0.0f && uv_y <= 1.0f) {
+				glm::mat4 inv_vp = glm::inverse(m_camera->getProj() * m_camera->getView());
+				Ray ray = screenToWorldRay(uv_x, uv_y, inv_vp);
+				RayHit hit;
+				if (raycastScene(ray, *registry, hit)) {
+					state.selected_entity = hit.entity;
+					state.selection_changed = true;
+				} else if (!state.selected_entity.isNull()) {
+					state.selected_entity = Entity::null();
+					state.selection_changed = true;
+				}
+			}
+		}
 
 		// Keyboard shortcuts for gizmo mode (when viewport is hovered)
 		if (state.viewport_hovered || state.viewport_focused) {
