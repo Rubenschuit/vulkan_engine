@@ -23,6 +23,14 @@ enum class TextureType {
 	EMISSIVE,
 };
 
+// Holds decoded pixel data or raw KTX bytes for images embedded in .glb files.
+struct EmbeddedImageData {
+	std::vector<uint8_t> pixels; // decoded RGBA or raw KTX bytes
+	uint32_t width{};
+	uint32_t height{};
+	bool is_ktx{};
+};
+
 class VENGINE_API VeTexture : public Resource {
 public:
 	// For ResourceManager: stores id, does not load. Call load() to load.
@@ -46,6 +54,11 @@ public:
 	// Load texture via ResourceManager; returns default if path is placeholder or missing
 	static ResourceHandle<VeTexture> loadOrDefault(VeResourceManager& resource_manager, const std::filesystem::path& path, TextureType fallback_type);
 
+	// Embedded image cache for .glb support
+	static void registerEmbedded(const std::string& key, EmbeddedImageData data);
+	static bool hasEmbedded(const std::string& key);
+	static void clearEmbeddedCache();
+
 	// For createDefault - constructs texture from generated pixel data
 	VeTexture(VeDevice& device, uint32_t width, uint32_t height, TextureType type);
 
@@ -60,6 +73,8 @@ protected:
 
 private:
 	bool createTextureImage(const std::filesystem::path& texture_path, vk::Format format_hint = vk::Format::eUndefined);
+	bool createTextureImageFromKtxMemory(const uint8_t* data, size_t size, vk::Format format_hint = vk::Format::eUndefined);
+	bool uploadKtxTexture(void* k_texture_ptr, vk::Format format_hint);
 	bool createTextureImageSTB(const std::filesystem::path& texture_path, vk::Format format = vk::Format::eR8G8B8A8Srgb);
 	void createTextureImageFromPixels(uint32_t width, uint32_t height, const stbi_uc* pixels, vk::Format format);
 	void createTextureSampler();

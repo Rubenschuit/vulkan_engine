@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "resources/ve_model.hpp"
+#include "resources/ve_texture.hpp"
 #include "scene/ve_component.hpp"
 #include "utils/ve_log.hpp"
 
@@ -46,37 +47,56 @@ static int getTextureImageIndex(const tinygltf::Model& gltf, size_t tex_idx) {
 	return -1;
 }
 
-// Custom image loader: KTX/KTX2 files are loaded via VeTexture from URI, not by TinyGLTF.
-// Detect KTX magic and return success without calling STB (avoids "Unknown image format" warnings).
+// Check for KTX/KTX2 magic bytes: 0xAB 'K' 'T' 'X'
+static bool isKtxMagic(const unsigned char* bytes, size_t size) {
+	return size >= 4 && bytes[0] == 0xAB && bytes[1] == 0x4B && bytes[2] == 0x54 && bytes[3] == 0x58;
+}
+
+// Custom image loader: handles KTX/KTX2 bypass and embedded vs external images.
+// - KTX + embedded (glb): keep raw bytes in image->image for later in-memory loading
+// - KTX + external (gltf): clear image->image, engine loads from file via URI
+// - Non-KTX + embedded: decode to RGBA pixels via tinygltf (as_is=false)
+// - Non-KTX + external: store as-is, engine loads from file via URI
 static bool LoadImageDataVeModel(tinygltf::Image* image, const int image_idx, std::string* err,
                                  std::string* warn, int req_width, int req_height,
                                  const unsigned char* bytes, int size, void* user_data) {
-	(void)image_idx;
-	(void)err;
-	(void)warn;
-	(void)req_width;
-	(void)req_height;
-	// KTX magic: 0xAB 0x4B 0x54 0x58 ("KTX")
-	// KTX2 magic: 0xAB 0x4B 0x54 0x58 0x20 0x32 0x30 ("KTX 20")
-	if (size >= 4 && bytes[0] == 0xAB && bytes[1] == 0x4B && bytes[2] == 0x54 && bytes[3] == 0x58) {
+	bool is_ktx = isKtxMagic(bytes, static_cast<size_t>(size));
+	if (is_ktx) {
 		image->width = image->height = image->component = -1;
 		image->bits = image->pixel_type = -1;
 		image->as_is = true;
-		image->image.clear();
+		if (image->uri.empty()) // embedded (glb): keep raw KTX bytes for in-memory loading
+			image->image.assign(bytes, bytes + size);
+		else // external (gltf): engine loads from file via URI
+			image->image.clear();
 		return true;
 	}
+	if (image->uri.empty()) {
+		// Embedded image (glb): decode PNG/JPEG to RGBA pixels
+		tinygltf::LoadImageDataOption opt;
+		opt.as_is = false;
+		opt.preserve_channels = false;
+		return tinygltf::LoadImageData(image, image_idx, err, warn, req_width, req_height, bytes, size, &opt);
+	}
+	// External image (gltf): store as-is, engine loads from file via URI
 	return tinygltf::LoadImageData(image, image_idx, err, warn, req_width, req_height, bytes, size, user_data);
 }
 
-// Resolve texture path from glTF image: use extracted URI so VeTexture loads from file (no custom decode in loader).
+// Resolve texture path from glTF image. External images use URI on disk; embedded images (glb)
+// return a synthetic "@embedded:" key that maps to the in-memory texture cache.
 static std::filesystem::path resolveTexturePath(const tinygltf::Model& gltf, size_t tex_idx,
                                                 const std::filesystem::path& model_dir,
+                                                const std::string& model_path_str,
                                                 const std::filesystem::path& default_path) {
 	int img_idx = getTextureImageIndex(gltf, tex_idx);
 	if (img_idx < 0) return default_path;
 	const auto& image = gltf.images[static_cast<size_t>(img_idx)];
-	if (image.uri.empty()) return default_path;
-	return model_dir / image.uri;
+	if (!image.uri.empty())
+		return model_dir / image.uri;
+	std::string emb_key = "@embedded:" + model_path_str + "::img_" + std::to_string(img_idx);
+	if (VeTexture::hasEmbedded(emb_key))
+		return std::filesystem::path(emb_key);
+	return default_path;
 }
 
 // Try to derive a texture path by replacing a known suffix with alternatives; return first path that exists.
@@ -541,7 +561,6 @@ VeModel::VeModel() = default;
 
 VeModel::~VeModel() = default;
 
-// TODO: add .glb support
 void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceManager& resource_manager,
                            VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout,
                            bool extract_lights, bool flip_tex_coord_v) {
@@ -558,7 +577,6 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	std::string path_ext = model_path.extension().string();
 	std::transform(path_ext.begin(), path_ext.end(), path_ext.begin(), ::tolower);
 	if (path_ext == ".glb") {
-		VE_LOGI("Loading glTF binary file (NOT SUPPORTED YET): " << model_path);
 		ret = loader.LoadBinaryFromFile(&gltf, &err, &warn, model_path.string());
 	} else if (path_ext == ".gltf") {
 		ret = loader.LoadASCIIFromFile(&gltf, &err, &warn, model_path.string());
@@ -593,6 +611,18 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	std::filesystem::path model_dir = model_path.parent_path();
 	std::string model_path_str = model_path.lexically_normal().generic_string();
 	bool has_textured_materials = false;
+
+	// Register embedded images (glb) in the texture cache so VeTexture can load from memory
+	for (size_t i = 0; i < gltf.images.size(); i++) {
+		auto& img = gltf.images[i];
+		if (!img.uri.empty() || img.image.empty())
+			continue;
+		std::string key = "@embedded:" + model_path_str + "::img_" + std::to_string(i);
+		bool is_ktx = isKtxMagic(img.image.data(), img.image.size());
+		VeTexture::registerEmbedded(key, {std::move(img.image),
+		                                  is_ktx ? 0u : static_cast<uint32_t>(img.width),
+		                                  is_ktx ? 0u : static_cast<uint32_t>(img.height), is_ktx});
+	}
 
 	const std::filesystem::path default_albedo = model_dir / "default_albedo.png";
 	const std::filesystem::path default_normal = model_dir / "default_normal.png";
@@ -756,12 +786,12 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 			// Albedo: baseColorTexture or KHR_materials_pbrSpecularGlossiness.diffuseTexture
 			if (mat.pbrMetallicRoughness.baseColorTexture.index >= 0) {
 				albedo_paths.push_back(resolveTexturePath(gltf,
-					static_cast<size_t>(mat.pbrMetallicRoughness.baseColorTexture.index), model_dir, default_albedo));
+					static_cast<size_t>(mat.pbrMetallicRoughness.baseColorTexture.index), model_dir, model_path_str, default_albedo));
 			} else if (it_sg != mat.extensions.end()) {
 				const tinygltf::Value& ext = it_sg->second;
 				if (ext.Has("diffuseTexture") && ext.Get("diffuseTexture").Has("index")) {
 					int tex_idx = ext.Get("diffuseTexture").Get("index").Get<int>();
-					albedo_paths.push_back(resolveTexturePath(gltf, static_cast<size_t>(tex_idx), model_dir, default_albedo));
+					albedo_paths.push_back(resolveTexturePath(gltf, static_cast<size_t>(tex_idx), model_dir, model_path_str, default_albedo));
 				} else {
 					albedo_paths.push_back(default_albedo);
 				}
@@ -770,18 +800,18 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 			}
 			// Normal
 			if (mat.normalTexture.index >= 0) {
-				normal_paths.push_back(resolveTexturePath(gltf, static_cast<size_t>(mat.normalTexture.index), model_dir, default_normal));
+				normal_paths.push_back(resolveTexturePath(gltf, static_cast<size_t>(mat.normalTexture.index), model_dir, model_path_str, default_normal));
 			} else {
 				normal_paths.push_back(default_normal);
 			}
 			// Metallic-roughness: metallicRoughnessTexture or specularGlossinessTexture as stand-in (alpha = roughness)
 			if (mat.pbrMetallicRoughness.metallicRoughnessTexture.index >= 0) {				metallic_roughness_paths.push_back(resolveTexturePath(gltf,
-					static_cast<size_t>(mat.pbrMetallicRoughness.metallicRoughnessTexture.index), model_dir, default_metallic_roughness));
+					static_cast<size_t>(mat.pbrMetallicRoughness.metallicRoughnessTexture.index), model_dir, model_path_str, default_metallic_roughness));
 			} else if (it_sg != mat.extensions.end()) {
 				const tinygltf::Value& ext = it_sg->second;
 				if (ext.Has("specularGlossinessTexture") && ext.Get("specularGlossinessTexture").Has("index")) {
 					int tex_idx = ext.Get("specularGlossinessTexture").Get("index").Get<int>();
-					metallic_roughness_paths.push_back(resolveTexturePath(gltf, static_cast<size_t>(tex_idx), model_dir, default_metallic_roughness));
+					metallic_roughness_paths.push_back(resolveTexturePath(gltf, static_cast<size_t>(tex_idx), model_dir, model_path_str, default_metallic_roughness));
 					material_alpha_props.back().use_spec_gloss_texture = true;
 				} else {
 					metallic_roughness_paths.push_back(default_metallic_roughness);
@@ -791,13 +821,13 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 			}
 			// Occlusion
 			if (mat.occlusionTexture.index >= 0) {
-				occlusion_paths.push_back(resolveTexturePath(gltf, static_cast<size_t>(mat.occlusionTexture.index), model_dir, default_occlusion));
+				occlusion_paths.push_back(resolveTexturePath(gltf, static_cast<size_t>(mat.occlusionTexture.index), model_dir, model_path_str, default_occlusion));
 			} else {
 				occlusion_paths.push_back(default_occlusion);
 			}
 			// Emissive
 			if (mat.emissiveTexture.index >= 0) {
-				emissive_paths.push_back(resolveTexturePath(gltf, static_cast<size_t>(mat.emissiveTexture.index), model_dir, default_emissive));
+				emissive_paths.push_back(resolveTexturePath(gltf, static_cast<size_t>(mat.emissiveTexture.index), model_dir, model_path_str, default_emissive));
 			} else {
 				emissive_paths.push_back(default_emissive);
 			}
@@ -884,6 +914,7 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 		}
 		m_material_handles.push_back(std::move(mat_handle));
 	}
+	VeTexture::clearEmbeddedCache();
 
 	std::vector<int> root_nodes;
 	if (!gltf.scenes.empty() && gltf.defaultScene >= 0 && gltf.defaultScene < static_cast<int>(gltf.scenes.size())) {

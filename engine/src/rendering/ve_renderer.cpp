@@ -568,12 +568,12 @@ VkSampler VeRenderer::getViewportSampler() const {
 void VeRenderer::resizeSceneRender(uint32_t w, uint32_t h) {
 	if (w == 0 || h == 0)
 		return;
-	m_scene_render_extent = {w, h};
+	m_scene_render_extent = vk::Extent2D{w, h};
 	m_ve_swap_chain->resizeOffscreenResources({w, h});
 }
 
 void VeRenderer::resetSceneRenderExtent() {
-	m_scene_render_extent = {0, 0};
+	m_scene_render_extent = vk::Extent2D{0, 0};
 	m_ve_swap_chain->resizeOffscreenResources(m_ve_swap_chain->getSwapChainExtent());
 }
 

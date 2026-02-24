@@ -39,6 +39,10 @@ namespace {
 	}
 }
 
+// Static cache for embedded images from .glb files.
+// Not thread-safe.
+static std::unordered_map<std::string, ve::EmbeddedImageData> s_embedded_cache;
+
 namespace ve {
 
 VeTexture::VeTexture(VeDevice& ve_device, const std::string& resource_id)
@@ -65,7 +69,7 @@ ResourceHandle<VeTexture> VeTexture::loadOrDefault(VeResourceManager& resource_m
 	bool is_default = (fn == "default_albedo.png" || fn == "default_normal.png" || fn == "default_metallic_roughness.png" ||
 	                   fn == "default_occlusion.png" || fn == "default_emissive.png" || fn == "default_mr_unit.png" ||
 	                   fn == "white.png" || fn == "black.png");
-	if (is_default || !std::filesystem::exists(path)) {
+	if (is_default || (!std::filesystem::exists(path) && !hasEmbedded(key))) {
 		if (fn == "default_mr_unit.png")
 			return resource_manager.load<VeTexture>("default_mr_unit");
 		const char* default_id = "default_metallic_roughness";
@@ -81,6 +85,18 @@ ResourceHandle<VeTexture> VeTexture::loadOrDefault(VeResourceManager& resource_m
 	else if (fallback_type == TextureType::OCCLUSION) suffix = "|occlusion";
 	else if (fallback_type == TextureType::EMISSIVE) suffix = "|emissive";
 	return resource_manager.load<VeTexture>(key + suffix);
+}
+
+void VeTexture::registerEmbedded(const std::string& key, EmbeddedImageData data) {
+	s_embedded_cache[key] = std::move(data);
+}
+
+bool VeTexture::hasEmbedded(const std::string& key) {
+	return s_embedded_cache.find(key) != s_embedded_cache.end();
+}
+
+void VeTexture::clearEmbeddedCache() {
+	s_embedded_cache.clear();
 }
 
 VeTexture::~VeTexture() {
@@ -150,6 +166,25 @@ bool VeTexture::doLoad() {
 			format = vk::Format::eR8G8B8A8Unorm;
 	}
 
+	// Check embedded image cache (glb support)
+	auto emb_it = s_embedded_cache.find(path_str);
+	if (emb_it != s_embedded_cache.end()) {
+		auto& data = emb_it->second;
+		bool ok;
+		if (data.is_ktx) {
+			ok = createTextureImageFromKtxMemory(data.pixels.data(), data.pixels.size(), format);
+		} else {
+			m_width = data.width;
+			m_height = data.height;
+			createTextureImageFromPixels(data.width, data.height, data.pixels.data(), format);
+			ok = true;
+		}
+		if (ok)
+			createTextureSampler();
+		s_embedded_cache.erase(emb_it);
+		return ok;
+	}
+
 	std::filesystem::path path(path_str);
 	if (path.extension() == ".ktx" || path.extension() == ".ktx2") {
 		if (!createTextureImage(path, format)) {
@@ -178,77 +213,83 @@ const vk::raii::Sampler& VeTexture::getSampler() const {
 	return *m_texture_sampler;
 }
 
-// TODO: generate mipmaps if not present
-// Loads a texture from a .ktx or .ktx2 file and creates a Vulkan image resources.
-// Also works for cubemaps.
-// format_hint: preferred format when converting R8G8B8->RGBA.
-// Normals for example should use Unorm (linear).
+// Loads a texture from a .ktx or .ktx2 file and creates Vulkan image resources.
 bool VeTexture::createTextureImage(const std::filesystem::path& texture_path, vk::Format format_hint) {
-	//VE_LOGD("Loading texture from " << texture_path);
-
 	ktxTexture* k_texture;
-    KTX_error_code result = ktxTexture_CreateFromNamedFile(
-        texture_path.string().c_str(),
-        KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
-        &k_texture);
+	KTX_error_code result = ktxTexture_CreateFromNamedFile(
+		texture_path.string().c_str(),
+		KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
+		&k_texture);
 
 	if (result != KTX_SUCCESS) {
 		VE_LOGE("KTX load failed: " << texture_path << " (error " << static_cast<int>(result) << ")");
 		return false;
 	}
 
-	//VE_LOGD("Texture loaded successfully");
+	return uploadKtxTexture(k_texture, format_hint);
+}
 
-	// Get texture dimensions and data
+// Loads a KTX/KTX2 texture from raw bytes in memory (for .glb embedded images).
+bool VeTexture::createTextureImageFromKtxMemory(const uint8_t* mem_data, size_t mem_size, vk::Format format_hint) {
+	ktxTexture* k_texture;
+	KTX_error_code result = ktxTexture_CreateFromMemory(
+		mem_data, mem_size,
+		KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
+		&k_texture);
+
+	if (result != KTX_SUCCESS) {
+		VE_LOGE("KTX load from memory failed (error " << static_cast<int>(result) << ")");
+		return false;
+	}
+
+	return uploadKtxTexture(k_texture, format_hint);
+}
+
+// Shared KTX upload: transcodes, stages, and uploads a ktxTexture to GPU.
+// Takes ownership of k_texture and destroys it before returning.
+bool VeTexture::uploadKtxTexture(void* k_texture_ptr, vk::Format format_hint) {
+	auto* k_texture = static_cast<ktxTexture*>(k_texture_ptr);
 	bool is_cubemap = k_texture->isCubemap;
-    m_width = k_texture->baseWidth;
-    m_height = k_texture->baseHeight;
+	m_width = k_texture->baseWidth;
+	m_height = k_texture->baseHeight;
 
 	if (m_width == 0 || m_height == 0) {
-		VE_LOGE("KTX texture has invalid dimensions: " << m_width << "x" << m_height << " (" << texture_path << ")");
+		VE_LOGE("KTX texture has invalid dimensions: " << m_width << "x" << m_height);
 		ktxTexture_Destroy(k_texture);
 		return false;
 	}
 
-    // Handle transcoding for compressed KTX2 textures (BasisLZ / UASTC)
-    // Transcode to GPU-compressed formats when supported to reduce VRAM usage ~4x
-    if (k_texture->classId == ktxTexture2_c) {
-        ktxTexture2* ktx2 = reinterpret_cast<ktxTexture2*>(k_texture);
-        if (ktxTexture2_NeedsTranscoding(ktx2)) {
-            ktx_transcode_fmt_e target = KTX_TTF_RGBA32;
-            if (m_ve_device.supportsBC()) {
-                target = KTX_TTF_BC7_RGBA;
-            } else if (m_ve_device.supportsASTC()) {
-                target = KTX_TTF_ASTC_4x4_RGBA;
-            }
-            result = ktxTexture2_TranscodeBasis(ktx2, target, 0);
-            if (result != KTX_SUCCESS) {
-                VE_LOGE("KTX2 transcoding failed: " << texture_path << " (error " << static_cast<int>(result) << ")");
-                ktxTexture_Destroy(k_texture);
-                return false;
-            }
-        }
-    }
+	// Handle transcoding for compressed KTX2 textures (BasisLZ / UASTC)
+	if (k_texture->classId == ktxTexture2_c) {
+		ktxTexture2* ktx2 = reinterpret_cast<ktxTexture2*>(k_texture);
+		if (ktxTexture2_NeedsTranscoding(ktx2)) {
+			ktx_transcode_fmt_e target = KTX_TTF_RGBA32;
+			if (m_ve_device.supportsBC())
+				target = KTX_TTF_BC7_RGBA;
+			else if (m_ve_device.supportsASTC())
+				target = KTX_TTF_ASTC_4x4_RGBA;
+			KTX_error_code result = ktxTexture2_TranscodeBasis(ktx2, target, 0);
+			if (result != KTX_SUCCESS) {
+				VE_LOGE("KTX2 transcoding failed (error " << static_cast<int>(result) << ")");
+				ktxTexture_Destroy(k_texture);
+				return false;
+			}
+		}
+	}
 
-	uint32_t num_levels = k_texture->numLevels; // number of mip levels
+	uint32_t num_levels = k_texture->numLevels;
 	ktx_uint8_t* data = ktxTexture_GetData(k_texture);
-	//VE_LOGD("Texture dimensions: " << m_width << "x" << m_height);
-	//VE_LOGD("Mip levels: " << num_levels);
 
 	vk::Format texture_format;
 	if (k_texture->classId == ktxTexture2_c) {
 		auto* ktx2 = reinterpret_cast<ktxTexture2*>(k_texture);
 		texture_format = static_cast<vk::Format>(ktx2->vkFormat);
-		//VE_LOGD("Texture format: " << vk::to_string(texture_format));
 		if (texture_format == vk::Format::eUndefined)
 			texture_format = vk::Format::eR8G8B8A8Unorm;
 	} else if (k_texture->classId == ktxTexture1_c) {
 		texture_format = static_cast<vk::Format>(ktxTexture1_GetVkFormat(reinterpret_cast<ktxTexture1*>(k_texture)));
-		if (texture_format == vk::Format::eUndefined) {
-			VE_LOGW("KTX1 format unknown for " << texture_path << ", assuming R8G8B8A8Unorm");
+		if (texture_format == vk::Format::eUndefined)
 			texture_format = vk::Format::eR8G8B8A8Unorm;
-		}
-		VE_LOGD("Texture format (KTX1): " << vk::to_string(texture_format));
 	} else {
 		texture_format = vk::Format::eR8G8B8A8Unorm;
 	}
@@ -258,14 +299,12 @@ bool VeTexture::createTextureImage(const std::filesystem::path& texture_path, vk
 	bool is_uncompressed_8bit = (texture_format == vk::Format::eR8G8B8Srgb || texture_format == vk::Format::eR8G8B8Unorm ||
 	                            texture_format == vk::Format::eR8G8B8A8Srgb || texture_format == vk::Format::eR8G8B8A8Unorm);
 	bool has_format_hint = (format_hint == vk::Format::eR8G8B8A8Srgb || format_hint == vk::Format::eR8G8B8A8Unorm);
-	if (has_format_hint && is_uncompressed_8bit) {
+	if (has_format_hint && is_uncompressed_8bit)
 		texture_format = format_hint;
-	} else if (has_format_hint && isBlockCompressed(texture_format)) {
+	else if (has_format_hint && isBlockCompressed(texture_format)) {
 		bool want_srgb = (format_hint == vk::Format::eR8G8B8A8Srgb);
 		texture_format = want_srgb ? toSrgbBC(texture_format) : toUnormBC(texture_format);
 	}
-
-
 
 	// Compute total size and copy regions. For cubemaps with mipmaps we use single-level path.
 	// Cubemap mipmap copy is not implemented - only level 0 is copied, so force num_levels=1 to avoid
@@ -282,8 +321,7 @@ bool VeTexture::createTextureImage(const std::filesystem::path& texture_path, vk
 			ktx_size_t offset = 0;
 			ktxTexture_GetImageOffset(k_texture, level, 0, 0, &offset);
 			buffer_offsets.push_back(offset);
-			ktx_size_t level_size = ktxTexture_GetImageSize(k_texture, level);
-			total_size += level_size;
+			total_size += ktxTexture_GetImageSize(k_texture, level);
 			uint32_t w = std::max(1u, m_width >> level);
 			uint32_t h = std::max(1u, m_height >> level);
 			extents.push_back({ w, h, 1 });
@@ -294,72 +332,43 @@ bool VeTexture::createTextureImage(const std::filesystem::path& texture_path, vk
 		buffer_offsets.push_back(0);
 		extents.push_back({ m_width, m_height, 1 });
 	}
-	//VE_LOGD("Total size: " << total_size);
 
-	// Create staging buffer and copy data
 	ve::VeBuffer staging_buffer(
-		m_ve_device,
-		total_size,
-		1,
+		m_ve_device, total_size, 1,
 		vk::BufferUsageFlagBits::eTransferSrc,
-		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
-	);
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	staging_buffer.map();
 	staging_buffer.writeToBuffer(data, static_cast<size_t>(total_size));
-	//VE_LOGD("Copied texture data to staging buffer");
 
-	// Create image with mip levels
 	m_texture_image = std::make_unique<ve::VeImage>(
-		m_ve_device,
-		static_cast<uint32_t>(m_width),
-		static_cast<uint32_t>(m_height),
-		vk::SampleCountFlagBits::e1,
-		texture_format,
+		m_ve_device, m_width, m_height,
+		vk::SampleCountFlagBits::e1, texture_format,
 		vk::ImageTiling::eOptimal,
 		vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		vk::ImageAspectFlagBits::eColor,
-		is_cubemap,
-		array_layers,
-		effective_levels
-	);
+		is_cubemap, array_layers, effective_levels);
 
 	m_texture_image->transitionImageLayout(
-		vk::ImageLayout::eUndefined,
-		vk::ImageLayout::eTransferDstOptimal,
-		{},
-		vk::AccessFlagBits2::eTransferWrite,
-		vk::PipelineStageFlagBits2::eTopOfPipe,
-		vk::PipelineStageFlagBits2::eTransfer);
+		vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
+		{}, vk::AccessFlagBits2::eTransferWrite,
+		vk::PipelineStageFlagBits2::eTopOfPipe, vk::PipelineStageFlagBits2::eTransfer);
 
 	if (use_mipmap_copy) {
 		m_ve_device.copyBufferToImageWithMipmaps(
-			staging_buffer.getBuffer(),
-			m_texture_image->getImage(),
-			array_layers,
-			effective_levels,
-			buffer_offsets,
-			extents
-		);
+			staging_buffer.getBuffer(), m_texture_image->getImage(),
+			array_layers, effective_levels, buffer_offsets, extents);
 	} else {
 		m_ve_device.copyBufferToImage(
-			staging_buffer.getBuffer(),
-			m_texture_image->getImage(),
-			m_width,
-			m_height,
-			array_layers
-		);
+			staging_buffer.getBuffer(), m_texture_image->getImage(),
+			m_width, m_height, array_layers);
 	}
 
 	m_texture_image->transitionImageLayout(
-		vk::ImageLayout::eTransferDstOptimal,
-		vk::ImageLayout::eShaderReadOnlyOptimal,
-		vk::AccessFlagBits2::eTransferWrite,
-		vk::AccessFlagBits2::eShaderRead,
-		vk::PipelineStageFlagBits2::eTransfer,
-		vk::PipelineStageFlagBits2::eFragmentShader);
+		vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
+		vk::AccessFlagBits2::eTransferWrite, vk::AccessFlagBits2::eShaderRead,
+		vk::PipelineStageFlagBits2::eTransfer, vk::PipelineStageFlagBits2::eFragmentShader);
 
-	//VE_LOGD("Texture created successfully: " << m_width << "x" << m_height << " format=" << vk::to_string(texture_format));
 	ktxTexture_Destroy(k_texture);
 	return true;
 }
