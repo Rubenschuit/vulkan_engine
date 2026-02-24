@@ -44,6 +44,13 @@ struct WorldTransformCache {
 	bool normal_dirty    = true;
 };
 
+// Deferred component removal (processed alongside entity deletions at safe frame boundary)
+enum class ComponentType : uint8_t { Mesh, PointLight, DirectionalLight };
+struct PendingComponentRemoval {
+	Entity entity;
+	ComponentType type;
+};
+
 class VENGINE_API Registry {
 public:
 	Registry();
@@ -114,6 +121,7 @@ public:
 
 	// Hierarchy
 	void   setParent(Entity child, Entity parent);
+	void   reparent(Entity child, Entity new_parent);  // preserves world transform
 	Entity getParent(Entity e) const;
 	Entity firstChild(Entity e) const;
 	Entity nextSibling(Entity e) const;
@@ -134,9 +142,12 @@ public:
 
 	void clear();
 
-	// Deferred deletion (queued by DeleteEntityRequest events, processed at safe frame boundary)
-	bool hasPendingDeletions() const { return !m_pending_deletions.empty(); }
+	// Deferred deletion
+	bool hasPendingDeletions() const { return !m_pending_deletions.empty() || !m_pending_component_removals.empty(); }
 	void processPendingDeletions();
+
+	// Deferred component removal
+	void queueComponentRemoval(Entity entity, ComponentType type);
 
 	// Entity for a given raw entity index (reconstructs with current generation)
 	Entity entityFromIndex(uint32_t index) const;
@@ -148,6 +159,7 @@ public:
 private:
 	void ensureSlotSize(uint32_t index);
 	void invalidateMeshWorldAABBs(Entity e);
+	void processPendingComponentRemovals();
 
 	// Entity management
 	std::vector<EntityMeta> m_meta;
@@ -172,6 +184,7 @@ private:
 
 	EventDispatcher m_events;
 	std::vector<DeleteEntityRequest> m_pending_deletions;
+	std::vector<PendingComponentRemoval> m_pending_component_removals;
 };
 
 // ── Template implementations ────────────────────────────────────────────────

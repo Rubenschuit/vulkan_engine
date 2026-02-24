@@ -49,6 +49,13 @@ public:
 	// When true, vertex shader flips tex coord v. Required for some gltf exporters.
 	bool getFlipTexCoordV() const { return m_flip_tex_coord_v; }
 
+	// Texture access for editor UI (read-only display)
+	const ResourceHandle<VeTexture>& getAlbedoTexture() const { return m_albedo_texture; }
+	const ResourceHandle<VeTexture>& getNormalTexture() const { return m_normal_texture; }
+	const ResourceHandle<VeTexture>& getMetallicRoughnessTexture() const { return m_metallic_roughness_texture; }
+	const ResourceHandle<VeTexture>& getOcclusionTexture() const { return m_occlusion_texture; }
+	const ResourceHandle<VeTexture>& getEmissiveTexture() const { return m_emissive_texture; }
+
 protected:
 	bool doLoad() override;
 	void doUnload() override;

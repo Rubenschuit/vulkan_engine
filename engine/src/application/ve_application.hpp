@@ -35,7 +35,7 @@ struct VENGINE_API SceneLoadRequest {
 	std::filesystem::path gltf_path;
 };
 
-// Forward declarations for render systems (engine owns these)
+// Forward declarations for render systems
 class CullingSystem;
 class ShadowRenderSystem;
 class DepthPrePassSystem;
@@ -51,6 +51,7 @@ class FireworksSystem;
 class SkyboxRenderSystem;
 class BloomSystem;
 class PostProcessSystem;
+class OutlineSystem;
 class Editor;
 class VeScene;
 
@@ -197,6 +198,7 @@ private:
 	std::unique_ptr<SkyboxRenderSystem> m_skybox_render_system;
 	std::unique_ptr<BloomSystem> m_bloom_system;
 	std::unique_ptr<PostProcessSystem> m_post_process_system;
+	std::unique_ptr<OutlineSystem> m_outline_system;
 
 	// --- Camera state ---
 	glm::mat4 m_prev_projection_view{1.0f};

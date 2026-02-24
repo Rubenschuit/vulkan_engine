@@ -10,6 +10,7 @@
 #include <imgui_internal.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_vulkan.h>
+#include <ImGuizmo.h>
 
 
 namespace ve {
@@ -105,6 +106,7 @@ void ImGuiLayer::beginFrame() {
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+    ImGuizmo::BeginFrame();
 }
 
 void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd, bool clear_target) {

@@ -37,7 +37,7 @@ Small modern cross-platform C++20 Vulkan 1.3+ clustered forward renderer using G
 - GTAO
 - Post-processing effects like Bloom and Blur
 - Basic HDR, several tone mapping options
-- Dear ImGui overlay
+- Dear ImGui docked UI
 - Skybox
 - FPS-style camera
 - MSAA
@@ -55,11 +55,11 @@ Fetched automatically if not found on the system:
 - KTX, GLFW 3.3+, GLM, Meshoptimizer
 
 Included in `external/`:
-- TinyGLTF, Dear ImGui, Mikktspace, Portable File Dialogs
+- TinyGLTF, Dear ImGui, ImGuizmo, Mikktspace, Portable File Dialogs
 
 
 #### Downloads:
-Besides git, cmake and a c++20 compiler, the Vulkan SDK must be installed manually. KTX is fetched automatically if not found on the system.
+Besides git, cmake and a c++20 compiler, the Vulkan SDK must be installed manually.
 
 - Vulkan SDK (LunarG): https://vulkan.lunarg.com/sdk/home
 	- macOS and Windows: Check 'System global installation' component in the installer

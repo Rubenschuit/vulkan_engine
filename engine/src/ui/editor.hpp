@@ -18,6 +18,7 @@ namespace ve {
 
 class ImGuiLayer;
 class VeRenderer;
+class VeCamera;
 class Registry;
 class VeScene;
 class SkyboxRenderSystem;
@@ -53,6 +54,9 @@ public:
 
 	// Scene registry (set by VeApplication after registerScene calls)
 	void setSceneRegistry(const std::vector<SceneEntry>* entries, int* current_index, SceneLoadRequest* request);
+
+	// Camera access for gizmo rendering
+	void setCamera(VeCamera* camera);
 
 	// Skybox system access for environment panel
 	void setSkyboxSystem(SkyboxRenderSystem* skybox);

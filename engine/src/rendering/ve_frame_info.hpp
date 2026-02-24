@@ -227,6 +227,9 @@ struct VeFrameInfo {
 	// GPU timing: compute systems write the start timestamp after their barriers resolve.
 	vk::QueryPool compute_query_pool = VK_NULL_HANDLE;
 	uint32_t compute_start_query = 0;
+
+	// Selection outline
+	Entity selected_entity = Entity::null();
 };
 
 }

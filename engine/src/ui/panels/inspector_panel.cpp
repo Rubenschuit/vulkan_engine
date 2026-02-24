@@ -4,14 +4,77 @@
 #include "scene/ve_registry.hpp"
 #include "resources/ve_mesh.hpp"
 #include "resources/ve_material.hpp"
+#include "resources/ve_texture.hpp"
 #include "resources/ve_material_properties.hpp"
 #include <imgui.h>
+#include <backends/imgui_impl_vulkan.h>
 #include <glm/gtc/type_ptr.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/euler_angles.hpp>
 #include <glm/gtx/quaternion.hpp>
 
 namespace ve {
+
+InspectorPanel::~InspectorPanel() {
+	clearTextureCache();
+}
+
+VkDescriptorSet InspectorPanel::getOrCreateTextureDescriptor(const std::string& id, const VeTexture* texture) {
+	if (!texture || id.empty())
+		return VK_NULL_HANDLE;
+
+	auto it = m_texture_cache.find(id);
+	if (it != m_texture_cache.end()) {
+		it->second.last_used_frame = m_frame_counter;
+		return it->second.descriptor_set;
+	}
+
+	if (m_texture_cache.size() >= MAX_CACHED_TEXTURES)
+		evictStaleTextures();
+
+	VkDescriptorSet ds = ImGui_ImplVulkan_AddTexture(
+		static_cast<VkSampler>(*texture->getSampler()),
+		static_cast<VkImageView>(*texture->getImageView()),
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	m_texture_cache[id] = {ds, m_frame_counter};
+	return ds;
+}
+
+void InspectorPanel::evictStaleTextures() {
+	for (auto it = m_texture_cache.begin(); it != m_texture_cache.end(); ) {
+		if (m_frame_counter - it->second.last_used_frame > TEXTURE_CACHE_TTL) {
+			ImGui_ImplVulkan_RemoveTexture(it->second.descriptor_set);
+			it = m_texture_cache.erase(it);
+		} else {
+			++it;
+		}
+	}
+}
+
+void InspectorPanel::clearTextureCache() {
+	for (auto& [tex, entry] : m_texture_cache)
+		if (entry.descriptor_set != VK_NULL_HANDLE)
+			ImGui_ImplVulkan_RemoveTexture(entry.descriptor_set);
+	m_texture_cache.clear();
+}
+
+void InspectorPanel::renderTextureSlot(const char* label, const std::string& id, const VeTexture* texture, float thumb_size) {
+	ImGui::TableNextRow();
+	ImGui::TableNextColumn();
+	ImGui::AlignTextToFramePadding();
+	ImGui::Text("%s", label);
+	ImGui::TableNextColumn();
+	if (texture) {
+		VkDescriptorSet ds = getOrCreateTextureDescriptor(id, texture);
+		if (ds != VK_NULL_HANDLE)
+			ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(ds)),
+			             ImVec2(thumb_size, thumb_size));
+		else
+			ImGui::TextDisabled("[failed]");
+	} else {
+		ImGui::TextDisabled("[none]");
+	}
+}
 
 // Draws a vec3 editor with colored X/Y/Z labels
 // TODO: make fit better
@@ -79,7 +142,42 @@ static bool drawVec3Control(const char* label, glm::vec3& values, float speed = 
 	return changed;
 }
 
+// Two-column labeled widget with optional reset button (variadic resetFn)
+template <typename WidgetFn, typename... ResetFn>
+static void labeledWidget(float label_w, const char* text, WidgetFn widgetFn, ResetFn... resetFn) {
+	ImGui::Columns(2, nullptr, false);
+	ImGui::SetColumnWidth(0, label_w);
+	ImGui::AlignTextToFramePadding();
+	ImGui::Text("%s", text);
+	if constexpr (sizeof...(resetFn) > 0) {
+		ImGui::SameLine();
+		ImGui::PushID(text);
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 0));
+		if (ImGui::SmallButton("*"))
+			(resetFn(), ...);
+		ImGui::PopStyleVar();
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Reset to default");
+		ImGui::PopID();
+	}
+	ImGui::NextColumn();
+	ImGui::SetNextItemWidth(-FLT_MIN);
+	widgetFn();
+	ImGui::Columns(1);
+}
+
 void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /*context*/) {
+	m_frame_counter++;
+
+	// Flush texture cache on scene switch
+	if (registry != m_last_registry) {
+		clearTextureCache();
+		m_last_registry = registry;
+	}
+
+	if (m_frame_counter % 60 == 0)
+		evictStaleTextures();
+
 	if (!ImGui::Begin("Inspector", &state.show_inspector)) {
 		ImGui::End();
 		return;
@@ -96,32 +194,138 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 	renderEntityHeader(*registry, entity);
 	ImGui::Separator();
 
-	// Transform
+	// Transform (no remove button)
 	auto* transform = registry->getComponent<TransformComponent>(entity);
 	if (transform) {
-		if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
+		bool open = ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen);
+		if (ImGui::BeginPopupContextItem("transform_ctx")) {
+			if (ImGui::MenuItem("Copy")) {
+				CopiedTransform ct;
+				ct.translation = transform->getTranslation();
+				ct.rotation = transform->getRotation();
+				ct.scale = transform->getScale();
+				state.component_clipboard = ct;
+			}
+			if (state.component_clipboard && std::holds_alternative<CopiedTransform>(*state.component_clipboard))
+				if (ImGui::MenuItem("Paste")) {
+					auto& ct = std::get<CopiedTransform>(*state.component_clipboard);
+					transform->setTranslation(ct.translation);
+					transform->setRotation(ct.rotation);
+					transform->setScale(ct.scale);
+				}
+			ImGui::EndPopup();
+		}
+		if (open)
 			renderTransform(*transform);
 	}
 
 	// Mesh
-	auto* mesh = registry->getComponent<MeshComponent>(entity);
-	if (mesh) {
-		if (ImGui::CollapsingHeader("Mesh", ImGuiTreeNodeFlags_DefaultOpen))
-			renderMesh(*mesh);
+	if (registry->hasComponent<MeshComponent>(entity)) {
+		bool open = ImGui::CollapsingHeader("Mesh", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
+		ImGui::PushID("remove_mesh");
+		if (ImGui::SmallButton("X"))
+			registry->queueComponentRemoval(entity, ComponentType::Mesh);
+		ImGui::PopID();
+		if (open && registry->hasComponent<MeshComponent>(entity))
+			renderMesh(*registry->getComponent<MeshComponent>(entity));
 	}
 
 	// Point Light
-	auto* pl = registry->getComponent<PointLightComponent>(entity);
-	if (pl) {
-		if (ImGui::CollapsingHeader("Point Light", ImGuiTreeNodeFlags_DefaultOpen))
-			renderPointLight(*pl);
+	if (registry->hasComponent<PointLightComponent>(entity)) {
+		bool open = ImGui::CollapsingHeader("Point Light", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		if (ImGui::BeginPopupContextItem("pl_ctx")) {
+			if (ImGui::MenuItem("Copy")) {
+				auto* pl = registry->getComponent<PointLightComponent>(entity);
+				CopiedPointLight cpl;
+				cpl.intensity = pl->getIntensity();
+				cpl.color = pl->getColor();
+				cpl.range = pl->getRange();
+				cpl.rotates = pl->getRotates();
+				cpl.casts_shadow = pl->getCastsShadow();
+				state.component_clipboard = cpl;
+			}
+			if (state.component_clipboard && std::holds_alternative<CopiedPointLight>(*state.component_clipboard))
+				if (ImGui::MenuItem("Paste")) {
+					auto* pl = registry->getComponent<PointLightComponent>(entity);
+					auto& cpl = std::get<CopiedPointLight>(*state.component_clipboard);
+					pl->setIntensity(cpl.intensity);
+					pl->setColor(cpl.color);
+					pl->setRange(cpl.range);
+					pl->setRotates(cpl.rotates);
+					pl->setCastsShadow(cpl.casts_shadow);
+				}
+			ImGui::EndPopup();
+		}
+		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
+		ImGui::PushID("remove_pl");
+		if (ImGui::SmallButton("X"))
+			registry->queueComponentRemoval(entity, ComponentType::PointLight);
+		ImGui::PopID();
+		if (open && registry->hasComponent<PointLightComponent>(entity))
+			renderPointLight(*registry->getComponent<PointLightComponent>(entity));
 	}
 
 	// Directional Light
-	auto* dl = registry->getComponent<DirectionalLightComponent>(entity);
-	if (dl) {
-		if (ImGui::CollapsingHeader("Directional Light", ImGuiTreeNodeFlags_DefaultOpen))
-			renderDirectionalLight(*dl);
+	if (registry->hasComponent<DirectionalLightComponent>(entity)) {
+		bool open = ImGui::CollapsingHeader("Directional Light", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		if (ImGui::BeginPopupContextItem("dl_ctx")) {
+			if (ImGui::MenuItem("Copy")) {
+				auto* dl = registry->getComponent<DirectionalLightComponent>(entity);
+				CopiedDirectionalLight cdl;
+				cdl.direction = dl->direction;
+				cdl.color = dl->color;
+				cdl.intensity = dl->intensity;
+				cdl.casts_shadow = dl->casts_shadow;
+				cdl.celestial_type = static_cast<uint8_t>(dl->celestial_type);
+				state.component_clipboard = cdl;
+			}
+			if (state.component_clipboard && std::holds_alternative<CopiedDirectionalLight>(*state.component_clipboard))
+				if (ImGui::MenuItem("Paste")) {
+					auto* dl = registry->getComponent<DirectionalLightComponent>(entity);
+					auto& cdl = std::get<CopiedDirectionalLight>(*state.component_clipboard);
+					dl->direction = cdl.direction;
+					dl->color = cdl.color;
+					dl->intensity = cdl.intensity;
+					dl->casts_shadow = cdl.casts_shadow;
+					dl->celestial_type = static_cast<CelestialType>(cdl.celestial_type);
+				}
+			ImGui::EndPopup();
+		}
+		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
+		ImGui::PushID("remove_dl");
+		if (ImGui::SmallButton("X"))
+			registry->queueComponentRemoval(entity, ComponentType::DirectionalLight);
+		ImGui::PopID();
+		if (open && registry->hasComponent<DirectionalLightComponent>(entity))
+			renderDirectionalLight(*registry->getComponent<DirectionalLightComponent>(entity));
+	}
+
+	// Add Component
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::Spacing();
+
+	float button_width = ImGui::GetContentRegionAvail().x;
+	if (ImGui::Button("Add Component", ImVec2(button_width, 0)))
+		ImGui::OpenPopup("AddComponentPopup");
+
+	if (ImGui::BeginPopup("AddComponentPopup")) {
+		if (!registry->hasComponent<PointLightComponent>(entity))
+			if (ImGui::MenuItem("Point Light"))
+				registry->addComponent<PointLightComponent>(entity);
+
+		if (!registry->hasComponent<DirectionalLightComponent>(entity))
+			if (ImGui::MenuItem("Directional Light"))
+				registry->addComponent<DirectionalLightComponent>(entity);
+
+		if (!registry->hasComponent<MeshComponent>(entity)) {
+			ImGui::BeginDisabled(true);
+			ImGui::MenuItem("Mesh (load model first)");
+			ImGui::EndDisabled();
+		}
+
+		ImGui::EndPopup();
 	}
 
 	ImGui::End();
@@ -144,6 +348,63 @@ void InspectorPanel::renderEntityHeader(Registry& registry, Entity entity) {
 	// Entity ID
 	ImGui::SameLine();
 	ImGui::TextDisabled("(ID: %u)", entity.id());
+
+	// Parent
+	Entity current_parent = registry.getParent(entity);
+	const char* parent_label;
+	char parent_buf[64];
+	if (current_parent.isNull()) {
+		parent_label = "(No parent)";
+	} else {
+		const std::string& pname = registry.getName(current_parent);
+		if (pname.empty()) {
+			snprintf(parent_buf, sizeof(parent_buf), "Entity %u", current_parent.index());
+			parent_label = parent_buf;
+		} else {
+			parent_label = pname.c_str();
+		}
+	}
+
+	ImGui::Columns(2, nullptr, false);
+	ImGui::SetColumnWidth(0, 85.0f);
+	ImGui::Text("Parent");
+	ImGui::NextColumn();
+	ImGui::SetNextItemWidth(-FLT_MIN);
+	if (ImGui::BeginCombo("##Parent", parent_label)) {
+		if (ImGui::Selectable("(No parent)", current_parent.isNull()))
+			registry.reparent(entity, Entity::null());
+
+		uint32_t max_idx = registry.maxEntityIndex();
+		for (uint32_t i = 0; i < max_idx; ++i) {
+			if (!registry.isAliveAtIndex(i))
+				continue;
+			Entity candidate = registry.entityFromIndex(i);
+			if (candidate == entity)
+				continue;
+
+			// Prevent cycles: check if entity is an ancestor of candidate
+			bool is_descendant = false;
+			Entity walk = candidate;
+			while (!walk.isNull()) {
+				if (walk == entity) { is_descendant = true; break; }
+				walk = registry.getParent(walk);
+			}
+			if (is_descendant)
+				continue;
+
+			const std::string& cname = registry.getName(candidate);
+			char entry[256];
+			if (cname.empty())
+				snprintf(entry, sizeof(entry), "Entity %u", i);
+			else
+				snprintf(entry, sizeof(entry), "%s (%u)", cname.c_str(), i);
+
+			if (ImGui::Selectable(entry, current_parent == candidate))
+				registry.reparent(entity, candidate);
+		}
+		ImGui::EndCombo();
+	}
+	ImGui::Columns(1);
 }
 
 void InspectorPanel::renderTransform(TransformComponent& transform) {
@@ -183,45 +444,52 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 	if (!ImGui::TreeNode("Material"))
 		return;
 
-	const float label_w = 85.0f;
-	auto labeledWidget = [&](const char* text, auto widgetFn) {
-		ImGui::Columns(2, nullptr, false);
-		ImGui::SetColumnWidth(0, label_w);
-		ImGui::AlignTextToFramePadding();
-		ImGui::Text("%s", text);
-		ImGui::NextColumn();
-		ImGui::SetNextItemWidth(-FLT_MIN);
-		widgetFn();
-		ImGui::Columns(1);
-	};
+	constexpr float mat_label_w = 85.0f;
 
 	auto factors = mat->getMaterialFactors();
+	MaterialFactors defaults;
 	bool changed = false;
 
-	labeledWidget("Base Color", [&]() {
+	labeledWidget(mat_label_w, "Base Color", [&]() {
 		if (ImGui::ColorEdit4("##BaseColor", glm::value_ptr(factors.base_color_factor)))
 			changed = true;
-	});
+	}, [&]() { factors.base_color_factor = defaults.base_color_factor; changed = true; });
 
-	labeledWidget("Metallic", [&]() {
+	labeledWidget(mat_label_w, "Metallic", [&]() {
 		if (ImGui::SliderFloat("##Metallic", &factors.metallic_factor, 0.0f, 1.0f))
 			changed = true;
-	});
+	}, [&]() { factors.metallic_factor = defaults.metallic_factor; changed = true; });
 
-	labeledWidget("Roughness", [&]() {
+	labeledWidget(mat_label_w, "Roughness", [&]() {
 		if (ImGui::SliderFloat("##Roughness", &factors.roughness_factor, 0.0f, 1.0f))
 			changed = true;
-	});
+	}, [&]() { factors.roughness_factor = defaults.roughness_factor; changed = true; });
 
-	labeledWidget("Emissive", [&]() {
+	labeledWidget(mat_label_w, "Emissive", [&]() {
 		if (ImGui::ColorEdit3("##Emissive", glm::value_ptr(factors.emissive_factor)))
 			changed = true;
-	});
+	}, [&]() { factors.emissive_factor = defaults.emissive_factor; changed = true; });
 
-	labeledWidget("Emissive Str", [&]() {
+	labeledWidget(mat_label_w, "Emissive Str", [&]() {
 		if (ImGui::DragFloat("##EmissiveStr", &factors.emissive_strength, 0.001f, 0.0f, 100.0f))
 			changed = true;
-	});
+	}, [&]() { factors.emissive_strength = defaults.emissive_strength; changed = true; });
+
+	labeledWidget(mat_label_w, "Transmission", [&]() {
+		if (ImGui::SliderFloat("##Transmission", &factors.transmission_factor, 0.0f, 1.0f))
+			changed = true;
+	}, [&]() { factors.transmission_factor = defaults.transmission_factor; changed = true; });
+
+	labeledWidget(mat_label_w, "IOR", [&]() {
+		if (ImGui::DragFloat("##IOR", &factors.ior, 0.01f, 1.0f, 3.0f, "%.2f"))
+			changed = true;
+	}, [&]() { factors.ior = defaults.ior; changed = true; });
+
+	labeledWidget(mat_label_w, "Specular F0", [&]() {
+		if (ImGui::ColorEdit3("##SpecularF0", glm::value_ptr(factors.specular_factor),
+				ImGuiColorEditFlags_Float))
+			changed = true;
+	}, [&]() { factors.specular_factor = defaults.specular_factor; changed = true; });
 
 	if (changed)
 		mat->setMaterialFactors(factors);
@@ -232,7 +500,7 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 
 	const char* alpha_modes[] = { "Opaque", "Mask", "Blend" };
 	int alpha_idx = static_cast<int>(alpha.alpha_mode);
-	labeledWidget("Alpha Mode", [&]() {
+	labeledWidget(mat_label_w, "Alpha Mode", [&]() {
 		if (ImGui::Combo("##AlphaMode", &alpha_idx, alpha_modes, 3)) {
 			alpha.alpha_mode = static_cast<AlphaMode>(alpha_idx);
 			alpha_changed = true;
@@ -240,7 +508,7 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 	});
 
 	if (alpha.alpha_mode == AlphaMode::MASK) {
-		labeledWidget("Alpha Cutoff", [&]() {
+		labeledWidget(mat_label_w, "Alpha Cutoff", [&]() {
 			if (ImGui::SliderFloat("##AlphaCutoff", &alpha.alpha_cutoff, 0.0f, 1.0f))
 				alpha_changed = true;
 		});
@@ -252,21 +520,44 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 	if (alpha_changed)
 		mat->setAlphaProps(alpha);
 
+	// Texture thumbnails
+	if (ImGui::TreeNode("Textures")) {
+		if (ImGui::BeginTable("##TexTable", 2, ImGuiTableFlags_SizingFixedFit)) {
+			ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+			ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthFixed, 52.0f);
+			renderTextureSlot("Albedo",    mat->getAlbedoTexture().getId(), mat->getAlbedoTexture().get());
+			renderTextureSlot("Normal",    mat->getNormalTexture().getId(), mat->getNormalTexture().get());
+			renderTextureSlot("Metal/Rgh", mat->getMetallicRoughnessTexture().getId(), mat->getMetallicRoughnessTexture().get());
+			renderTextureSlot("Occlusion", mat->getOcclusionTexture().getId(), mat->getOcclusionTexture().get());
+			renderTextureSlot("Emissive",  mat->getEmissiveTexture().getId(), mat->getEmissiveTexture().get());
+			ImGui::EndTable();
+		}
+		ImGui::TreePop();
+	}
+
 	ImGui::TreePop();
 }
 
 void InspectorPanel::renderPointLight(PointLightComponent& light) {
+	constexpr float light_label_w = 110.0f;
+
 	glm::vec3 color = light.getColor();
-	if (ImGui::ColorEdit3("Color", glm::value_ptr(color)))
-		light.setColor(color);
+	labeledWidget(light_label_w, "Color", [&]() {
+		if (ImGui::ColorEdit3("##Color", glm::value_ptr(color)))
+			light.setColor(color);
+	}, [&]() { light.setColor(glm::vec3(1.0f)); });
 
 	float intensity = light.getIntensity();
-	if (ImGui::DragFloat("Intensity", &intensity, 0.1f, 0.0f, 10000.0f))
-		light.setIntensity(intensity);
+	labeledWidget(light_label_w, "Intensity", [&]() {
+		if (ImGui::DragFloat("##Intensity", &intensity, 0.1f, 0.0f, 10000.0f))
+			light.setIntensity(intensity);
+	}, [&]() { light.setIntensity(1.0f); });
 
 	float range = light.getRange();
-	if (ImGui::DragFloat("Range", &range, 0.1f, 0.0f, 1000.0f, "%.1f"))
-		light.setRange(range);
+	labeledWidget(light_label_w, "Range", [&]() {
+		if (ImGui::DragFloat("##Range", &range, 0.1f, 0.0f, 1000.0f, "%.1f"))
+			light.setRange(range);
+	}, [&]() { light.setRange(0.0f); });
 
 	ImGui::Text("Effective Range: %.1f", light.getEffectiveRange());
 
@@ -286,8 +577,16 @@ void InspectorPanel::renderDirectionalLight(DirectionalLightComponent& light) {
 			light.direction = light.direction / len;
 	}
 
-	ImGui::ColorEdit3("Color", glm::value_ptr(light.color));
-	ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, 100.0f);
+	constexpr float light_label_w = 110.0f;
+
+	labeledWidget(light_label_w, "Color", [&]() {
+		ImGui::ColorEdit3("##Color", glm::value_ptr(light.color));
+	}, [&]() { light.color = glm::vec3(1.f); });
+
+	labeledWidget(light_label_w, "Intensity", [&]() {
+		ImGui::DragFloat("##Intensity", &light.intensity, 0.1f, 0.0f, 100.0f);
+	}, [&]() { light.intensity = 1.f; });
+
 	ImGui::Checkbox("Casts Shadow", &light.casts_shadow);
 
 	const char* celestial_types[] = { "Moon", "Sun" };

@@ -26,6 +26,7 @@
 #include "rendering/skybox_render_system.hpp"
 #include "rendering/bloom_system.hpp"
 #include "rendering/post_process_system.hpp"
+#include "rendering/outline_system.hpp"
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -272,6 +273,7 @@ VeFrameInfo VeApplication::buildFrameInfo() {
 		.shadow_mode = m_ui.shadow_mode,
 		.compute_query_pool = m_ve_renderer.getQueryPool(),
 		.compute_start_query = m_ve_renderer.getComputeStartQuery(),
+		.selected_entity = m_editor->getState().selected_entity,
 	};
 
 	return fi;
@@ -460,13 +462,25 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 
 	m_ve_renderer.endSceneRender(command_buffer);
 
+	// Selection outline: mask + JFA
+	auto& editor_state = m_editor->getState();
+	bool outline_active = editor_state.outline_enabled && !fi.selected_entity.isNull();
+	if (outline_active) {
+		m_outline_system->renderMask(fi, *fi.registry, fi.selected_entity);
+		if (m_outline_system->hasOutline())
+			m_outline_system->dispatchJFA(fi, editor_state.outline_width);
+	}
+
 	// Bloom
 	if (m_ui.bloom_enabled)
 		m_bloom_system->render(command_buffer);
 
-	// Post-processing
+	// Post-processing + outline composite
 	m_ve_renderer.beginPostProcessRender(command_buffer, editor_mode);
 	m_post_process_system->render(command_buffer, fi.post_process_push);
+	if (outline_active && m_outline_system->hasOutline())
+		m_outline_system->composite(command_buffer, fi.current_frame,
+			editor_state.outline_width, editor_state.outline_color);
 	m_ve_renderer.endPostProcessRender(command_buffer, editor_mode);
 
 	// UI
@@ -540,6 +554,7 @@ void VeApplication::recreateResolutionDependentSystems() {
 	}
 
 	m_post_process_system->recreatePipeline(color_format, m_ve_renderer.getResolveTargetImageView(), m_bloom_system->getBloomTexture());
+	m_outline_system->recreate(*m_global_pool, extent, color_format);
 }
 
 // ─── Buffer / Descriptor / System Initialization ─────────────────────────────
@@ -594,16 +609,34 @@ void VeApplication::createDescriptors() {
 		.addBinding(5, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eFragment)
 		.build();
 
-	// Descriptor pool
+	// Descriptor pool — counts broken down by system. TODO: make this dynamic
+	// F = MAX_FRAMES_IN_FLIGHT, S = MAX_SHADOW_LAYERS
+	constexpr uint32_t F = MAX_FRAMES_IN_FLIGHT;
+	constexpr uint32_t S = MAX_SHADOW_LAYERS;
 	constexpr uint32_t MAX_MATERIAL_SETS = 4096;
 	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
-		.setMaxSets(4 * MAX_FRAMES_IN_FLIGHT + (MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT) + 10 + MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS + 4 * MAX_FRAMES_IN_FLIGHT + 4 * MAX_FRAMES_IN_FLIGHT + 10)
-		.addPoolSize(vk::DescriptorType::eUniformBuffer, 4 * MAX_FRAMES_IN_FLIGHT + (MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT) + MAX_MATERIAL_SETS + 1 + 4 * MAX_FRAMES_IN_FLIGHT)
-		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 3 * 3 + MAX_MATERIAL_SETS * 5)
-		.addPoolSize(vk::DescriptorType::eSampler, 2 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + 10)
-		.addPoolSize(vk::DescriptorType::eSampledImage, MAX_FRAMES_IN_FLIGHT + 4 * MAX_FRAMES_IN_FLIGHT + 8 * MAX_FRAMES_IN_FLIGHT + 10)
-		.addPoolSize(vk::DescriptorType::eStorageBuffer, 22 * MAX_FRAMES_IN_FLIGHT + MAX_FRAMES_IN_FLIGHT + MAX_SHADOW_LAYERS * MAX_FRAMES_IN_FLIGHT + 14 * MAX_FRAMES_IN_FLIGHT)
-		.addPoolSize(vk::DescriptorType::eStorageImage, MAX_FRAMES_IN_FLIGHT + 3 * MAX_FRAMES_IN_FLIGHT)
+		.setMaxSets(
+			4*F            // global + skybox + bloom + post-process
+			+ S*F          // shadow
+			+ 10           // misc (imgui, etc.)
+			+ F            // depth pre-pass
+			+ MAX_MATERIAL_SETS
+			+ 4*F          // culling + GTAO
+			+ 4*F          // particle
+			+ 10           // headroom
+			+ 5*F)         // outline (JFA init + 2 step dirs + 2 composite)
+		.addPoolSize(vk::DescriptorType::eUniformBuffer,
+			4*F + S*F + MAX_MATERIAL_SETS + 1 + 4*F)    // global + shadow + material + skybox + culling/GTAO
+		.addPoolSize(vk::DescriptorType::eCombinedImageSampler,
+			3*3 + MAX_MATERIAL_SETS*5 + 4*F)             // global samplers + material textures + outline composite
+		.addPoolSize(vk::DescriptorType::eSampler,
+			2*F + F + F + 10)                             // bloom + post-process + depth + headroom
+		.addPoolSize(vk::DescriptorType::eSampledImage,
+			F + 4*F + 8*F + 10 + 3*F)                    // depth + GTAO + particle + headroom + outline JFA
+		.addPoolSize(vk::DescriptorType::eStorageBuffer,
+			22*F + F + S*F + 14*F)                        // culling + depth + shadow + particle
+		.addPoolSize(vk::DescriptorType::eStorageImage,
+			F + 3*F + 3*F)                                // GTAO + particle + outline JFA
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
 		.buildShared();
 
@@ -796,6 +829,14 @@ void VeApplication::initSystems() {
 		m_bloom_system->getBloomTexture(),
 		shader("post_process.spv")
 	);
+
+	m_outline_system = std::make_unique<OutlineSystem>(
+		m_ve_device, *m_global_pool,
+		m_global_set_layout->getDescriptorSetLayout(),
+		m_config.shaders_dir,
+		m_ve_renderer.getExtent(),
+		m_ve_renderer.getSwapChainImageFormat()
+	);
 }
 
 void VeApplication::initEditor() {
@@ -808,6 +849,7 @@ void VeApplication::initEditor() {
 	// Wire scene registry and systems into editor
 	m_editor->setSceneRegistry(&m_scene_entries, &m_current_scene_index, &m_pending_load);
 	m_editor->setSkyboxSystem(m_skybox_render_system.get());
+	m_editor->setCamera(&m_camera);
 
 	m_ui.hdr_enabled = m_ve_renderer.hasHdrSupport() && m_ve_renderer.isHdrEnabled();
 	m_ui.fov = glm::degrees(m_fov);

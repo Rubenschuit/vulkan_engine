@@ -1,39 +1,26 @@
 #pragma once
 #include "ui/editor_panel.hpp"
 #include "ui/editor_state.hpp"
-#include <imgui.h>
 #include <vulkan/vulkan.h>
 
 namespace ve {
 
+class VeCamera;
+
 class VENGINE_API ViewportPanel : public EditorPanel {
 public:
 	void setTextureID(VkDescriptorSet texture_id) { m_texture_id = texture_id; }
+	void setCamera(VeCamera* camera) { m_camera = camera; }
 
-	void render(Registry* /*registry*/, EditorState& state, UIContext& /*context*/) override {
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-		if (ImGui::Begin("Viewport", &state.show_viewport)) {
-			state.viewport_hovered = ImGui::IsWindowHovered();
-			state.viewport_focused = ImGui::IsWindowFocused();
-
-			ImVec2 size = ImGui::GetContentRegionAvail();
-			float dpi_scale = ImGui::GetIO().DisplayFramebufferScale.x;
-			state.viewport_width = size.x * dpi_scale;
-			state.viewport_height = size.y * dpi_scale;
-
-			if (m_texture_id != VK_NULL_HANDLE && size.x > 0 && size.y > 0)
-				ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_texture_id)), size);
-			else
-				ImGui::Text("No viewport image");
-		}
-		ImGui::End();
-		ImGui::PopStyleVar();
-	}
-
+	void render(Registry* registry, EditorState& state, UIContext& context) override;
 	const char* getName() const override { return "Viewport"; }
 
 private:
+	void renderGizmoToolbar(EditorState& state);
+	void renderGizmo(Registry* registry, EditorState& state, float img_x, float img_y, float img_w, float img_h);
+
 	VkDescriptorSet m_texture_id = VK_NULL_HANDLE;
+	VeCamera* m_camera = nullptr;
 };
 
 } // namespace ve

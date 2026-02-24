@@ -98,6 +98,19 @@ if(EXISTS "${MIKKTSPACE_DIR}/mikktspace.c")
 	message(STATUS "MikkTSpace (vendored): ${MIKKTSPACE_DIR}")
 endif()
 
+# ImGuizmo (vendored in external/imguizmo) for viewport transform gizmos
+set(IMGUIZMO_DIR "${PROJECT_SOURCE_DIR}/external/imguizmo")
+if(EXISTS "${IMGUIZMO_DIR}/ImGuizmo.cpp")
+	target_sources(VEngineLib PRIVATE ${IMGUIZMO_DIR}/ImGuizmo.cpp)
+	target_include_directories(VEngineLib SYSTEM PRIVATE ${IMGUIZMO_DIR})
+	target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${IMGUIZMO_DIR})
+	set_source_files_properties(${IMGUIZMO_DIR}/ImGuizmo.cpp PROPERTIES
+		SKIP_PRECOMPILE_HEADERS ON
+		COMPILE_OPTIONS "-w"
+	)
+	message(STATUS "ImGuizmo (vendored): ${IMGUIZMO_DIR}")
+endif()
+
 if (APPLE)
 	target_link_libraries(VEngineLib PUBLIC
 		"-framework Cocoa" "-framework IOKit" "-framework CoreVideo" "-framework Metal"

@@ -3,6 +3,8 @@
 #include "resources/ve_mesh.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/matrix_decompose.hpp>
 #include <algorithm>
 #include <cassert>
 
@@ -142,6 +144,9 @@ void Registry::destroyEntityRecursive(Entity e) {
 }
 
 void Registry::processPendingDeletions() {
+	// Process pending component removals first
+	processPendingComponentRemovals();
+
 	if (m_pending_deletions.empty())
 		return;
 	// Move to local to allow re-entrant emit during destruction
@@ -154,6 +159,35 @@ void Registry::processPendingDeletions() {
 			destroyEntityRecursive(req.entity);
 		else
 			destroyEntity(req.entity);
+	}
+}
+
+void Registry::queueComponentRemoval(Entity entity, ComponentType type) {
+	m_pending_component_removals.push_back({entity, type});
+}
+
+void Registry::processPendingComponentRemovals() {
+	if (m_pending_component_removals.empty())
+		return;
+	auto removals = std::move(m_pending_component_removals);
+	m_pending_component_removals.clear();
+	for (auto& r : removals) {
+		if (!isAlive(r.entity))
+			continue;
+		switch (r.type) {
+			case ComponentType::Mesh:
+				if (hasComponent<MeshComponent>(r.entity))
+					removeComponent<MeshComponent>(r.entity);
+				break;
+			case ComponentType::PointLight:
+				if (hasComponent<PointLightComponent>(r.entity))
+					removeComponent<PointLightComponent>(r.entity);
+				break;
+			case ComponentType::DirectionalLight:
+				if (hasComponent<DirectionalLightComponent>(r.entity))
+					removeComponent<DirectionalLightComponent>(r.entity);
+				break;
+		}
 	}
 }
 
@@ -257,6 +291,34 @@ void Registry::setParent(Entity child, Entity parent) {
 	}
 
 	invalidateWorldTransform(child);
+}
+
+void Registry::reparent(Entity child, Entity new_parent) {
+	assert(isAlive(child));
+	auto* tc = getComponent<TransformComponent>(child);
+	if (!tc) {
+		setParent(child, new_parent);
+		return;
+	}
+
+	// Capture current world transform before reparenting
+	const glm::mat4 old_world = getWorldTransform(child);
+
+	setParent(child, new_parent);
+
+	// Compute new local transform that preserves the old world position
+	glm::mat4 new_local = old_world;
+	if (!new_parent.isNull() && isAlive(new_parent))
+		new_local = glm::inverse(getWorldTransform(new_parent)) * old_world;
+
+	glm::vec3 translation, scale, skew;
+	glm::vec4 perspective;
+	glm::quat rotation;
+	glm::decompose(new_local, scale, rotation, translation, skew, perspective);
+
+	tc->setTranslation(translation);
+	tc->setRotation(rotation);
+	tc->setScale(scale);
 }
 
 Entity Registry::getParent(Entity e) const {
