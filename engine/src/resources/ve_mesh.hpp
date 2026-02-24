@@ -81,6 +81,10 @@ public:
 
 	AABB getLocalAABB() const { return m_local_aabb; }
 
+	const std::vector<glm::vec3>& getCpuPositions() const { return m_cpu_positions; }
+	const std::vector<uint32_t>& getCpuIndices() const { return m_cpu_indices; }
+	bool hasCpuGeometry() const { return !m_cpu_positions.empty(); }
+
 protected:
 	bool doLoad() override;
 	void doUnload() override;
@@ -100,6 +104,8 @@ private:
 	uint32_t m_vertex_count{0};
 	uint32_t m_index_count{0};
 	AABB m_local_aabb{};
+	std::vector<glm::vec3> m_cpu_positions;
+	std::vector<uint32_t> m_cpu_indices;
 };
 
 // Transform AABB by model matrix (transform 8 corners, take min/max of result).

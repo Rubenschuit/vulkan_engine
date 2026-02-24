@@ -29,6 +29,10 @@ VeMesh::VeMesh(VeDevice& device, const std::string& resource_id,
 	createVertexBuffers(vertices);
 	createShadowVertexBuffer(vertices);
 	createIndexBuffers(indices);
+	m_cpu_positions.resize(vertices.size());
+	for (size_t i = 0; i < vertices.size(); i++)
+		m_cpu_positions[i] = vertices[i].pos;
+	m_cpu_indices = indices;
 	setLoaded(true);
 }
 
@@ -40,9 +44,12 @@ VeMesh::VeMesh(VeDevice& device, const std::string& resource_id,
 	createVertexBuffers(vertices);
 	createShadowVertexBuffer(vertices);
 	createIndexBuffers(indices);
-	for (const auto& lod : lod_indices) {
+	for (const auto& lod : lod_indices)
 		createLodIndexBuffer(lod);
-	}
+	m_cpu_positions.resize(vertices.size());
+	for (size_t i = 0; i < vertices.size(); i++)
+		m_cpu_positions[i] = vertices[i].pos;
+	m_cpu_indices = indices;
 	setLoaded(true);
 }
 
@@ -60,6 +67,10 @@ void VeMesh::doUnload() {
 	m_shadow_vertex_buffer.reset();
 	m_index_buffer.reset();
 	m_lod_levels.clear();
+	m_cpu_positions.clear();
+	m_cpu_positions.shrink_to_fit();
+	m_cpu_indices.clear();
+	m_cpu_indices.shrink_to_fit();
 	m_vertex_count = 0;
 	m_index_count = 0;
 }
