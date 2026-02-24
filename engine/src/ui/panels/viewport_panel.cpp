@@ -23,8 +23,8 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 
 		ImVec2 size = ImGui::GetContentRegionAvail();
 		float dpi_scale = ImGui::GetIO().DisplayFramebufferScale.x;
-		state.viewport_width = size.x * dpi_scale;
-		state.viewport_height = size.y * dpi_scale;
+		state.viewport_width = std::max(0.0f, size.x * dpi_scale);
+		state.viewport_height = std::max(0.0f, size.y * dpi_scale);
 
 		// Capture image top-left for gizmo rect (after toolbar, before Image call)
 		ImVec2 image_pos = ImGui::GetCursorScreenPos();
