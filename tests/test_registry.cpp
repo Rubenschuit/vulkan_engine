@@ -264,7 +264,7 @@ TEST_CASE("Registry createDirectionalLight adds Transform + DirectionalLight", "
 	ve::Registry reg;
 	ve::Entity e = reg.createDirectionalLight(10.0f, {1.0f, 0.5f, 0.0f}, {0.0f, -1.0f, 0.0f});
 
-	REQUIRE(reg.hasComponent<ve::TransformComponent>(e));
+	REQUIRE(!reg.hasComponent<ve::TransformComponent>(e));
 	REQUIRE(reg.hasComponent<ve::DirectionalLightComponent>(e));
 	REQUIRE(!reg.hasComponent<ve::PointLightComponent>(e));
 
@@ -294,6 +294,101 @@ TEST_CASE("Registry directional light pool iteration", "[ecs][registry]") {
 
 	// Point lights should be unaffected
 	REQUIRE(reg.pointLights().size() == 1);
+}
+
+// ── Registry: spot light factories ──────────────────────────────────────────
+
+TEST_CASE("Registry createSpotLight adds Transform + SpotLight", "[ecs][registry]") {
+	ve::Registry reg;
+	glm::vec3 dir = glm::normalize(glm::vec3(0.0f, -1.0f, -1.0f));
+	ve::Entity e = reg.createSpotLight(200.0f, 15.0f, {1.0f, 0.8f, 0.6f},
+	                                   dir, glm::radians(20.0f), glm::radians(30.0f));
+
+	REQUIRE(reg.isAlive(e));
+	REQUIRE(reg.hasComponent<ve::TransformComponent>(e));
+	REQUIRE(reg.hasComponent<ve::SpotLightComponent>(e));
+	REQUIRE(!reg.hasComponent<ve::PointLightComponent>(e));
+
+	auto* sl = reg.getComponent<ve::SpotLightComponent>(e);
+	REQUIRE(sl->getIntensity() == 200.0f);
+	REQUIRE(sl->getColor() == glm::vec3(1.0f, 0.8f, 0.6f));
+	REQUIRE(std::abs(sl->getInnerConeAngle() - glm::radians(20.0f)) < 1e-5f);
+	REQUIRE(std::abs(sl->getOuterConeAngle() - glm::radians(30.0f)) < 1e-5f);
+
+	// Direction should be normalized
+	glm::vec3 got_dir = sl->getDirection();
+	REQUIRE(std::abs(glm::length(got_dir) - 1.0f) < 1e-5f);
+	REQUIRE(std::abs(got_dir.x - dir.x) < 1e-5f);
+	REQUIRE(std::abs(got_dir.y - dir.y) < 1e-5f);
+	REQUIRE(std::abs(got_dir.z - dir.z) < 1e-5f);
+
+	// Radius sets transform scale
+	auto* tc = reg.getComponent<ve::TransformComponent>(e);
+	REQUIRE(tc->getScale().x == 15.0f);
+}
+
+TEST_CASE("Registry createSpotLight with defaults", "[ecs][registry]") {
+	ve::Registry reg;
+	ve::Entity e = reg.createSpotLight();
+
+	auto* sl = reg.getComponent<ve::SpotLightComponent>(e);
+	REQUIRE(sl->getIntensity() == 1.0f);
+	REQUIRE(sl->getColor() == glm::vec3(1.0f));
+	REQUIRE(std::abs(sl->getInnerConeAngle() - glm::radians(25.0f)) < 1e-5f);
+	REQUIRE(std::abs(sl->getOuterConeAngle() - glm::radians(35.0f)) < 1e-5f);
+	REQUIRE(sl->getDirection() == glm::vec3(0.f, 0.f, -1.f));
+
+	auto* tc = reg.getComponent<ve::TransformComponent>(e);
+	REQUIRE(tc->getScale().x == 1.0f);
+}
+
+TEST_CASE("Registry spot light pool iteration", "[ecs][registry]") {
+	ve::Registry reg;
+
+	reg.createGameObject();
+	reg.createSpotLight(5.0f, 1.0f, {1, 0, 0});
+	reg.createPointLight(1.0f, 1.0f);
+	reg.createSpotLight(10.0f, 1.0f, {0, 1, 0});
+	reg.createGameObject();
+
+	auto& sl_pool = reg.spotLights();
+	REQUIRE(sl_pool.size() == 2);
+
+	float intensity_sum = 0.0f;
+	for (uint32_t i = 0; i < sl_pool.size(); i++)
+		intensity_sum += sl_pool.data()[i].getIntensity();
+	REQUIRE(intensity_sum == 15.0f);
+
+	// Other pools unaffected
+	REQUIRE(reg.pointLights().size() == 1);
+	REQUIRE(reg.transforms().size() == 5);
+}
+
+TEST_CASE("Registry destroyEntity removes spot light component", "[ecs][registry]") {
+	ve::Registry reg;
+	ve::Entity e = reg.createSpotLight(3.0f);
+
+	REQUIRE(reg.spotLights().size() == 1);
+
+	reg.destroyEntity(e);
+
+	REQUIRE(reg.spotLights().size() == 0);
+	REQUIRE(!reg.isAlive(e));
+}
+
+TEST_CASE("Registry clear removes spot lights", "[ecs][registry]") {
+	ve::Registry reg;
+	reg.createSpotLight(1.0f);
+	reg.createSpotLight(2.0f);
+	reg.createPointLight();
+
+	REQUIRE(reg.spotLights().size() == 2);
+
+	reg.clear();
+
+	REQUIRE(reg.spotLights().size() == 0);
+	REQUIRE(reg.pointLights().size() == 0);
+	REQUIRE(reg.entityCount() == 0);
 }
 
 // ── Registry: hierarchy ─────────────────────────────────────────────────────
