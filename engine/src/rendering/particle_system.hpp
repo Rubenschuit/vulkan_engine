@@ -93,10 +93,10 @@ struct Particle {
 	// we dont need velocity for rendering
 	static std::vector<vk::VertexInputAttributeDescription> getAttributeDescriptions() {
 		return {
-			vk::VertexInputAttributeDescription( 0, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, position) ),
-			vk::VertexInputAttributeDescription( 1, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, color) ),
-			vk::VertexInputAttributeDescription( 2, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, tex_coords) ),
-			vk::VertexInputAttributeDescription( 3, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, extra_data) )
+			{.location = 0, .binding = 0, .format = vk::Format::eR32G32B32A32Sfloat, .offset = offsetof(Particle, position)},
+			{.location = 1, .binding = 0, .format = vk::Format::eR32G32B32A32Sfloat, .offset = offsetof(Particle, color)},
+			{.location = 2, .binding = 0, .format = vk::Format::eR32G32B32A32Sfloat, .offset = offsetof(Particle, tex_coords)},
+			{.location = 3, .binding = 0, .format = vk::Format::eR32G32B32A32Sfloat, .offset = offsetof(Particle, extra_data)}
 		};
 	}
 };

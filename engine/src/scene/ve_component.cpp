@@ -117,7 +117,7 @@ void PointLightComponent::updateEffectiveRange() const {
 		m_effective_range = m_range;
 	} else {
 		float max_i = std::max({m_color.r * m_intensity, m_color.g * m_intensity, m_color.b * m_intensity});
-		m_effective_range = std::min(std::sqrtf(max_i / CLUSTER_LIGHT_CUTOFF), CLUSTER_MAX_EFFECTIVE_RANGE);
+		m_effective_range = std::min(std::sqrt(max_i / CLUSTER_LIGHT_CUTOFF), CLUSTER_MAX_EFFECTIVE_RANGE);
 	}
 	m_range_dirty = false;
 }

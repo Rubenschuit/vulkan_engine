@@ -86,7 +86,6 @@ inline const std::vector<const char*> REQUIRED_DEVICE_EXTENSIONS = {
 // Central list of required Vulkan instance extensions (GLFW-required are added at runtime)
 inline const std::vector<const char*> REQUIRED_INSTANCE_EXTENSIONS = {
 	VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
-	VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME // required for portability subset
 };
 
 // Central list of validation layers

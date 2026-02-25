@@ -105,7 +105,12 @@ jobs:
       - name: Add Vulkan SDK to MSYS2 PATH
         if: matrix.mingw
         shell: msys2 {0}
-        run: echo "export PATH=\"$VULKAN_SDK/Bin:\$PATH\"" >> ~/.bash_profile
+        run: |
+          VKSDK="${VULKAN_SDK:-C:/VulkanSDK/${VULKAN_SDK_VERSION}}"
+          SDK_PATH=$(cygpath -u "$VKSDK")
+          echo "export VULKAN_SDK=\"$VKSDK\"" >> ~/.bash_profile
+          echo "export PATH=\"${SDK_PATH}/Bin:\$PATH\"" >> ~/.bash_profile
+          cat ~/.bash_profile
 
       - name: Verify Vulkan SDK and slangc
         if: "!matrix.mingw"
@@ -121,6 +126,7 @@ jobs:
         run: |
           source ~/.bash_profile
           echo "VULKAN_SDK=$VULKAN_SDK"
+          ls "$SDK_PATH/Bin/" 2>/dev/null || ls "$(cygpath -u "$VULKAN_SDK")/Bin/" 2>/dev/null || echo "Could not list SDK bin directory"
           slangc -v
 
       # ── FetchContent cache ─────────────────────────────────────────

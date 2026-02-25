@@ -26,7 +26,7 @@ public:
 		glm::vec3 max;
 	};
 
-	struct Vertex {
+	struct VENGINE_API Vertex {
 		glm::vec3 pos;
 		glm::vec3 normal;
 		glm::vec2 tex_coord{0.0f, 0.0f};

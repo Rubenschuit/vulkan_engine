@@ -240,7 +240,7 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
 		.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 		.loadOp = vk::AttachmentLoadOp::eClear,
 		.storeOp = vk::AttachmentStoreOp::eStore,
-		.clearValue = vk::ClearDepthStencilValue(1.0f, 0)
+		.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
 	};
 
 	// When MSAA is active, resolve depth to a single-sample image at endRendering().
@@ -275,8 +275,13 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
 	};
 
 	command_buffer.beginRendering(rendering_info);
-	command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f));
-	command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), extent));
+	command_buffer.setViewport(0, vk::Viewport{
+		.x = 0.0f, .y = 0.0f,
+		.width = static_cast<float>(extent.width),
+		.height = static_cast<float>(extent.height),
+		.minDepth = 0.0f, .maxDepth = 1.0f
+	});
+	command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = extent});
 }
 
 void VeRenderer::endDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
@@ -351,7 +356,7 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer, bool 
 		.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 		.loadOp = load_depth ? vk::AttachmentLoadOp::eLoad : vk::AttachmentLoadOp::eClear,
 		.storeOp = vk::AttachmentStoreOp::eStore,
-		.clearValue = vk::ClearDepthStencilValue(1.0f, 0)
+		.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
 	};
 
 	// Resolve MSAA depth at end of scene render so the resolved depth includes
@@ -372,8 +377,13 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer, bool 
 
 	// Begin dynamic rendering
 	command_buffer.beginRendering(rendering_info);
-	command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f));
-	command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), extent));
+	command_buffer.setViewport(0, vk::Viewport{
+		.x = 0.0f, .y = 0.0f,
+		.width = static_cast<float>(width),
+		.height = static_cast<float>(height),
+		.minDepth = 0.0f, .maxDepth = 1.0f
+	});
+	command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = extent});
 }
 
 // Ends the dynamic rendering pass and transitions the swap chain image to presentation
@@ -430,8 +440,13 @@ void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer,
 		};
 
 		command_buffer.beginRendering(rendering_info);
-		command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(vp_extent.width), static_cast<float>(vp_extent.height), 0.0f, 1.0f));
-		command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), vp_extent));
+		command_buffer.setViewport(0, vk::Viewport{
+			.x = 0.0f, .y = 0.0f,
+			.width = static_cast<float>(vp_extent.width),
+			.height = static_cast<float>(vp_extent.height),
+			.minDepth = 0.0f, .maxDepth = 1.0f
+		});
+		command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = vp_extent});
 	} else {
 		// Fullscreen mode: render to swapchain (current behavior)
 		auto extent = m_ve_swap_chain->getSwapChainExtent();
@@ -464,8 +479,13 @@ void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer,
 		};
 
 		command_buffer.beginRendering(rendering_info);
-		command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f));
-		command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), extent));
+		command_buffer.setViewport(0, vk::Viewport{
+			.x = 0.0f, .y = 0.0f,
+			.width = static_cast<float>(extent.width),
+			.height = static_cast<float>(extent.height),
+			.minDepth = 0.0f, .maxDepth = 1.0f
+		});
+		command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = extent});
 	}
 }
 

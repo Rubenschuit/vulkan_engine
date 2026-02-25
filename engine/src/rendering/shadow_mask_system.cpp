@@ -296,10 +296,10 @@ void ShadowMaskSystem::dispatch(VeFrameInfo& frame_info) {
 	uint32_t frame = frame_info.current_frame;
 	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
 
-	// Barrier 1: depth buffer eDepthAttachmentOptimal → eDepthStencilReadOnlyOptimal
+	// Barrier 1: depth buffer eDepthAttachmentOptimal -> eDepthStencilReadOnlyOptimal
 	vk::ImageMemoryBarrier2 depth_to_read{
-		.srcStageMask = vk::PipelineStageFlagBits2::eNone,
-		.srcAccessMask = vk::AccessFlagBits2::eNone,
+		.srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
 		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
 		.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
@@ -310,7 +310,7 @@ void ShadowMaskSystem::dispatch(VeFrameInfo& frame_info) {
 		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
 	};
 
-	// Barrier 2: shadow mask eShaderReadOnlyOptimal → eGeneral for storage write
+	// Barrier 2: shadow mask eShaderReadOnlyOptimal -> eGeneral for storage write
 	// Cross-queue: previous graphics read dependency handled by timeline semaphore.
 	vk::ImageMemoryBarrier2 mask_to_general{
 		.srcStageMask = vk::PipelineStageFlagBits2::eNone,
@@ -359,12 +359,11 @@ void ShadowMaskSystem::dispatch(VeFrameInfo& frame_info) {
 	cmd.dispatch(groups_x, groups_y, 1);
 
 	// Post-dispatch barriers: shadow mask to read-only + depth back to attachment.
-	// Cross-queue: timeline semaphore signal will make compute writes available to graphics.
 	vk::ImageMemoryBarrier2 mask_to_read{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eNone,
-		.dstAccessMask = vk::AccessFlagBits2::eNone,
+		.dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
 		.oldLayout = vk::ImageLayout::eGeneral,
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -376,8 +375,8 @@ void ShadowMaskSystem::dispatch(VeFrameInfo& frame_info) {
 	vk::ImageMemoryBarrier2 depth_to_attachment{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.dstStageMask = vk::PipelineStageFlagBits2::eNone,
-		.dstAccessMask = vk::AccessFlagBits2::eNone,
+		.dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+		.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
 		.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
 		.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,

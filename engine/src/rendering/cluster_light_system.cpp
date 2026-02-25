@@ -191,6 +191,19 @@ void ClusterLightSystem::dispatch(VeFrameInfo& frame_info, const VeCamera& camer
 	params.max_lights_per_cluster = MAX_LIGHTS_PER_CLUSTER;
 	m_cluster_param_ubos[frame]->writeToBuffer(&params);
 
+	// Barrier: previous frame's compute dispatch -> this frame's fillBuffer.
+	vk::MemoryBarrier2 pre_fill_barrier{
+		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+		.dstStageMask = vk::PipelineStageFlagBits2::eClear,
+		.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+	};
+	vk::DependencyInfo pre_fill_dep{
+		.memoryBarrierCount = 1,
+		.pMemoryBarriers = &pre_fill_barrier,
+	};
+	cmd.pipelineBarrier2(pre_fill_dep);
+
 	// Reset atomic counter and cluster counts to zero
 	cmd.fillBuffer(*m_atomic_counter_ssbos[frame]->getBuffer(), 0, sizeof(uint32_t), 0);
 	cmd.fillBuffer(*m_cluster_count_ssbos[frame]->getBuffer(), 0,

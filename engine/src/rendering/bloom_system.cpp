@@ -194,7 +194,7 @@ void BloomSystem::render(vk::raii::CommandBuffer& command_buffer) {
 			vk::ImageLayout::eShaderReadOnlyOptimal,
 			vk::ImageLayout::eColorAttachmentOptimal,
 			vk::AccessFlagBits2::eShaderRead,
-			vk::AccessFlagBits2::eColorAttachmentWrite,
+			vk::AccessFlagBits2::eColorAttachmentWrite | vk::AccessFlagBits2::eColorAttachmentRead,
 			vk::PipelineStageFlagBits2::eFragmentShader,
 			vk::PipelineStageFlagBits2::eColorAttachmentOutput
 		);
@@ -215,8 +215,13 @@ void BloomSystem::render(vk::raii::CommandBuffer& command_buffer) {
 		};
 
 		command_buffer.beginRendering(rendering_info);
-		command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(m_bloom_mips[i].image->getWidth()), static_cast<float>(m_bloom_mips[i].image->getHeight()), 0.0f, 1.0f));
-		command_buffer.setScissor(0, vk::Rect2D({0, 0}, m_bloom_mips[i].image->getExtent2D()));
+		command_buffer.setViewport(0, vk::Viewport{
+			.x = 0.0f, .y = 0.0f,
+			.width = static_cast<float>(m_bloom_mips[i].image->getWidth()),
+			.height = static_cast<float>(m_bloom_mips[i].image->getHeight()),
+			.minDepth = 0.0f, .maxDepth = 1.0f
+		});
+		command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = m_bloom_mips[i].image->getExtent2D()});
 
 		// Bind input: first mip uses HDR buffer, subsequent mips use previous mip
 		vk::DescriptorSet input_set_handle;
@@ -263,7 +268,7 @@ void BloomSystem::render(vk::raii::CommandBuffer& command_buffer) {
 			vk::ImageLayout::eShaderReadOnlyOptimal,
 			vk::ImageLayout::eColorAttachmentOptimal,
 			vk::AccessFlagBits2::eShaderRead,
-			vk::AccessFlagBits2::eColorAttachmentWrite,
+			vk::AccessFlagBits2::eColorAttachmentWrite | vk::AccessFlagBits2::eColorAttachmentRead,
 			vk::PipelineStageFlagBits2::eFragmentShader,
 			vk::PipelineStageFlagBits2::eColorAttachmentOutput
 		);
@@ -284,8 +289,13 @@ void BloomSystem::render(vk::raii::CommandBuffer& command_buffer) {
 		};
 
 		command_buffer.beginRendering(rendering_info);
-		command_buffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(m_bloom_mips[next_mip_idx].image->getWidth()), static_cast<float>(m_bloom_mips[next_mip_idx].image->getHeight()), 0.0f, 1.0f));
-		command_buffer.setScissor(0, vk::Rect2D({0, 0}, m_bloom_mips[next_mip_idx].image->getExtent2D()));
+		command_buffer.setViewport(0, vk::Viewport{
+			.x = 0.0f, .y = 0.0f,
+			.width = static_cast<float>(m_bloom_mips[next_mip_idx].image->getWidth()),
+			.height = static_cast<float>(m_bloom_mips[next_mip_idx].image->getHeight()),
+			.minDepth = 0.0f, .maxDepth = 1.0f
+		});
+		command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = m_bloom_mips[next_mip_idx].image->getExtent2D()});
 
 		// Bind input: the current smaller mip
 		command_buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_upsample_pipeline_layout, 0, {*m_bloom_mips[i].descriptor_set}, {});

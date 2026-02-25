@@ -427,9 +427,13 @@ void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_
 		.pColorAttachments = &color_att,
 	};
 	cmd.beginRendering(rendering_info);
-	cmd.setViewport(0, vk::Viewport(0, 0, static_cast<float>(m_extent.width),
-	                                 static_cast<float>(m_extent.height), 0, 1));
-	cmd.setScissor(0, vk::Rect2D({0, 0}, m_extent));
+	cmd.setViewport(0, vk::Viewport{
+		.x = 0.0f, .y = 0.0f,
+		.width = static_cast<float>(m_extent.width),
+		.height = static_cast<float>(m_extent.height),
+		.minDepth = 0.0f, .maxDepth = 1.0f
+	});
+	cmd.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = m_extent});
 
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_mask_pipeline->getPipeline());
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_mask_pipeline_layout,

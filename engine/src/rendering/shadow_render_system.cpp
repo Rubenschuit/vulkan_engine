@@ -671,7 +671,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 			.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 			.loadOp = vk::AttachmentLoadOp::eClear,
 			.storeOp = vk::AttachmentStoreOp::eStore,
-			.clearValue = vk::ClearDepthStencilValue(1.0f, 0)
+			.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
 		};
 		vk::RenderingInfo csm_rendering_info{
 			.renderArea = { {0, 0}, shadow_extent },
@@ -689,7 +689,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 			.height = static_cast<float>(SHADOW_MAP_RESOLUTION),
 			.minDepth = 0.0f, .maxDepth = 1.0f
 		});
-		command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), shadow_extent));
+		command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = shadow_extent});
 		command_buffer.setDepthBias(1.25f, 0.0f, 1.75f);
 
 		// Bind CSM multiview pipeline and descriptor set
@@ -770,7 +770,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 				.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 				.loadOp = vk::AttachmentLoadOp::eClear,
 				.storeOp = vk::AttachmentStoreOp::eStore,
-				.clearValue = vk::ClearDepthStencilValue(1.0f, 0)
+				.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
 			};
 			vk::RenderingInfo shadow_rendering_info{
 				.renderArea = { {0, 0}, shadow_extent },
@@ -811,7 +811,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 				.height = static_cast<float>(SHADOW_MAP_RESOLUTION),
 				.minDepth = 0.0f, .maxDepth = 1.0f
 			});
-			command_buffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), shadow_extent));
+			command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = shadow_extent});
 			command_buffer.setDepthBias(1.25f, 0.0f, 1.75f);
 
 			renderShadowMap(frame_info, array_layer, m_shadow_instance_groups);

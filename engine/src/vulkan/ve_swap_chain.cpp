@@ -81,7 +81,7 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer command_buffer, uint3
 	// Wait on image-available (binary) and compute timeline before starting graphics work.
 	vk::PipelineStageFlags wait_stages[2] = {
 		vk::PipelineStageFlagBits::eColorAttachmentOutput, // swapchain image usage
-		vk::PipelineStageFlagBits::eVertexInput | vk::PipelineStageFlagBits::eDrawIndirect // compute→graphics sync
+		vk::PipelineStageFlagBits::eVertexInput | vk::PipelineStageFlagBits::eDrawIndirect | vk::PipelineStageFlagBits::eEarlyFragmentTests // compute -> graphics sync
 	};
 
 	// Wait values: 0 (ignored) for binary image_available, compute timeline value for compute sync
@@ -220,7 +220,7 @@ void VeSwapChain::createColorResources() {
 		m_offscreen_image_format,
 		vk::ImageTiling::eOptimal,
 		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransientAttachment,
-		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		vk::MemoryPropertyFlagBits::eLazilyAllocated,
 		vk::ImageAspectFlagBits::eColor,
 		false,
 		1);
