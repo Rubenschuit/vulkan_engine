@@ -131,7 +131,7 @@ else()
 		target_compile_options(${tgt} PRIVATE -Wall -Wextra -Wconversion -Wpedantic $<$<BOOL:${VE_WARNINGS_AS_ERRORS}>:-Werror>)
 		# Clang-specific warning for struct initialization order
 		if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-			target_compile_options(${tgt} PRIVATE -Wreorder-init-list)
+			target_compile_options(${tgt} PRIVATE -Wreorder-init-list -Werror=c99-designator)
 		endif()
 	endforeach()
 endif()

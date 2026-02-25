@@ -334,9 +334,8 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 void InspectorPanel::renderEntityHeader(Registry& registry, Entity entity) {
 	// Name
 	const std::string& name = registry.getName(entity);
-	char buf[256];
-	strncpy(buf, name.c_str(), sizeof(buf) - 1);
-	buf[sizeof(buf) - 1] = '\0';
+	char buf[256]{};
+	std::snprintf(buf, sizeof(buf), "%s", name.c_str());
 	if (ImGui::InputText("Name", buf, sizeof(buf)))
 		registry.setName(entity, buf);
 

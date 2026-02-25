@@ -271,10 +271,10 @@ VeFrameInfo VeApplication::buildFrameInfo() {
 		.instance_count = 0,
 		.instance_capacity = INITIAL_INSTANCE_CAPACITY,
 		.shadow_mode = m_ui.shadow_mode,
+		.csm_data = {},
 		.compute_query_pool = m_ve_renderer.getQueryPool(),
 		.compute_start_query = m_ve_renderer.getComputeStartQuery(),
 		.selected_entity = m_editor->getState().selected_entity,
-		.csm_data = {},
 	};
 
 	return fi;
