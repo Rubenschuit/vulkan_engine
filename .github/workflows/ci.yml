@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 env:
-  VULKAN_SDK_VERSION: "1.4.304.1"
+  VULKAN_SDK_VERSION: "1.4.328.1"
 
 jobs:
   build:
@@ -51,6 +51,8 @@ jobs:
             generator: Ninja
             build_type: Release
 
+    timeout-minutes: 30
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -83,59 +85,43 @@ jobs:
 
       # ── Vulkan SDK ─────────────────────────────────────────────────
 
-      - name: Cache Vulkan SDK
-        id: cache-vulkan
-        uses: actions/cache@v4
+      - name: Install Vulkan SDK
+        uses: jakoch/install-vulkan-sdk-action@v1.4.0
         with:
-          path: ${{ runner.os == 'Linux' && '~/vulkan-sdk' || runner.os == 'macOS' && '~/VulkanSDK' || 'C:/VulkanSDK' }}
-          key: vulkan-sdk-${{ runner.os }}-${{ env.VULKAN_SDK_VERSION }}
+          vulkan_version: ${{ env.VULKAN_SDK_VERSION }}
+          install_runtime: true
+          cache: true
+          stripdown: true
 
-      - name: Install Vulkan SDK (Linux)
-        if: runner.os == 'Linux' && steps.cache-vulkan.outputs.cache-hit != 'true'
-        run: |
-          wget -q "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/linux/vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.xz" -O vulkan-sdk.tar.xz
-          mkdir -p ~/vulkan-sdk
-          tar xf vulkan-sdk.tar.xz -C ~/vulkan-sdk
-          rm vulkan-sdk.tar.xz
+      - name: Add Vulkan SDK to PATH (Unix)
+        if: runner.os != 'Windows'
+        run: echo "$VULKAN_SDK/bin" >> "$GITHUB_PATH"
 
-      - name: Set Vulkan SDK environment (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          echo "VULKAN_SDK=$HOME/vulkan-sdk/${VULKAN_SDK_VERSION}/x86_64" >> "$GITHUB_ENV"
-          echo "$HOME/vulkan-sdk/${VULKAN_SDK_VERSION}/x86_64/bin" >> "$GITHUB_PATH"
-
-      - name: Install Vulkan SDK (macOS)
-        if: runner.os == 'macOS' && steps.cache-vulkan.outputs.cache-hit != 'true'
-        run: |
-          wget -q "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/mac/vulkansdk-macos-${VULKAN_SDK_VERSION}.zip" -O vulkan-sdk.zip
-          mkdir -p ~/VulkanSDK
-          unzip -q vulkan-sdk.zip -d ~/VulkanSDK
-          rm vulkan-sdk.zip
-
-      - name: Set Vulkan SDK environment (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          echo "VULKAN_SDK=$HOME/VulkanSDK/${VULKAN_SDK_VERSION}/macOS" >> "$GITHUB_ENV"
-          echo "$HOME/VulkanSDK/${VULKAN_SDK_VERSION}/macOS/bin" >> "$GITHUB_PATH"
-
-      - name: Install Vulkan SDK (Windows)
-        if: runner.os == 'Windows' && steps.cache-vulkan.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          $url = "https://sdk.lunarg.com/sdk/download/$env:VULKAN_SDK_VERSION/windows/VulkanSDK-$env:VULKAN_SDK_VERSION-Installer.exe"
-          Invoke-WebRequest -Uri $url -OutFile VulkanSDK-Installer.exe
-          Start-Process -FilePath .\VulkanSDK-Installer.exe -ArgumentList "--accept-licenses --default-answer --confirm-command install" -Wait
-          Remove-Item VulkanSDK-Installer.exe
-
-      - name: Set Vulkan SDK environment (Windows)
+      - name: Add Vulkan SDK to PATH (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          echo "VULKAN_SDK=C:\VulkanSDK\$env:VULKAN_SDK_VERSION" >> $env:GITHUB_ENV
-          echo "C:\VulkanSDK\$env:VULKAN_SDK_VERSION\Bin" >> $env:GITHUB_PATH
+        run: echo "$env:VULKAN_SDK\Bin" >> $env:GITHUB_PATH
 
-      - name: Verify slangc
-        run: slangc --version
+      - name: Add Vulkan SDK to MSYS2 PATH
+        if: matrix.mingw
+        shell: msys2 {0}
+        run: echo "export PATH=\"$VULKAN_SDK/Bin:\$PATH\"" >> ~/.bash_profile
+
+      - name: Verify Vulkan SDK and slangc
+        if: "!matrix.mingw"
+        run: |
+          echo "VULKAN_SDK=$VULKAN_SDK"
+          ls "$VULKAN_SDK/bin/" 2>/dev/null || ls "$VULKAN_SDK/Bin/" 2>/dev/null || echo "Could not list SDK bin directory"
+          slangc -v
+        shell: bash
+
+      - name: Verify Vulkan SDK and slangc (MinGW)
+        if: matrix.mingw
+        shell: msys2 {0}
+        run: |
+          source ~/.bash_profile
+          echo "VULKAN_SDK=$VULKAN_SDK"
+          slangc -v
 
       # ── FetchContent cache ─────────────────────────────────────────
 
@@ -171,7 +157,7 @@ jobs:
         if: matrix.mingw
         shell: msys2 {0}
         run: |
-          export PATH="/c/VulkanSDK/${VULKAN_SDK_VERSION}/Bin:$PATH"
+          source ~/.bash_profile
           cmake -S . -B build \
             -G "MinGW Makefiles" \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
@@ -187,7 +173,7 @@ jobs:
         if: matrix.mingw
         shell: msys2 {0}
         run: |
-          export PATH="/c/VulkanSDK/${VULKAN_SDK_VERSION}/Bin:$PATH"
+          source ~/.bash_profile
           cmake --build build --config ${{ matrix.build_type }} --parallel
 
       # ── Test ───────────────────────────────────────────────────────
@@ -200,5 +186,5 @@ jobs:
         if: matrix.mingw
         shell: msys2 {0}
         run: |
-          export PATH="/c/VulkanSDK/${VULKAN_SDK_VERSION}/Bin:$PATH"
+          source ~/.bash_profile
           ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --exclude-regex "pipelineConfig"
