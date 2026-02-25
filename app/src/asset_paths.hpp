@@ -18,7 +18,7 @@ struct AssetPaths {
 	std::filesystem::path mots_texture;
 	std::filesystem::path grid_texture;
 
-	std::filesystem::path sponza_model(const char* variant = "") const { return project_root / "models" / variant / "glTF" / "Sponza.gltf"; }
+	std::filesystem::path sponza_model() const { return project_root / "models" / "sponza" / "glTF" / "Sponza.gltf"; }
 	std::filesystem::path bistro_model() const { return project_root / "models" / "bistro-master" / "bistro.gltf"; }
 
 	explicit AssetPaths(const std::filesystem::path& root)

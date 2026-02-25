@@ -22,6 +22,7 @@ namespace ve {
 
 class VeDescriptorPool;
 class VeDescriptorSetLayout;
+struct GltfLoadContext;
 
 class VENGINE_API VeModel {
 public:
@@ -42,6 +43,7 @@ public:
 	VeModel& operator=(const VeModel&) = delete;
 
 	// Add all loaded nodes to a Registry as entities with components and hierarchy.
+	// Can only be called once per model; m_nodes is cleared after use.
 	void addToScene(Registry& registry,
 	                const glm::vec3& root_translation,
 	                const glm::vec3& root_rotation,
@@ -79,10 +81,10 @@ private:
 	void loadFromGltf(const std::filesystem::path& model_path, VeResourceManager& resource_manager,
 	                  VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout,
 	                  bool extract_lights, bool flip_tex_coord_v = false);
+	void processNode(int gltf_node_idx, int parent_node_idx, GltfLoadContext& ctx);
 
 	// Lightweight node data from glTF parsing
 	struct LoadedNode {
-		uint32_t id = 0;
 		std::string name;
 		glm::vec3 translation{0.f};
 		glm::quat rotation{1.f, 0.f, 0.f, 0.f};
@@ -92,15 +94,12 @@ private:
 	};
 
 	std::vector<LoadedNode> m_nodes;
-	std::vector<std::pair<uint32_t, uint32_t>> m_parent_links;  // (child_id, parent_id)
-	std::unordered_set<uint32_t> m_root_ids;
-	uint32_t m_root_id{0};
+	std::vector<std::pair<uint32_t, uint32_t>> m_parent_links;  // (child_index, parent_index)
+	std::unordered_set<uint32_t> m_root_indices;
 
 	std::vector<ResourceHandle<VeMaterial>> m_material_handles;
 	std::vector<ExtractedLight> m_punctual_lights;
 	std::vector<ExtractedLight> m_emissive_lights;
-
-	static uint32_t s_next_node_id;
 };
 
 } // namespace ve

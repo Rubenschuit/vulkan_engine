@@ -1,0 +1,204 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  VULKAN_SDK_VERSION: "1.4.304.1"
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "Linux GCC"
+            os: ubuntu-24.04
+            cc: gcc
+            cxx: g++
+            generator: Ninja
+            build_type: Release
+
+          - name: "Linux Clang"
+            os: ubuntu-24.04
+            cc: clang
+            cxx: clang++
+            generator: Ninja
+            build_type: Release
+
+          - name: "Windows MSVC"
+            os: windows-latest
+            generator: "Visual Studio 17 2022"
+            cmake_args: "-A x64"
+            build_type: Release
+
+          - name: "Windows MinGW"
+            os: windows-latest
+            generator: "MinGW Makefiles"
+            build_type: Release
+            mingw: true
+
+          - name: "macOS Clang"
+            os: macos-14
+            cc: clang
+            cxx: clang++
+            generator: Ninja
+            build_type: Release
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── System dependencies ────────────────────────────────────────
+
+      - name: Install system packages (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build xorg-dev \
+            libxcb-xinerama0-dev libxcb-xinput-dev libxcb-cursor-dev \
+            libwayland-dev libxkbcommon-dev
+
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Setup MSYS2 (MinGW)
+        if: matrix.mingw
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            make
+
+      # ── Vulkan SDK ─────────────────────────────────────────────────
+
+      - name: Cache Vulkan SDK
+        id: cache-vulkan
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.os == 'Linux' && '~/vulkan-sdk' || runner.os == 'macOS' && '~/VulkanSDK' || 'C:/VulkanSDK' }}
+          key: vulkan-sdk-${{ runner.os }}-${{ env.VULKAN_SDK_VERSION }}
+
+      - name: Install Vulkan SDK (Linux)
+        if: runner.os == 'Linux' && steps.cache-vulkan.outputs.cache-hit != 'true'
+        run: |
+          wget -q "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/linux/vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.xz" -O vulkan-sdk.tar.xz
+          mkdir -p ~/vulkan-sdk
+          tar xf vulkan-sdk.tar.xz -C ~/vulkan-sdk
+          rm vulkan-sdk.tar.xz
+
+      - name: Set Vulkan SDK environment (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          echo "VULKAN_SDK=$HOME/vulkan-sdk/${VULKAN_SDK_VERSION}/x86_64" >> "$GITHUB_ENV"
+          echo "$HOME/vulkan-sdk/${VULKAN_SDK_VERSION}/x86_64/bin" >> "$GITHUB_PATH"
+
+      - name: Install Vulkan SDK (macOS)
+        if: runner.os == 'macOS' && steps.cache-vulkan.outputs.cache-hit != 'true'
+        run: |
+          wget -q "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/mac/vulkansdk-macos-${VULKAN_SDK_VERSION}.zip" -O vulkan-sdk.zip
+          mkdir -p ~/VulkanSDK
+          unzip -q vulkan-sdk.zip -d ~/VulkanSDK
+          rm vulkan-sdk.zip
+
+      - name: Set Vulkan SDK environment (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "VULKAN_SDK=$HOME/VulkanSDK/${VULKAN_SDK_VERSION}/macOS" >> "$GITHUB_ENV"
+          echo "$HOME/VulkanSDK/${VULKAN_SDK_VERSION}/macOS/bin" >> "$GITHUB_PATH"
+
+      - name: Install Vulkan SDK (Windows)
+        if: runner.os == 'Windows' && steps.cache-vulkan.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $url = "https://sdk.lunarg.com/sdk/download/$env:VULKAN_SDK_VERSION/windows/VulkanSDK-$env:VULKAN_SDK_VERSION-Installer.exe"
+          Invoke-WebRequest -Uri $url -OutFile VulkanSDK-Installer.exe
+          Start-Process -FilePath .\VulkanSDK-Installer.exe -ArgumentList "--accept-licenses --default-answer --confirm-command install" -Wait
+          Remove-Item VulkanSDK-Installer.exe
+
+      - name: Set Vulkan SDK environment (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          echo "VULKAN_SDK=C:\VulkanSDK\$env:VULKAN_SDK_VERSION" >> $env:GITHUB_ENV
+          echo "C:\VulkanSDK\$env:VULKAN_SDK_VERSION\Bin" >> $env:GITHUB_PATH
+
+      - name: Verify slangc
+        run: slangc --version
+
+      # ── FetchContent cache ─────────────────────────────────────────
+
+      - name: Cache FetchContent
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-${{ matrix.name }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/Tests.cmake') }}
+          restore-keys: deps-${{ matrix.name }}-
+
+      # ── Configure ──────────────────────────────────────────────────
+
+      - name: Configure (Unix)
+        if: runner.os != 'Windows'
+        run: >
+          cmake -S . -B build
+          -G "${{ matrix.generator }}"
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DVE_BUILD_TESTS=ON
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+
+      - name: Configure (MSVC)
+        if: runner.os == 'Windows' && !matrix.mingw
+        run: >
+          cmake -S . -B build
+          -G "${{ matrix.generator }}"
+          ${{ matrix.cmake_args }}
+          -DVE_BUILD_TESTS=ON
+
+      - name: Configure (MinGW)
+        if: matrix.mingw
+        shell: msys2 {0}
+        run: |
+          export PATH="/c/VulkanSDK/${VULKAN_SDK_VERSION}/Bin:$PATH"
+          cmake -S . -B build \
+            -G "MinGW Makefiles" \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DVE_BUILD_TESTS=ON
+
+      # ── Build ──────────────────────────────────────────────────────
+
+      - name: Build (Unix / MSVC)
+        if: "!matrix.mingw"
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel
+
+      - name: Build (MinGW)
+        if: matrix.mingw
+        shell: msys2 {0}
+        run: |
+          export PATH="/c/VulkanSDK/${VULKAN_SDK_VERSION}/Bin:$PATH"
+          cmake --build build --config ${{ matrix.build_type }} --parallel
+
+      # ── Test ───────────────────────────────────────────────────────
+
+      - name: Test (Unix / MSVC)
+        if: "!matrix.mingw"
+        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --exclude-regex "pipelineConfig"
+
+      - name: Test (MinGW)
+        if: matrix.mingw
+        shell: msys2 {0}
+        run: |
+          export PATH="/c/VulkanSDK/${VULKAN_SDK_VERSION}/Bin:$PATH"
+          ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --exclude-regex "pipelineConfig"

@@ -38,10 +38,7 @@ Sandbox::Sandbox(const std::filesystem::path& working_dir)
 		return std::make_unique<SimpleScene>(ctx, m_paths);
 	});
 	registerScene("Sponza", [this](const SceneContext& ctx) {
-		return std::make_unique<SponzaScene>(ctx, m_paths, "sponza");
-	});
-	registerScene("Sponza Low", [this](const SceneContext& ctx) {
-		return std::make_unique<SponzaScene>(ctx, m_paths, "sponza_low");
+		return std::make_unique<SponzaScene>(ctx, m_paths);
 	});
 	registerScene("Bistro", [this](const SceneContext& ctx) {
 		return std::make_unique<BistroScene>(ctx, m_paths);

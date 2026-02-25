@@ -159,7 +159,8 @@ uint32_t ClusterLightSystem::uploadLightData(VeFrameInfo& frame_info) {
 			break;
 		glm::vec3 color = pl.getColor();
 		float intensity = pl.getIntensity();
-		buffer[count].position = glm::vec4{tc.getTranslation(), pl.getEffectiveRange()};
+		glm::vec3 world_pos = glm::vec3(registry.getWorldTransform(entity)[3]);
+		buffer[count].position = glm::vec4{world_pos, pl.getEffectiveRange()};
 		buffer[count].color.x = color.x * intensity;
 		buffer[count].color.y = color.y * intensity;
 		buffer[count].color.z = color.z * intensity;

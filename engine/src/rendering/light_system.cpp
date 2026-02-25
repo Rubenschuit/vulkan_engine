@@ -142,7 +142,8 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 	auto& registry = *frame_info.registry;
 	for (auto [entity, pl, tc] : registry.view<PointLightComponent, TransformComponent>()) {
 		SimplePushConstantData push{};
-		push.position = glm::vec4{tc.getTranslation(), 1.0f};
+		glm::vec3 world_pos = glm::vec3(registry.getWorldTransform(entity)[3]);
+		push.position = glm::vec4{world_pos, 1.0f};
 		push.scale = tc.getScale().x;
 		push.color = glm::vec4{pl.getColor(), pl.getIntensity()};
 		push.billboard_type = 0;
@@ -192,14 +193,15 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 		glm::vec3 color = pl.getColor();
 		float intensity = pl.getIntensity();
 
-		ubo.point_lights[num_lights].position = glm::vec4{tc.getTranslation(), pl.getRange()};
+		glm::vec3 world_pos = glm::vec3(registry.getWorldTransform(entity)[3]);
+		ubo.point_lights[num_lights].position = glm::vec4{world_pos, pl.getRange()};
 		ubo.point_lights[num_lights].color.x = color.x * intensity;
 		ubo.point_lights[num_lights].color.y = color.y * intensity;
 		ubo.point_lights[num_lights].color.z = color.z * intensity;
 		ubo.point_lights[num_lights].color.w = intensity;
 
 		if (pl.getCastsShadow() && num_shadow_lights < MAX_POINT_SHADOW_LIGHTS) {
-			glm::vec3 light_pos = tc.getTranslation();
+			glm::vec3 light_pos = world_pos;
 			glm::vec3 scene_center = glm::vec3(0.0f, 0.0f, 0.0f);
 			glm::vec3 view_up = glm::vec3(0.0f, 1.0f, 0.0f);
 			glm::mat4 light_view = glm::lookAt(light_pos, scene_center, view_up);

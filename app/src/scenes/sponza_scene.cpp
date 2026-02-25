@@ -2,9 +2,9 @@
 
 namespace ve {
 
-SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths, const char* variant)
+SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
     : VeScene(ctx, "Sponza Scene") {
-    loadGameObjects(paths, variant);
+    loadGameObjects(paths);
 }
 
 vk::raii::DescriptorSet& SponzaScene::getDescriptorSet() {
@@ -12,7 +12,7 @@ vk::raii::DescriptorSet& SponzaScene::getDescriptorSet() {
     return m_default_material_handle.get()->getDescriptorSet();
 }
 
-void SponzaScene::loadGameObjects(const AssetPaths& paths, const char* variant) {
+void SponzaScene::loadGameObjects(const AssetPaths& paths) {
     glm::vec3 sponza_translation = {0.0f, 0.0f, 300.0f};
 
     // Helper: create a point light entity in Registry
@@ -32,7 +32,7 @@ void SponzaScene::loadGameObjects(const AssetPaths& paths, const char* variant) 
 
     // Sponza model (variant: sponza, sponza_low, sponza_high)
     {
-        std::filesystem::path sponza_model_path = paths.sponza_model(variant);
+        std::filesystem::path sponza_model_path = paths.sponza_model();
         m_sponza_model = VeModel::load(m_resource_manager, sponza_model_path.lexically_normal(), &m_pool, &m_material_layout);
         assert(m_sponza_model && "Failed to load Sponza model");
 

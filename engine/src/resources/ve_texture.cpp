@@ -104,52 +104,36 @@ VeTexture::~VeTexture() {
 }
 
 bool VeTexture::doLoad() {
-	// Default placeholder textures (create from pixels)
-	if (m_resource_id == "default_albedo") {
-		stbi_uc* pixels = generateDefaultTexture(4, 4, TextureType::ALBEDO);
-		createTextureImageFromPixels(4, 4, pixels, vk::Format::eR8G8B8A8Srgb);
-		free(pixels);
-		createTextureSampler();
-		return true;
-	}
-	if (m_resource_id == "default_normal") {
-		stbi_uc* pixels = generateDefaultTexture(4, 4, TextureType::NORMAL);
-		createTextureImageFromPixels(4, 4, pixels, vk::Format::eR8G8B8A8Unorm);
-		free(pixels);
-		createTextureSampler();
-		return true;
-	}
-	if (m_resource_id == "default_metallic_roughness") {
-		stbi_uc* pixels = generateDefaultTexture(4, 4, TextureType::METALLIC_ROUGHNESS);
-		createTextureImageFromPixels(4, 4, pixels, vk::Format::eR8G8B8A8Unorm);
-		free(pixels);
-		createTextureSampler();
-		return true;
-	}
-	if (m_resource_id == "default_mr_unit") {
-		// Full metallic (B=255) and full roughness (G=255) so MaterialFactors alone control the values
-		stbi_uc* pixels = (stbi_uc*)malloc(4 * 4 * 4);
-		for (size_t i = 0; i < 16; i++) {
-			pixels[i * 4 + 0] = 0;
-			pixels[i * 4 + 1] = 255;  // roughness = 1.0
-			pixels[i * 4 + 2] = 255;  // metallic = 1.0
-			pixels[i * 4 + 3] = 255;
+	// Default placeholder textures
+	static const struct {
+		const char* id;
+		TextureType type;
+		vk::Format format;
+	} defaults[] = {
+		{"default_albedo",              TextureType::ALBEDO,              vk::Format::eR8G8B8A8Srgb},
+		{"default_normal",              TextureType::NORMAL,              vk::Format::eR8G8B8A8Unorm},
+		{"default_metallic_roughness",  TextureType::METALLIC_ROUGHNESS,  vk::Format::eR8G8B8A8Unorm},
+		{"default_mr_unit",             TextureType::METALLIC_ROUGHNESS,  vk::Format::eR8G8B8A8Unorm},
+		{"default_occlusion",           TextureType::OCCLUSION,           vk::Format::eR8G8B8A8Unorm},
+		{"default_emissive",            TextureType::EMISSIVE,            vk::Format::eR8G8B8A8Unorm},
+	};
+	for (const auto& def : defaults) {
+		if (m_resource_id != def.id)
+			continue;
+		stbi_uc* pixels;
+		if (m_resource_id == "default_mr_unit") {
+			// Full metallic (B=255) and full roughness (G=255) so MaterialFactors alone control the values
+			pixels = (stbi_uc*)malloc(4 * 4 * 4);
+			for (size_t i = 0; i < 16; i++) {
+				pixels[i * 4 + 0] = 0;
+				pixels[i * 4 + 1] = 255;  // roughness = 1.0
+				pixels[i * 4 + 2] = 255;  // metallic = 1.0
+				pixels[i * 4 + 3] = 255;
+			}
+		} else {
+			pixels = generateDefaultTexture(4, 4, def.type);
 		}
-		createTextureImageFromPixels(4, 4, pixels, vk::Format::eR8G8B8A8Unorm);
-		free(pixels);
-		createTextureSampler();
-		return true;
-	}
-	if (m_resource_id == "default_occlusion") {
-		stbi_uc* pixels = generateDefaultTexture(4, 4, TextureType::OCCLUSION);
-		createTextureImageFromPixels(4, 4, pixels, vk::Format::eR8G8B8A8Unorm);
-		free(pixels);
-		createTextureSampler();
-		return true;
-	}
-	if (m_resource_id == "default_emissive") {
-		stbi_uc* pixels = generateDefaultTexture(4, 4, TextureType::EMISSIVE);
-		createTextureImageFromPixels(4, 4, pixels, vk::Format::eR8G8B8A8Unorm);
+		createTextureImageFromPixels(4, 4, pixels, def.format);
 		free(pixels);
 		createTextureSampler();
 		return true;
@@ -181,7 +165,8 @@ bool VeTexture::doLoad() {
 		}
 		if (ok)
 			createTextureSampler();
-		s_embedded_cache.erase(emb_it);
+		// Don't erase — the same image may be referenced by multiple texture types
+		// (e.g. ORM shared between |mr and |occlusion). clearEmbeddedCache() handles cleanup.
 		return ok;
 	}
 
@@ -307,7 +292,7 @@ bool VeTexture::uploadKtxTexture(void* k_texture_ptr, vk::Format format_hint) {
 	}
 
 	// Compute total size and copy regions. For cubemaps with mipmaps we use single-level path.
-	// Cubemap mipmap copy is not implemented - only level 0 is copied, so force num_levels=1 to avoid
+	// Cubemap mipmap copy is not implemented, only level 0 is copied, so force num_levels=1 to avoid
 	// sampling uninitialized mip levels (which causes pink).
 	const uint32_t array_layers = is_cubemap ? 6 : 1;
 	const uint32_t effective_levels = (is_cubemap && num_levels > 1) ? 1u : num_levels;
@@ -434,62 +419,8 @@ bool VeTexture::createTextureImageSTB(const std::filesystem::path& texture_path,
 	m_height = static_cast<uint32_t>(height);
 	VE_LOGD("Texture width x height: " << m_width << " x " << m_height);
 
-	// Create a local scope staging buffer
-	ve::VeBuffer staging_buffer(
-		m_ve_device,
-		4,                                        // instance size
-		static_cast<uint32_t>(width * height),    // instance count
-		vk::BufferUsageFlagBits::eTransferSrc,
-		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
-	);
-
-	// Copy image data to staging buffer
-	staging_buffer.map();
-	staging_buffer.writeToBuffer(pixels);
-	// unmap is called in the destructor of VeBuffer
+	createTextureImageFromPixels(m_width, m_height, pixels, format);
 	stbi_image_free(pixels);
-
-	// Create image
-	m_texture_image = std::make_unique<ve::VeImage>(
-		m_ve_device,
-		static_cast<uint32_t>(width),
-		static_cast<uint32_t>(height),
-		vk::SampleCountFlagBits::e1,
-		format,
-		vk::ImageTiling::eOptimal,
-		vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
-		vk::MemoryPropertyFlagBits::eDeviceLocal,
-		vk::ImageAspectFlagBits::eColor,
-		false,
-		1
-	);
-	// Next we execute synchronously 3 single-time command buffers:
-	// TODO: consider combining these into one command buffer
-
-	//transition image to be optimal for receiving data from buffer
-	m_texture_image->transitionImageLayout(
-		vk::ImageLayout::eUndefined,
-		vk::ImageLayout::eTransferDstOptimal,
-		{},
-		vk::AccessFlagBits2::eTransferWrite,
-		vk::PipelineStageFlagBits2::eTopOfPipe,
-		vk::PipelineStageFlagBits2::eTransfer);
-
-	// Copy data from staging buffer to texture image
-	m_ve_device.copyBufferToImage(
-		staging_buffer.getBuffer(),
-		m_texture_image->getImage(),
-		static_cast<uint32_t>(width),
-		static_cast<uint32_t>(height));
-
-	// Transition image to be optimal for shader read access
-	m_texture_image->transitionImageLayout(
-		vk::ImageLayout::eTransferDstOptimal,
-		vk::ImageLayout::eShaderReadOnlyOptimal,
-		vk::AccessFlagBits2::eTransferWrite,
-		vk::AccessFlagBits2::eShaderRead,
-		vk::PipelineStageFlagBits2::eTransfer,
-		vk::PipelineStageFlagBits2::eFragmentShader);
 	return true;
 }
 
@@ -567,6 +498,8 @@ vk::raii::Sampler VeTexture::createShadowRawSampler(VeDevice& device) {
 	return vk::raii::Sampler(device.getDevice(), sampler_info);
 }
 
+// Generates a simple 4-channel RGBA texture based on the type.
+// Callers must free the returned pixel data after use.
 stbi_uc* VeTexture::generateDefaultTexture(int width, int height, TextureType type) {
 	assert(width > 0 && height > 0 && "Width and height must be greater than 0");
     stbi_uc* pixels = (stbi_uc*)malloc(static_cast<size_t>(width * height * 4));
@@ -583,7 +516,7 @@ stbi_uc* VeTexture::generateDefaultTexture(int width, int height, TextureType ty
                 break;
 
             case TextureType::NORMAL:
-                // Flat normal (0.5, 0.5, 1.0) → (128, 128, 255) in RGB
+                // Flat normal (0.5, 0.5, 1.0) or (128, 128, 255) in RGB
                 pixels[i * 4 + 0] = 128;
                 pixels[i * 4 + 1] = 128;
                 pixels[i * 4 + 2] = 255;
@@ -591,11 +524,11 @@ stbi_uc* VeTexture::generateDefaultTexture(int width, int height, TextureType ty
                 break;
 
             case TextureType::METALLIC_ROUGHNESS:
-                // Non-metallic (0), rough (1) → (0, 255, 0, 255)
+                // Non-metallic (0), rough (1) or (0, 255, 0, 255)
                 // Metallic in B, Roughness in G (glTF convention)
                 pixels[i * 4 + 0] = 0;
-                pixels[i * 4 + 1] = 255;  // Roughness = 1
-                pixels[i * 4 + 2] = 0;    // Metallic = 0
+                pixels[i * 4 + 1] = 255;
+                pixels[i * 4 + 2] = 0;
                 pixels[i * 4 + 3] = 255;
                 break;
 
