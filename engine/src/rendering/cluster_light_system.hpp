@@ -65,7 +65,8 @@ private:
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;
 	bool m_enabled = false;
-	uint32_t m_last_light_count = 0;  // set by uploadLightData(), read by dispatch()
+	uint32_t m_last_light_count = 0;       // total (point + spot), set by uploadLightData()
+	uint32_t m_last_point_light_count = 0; // point lights only, for cluster_params.num_point_lights
 
 	// Grid dimensions (recomputed on resize)
 	uint32_t m_tiles_x = 0;

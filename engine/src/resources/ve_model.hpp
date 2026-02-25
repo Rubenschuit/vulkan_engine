@@ -61,7 +61,7 @@ public:
 		bool flip_tex_coord_v = false);
 
 	// Lights extracted from glTF (KHR_lights_punctual) or from emissive materials. Applied when addToScene is used.
-	enum class ExtractedLightType { Point, Directional };
+	enum class ExtractedLightType { Point, Directional, Spot };
 	struct ExtractedLight {
 		ExtractedLightType type = ExtractedLightType::Point;
 		glm::vec3 position{0.f};
@@ -69,7 +69,10 @@ public:
 		glm::vec3 color{1.f};
 		float intensity = 1.f;
 		float range = 0.f;  // 0 = no range limit
+		float inner_cone_angle = 0.f;                    // half-angle in radians (glTF default)
+		float outer_cone_angle = glm::radians(45.0f);    // half-angle in radians (glTF default: pi/4)
 		std::string name;
+		int node_idx = -1;  // glTF node that produced this light (-1 = unknown)
 	};
 	const std::vector<ExtractedLight>& getPunctualLights() const { return m_punctual_lights; }
 	const std::vector<ExtractedLight>& getEmissiveLights() const { return m_emissive_lights; }
@@ -100,6 +103,7 @@ private:
 	std::vector<ResourceHandle<VeMaterial>> m_material_handles;
 	std::vector<ExtractedLight> m_punctual_lights;
 	std::vector<ExtractedLight> m_emissive_lights;
+	std::unordered_map<int, uint32_t> m_gltf_to_loaded_idx;
 };
 
 } // namespace ve

@@ -106,6 +106,10 @@ void ShadowRenderSystem::createPipeline(vk::Format depth_format) {
 	pipeline_config.rasterization_info.depthClampEnable = VK_TRUE;
 	pipeline_config.rasterization_info.depthBiasEnable = VK_TRUE;
 
+	pipeline_config.dynamic_state_enables.push_back(vk::DynamicState::eDepthBias);
+	pipeline_config.dynamic_state_info.dynamicStateCount = static_cast<uint32_t>(pipeline_config.dynamic_state_enables.size());
+	pipeline_config.dynamic_state_info.pDynamicStates = pipeline_config.dynamic_state_enables.data();
+
 	pipeline_config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	pipeline_config.depth_stencil_info.depthWriteEnable = VK_TRUE;
 	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLess;
@@ -131,6 +135,10 @@ void ShadowRenderSystem::createCsmPipeline(vk::Format depth_format) {
 	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eFront;
 	pipeline_config.rasterization_info.depthClampEnable = VK_TRUE;
 	pipeline_config.rasterization_info.depthBiasEnable = VK_TRUE;
+
+	pipeline_config.dynamic_state_enables.push_back(vk::DynamicState::eDepthBias);
+	pipeline_config.dynamic_state_info.dynamicStateCount = static_cast<uint32_t>(pipeline_config.dynamic_state_enables.size());
+	pipeline_config.dynamic_state_info.pDynamicStates = pipeline_config.dynamic_state_enables.data();
 
 	pipeline_config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	pipeline_config.depth_stencil_info.depthWriteEnable = VK_TRUE;
@@ -366,8 +374,8 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBuffer
 		m_csm_ubos[frame_index]->writeToBuffer(&csm_ubo);
 	}
 
-	// Point light shadows: layers NUM_CSM_CASCADES..NUM_CSM_CASCADES+num_shadow_lights-1
-	for (uint32_t shadow_idx = 0; shadow_idx < ubo.num_shadow_lights && shadow_idx < MAX_POINT_SHADOW_LIGHTS; shadow_idx++) {
+	// non cascade shadow lights
+	for (uint32_t shadow_idx = 0; shadow_idx < ubo.num_shadow_lights && shadow_idx < MAX_SHADOW_LIGHTS; shadow_idx++) {
 		uint32_t layer = NUM_CSM_CASCADES + shadow_idx;
 		m_light_views[frame_index][csm_data.active_cascade_count + shadow_idx] = ubo.shadow_lights[shadow_idx].light_view;
 		m_light_projs[frame_index][csm_data.active_cascade_count + shadow_idx] = ubo.shadow_lights[shadow_idx].light_proj;

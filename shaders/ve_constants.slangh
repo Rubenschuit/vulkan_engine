@@ -3,8 +3,9 @@
 
 // Keep in sync with engine/src/ve_config.hpp
 #define MAX_LIGHTS          160
-#define MAX_SHADOW_LIGHTS   2
+#define MAX_SHADOW_LIGHTS   4
 #define MAX_DIR_LIGHTS      4
+#define MAX_SPOT_LIGHTS     32
 #define NUM_CSM_CASCADES    3
 
 // Clustered forward shading (keep in sync with ve_config.hpp)

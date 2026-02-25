@@ -43,11 +43,17 @@ struct DirectionalLight {
 	alignas(16) glm::vec4 color;      // xyz = color * intensity, w = intensity
 };
 
+struct SpotLight {
+	alignas(16) glm::vec4 position;   // xyz = world pos, w = range
+	alignas(16) glm::vec4 direction;  // xyz = normalized dir, w = cos(outerConeAngle)
+	alignas(16) glm::vec4 color;      // xyz = color * intensity, w = cos(innerConeAngle)
+};
+
 struct ShadowLight {
 	alignas(16) glm::mat4 light_view;
 	alignas(16) glm::mat4 light_proj;
 	alignas(16) glm::mat4 shadow_matrix;        // pre-computed bias * light_proj * light_view
-	alignas(16) glm::vec4 light_index_padding;  // x = light_index, y = type (0=point, 1=directional), zw = padding
+	alignas(16) glm::vec4 light_index_padding;  // x = light_index, y = type (0=point, 1=directional, 2=spot), zw = padding
 };
 
 enum class RenderMode : uint32_t {
@@ -139,6 +145,10 @@ struct UniformBufferObject {
 	alignas(16) glm::mat4 inverse_projection_view{1.0f};  // for depth → world reconstruction
 	alignas(16) glm::mat4 prev_projection_view{1.0f};     // previous frame's proj*view for temporal reprojection
 	alignas(8)  glm::vec2 screen_size{};                   // viewport dimensions in pixels
+
+	// Spot lights
+	alignas(16) uint32_t num_spot_lights = 0;              // 16-byte aligned (12 bytes implicit padding)
+	alignas(16) SpotLight spot_lights[ve::MAX_SPOT_LIGHTS];
 };
 static_assert(offsetof(UniformBufferObject, dir_lights) % 16 == 0,
 	"dir_lights must be 16-byte aligned for GPU UBO layout");
@@ -176,7 +186,7 @@ struct ClusterParams {
 	alignas(16) glm::uvec4 grid_dims{};           // xyz = (tiles_x, tiles_y, z_slices), w = total clusters
 	alignas(4)  uint32_t cluster_enabled = 0;     // 0 = brute-force fallback
 	alignas(4)  uint32_t max_lights_per_cluster = ve::MAX_LIGHTS_PER_CLUSTER;
-	alignas(4)  uint32_t _pad0 = 0;
+	alignas(4)  uint32_t num_point_lights = 0;    // how many of num_lights are point lights (rest are spot)
 	alignas(4)  uint32_t _pad1 = 0;
 };
 

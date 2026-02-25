@@ -13,9 +13,34 @@
 
 namespace ve {
 
+bool HierarchyPanel::subtreeMatchesSearch(Registry& registry, Entity entity) {
+	if (!m_search_active)
+		return true;
+
+	// Case-insensitive substring match
+	const std::string& name = registry.getName(entity);
+	auto ciFind = [](const std::string& haystack, const char* needle) {
+		return std::search(haystack.begin(), haystack.end(), needle, needle + std::strlen(needle),
+			[](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); })
+			!= haystack.end();
+	};
+	if (ciFind(name, m_search_buf))
+		return true;
+
+	// Check children recursively
+	Entity child = registry.firstChild(entity);
+	while (!child.isNull()) {
+		if (subtreeMatchesSearch(registry, child))
+			return true;
+		child = registry.nextSibling(child);
+	}
+	return false;
+}
+
 bool HierarchyPanel::isLightOnly(Registry& registry, Entity entity) {
 	bool is_light = registry.hasComponent<PointLightComponent>(entity)
-	             || registry.hasComponent<DirectionalLightComponent>(entity);
+	             || registry.hasComponent<DirectionalLightComponent>(entity)
+	             || registry.hasComponent<SpotLightComponent>(entity);
 	return is_light && !registry.hasComponent<MeshComponent>(entity);
 }
 
@@ -40,11 +65,33 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 		m_last_registry = registry;
 	}
 
+	// Auto-expand ancestors when selection changes
+	if (state.selection_changed && !state.selected_entity.isNull()) {
+		m_force_open_entities.clear();
+		Entity ancestor = registry->getParent(state.selected_entity);
+		while (!ancestor.isNull()) {
+			m_force_open_entities.insert(ancestor.id());
+			ancestor = registry->getParent(ancestor);
+		}
+		m_scroll_to_selected = true;
+	}
+
 	// Lights section
 	renderLightsSection(*registry, state);
 
-	// Entity tree (skip light-only entities)
-	if (ImGui::CollapsingHeader("Entities", ImGuiTreeNodeFlags_DefaultOpen)) {
+	// Entity tree
+	bool entities_open = ImGui::CollapsingHeader("Entities", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+	ImGui::SameLine(ImGui::GetWindowWidth() - 35.0f);
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 2));
+	ImGui::Checkbox("##show_lights", &m_show_lights_in_tree);
+	ImGui::PopStyleVar();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Show lights in tree");
+	if (entities_open) {
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::InputTextWithHint("##search", "Search...", m_search_buf, sizeof(m_search_buf));
+		m_search_active = m_search_buf[0] != '\0';
+
 		uint32_t max_idx = registry->maxEntityIndex();
 		for (uint32_t i = 0; i < max_idx; ++i) {
 			if (!registry->isAliveAtIndex(i))
@@ -52,7 +99,9 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 			Entity e = registry->entityFromIndex(i);
 			if (registry->hasParent(e))
 				continue;
-			if (isLightOnly(*registry, e))
+			if (!m_show_lights_in_tree && isLightOnly(*registry, e))
+				continue;
+			if (!subtreeMatchesSearch(*registry, e))
 				continue;
 			renderEntityNode(*registry, e, state);
 		}
@@ -68,6 +117,8 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 	if (!state.selected_entity.isNull() && ImGui::IsWindowFocused()
 	    && (ImGui::IsKeyPressed(ImGuiKey_Delete) || ImGui::IsKeyPressed(ImGuiKey_Backspace)))
 		m_pending_delete = state.selected_entity;
+
+	m_force_open_entities.clear();
 
 	// Schedule deferred deletion via event system (actual destroy happens at safe frame boundary)
 	if (!m_pending_delete.isNull() && registry) {
@@ -96,13 +147,16 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 	// Component badges
 	bool has_mesh = registry.hasComponent<MeshComponent>(entity);
 	bool has_pl = registry.hasComponent<PointLightComponent>(entity);
+	bool has_sl = registry.hasComponent<SpotLightComponent>(entity);
 	bool has_dl = registry.hasComponent<DirectionalLightComponent>(entity);
 
-	// Check if has visible (non-light-only) children
+	// Check if has visible children
 	bool has_visible_children = false;
 	Entity child = registry.firstChild(entity);
 	while (!child.isNull()) {
-		if (!isLightOnly(registry, child)) {
+		bool visible = (m_show_lights_in_tree || !isLightOnly(registry, child))
+		            && subtreeMatchesSearch(registry, child);
+		if (visible) {
 			has_visible_children = true;
 			break;
 		}
@@ -114,6 +168,10 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 		flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 	if (state.selected_entity == entity)
 		flags |= ImGuiTreeNodeFlags_Selected;
+
+	// Open ancestors of the selected entity, or auto-expand during search
+	if (m_force_open_entities.count(entity.id()) || (m_search_active && has_visible_children))
+		ImGui::SetNextItemOpen(true);
 
 	// Dim inactive entities
 	bool active = registry.isActive(entity);
@@ -134,14 +192,18 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 		ImGui::PopStyleColor();
 
 	// Component badges on the same line
-	if (has_mesh || has_pl || has_dl) {
+	if (has_mesh || has_pl || has_sl || has_dl) {
 		ImGui::SameLine();
 		if (has_mesh) {
 			ImGui::TextColored(ImVec4(0.5f, 0.8f, 0.5f, 1.0f), "[M]");
-			if (has_pl || has_dl) ImGui::SameLine();
+			if (has_pl || has_sl || has_dl) ImGui::SameLine();
 		}
 		if (has_pl) {
 			ImGui::TextColored(ImVec4(1.0f, 0.9f, 0.4f, 1.0f), "[PL]");
+			if (has_sl || has_dl) ImGui::SameLine();
+		}
+		if (has_sl) {
+			ImGui::TextColored(ImVec4(0.8f, 0.9f, 1.0f, 1.0f), "[SL]");
 			if (has_dl) ImGui::SameLine();
 		}
 		if (has_dl)
@@ -154,11 +216,19 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 		state.selection_changed = true;
 	}
 
-	// Render children recursively (skip light-only)
+	// Scroll to the selected entity
+	if (state.selected_entity == entity && m_scroll_to_selected) {
+		ImGui::SetScrollHereY();
+		m_scroll_to_selected = false;
+	}
+
+	// Render children recursively
 	if (has_visible_children && node_open) {
 		child = registry.firstChild(entity);
 		while (!child.isNull()) {
-			if (!isLightOnly(registry, child))
+			bool visible = (m_show_lights_in_tree || !isLightOnly(registry, child))
+			            && subtreeMatchesSearch(registry, child);
+			if (visible)
 				renderEntityNode(registry, child, state);
 			child = registry.nextSibling(child);
 		}
@@ -278,12 +348,13 @@ void HierarchyPanel::renderGroupControls(const std::string& key, const std::vect
 void HierarchyPanel::renderLightsSection(Registry& registry, EditorState& state) {
 	uint32_t dl_count = registry.directionalLights().size();
 	uint32_t pl_count = registry.pointLights().size();
-	if (dl_count == 0 && pl_count == 0)
+	uint32_t sl_count = registry.spotLights().size();
+	if (dl_count == 0 && pl_count == 0 && sl_count == 0)
 		return;
 
 	char header[64];
-	snprintf(header, sizeof(header), "Lights (%u)", dl_count + pl_count);
-	if (!ImGui::CollapsingHeader(header, ImGuiTreeNodeFlags_DefaultOpen))
+	snprintf(header, sizeof(header), "Lights (%u)", dl_count + pl_count + sl_count);
+	if (!ImGui::CollapsingHeader(header))
 		return;
 
 	ImGui::PushID("lights_section");
@@ -291,6 +362,14 @@ void HierarchyPanel::renderLightsSection(Registry& registry, EditorState& state)
 	// --- Directional Lights ---
 	if (dl_count > 0 && ImGui::TreeNodeEx("Directional", ImGuiTreeNodeFlags_DefaultOpen)) {
 		for (auto [e, dl] : registry.view<DirectionalLightComponent>().includeInactive())
+			renderSelectableLight(registry, e, state);
+		ImGui::TreePop();
+	}
+
+	// --- Spot Lights ---
+	if (sl_count > 0 && ImGui::TreeNodeEx("Spot Lights", ImGuiTreeNodeFlags_DefaultOpen)) {
+		auto sl_view = registry.view<SpotLightComponent, TransformComponent>().includeInactive();
+		for (auto [e, sl, tc] : sl_view)
 			renderSelectableLight(registry, e, state);
 		ImGui::TreePop();
 	}

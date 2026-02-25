@@ -21,11 +21,17 @@ struct DirectionalLight {
 	float4 color;      // xyz = color * intensity, w = intensity
 };
 
+struct SpotLight {
+	float4 position;    // xyz = world pos, w = range
+	float4 direction;   // xyz = normalized dir, w = cos(outerConeAngle)
+	float4 color;       // xyz = color*intensity, w = cos(innerConeAngle)
+};
+
 struct ShadowLight {
 	float4x4 light_view;
 	float4x4 light_proj;
 	float4x4 shadow_matrix;
-	float4 light_index_padding; // x = light_index, y = type (0=point, 1=directional), zw = padding
+	float4 light_index_padding; // x = light_index, y = type (0=point, 1=directional, 2=spot), zw = padding
 };
 
 // Keep in sync with RenderMode enum in ve_frame_info.hpp
@@ -78,6 +84,15 @@ struct UniformBuffer {
 	float4x4 inverse_projection_view;
 	float4x4 prev_projection_view;  // previous frame's proj*view for temporal reprojection
 	float2   screen_size;
+	float    _pad_screen_0;
+	float    _pad_screen_1;
+
+	// Spot lights
+	uint32_t num_spot_lights;
+	float    _pad_spot_0;
+	float    _pad_spot_1;
+	float    _pad_spot_2;
+	SpotLight spot_lights[MAX_SPOT_LIGHTS];
 };
 [vk::binding(0, 0)]
 ConstantBuffer<UniformBuffer> ubo;
@@ -159,6 +174,18 @@ float calculateAttenuation(float distance_sq, float range) {
 		return (window * window) / max(distance_sq, 0.0001);
 	}
 	return 1.0 / max(distance_sq, 0.0001);
+}
+
+// Spot light angular attenuation: smooth falloff between inner and outer cone (glTF spec)
+float calculateSpotAttenuation(float3 light_to_frag, float3 spot_direction,
+                                float cos_outer, float cos_inner) {
+	float cos_angle = dot(normalize(-light_to_frag), spot_direction);
+	if (cos_angle < cos_outer)
+		return 0.0;
+	if (cos_angle > cos_inner)
+		return 1.0;
+	float t = (cos_angle - cos_outer) / (cos_inner - cos_outer);
+	return t * t;  // quadratic falloff
 }
 
 // ============================================================================

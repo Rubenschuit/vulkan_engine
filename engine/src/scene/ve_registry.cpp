@@ -55,6 +55,8 @@ void Registry::destroyEntity(Entity e) {
 		m_events.emit(ComponentRemovedEvent<PointLightComponent>{e});
 	if (m_directional_lights.has(idx))
 		m_events.emit(ComponentRemovedEvent<DirectionalLightComponent>{e});
+	if (m_spot_lights.has(idx))
+		m_events.emit(ComponentRemovedEvent<SpotLightComponent>{e});
 
 	// Adjust active light counters before removing components
 	if (m_meta[idx].active) {
@@ -62,6 +64,8 @@ void Registry::destroyEntity(Entity e) {
 			m_active_point_lights--;
 		if (m_directional_lights.has(idx))
 			m_active_directional_lights--;
+		if (m_spot_lights.has(idx))
+			m_active_spot_lights--;
 	}
 
 	// Remove all components
@@ -73,6 +77,8 @@ void Registry::destroyEntity(Entity e) {
 		m_point_lights.remove(idx);
 	if (m_directional_lights.has(idx))
 		m_directional_lights.remove(idx);
+	if (m_spot_lights.has(idx))
+		m_spot_lights.remove(idx);
 
 	// Detach from hierarchy: unlink from parent's child list
 	auto& h = m_hierarchy[idx];
@@ -187,6 +193,10 @@ void Registry::processPendingComponentRemovals() {
 				if (hasComponent<DirectionalLightComponent>(r.entity))
 					removeComponent<DirectionalLightComponent>(r.entity);
 				break;
+			case ComponentType::SpotLight:
+				if (hasComponent<SpotLightComponent>(r.entity))
+					removeComponent<SpotLightComponent>(r.entity);
+				break;
 		}
 	}
 }
@@ -234,11 +244,14 @@ void Registry::setActive(Entity e, bool active) {
 			active ? m_active_point_lights++ : m_active_point_lights--;
 		else if (m_directional_lights.has(idx))
 			active ? m_active_directional_lights++ : m_active_directional_lights--;
+		else if (m_spot_lights.has(idx))
+			active ? m_active_spot_lights++ : m_active_spot_lights--;
 	}
 }
 
 uint32_t Registry::activePointLightCount() const { return m_active_point_lights; }
 uint32_t Registry::activeDirectionalLightCount() const { return m_active_directional_lights; }
+uint32_t Registry::activeSpotLightCount() const { return m_active_spot_lights; }
 
 LightSource Registry::getLightSource(Entity e) const {
 	assert(isAlive(e));
@@ -436,12 +449,26 @@ Entity Registry::createPointLight(float intensity, float radius, glm::vec3 color
 }
 
 Entity Registry::createDirectionalLight(float intensity, glm::vec3 color, glm::vec3 direction) {
-	Entity e = createGameObject();
+	Entity e = createEntity();
 	auto& dl = addComponent<DirectionalLightComponent>(e);
 	dl.intensity = intensity;
 	dl.color = color;
 	dl.direction = glm::normalize(direction);
 	dl.casts_shadow = false;
+	return e;
+}
+
+Entity Registry::createSpotLight(float intensity, float radius, glm::vec3 color,
+                                 glm::vec3 direction, float inner_cone, float outer_cone) {
+	Entity e = createGameObject();
+	auto& sl = addComponent<SpotLightComponent>(e);
+	sl.setIntensity(intensity);
+	sl.setColor(color);
+	sl.setDirection(direction);
+	sl.setInnerConeAngle(inner_cone);
+	sl.setOuterConeAngle(outer_cone);
+	auto* transform = getComponent<TransformComponent>(e);
+	transform->setScale(glm::vec3(radius));
 	return e;
 }
 
@@ -452,6 +479,7 @@ void Registry::clear() {
 	m_meshes.clear();
 	m_point_lights.clear();
 	m_directional_lights.clear();
+	m_spot_lights.clear();
 	m_meta.clear();
 	m_hierarchy.clear();
 	m_world_cache.clear();
@@ -459,6 +487,7 @@ void Registry::clear() {
 	m_alive_count = 0;
 	m_active_point_lights = 0;
 	m_active_directional_lights = 0;
+	m_active_spot_lights = 0;
 }
 
 Entity Registry::entityFromIndex(uint32_t index) const {

@@ -168,6 +168,23 @@ uint32_t ClusterLightSystem::uploadLightData(VeFrameInfo& frame_info) {
 		count++;
 	}
 
+	m_last_point_light_count = count;
+
+	// Append spot lights after point lights (same PointLight layout: position+range, color)
+	for (auto [entity, sl, tc] : registry.view<SpotLightComponent, TransformComponent>()) {
+		if (count >= MAX_CLUSTER_LIGHTS)
+			break;
+		glm::vec3 color = sl.getColor();
+		float intensity = sl.getIntensity();
+		glm::vec3 world_pos = glm::vec3(registry.getWorldTransform(entity)[3]);
+		buffer[count].position = glm::vec4{world_pos, sl.getEffectiveRange()};
+		buffer[count].color.x = color.x * intensity;
+		buffer[count].color.y = color.y * intensity;
+		buffer[count].color.z = color.z * intensity;
+		buffer[count].color.w = intensity;
+		count++;
+	}
+
 	m_last_light_count = count;
 	return count;
 }
@@ -189,6 +206,7 @@ void ClusterLightSystem::dispatch(VeFrameInfo& frame_info, const VeCamera& camer
 	params.grid_dims = glm::uvec4(m_tiles_x, m_tiles_y, CLUSTER_Z_SLICES, m_total_clusters);
 	params.cluster_enabled = 1;
 	params.max_lights_per_cluster = MAX_LIGHTS_PER_CLUSTER;
+	params.num_point_lights = m_last_point_light_count;
 	m_cluster_param_ubos[frame]->writeToBuffer(&params);
 
 	// Barrier: previous frame's compute dispatch -> this frame's fillBuffer.

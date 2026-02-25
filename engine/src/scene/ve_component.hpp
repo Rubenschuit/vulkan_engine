@@ -177,12 +177,50 @@ public:
 	CelestialType celestial_type{CelestialType::Sun};
 };
 
-// TODO: Add more components as needed (camera, animation, etc.)
+// ---------------------------------------------------------------------------
+// SpotLightComponent
+// ---------------------------------------------------------------------------
+class VENGINE_API SpotLightComponent : public Component {
+public:
+	float getIntensity() const { return m_intensity; }
+	const glm::vec3& getColor() const { return m_color; }
+	float getRange() const { return m_range; }
+	const glm::vec3& getDirection() const { return m_direction; }
+	float getInnerConeAngle() const { return m_inner_cone_angle; }
+	float getOuterConeAngle() const { return m_outer_cone_angle; }
+	bool getCastsShadow() const { return m_casts_shadow; }
+
+	void setIntensity(float v);
+	void setColor(const glm::vec3& v);
+	void setRange(float v);
+	void setDirection(const glm::vec3& v);
+	void setInnerConeAngle(float radians);
+	void setOuterConeAngle(float radians);
+	void setCastsShadow(bool v) { m_casts_shadow = v; }
+
+	/// Returns range if explicitly set, otherwise derives from intensity
+	float getEffectiveRange() const;
+
+private:
+	void updateEffectiveRange() const;
+
+	float m_intensity{1.0f};
+	glm::vec3 m_color{1.0f};
+	float m_range{0.0f};// 0 means derive from intensity
+	glm::vec3 m_direction{0.f, 0.f, -1.f}; // local-space
+	float m_inner_cone_angle{glm::radians(25.0f)};        
+	float m_outer_cone_angle{glm::radians(35.0f)};        
+	bool m_casts_shadow{false};
+
+	mutable float m_effective_range{0.0f};
+	mutable bool m_range_dirty{true};
+};
 
 // suppress implicit instantiation
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<TransformComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<PointLightComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<DirectionalLightComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MeshComponent>();
+extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SpotLightComponent>();
 
 } // namespace ve

@@ -174,6 +174,23 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 		);
 		frame_info.command_buffer.draw(6, 1, 0, 0);
 	}
+
+	// Spot light billboards
+	for (auto [entity, sl, tc] : registry.view<SpotLightComponent, TransformComponent>()) {
+		SimplePushConstantData push{
+			.position = glm::vec4{glm::vec3(registry.getWorldTransform(entity)[3]), 1.0f},
+			.color = glm::vec4{sl.getColor(), sl.getIntensity()},
+			.scale = tc.getScale().x,
+			.billboard_type = 3,
+		};
+		frame_info.command_buffer.pushConstants(
+			*m_pipeline_layout,
+			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+			0,
+			vk::ArrayProxy<const uint8_t>(sizeof(SimplePushConstantData), reinterpret_cast<const uint8_t*>(&push))
+		);
+		frame_info.command_buffer.draw(6, 1, 0, 0);
+	}
 }
 
 // Update UBO with all light data (point lights + directional lights + shadows)
@@ -326,6 +343,49 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 	}
 
 	ubo.num_dir_lights = num_dir_lights;
+
+	// Spot lights
+	uint32_t num_spot_lights = 0;
+	for (auto [entity, sl, tc] : registry.view<SpotLightComponent, TransformComponent>()) {
+		assert(num_spot_lights < MAX_SPOT_LIGHTS && "Number of spot lights exceeds MAX_SPOT_LIGHTS");
+
+		glm::vec3 color = sl.getColor();
+		float intensity = sl.getIntensity();
+		glm::vec3 world_pos = glm::vec3(registry.getWorldTransform(entity)[3]);
+		glm::vec3 world_dir = glm::normalize(glm::mat3(registry.getWorldTransform(entity)) * sl.getDirection());
+
+		ubo.spot_lights[num_spot_lights].position = glm::vec4{world_pos, sl.getEffectiveRange()};
+		ubo.spot_lights[num_spot_lights].direction = glm::vec4{world_dir, std::cos(sl.getOuterConeAngle())};
+		ubo.spot_lights[num_spot_lights].color.x = color.x * intensity;
+		ubo.spot_lights[num_spot_lights].color.y = color.y * intensity;
+		ubo.spot_lights[num_spot_lights].color.z = color.z * intensity;
+		ubo.spot_lights[num_spot_lights].color.w = std::cos(sl.getInnerConeAngle());
+
+		// Spot light shadow: single perspective projection along cone direction
+		if (sl.getCastsShadow() && num_shadow_lights < MAX_SHADOW_LIGHTS) {
+			float fov = sl.getOuterConeAngle() * 2.0f;
+			fov = std::min(fov, glm::radians(170.0f));
+			float near_plane = 0.1f;
+			float far_plane = sl.getEffectiveRange() > 0.0f ? sl.getEffectiveRange() : 100.0f;
+
+			glm::vec3 spot_up = std::abs(glm::dot(world_dir, glm::vec3(0, 1, 0))) > 0.99f
+				? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
+			glm::mat4 light_view = glm::lookAt(world_pos, world_pos + world_dir, spot_up);
+			glm::mat4 light_proj = glm::perspective(fov, 1.0f, near_plane, far_plane);
+
+			ubo.shadow_lights[num_shadow_lights].light_view = light_view;
+			ubo.shadow_lights[num_shadow_lights].light_proj = light_proj;
+			ubo.shadow_lights[num_shadow_lights].shadow_matrix = s_bias_matrix * light_proj * light_view;
+			ubo.shadow_lights[num_shadow_lights].light_index_padding = glm::vec4(
+				static_cast<float>(MAX_LIGHTS + num_spot_lights), 2.0f,  // type 2 = spot
+				static_cast<float>(NUM_CSM_CASCADES + num_shadow_lights),
+				0.0f);
+			num_shadow_lights++;
+		}
+
+		num_spot_lights++;
+	}
+	ubo.num_spot_lights = num_spot_lights;
 	ubo.num_shadow_lights = num_shadow_lights;
 }
 } // namespace ve

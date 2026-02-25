@@ -18,7 +18,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 		m_registry.getComponent<DirectionalLightComponent>(dl)->casts_shadow = true;
 	}
 
-	// Create some lights with ranging colors
+	// Create some point lights with ranging colors
 	constexpr uint32_t num_lights = 10;
 	constexpr float intensity = 300.0f;
 	constexpr float radius = 1.0f;
@@ -50,6 +50,8 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 		pl->setCastsShadow(false);
 		pl->setRotates(true);
 	}
+
+
 
 	// floor (grid texture, slightly glossy dielectric, tiled ~1m intervals)
 	{
@@ -108,7 +110,16 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 			auto& mc = m_registry.addComponent<MeshComponent>(quad_entity, quad_data->mesh, mat_handle);
 			mc.has_texture = 1.0f;
 			mc.has_shadow = false;
+
+			// Add spot light shining on the quad
+			glm::vec3 light_dir = glm::normalize(glm::vec3{0.0f, 70.0f, 60.0f});
+			Entity sl = m_registry.createSpotLight(2000.0f, 15.0f, glm::vec3(1.0f), light_dir, glm::radians(20.0f), glm::radians(30.0f));
+			m_registry.setName(sl, "Quad Spot Light");
+			auto* sl_tc = m_registry.getComponent<TransformComponent>(sl);
+			sl_tc->setTranslation(glm::vec3(0.0f, 38.0f, 12.0f));
+			sl_tc->setScale(glm::vec3(1.0f));
 		}
+
 	}
 
 	// PBR showcase grid: rows vary roughness (bottom=rough, top=smooth), columns vary metallic (left=dielectric, right=metal)

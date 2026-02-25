@@ -11,6 +11,7 @@ class TransformComponent;
 class MeshComponent;
 class PointLightComponent;
 class DirectionalLightComponent;
+class SpotLightComponent;
 class VeTexture;
 
 class VENGINE_API InspectorPanel : public EditorPanel {
@@ -21,11 +22,12 @@ public:
 	const char* getName() const override { return "Inspector"; }
 
 private:
-	void renderEntityHeader(Registry& registry, Entity entity);
+	void renderEntityHeader(Registry& registry, Entity entity, EditorState& state);
 	void renderTransform(TransformComponent& transform);
 	void renderMesh(MeshComponent& mesh);
 	void renderPointLight(PointLightComponent& light);
 	void renderDirectionalLight(DirectionalLightComponent& light);
+	void renderSpotLight(SpotLightComponent& light);
 
 	// Texture thumbnail cache
 	struct TextureCacheEntry {

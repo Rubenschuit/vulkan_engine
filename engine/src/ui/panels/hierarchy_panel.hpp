@@ -5,6 +5,7 @@
 #include <glm/vec3.hpp>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace ve {
@@ -31,6 +32,7 @@ private:
 	void renderEnableCheckbox(const char* label, const std::vector<Entity>& lights, Registry& registry);
 
 	bool isLightOnly(Registry& registry, Entity entity);
+	bool subtreeMatchesSearch(Registry& registry, Entity entity);
 
 	struct LightGroupState {
 		float intensity_multiplier = 1.0f;
@@ -48,6 +50,15 @@ private:
 	std::unordered_map<std::string, LightGroupState> m_group_states;
 	Registry* m_last_registry = nullptr;
 	Entity m_pending_delete = Entity::null();
+
+	// Auto-expand and scroll-to for selection changes
+	std::unordered_set<uint32_t> m_force_open_entities;
+	bool m_scroll_to_selected = false;
+	bool m_show_lights_in_tree = false;
+
+	// Search
+	char m_search_buf[256]{};
+	bool m_search_active = false;
 };
 
 } // namespace ve

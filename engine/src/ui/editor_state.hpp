@@ -33,7 +33,17 @@ struct CopiedDirectionalLight {
 	uint8_t celestial_type{1}; // stored as uint8_t
 };
 
-using ComponentClipboard = std::variant<CopiedTransform, CopiedPointLight, CopiedDirectionalLight>;
+struct CopiedSpotLight {
+	float intensity{1.0f};
+	glm::vec3 color{1.0f};
+	float range{0.0f};
+	glm::vec3 direction{0.f, 0.f, -1.f};
+	float inner_cone_angle{glm::radians(25.0f)};
+	float outer_cone_angle{glm::radians(35.0f)};
+	bool casts_shadow{false};
+};
+
+using ComponentClipboard = std::variant<CopiedTransform, CopiedPointLight, CopiedDirectionalLight, CopiedSpotLight>;
 
 enum class GizmoOperation : int {
 	Translate = 0,

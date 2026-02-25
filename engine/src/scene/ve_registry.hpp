@@ -45,7 +45,7 @@ struct WorldTransformCache {
 };
 
 // Deferred component removal (processed alongside entity deletions at safe frame boundary)
-enum class ComponentType : uint8_t { Mesh, PointLight, DirectionalLight };
+enum class ComponentType : uint8_t { Mesh, PointLight, DirectionalLight, SpotLight };
 struct PendingComponentRemoval {
 	Entity entity;
 	ComponentType type;
@@ -110,6 +110,10 @@ public:
 	const ComponentPool<DirectionalLightComponent>& directionalLights() const { return m_directional_lights; }
 	uint32_t activeDirectionalLightCount() const;
 
+	ComponentPool<SpotLightComponent>& spotLights() { return m_spot_lights; }
+	const ComponentPool<SpotLightComponent>& spotLights() const { return m_spot_lights; }
+	uint32_t activeSpotLightCount() const;
+
 	// Fast active check (skips generation validation)
 	bool isActiveAtIndex(uint32_t index) const {
 		return index < m_meta.size() && m_meta[index].active;
@@ -139,6 +143,11 @@ public:
 	Entity createDirectionalLight(float intensity = 1.0f,
 	                              glm::vec3 color = glm::vec3(1.0f),
 	                              glm::vec3 direction = glm::vec3(0.f, -1.f, -1.f));
+	Entity createSpotLight(float intensity = 1.0f, float radius = 1.0f,
+	                       glm::vec3 color = glm::vec3(1.0f),
+	                       glm::vec3 direction = glm::vec3(0.f, 0.f, -1.f),
+	                       float inner_cone = glm::radians(25.0f),
+	                       float outer_cone = glm::radians(35.0f));
 
 	void clear();
 
@@ -171,10 +180,12 @@ private:
 	ComponentPool<MeshComponent>             m_meshes;
 	ComponentPool<PointLightComponent>       m_point_lights;
 	ComponentPool<DirectionalLightComponent> m_directional_lights;
+	ComponentPool<SpotLightComponent>        m_spot_lights;
 
 	// Active light counters (maintained by setActive / addComponent / removeComponent)
 	uint32_t m_active_point_lights = 0;
 	uint32_t m_active_directional_lights = 0;
+	uint32_t m_active_spot_lights = 0;
 
 	// Hierarchy (indexed by entity index)
 	std::vector<HierarchyEntry> m_hierarchy;
@@ -195,6 +206,7 @@ ComponentPool<T>& Registry::pool() {
 	else if constexpr (std::is_same_v<T, MeshComponent>)            return m_meshes;
 	else if constexpr (std::is_same_v<T, PointLightComponent>)      return m_point_lights;
 	else if constexpr (std::is_same_v<T, DirectionalLightComponent>) return m_directional_lights;
+	else if constexpr (std::is_same_v<T, SpotLightComponent>)       return m_spot_lights;
 	else static_assert(sizeof(T) == 0, "Unknown component type");
 }
 
@@ -204,6 +216,7 @@ const ComponentPool<T>& Registry::pool() const {
 	else if constexpr (std::is_same_v<T, MeshComponent>)            return m_meshes;
 	else if constexpr (std::is_same_v<T, PointLightComponent>)      return m_point_lights;
 	else if constexpr (std::is_same_v<T, DirectionalLightComponent>) return m_directional_lights;
+	else if constexpr (std::is_same_v<T, SpotLightComponent>)       return m_spot_lights;
 	else static_assert(sizeof(T) == 0, "Unknown component type");
 }
 
@@ -222,6 +235,9 @@ T& Registry::addComponent(Entity e, Args&&... args) {
 	} else if constexpr (std::is_same_v<T, DirectionalLightComponent>) {
 		comp = &m_directional_lights.emplace(idx, std::forward<Args>(args)...);
 		if (m_meta[idx].active) m_active_directional_lights++;
+	} else if constexpr (std::is_same_v<T, SpotLightComponent>) {
+		comp = &m_spot_lights.emplace(idx, std::forward<Args>(args)...);
+		if (m_meta[idx].active) m_active_spot_lights++;
 	} else {
 		static_assert(sizeof(T) == 0, "Unknown component type");
 	}
@@ -244,9 +260,13 @@ void Registry::removeComponent(Entity e) {
 			m_active_point_lights--;
 		m_point_lights.remove(idx);
 	} else if constexpr (std::is_same_v<T, DirectionalLightComponent>) {
-		if (m_meta[idx].active) 
+		if (m_meta[idx].active)
 			m_active_directional_lights--;
 		m_directional_lights.remove(idx);
+	} else if constexpr (std::is_same_v<T, SpotLightComponent>) {
+		if (m_meta[idx].active)
+			m_active_spot_lights--;
+		m_spot_lights.remove(idx);
 	} else {
 		static_assert(sizeof(T) == 0, "Unknown component type");
 	}
@@ -264,6 +284,8 @@ T* Registry::getComponent(Entity e) {
 		return m_point_lights.get(idx);
 	} else if constexpr (std::is_same_v<T, DirectionalLightComponent>) {
 		return m_directional_lights.get(idx);
+	} else if constexpr (std::is_same_v<T, SpotLightComponent>) {
+		return m_spot_lights.get(idx);
 	} else {
 		static_assert(sizeof(T) == 0, "Unknown component type");
 		return nullptr;
@@ -282,6 +304,8 @@ const T* Registry::getComponent(Entity e) const {
 		return m_point_lights.get(idx);
 	} else if constexpr (std::is_same_v<T, DirectionalLightComponent>) {
 		return m_directional_lights.get(idx);
+	} else if constexpr (std::is_same_v<T, SpotLightComponent>) {
+		return m_spot_lights.get(idx);
 	} else {
 		static_assert(sizeof(T) == 0, "Unknown component type");
 		return nullptr;
@@ -300,6 +324,8 @@ bool Registry::hasComponent(Entity e) const {
 		return m_point_lights.has(idx);
 	} else if constexpr (std::is_same_v<T, DirectionalLightComponent>) {
 		return m_directional_lights.has(idx);
+	} else if constexpr (std::is_same_v<T, SpotLightComponent>) {
+		return m_spot_lights.has(idx);
 	} else {
 		static_assert(sizeof(T) == 0, "Unknown component type");
 		return false;

@@ -16,7 +16,7 @@ struct ClusterParams {
 	uint4 grid_dims;         // xyz = (tiles_x, tiles_y, z_slices), w = total_clusters
 	uint cluster_enabled;
 	uint max_lights_per_cluster;
-	uint _pad0;
+	uint num_point_lights;   // how many of num_lights are point lights (rest are spot)
 	uint _pad1;
 };
 

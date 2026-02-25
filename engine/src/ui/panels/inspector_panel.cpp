@@ -191,7 +191,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 
 	Entity entity = state.selected_entity;
 
-	renderEntityHeader(*registry, entity);
+	renderEntityHeader(*registry, entity, state);
 	ImGui::Separator();
 
 	// Transform (no remove button)
@@ -266,6 +266,45 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 			renderPointLight(*registry->getComponent<PointLightComponent>(entity));
 	}
 
+	// Spot Light
+	if (registry->hasComponent<SpotLightComponent>(entity)) {
+		bool open = ImGui::CollapsingHeader("Spot Light", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		if (ImGui::BeginPopupContextItem("sl_ctx")) {
+			if (ImGui::MenuItem("Copy")) {
+				auto* sl = registry->getComponent<SpotLightComponent>(entity);
+				CopiedSpotLight csl;
+				csl.intensity = sl->getIntensity();
+				csl.color = sl->getColor();
+				csl.range = sl->getRange();
+				csl.direction = sl->getDirection();
+				csl.inner_cone_angle = sl->getInnerConeAngle();
+				csl.outer_cone_angle = sl->getOuterConeAngle();
+				csl.casts_shadow = sl->getCastsShadow();
+				state.component_clipboard = csl;
+			}
+			if (state.component_clipboard && std::holds_alternative<CopiedSpotLight>(*state.component_clipboard))
+				if (ImGui::MenuItem("Paste")) {
+					auto* sl = registry->getComponent<SpotLightComponent>(entity);
+					auto& csl = std::get<CopiedSpotLight>(*state.component_clipboard);
+					sl->setIntensity(csl.intensity);
+					sl->setColor(csl.color);
+					sl->setRange(csl.range);
+					sl->setDirection(csl.direction);
+					sl->setInnerConeAngle(csl.inner_cone_angle);
+					sl->setOuterConeAngle(csl.outer_cone_angle);
+					sl->setCastsShadow(csl.casts_shadow);
+				}
+			ImGui::EndPopup();
+		}
+		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
+		ImGui::PushID("remove_sl");
+		if (ImGui::SmallButton("X"))
+			registry->queueComponentRemoval(entity, ComponentType::SpotLight);
+		ImGui::PopID();
+		if (open && registry->hasComponent<SpotLightComponent>(entity))
+			renderSpotLight(*registry->getComponent<SpotLightComponent>(entity));
+	}
+
 	// Directional Light
 	if (registry->hasComponent<DirectionalLightComponent>(entity)) {
 		bool open = ImGui::CollapsingHeader("Directional Light", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
@@ -315,6 +354,10 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 			if (ImGui::MenuItem("Point Light"))
 				registry->addComponent<PointLightComponent>(entity);
 
+		if (!registry->hasComponent<SpotLightComponent>(entity))
+			if (ImGui::MenuItem("Spot Light"))
+				registry->addComponent<SpotLightComponent>(entity);
+
 		if (!registry->hasComponent<DirectionalLightComponent>(entity))
 			if (ImGui::MenuItem("Directional Light"))
 				registry->addComponent<DirectionalLightComponent>(entity);
@@ -331,7 +374,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 	ImGui::End();
 }
 
-void InspectorPanel::renderEntityHeader(Registry& registry, Entity entity) {
+void InspectorPanel::renderEntityHeader(Registry& registry, Entity entity, EditorState& state) {
 	// Name
 	const std::string& name = registry.getName(entity);
 	char buf[256]{};
@@ -368,6 +411,22 @@ void InspectorPanel::renderEntityHeader(Registry& registry, Entity entity) {
 	ImGui::SetColumnWidth(0, 85.0f);
 	ImGui::Text("Parent");
 	ImGui::NextColumn();
+
+	// "Select Parent" button
+	bool has_parent = !current_parent.isNull();
+	if (!has_parent)
+		ImGui::BeginDisabled();
+	float btn_width = ImGui::GetFrameHeight();
+	if (ImGui::Button("^##select_parent", ImVec2(btn_width, 0))) {
+		state.selected_entity = current_parent;
+		state.selection_changed = true;
+	}
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("Select parent");
+	if (!has_parent)
+		ImGui::EndDisabled();
+
+	ImGui::SameLine();
 	ImGui::SetNextItemWidth(-FLT_MIN);
 	if (ImGui::BeginCombo("##Parent", parent_label)) {
 		if (ImGui::Selectable("(No parent)", current_parent.isNull()))
@@ -567,6 +626,53 @@ void InspectorPanel::renderPointLight(PointLightComponent& light) {
 	bool rotates = light.getRotates();
 	if (ImGui::Checkbox("Rotates", &rotates))
 		light.setRotates(rotates);
+}
+
+void InspectorPanel::renderSpotLight(SpotLightComponent& light) {
+	constexpr float light_label_w = 110.0f;
+
+	glm::vec3 color = light.getColor();
+	labeledWidget(light_label_w, "Color", [&]() {
+		if (ImGui::ColorEdit3("##Color", glm::value_ptr(color)))
+			light.setColor(color);
+	}, [&]() { light.setColor(glm::vec3(1.0f)); });
+
+	float intensity = light.getIntensity();
+	labeledWidget(light_label_w, "Intensity", [&]() {
+		if (ImGui::DragFloat("##Intensity", &intensity, 0.1f, 0.0f, 10000.0f))
+			light.setIntensity(intensity);
+	}, [&]() { light.setIntensity(1.0f); });
+
+	float range = light.getRange();
+	labeledWidget(light_label_w, "Range", [&]() {
+		if (ImGui::DragFloat("##Range", &range, 0.1f, 0.0f, 1000.0f, "%.1f"))
+			light.setRange(range);
+	}, [&]() { light.setRange(0.0f); });
+
+	ImGui::Text("Effective Range: %.1f", light.getEffectiveRange());
+
+	glm::vec3 dir = light.getDirection();
+	if (drawVec3Control("Direction", dir, 0.01f)) {
+		float len = glm::length(dir);
+		if (len > 0.001f)
+			light.setDirection(dir / len);
+	}
+
+	float inner_deg = glm::degrees(light.getInnerConeAngle());
+	labeledWidget(light_label_w, "Inner Cone", [&]() {
+		if (ImGui::SliderFloat("##InnerCone", &inner_deg, 0.0f, 90.0f, "%.1f deg"))
+			light.setInnerConeAngle(glm::radians(inner_deg));
+	}, [&]() { light.setInnerConeAngle(glm::radians(25.0f)); });
+
+	float outer_deg = glm::degrees(light.getOuterConeAngle());
+	labeledWidget(light_label_w, "Outer Cone", [&]() {
+		if (ImGui::SliderFloat("##OuterCone", &outer_deg, 0.0f, 90.0f, "%.1f deg"))
+			light.setOuterConeAngle(glm::radians(outer_deg));
+	}, [&]() { light.setOuterConeAngle(glm::radians(35.0f)); });
+
+	bool casts_shadow = light.getCastsShadow();
+	if (ImGui::Checkbox("Casts Shadow", &casts_shadow))
+		light.setCastsShadow(casts_shadow);
 }
 
 void InspectorPanel::renderDirectionalLight(DirectionalLightComponent& light) {

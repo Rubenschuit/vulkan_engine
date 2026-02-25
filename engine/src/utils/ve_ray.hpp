@@ -157,7 +157,26 @@ inline Ray screenToWorldRay(float uv_x, float uv_y, const glm::mat4& inverse_vp)
 	return {origin, direction};
 }
 
+// Ray-sphere intersection. Returns true if ray hits the sphere, sets t_hit to nearest positive intersection.
+// solves quadratic equation for ray-sphere intersection.
+inline bool rayIntersectsSphere(const Ray& ray, const glm::vec3& center, float radius, float& t_hit) {
+	glm::vec3 oc = ray.origin - center;
+	float b = glm::dot(oc, ray.direction);
+	float c = glm::dot(oc, oc) - radius * radius;
+	float discriminant = b * b - c;
+	if (discriminant < 0.0f)
+		return false;
+	float sqrt_d = std::sqrt(discriminant);
+	float t0 = -b - sqrt_d;
+	float t1 = -b + sqrt_d;
+	if (t1 < 0.0f)
+		return false;
+	t_hit = (t0 >= 0.0f) ? t0 : t1;
+	return true;
+}
+
 // Cast ray against scene: AABB broad phase into triangle narrow phase with early-out.
+// Also tests light entities against spheres for viewport picking.
 inline bool raycastScene(const Ray& ray, Registry& registry, RayHit& closest_hit) {
 	struct AabbCandidate {
 		Entity entity;
@@ -184,30 +203,50 @@ inline bool raycastScene(const Ray& ray, Registry& registry, RayHit& closest_hit
 		candidates.push_back({entity, &mesh, model, glm::inverse(model), glm::max(t, 0.0f)});
 	}
 
-	if (candidates.empty())
-		return false;
-
-	// Sort by AABB distance
-	std::sort(candidates.begin(), candidates.end(),
-	          [](const AabbCandidate& a, const AabbCandidate& b) { return a.aabb_t < b.aabb_t; });
-
-	// Narrow phase: test triangles per candidate, early-out when no closer hit possible
 	float best_t = std::numeric_limits<float>::max();
 	Entity best_entity = Entity::null();
 	glm::vec3 best_normal{0.0f};
 
-	for (const auto& c : candidates) {
-		if (c.aabb_t >= best_t)
-			break; // no candidate can beat current best because AABBs are sorted by distance
+	if (!candidates.empty()) {
+		// Sort by AABB distance
+		std::sort(candidates.begin(), candidates.end(),
+				[](const AabbCandidate& a, const AabbCandidate& b) { return a.aabb_t < b.aabb_t; });
 
-		float tri_t;
-		glm::vec3 tri_normal;
-		if (raycastMesh(ray, *c.mesh->getMesh(), c.model, c.inv_model, tri_t, tri_normal) && tri_t < best_t) {
-			best_t = tri_t;
-			best_entity = c.entity;
-			best_normal = tri_normal;
+		// Narrow phase: test triangles per candidate, early-out when no closer hit possible
+		for (const auto& c : candidates) {
+			if (c.aabb_t >= best_t)
+				break; // no candidate can beat current best because AABBs are sorted by distance
+
+			float tri_t;
+			glm::vec3 tri_normal;
+			if (raycastMesh(ray, *c.mesh->getMesh(), c.model, c.inv_model, tri_t, tri_normal) && tri_t < best_t) {
+				best_t = tri_t;
+				best_entity = c.entity;
+				best_normal = tri_normal;
+			}
 		}
 	}
+
+	// Test point lights and spot lights as spheres
+	constexpr float LIGHT_PICK_RADIUS = 0.35f;
+
+	auto testLightEntity = [&](Entity entity) {
+		auto* tc = registry.getComponent<TransformComponent>(entity);
+		if (!tc)
+			return;
+		glm::vec3 pos = registry.getWorldTransform(entity)[3];
+		float t;
+		if (rayIntersectsSphere(ray, pos, LIGHT_PICK_RADIUS, t) && t < best_t) {
+			best_t = t;
+			best_entity = entity;
+			best_normal = glm::normalize(ray.origin + ray.direction * t - pos);
+		}
+	};
+
+	for (auto [entity, pl, tc] : registry.view<PointLightComponent, TransformComponent>())
+		testLightEntity(entity);
+	for (auto [entity, sl, tc] : registry.view<SpotLightComponent, TransformComponent>())
+		testLightEntity(entity);
 
 	if (best_entity.isNull())
 		return false;

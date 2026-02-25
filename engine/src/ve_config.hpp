@@ -12,7 +12,9 @@ constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.04f); // w indicates light intensity
 constexpr uint32_t MAX_LIGHTS = 160; // requirded for UBO alignment
 constexpr uint32_t MAX_POINT_SHADOW_LIGHTS = 2; // Max point lights that can cast shadows
-constexpr uint32_t MAX_SHADOW_LIGHTS = MAX_POINT_SHADOW_LIGHTS;
+constexpr uint32_t MAX_SPOT_LIGHTS = 32;
+constexpr uint32_t MAX_SPOT_SHADOW_LIGHTS = 2;
+constexpr uint32_t MAX_SHADOW_LIGHTS = MAX_POINT_SHADOW_LIGHTS + MAX_SPOT_SHADOW_LIGHTS;
 constexpr uint32_t MAX_DIR_LIGHTS = 4; // Maximum number of directional lights
 
 // Celestial billboard (sun/moon) configuration
@@ -30,7 +32,7 @@ constexpr float DIR_SHADOW_MAX_DISTANCE = 300.0f; // Max distance from camera fo
 constexpr uint32_t NUM_CSM_CASCADES = 3; // keep in sync with shader
 constexpr uint32_t CSM_SHADOW_MAP_RESOLUTION = SHADOW_MAP_RESOLUTION; // per-cascade resolution
 constexpr float CSM_SPLIT_LAMBDA = 0.80f; // practical split blend (0=linear, 1=logarithmic)
-constexpr uint32_t MAX_SHADOW_LAYERS = NUM_CSM_CASCADES + MAX_POINT_SHADOW_LIGHTS; // total shadow map array layers
+constexpr uint32_t MAX_SHADOW_LAYERS = NUM_CSM_CASCADES + MAX_POINT_SHADOW_LIGHTS + MAX_SPOT_SHADOW_LIGHTS; // total shadow map array layers
 static_assert(SHADOW_MAP_RESOLUTION == CSM_SHADOW_MAP_RESOLUTION,
 	"Shadow map resolution and CSM resolution must match (unified shadow array)");
 

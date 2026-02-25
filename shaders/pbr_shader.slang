@@ -244,7 +244,7 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		return float4(heat * albedo.rgb, albedo.a);
 	}
 
-	// Accumulate point light contribution
+	// Accumulate point + spot light contribution
 	float3 Lo = float3(0.0);
 	if (cluster_params.cluster_enabled != 0) {
 		uint cid = getClusterIndex(in_vert.pos.xy, frag_view_z, cluster_params);
@@ -258,10 +258,22 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 			float NdotL = clamp(dot(world_normal, L), 0.0, 1.0);
 			if (NdotL <= 0.0) continue;
 
-			float NdotV = clamp(dot(world_normal, view_dir), 0.0, 1.0);
-			float3 H = normalize(view_dir + L);
 			float distance_sq = dot(light_dir, light_dir);
 			float attenuation = calculateAttenuation(distance_sq, light.position.w);
+
+			// Spot light cone attenuation (indices >= num_point_lights are spot lights)
+			if (light_idx >= cluster_params.num_point_lights) {
+				uint spot_idx = light_idx - cluster_params.num_point_lights;
+				float cos_outer = ubo.spot_lights[spot_idx].direction.w;
+				float cos_inner = ubo.spot_lights[spot_idx].color.w;
+				float spot_atten = calculateSpotAttenuation(light_dir,
+					ubo.spot_lights[spot_idx].direction.xyz, cos_outer, cos_inner);
+				if (spot_atten <= 0.0) continue;
+				attenuation *= spot_atten;
+			}
+
+			float NdotV = clamp(dot(world_normal, view_dir), 0.0, 1.0);
+			float3 H = normalize(view_dir + L);
 			float3 radiance = light.color.xyz * attenuation;
 
 			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0);
@@ -270,10 +282,14 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 			float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
 
 			float3 kD = (1.0 - F) * (1.0 - metallic) * (1.0 - transmission);
-			float pt_shadow = getPointShadow(light_idx, shadow_terms, shadow_for_light);
+			uint shadow_key = light_idx;
+			if (light_idx >= cluster_params.num_point_lights)
+				shadow_key = MAX_LIGHTS + (light_idx - cluster_params.num_point_lights);
+			float pt_shadow = getPointShadow(shadow_key, shadow_terms, shadow_for_light);
 			Lo += (kD * albedo.rgb / PI + specular) * radiance * NdotL * pt_shadow;
 		}
 	} else {
+		// Brute-force point lights
 		for (uint32_t i = 0; i < ubo.num_lights; i++) {
 			float3 light_dir = ubo.point_lights[i].position.xyz - in_vert.frag_pos_world;
 			float3 L = normalize(light_dir);
@@ -294,6 +310,37 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 			float3 kD = (1.0 - F) * (1.0 - metallic) * (1.0 - transmission);
 			float pt_shadow = getPointShadow(i, shadow_terms, shadow_for_light);
 			Lo += (kD * albedo.rgb / PI + specular) * radiance * NdotL * pt_shadow;
+		}
+
+		// Brute-force spot lights
+		for (uint32_t i = 0; i < ubo.num_spot_lights; i++) {
+			float3 light_dir = ubo.spot_lights[i].position.xyz - in_vert.frag_pos_world;
+			float3 L = normalize(light_dir);
+			float NdotL = clamp(dot(world_normal, L), 0.0, 1.0);
+			if (NdotL <= 0.0) continue;
+
+			float distance_sq = dot(light_dir, light_dir);
+			float attenuation = calculateAttenuation(distance_sq, ubo.spot_lights[i].position.w);
+
+			float cos_outer = ubo.spot_lights[i].direction.w;
+			float cos_inner = ubo.spot_lights[i].color.w;
+			float spot_atten = calculateSpotAttenuation(light_dir,
+				ubo.spot_lights[i].direction.xyz, cos_outer, cos_inner);
+			if (spot_atten <= 0.0) continue;
+			attenuation *= spot_atten;
+
+			float NdotV = clamp(dot(world_normal, view_dir), 0.0, 1.0);
+			float3 H = normalize(view_dir + L);
+			float3 radiance = ubo.spot_lights[i].color.xyz * attenuation;
+
+			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0);
+			float D = distributionGGX(world_normal, H, roughness);
+			float G = geometrySmith(NdotV, NdotL, roughness);
+			float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
+
+			float3 kD = (1.0 - F) * (1.0 - metallic) * (1.0 - transmission);
+			float spot_shadow = getPointShadow(MAX_LIGHTS + i, shadow_terms, shadow_for_light);
+			Lo += (kD * albedo.rgb / PI + specular) * radiance * NdotL * spot_shadow;
 		}
 	}
 

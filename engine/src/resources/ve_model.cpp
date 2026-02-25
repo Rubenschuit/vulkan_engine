@@ -451,6 +451,8 @@ static std::vector<VeModel::ExtractedLight> extractPunctualLights(
 			const std::string& type_str = v.Get("type").Get<std::string>();
 			if (type_str == "directional")
 				light.type = VeModel::ExtractedLightType::Directional;
+			else if (type_str == "spot")
+				light.type = VeModel::ExtractedLightType::Spot;
 			else
 				light.type = VeModel::ExtractedLightType::Point;
 		}
@@ -468,6 +470,14 @@ static std::vector<VeModel::ExtractedLight> extractPunctualLights(
 			light.range = static_cast<float>(v.Get("range").Get<double>());
 		if (v.Has("name") && v.Get("name").IsString())
 			light.name = v.Get("name").Get<std::string>();
+		// Spot light cone angles from KHR_lights_punctual
+		if (light.type == VeModel::ExtractedLightType::Spot && v.Has("spot") && v.Get("spot").IsObject()) {
+			const auto& spot = v.Get("spot");
+			if (spot.Has("innerConeAngle") && spot.Get("innerConeAngle").IsNumber())
+				light.inner_cone_angle = static_cast<float>(spot.Get("innerConeAngle").Get<double>());
+			if (spot.Has("outerConeAngle") && spot.Get("outerConeAngle").IsNumber())
+				light.outer_cone_angle = static_cast<float>(spot.Get("outerConeAngle").Get<double>());
+		}
 		punctual_lights.push_back(light);
 	}
 	for (size_t node_idx = 0; node_idx < gltf.nodes.size(); node_idx++) {
@@ -482,6 +492,7 @@ static std::vector<VeModel::ExtractedLight> extractPunctualLights(
 		auto& pl = punctual_lights[static_cast<size_t>(light_idx)];
 		pl.position = glm::vec3(W * glm::vec4(0, 0, 0, 1));
 		pl.direction = glm::normalize(glm::mat3(W) * glm::vec3(0, 0, -1));
+		pl.node_idx = static_cast<int>(node_idx);
 		if (pl.name.empty() && !node.name.empty())
 			pl.name = node.name;
 		VE_LOGI("Extracted light " << pl.name << " from node " << node.name);
@@ -554,7 +565,8 @@ static std::vector<VeModel::ExtractedLight> extractEmissiveLights(
 					.color = color_n,
 					.intensity = intensity,
 					.range = std::max(diag * 1.25f, 0.25f),
-					.name = mat_name + ": " + individual_name
+					.name = mat_name + ": " + individual_name,
+					.node_idx = np.node_idx
 				});
 				emissive_light_count++;
 			} else {
@@ -571,7 +583,8 @@ static std::vector<VeModel::ExtractedLight> extractEmissiveLights(
 						.color = color_n,
 						.intensity = intensity,
 						.range = std::max(diag * 1.25f, 0.25f),
-						.name = mat_name + ": " + individual_name
+						.name = mat_name + ": " + individual_name,
+						.node_idx = np.node_idx
 					});
 					emissive_light_count++;
 					continue;
@@ -604,7 +617,8 @@ static std::vector<VeModel::ExtractedLight> extractEmissiveLights(
 						.color = color_n,
 						.intensity = intensity,
 						.range = std::max(diag * 1.25f, 0.25f),
-						.name = mat_name + ": " + individual_name + " [" + std::to_string(ci) + "]"
+						.name = mat_name + ": " + individual_name + " [" + std::to_string(ci) + "]",
+						.node_idx = np.node_idx
 					});
 					emissive_light_count++;
 				}
@@ -1355,6 +1369,7 @@ void VeModel::processNode(int gltf_node_idx, int parent_node_idx, GltfLoadContex
 	NodeTRS trs = getNodeTRS(node);
 
 	uint32_t node_idx = static_cast<uint32_t>(m_nodes.size());
+	m_gltf_to_loaded_idx[gltf_node_idx] = node_idx;
 	LoadedNode loaded{};
 	loaded.name = node.name;
 	loaded.translation = trs.translation;
@@ -1523,37 +1538,72 @@ void VeModel::addToScene(Registry& registry,
 			registry.events().emit(ComponentAddedEvent<MeshComponent>{last_mesh_entity, *mc});
 	}
 
-	// Extracted lights: parent to wrapper so they inherit its transform.
+	// Resolve the parent entity for an extracted light: use the source glTF node if known, else wrapper
+	auto lightParent = [&](const ExtractedLight& L) -> Entity {
+		if (L.node_idx >= 0) {
+			auto it = m_gltf_to_loaded_idx.find(L.node_idx);
+			if (it != m_gltf_to_loaded_idx.end() && it->second < index_to_entity.size())
+				return index_to_entity[it->second];
+		}
+		return wrapper;
+	};
+
+	// L.position is in wrapper-local space (glTF world, before root transform).
+	// Convert to parent-local space: first apply wrapper transform to get scene world, then invert parent.
+	glm::mat4 wrapper_world = registry.getWorldTransform(wrapper);
+	auto toLocalPos = [&](const glm::vec3& pos, Entity parent) -> glm::vec3 {
+		if (parent == wrapper)
+			return pos;
+		glm::vec3 scene_world = glm::vec3(wrapper_world * glm::vec4(pos, 1.0f));
+		glm::mat4 inv_parent = glm::inverse(registry.getWorldTransform(parent));
+		return glm::vec3(inv_parent * glm::vec4(scene_world, 1.0f));
+	};
+
+	// Extracted lights: parent to source node entity (or wrapper as fallback)
 	constexpr float size = 0.1f;
 	for (const ExtractedLight& L : m_emissive_lights) {
+		Entity parent = lightParent(L);
 		Entity light = registry.createPointLight(L.intensity * EMISSIVE_LIGHT_INTENSITY_SCALE, size, L.color);
 		registry.setName(light, L.name.empty() ? "Light (emissive)" : L.name);
 		registry.setLightSource(light, LightSource::Emissive);
 		auto* tc = registry.getComponent<TransformComponent>(light);
-		tc->setTranslation(L.position);
-		registry.setParent(light, wrapper);
+		tc->setTranslation(toLocalPos(L.position, parent));
+		registry.setParent(light, parent);
 		registry.setActive(light, false);  // default OFF (MAX_LIGHTS constraint)
 	}
 	for (const ExtractedLight& L : m_punctual_lights) {
+		Entity parent = lightParent(L);
 		float scaled_intensity = L.intensity * KHR_PUNCTUAL_INTENSITY_SCALE;
 		if (L.type == ExtractedLightType::Directional) {
 			Entity light = registry.createDirectionalLight(scaled_intensity, L.color, L.direction);
 			registry.setName(light, L.name.empty() ? "Light (directional)" : L.name);
 			registry.setLightSource(light, LightSource::Punctual);
-			registry.setParent(light, wrapper);
+			registry.setParent(light, parent);
+			registry.setActive(light, false);  // default OFF
+		} else if (L.type == ExtractedLightType::Spot) {
+			Entity light = registry.createSpotLight(scaled_intensity, size, L.color,
+				L.direction, L.inner_cone_angle, L.outer_cone_angle);
+			registry.setName(light, L.name.empty() ? "Light (spot)" : L.name);
+			registry.setLightSource(light, LightSource::Punctual);
+			auto* tc = registry.getComponent<TransformComponent>(light);
+			tc->setTranslation(toLocalPos(L.position, parent));
+			registry.setParent(light, parent);
+			auto* slc = registry.getComponent<SpotLightComponent>(light);
+			if (slc) slc->setRange(L.range);
 			registry.setActive(light, false);  // default OFF
 		} else {
 			Entity light = registry.createPointLight(scaled_intensity, size, L.color);
 			registry.setName(light, L.name.empty() ? "Light (imported)" : L.name);
 			registry.setLightSource(light, LightSource::Punctual);
 			auto* tc = registry.getComponent<TransformComponent>(light);
-			tc->setTranslation(L.position);
-			registry.setParent(light, wrapper);
+			tc->setTranslation(toLocalPos(L.position, parent));
+			registry.setParent(light, parent);
 			auto* plc = registry.getComponent<PointLightComponent>(light);
 			if (plc) plc->setRange(L.range);
 			registry.setActive(light, false);  // default OFF
 		}
 	}
+	m_gltf_to_loaded_idx.clear();
 }
 
 std::optional<VeModel::SingleMeshData> VeModel::loadSingleMesh(

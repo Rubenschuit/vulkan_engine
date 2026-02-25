@@ -21,6 +21,7 @@ template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<TransformComponent>
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<PointLightComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<DirectionalLightComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MeshComponent>();
+template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SpotLightComponent>();
 
 
 // ---------------------------------------------------------------------------
@@ -147,6 +148,53 @@ void MeshComponent::updateWorldAABB() const {
 
 void MeshComponent::render() {
 // unused, render systems handle this for now
+}
+
+// ---------------------------------------------------------------------------
+// SpotLightComponent
+// ---------------------------------------------------------------------------
+
+void SpotLightComponent::setIntensity(float v) {
+	m_intensity = v;
+	m_range_dirty = true;
+}
+
+void SpotLightComponent::setColor(const glm::vec3& v) {
+	m_color = v;
+	m_range_dirty = true;
+}
+
+void SpotLightComponent::setRange(float v) {
+	m_range = v;
+	m_range_dirty = true;
+}
+
+void SpotLightComponent::setDirection(const glm::vec3& v) {
+	m_direction = glm::normalize(v);
+}
+
+void SpotLightComponent::setInnerConeAngle(float radians) {
+	m_inner_cone_angle = radians;
+}
+
+void SpotLightComponent::setOuterConeAngle(float radians) {
+	m_outer_cone_angle = radians;
+}
+
+float SpotLightComponent::getEffectiveRange() const {
+	if (m_range_dirty)
+		updateEffectiveRange();
+	return m_effective_range;
+}
+
+void SpotLightComponent::updateEffectiveRange() const {
+	if (m_range > 0.0f) {
+		m_effective_range = m_range;
+	} else {
+		float max_i = std::max({m_color.r * m_intensity, m_color.g * m_intensity, m_color.b * m_intensity});
+		m_effective_range = std::min(std::sqrt(max_i / CLUSTER_LIGHT_CUTOFF), CLUSTER_MAX_EFFECTIVE_RANGE);
+	}
+	m_range_dirty = false;
 }
 
 } // namespace ve
