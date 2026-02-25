@@ -9,13 +9,15 @@ class VeRenderer;
 
 class VENGINE_API PerformancePanel : public EditorPanel {
 public:
-	explicit PerformancePanel(VeRenderer& renderer) : m_renderer(renderer) {}
+	explicit PerformancePanel(VeRenderer& renderer);
+
 
 	void render(Registry* registry, EditorState& state, UIContext& context) override;
 	const char* getName() const override { return "Performance"; }
 
 private:
 	VeRenderer& m_renderer;
+	std::string m_gpu_name;
 
 	// Timing accumulators
 	std::chrono::high_resolution_clock::time_point m_last_time{};

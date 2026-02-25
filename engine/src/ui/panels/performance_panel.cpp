@@ -6,6 +6,9 @@
 
 namespace ve {
 
+PerformancePanel::PerformancePanel(VeRenderer& renderer)
+	: m_renderer(renderer), m_gpu_name(renderer.getDeviceName()) {}
+
 static void formatCount(char* buf, size_t buf_size, uint32_t count) {
 	if (count >= 1000000)
 		snprintf(buf, buf_size, "%.1fM", static_cast<double>(count) / 1000000.0);
@@ -107,7 +110,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	// --- Timing ---
 	ImGui::Text("%.0f FPS", m_fps);
 	ImGui::SameLine();
-	ImGui::TextDisabled("%.2f ms", m_frame_time_ms);
+	ImGui::TextDisabled("%.2f ms (%s)", m_frame_time_ms, m_gpu_name.c_str());
 	ImGui::Spacing();
 
 	char val[64];

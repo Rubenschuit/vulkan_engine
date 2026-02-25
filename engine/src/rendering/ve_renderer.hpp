@@ -22,6 +22,7 @@ public:
 	VeRenderer(const VeRenderer&) = delete;
 	VeRenderer& operator=(const VeRenderer&) = delete;
 
+	std::string getDeviceName() const { return m_ve_device.getDeviceProperties().deviceName.data(); }
 	bool isFrameInProgress() const { return m_is_frame_started; }
 	float getExtentAspectRatio() const;
 	vk::Format getSwapChainImageFormat() const;
