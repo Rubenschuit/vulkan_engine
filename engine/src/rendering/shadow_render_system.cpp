@@ -608,7 +608,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 				&& m_csm_instance_groups.back().lod_level == d.lod_level) {
 				m_csm_instance_groups.back().instance_count++;
 			} else {
-				m_csm_instance_groups.emplace_back(mesh_ptr, d.lod_level, idx, 1);
+				m_csm_instance_groups.push_back({mesh_ptr, d.lod_level, idx, 1});
 			}
 		}
 	}
@@ -632,7 +632,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 			&& m_shadow_instance_groups.back().lod_level == d.lod_level) {
 			m_shadow_instance_groups.back().instance_count++;
 		} else {
-			m_shadow_instance_groups.emplace_back(mesh_ptr, d.lod_level, idx, 1);
+			m_shadow_instance_groups.push_back({mesh_ptr, d.lod_level, idx, 1});
 		}
 	}
 

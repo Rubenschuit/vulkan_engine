@@ -274,6 +274,7 @@ VeFrameInfo VeApplication::buildFrameInfo() {
 		.compute_query_pool = m_ve_renderer.getQueryPool(),
 		.compute_start_query = m_ve_renderer.getComputeStartQuery(),
 		.selected_entity = m_editor->getState().selected_entity,
+		.csm_data = {},
 	};
 
 	return fi;

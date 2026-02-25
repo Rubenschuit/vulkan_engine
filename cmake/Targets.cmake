@@ -5,13 +5,13 @@ file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/app/src/*.
 add_library(VEngineLib SHARED ${ENGINE_SOURCES})
 if (MSVC)
 	target_compile_definitions(VEngineLib PRIVATE VENGINE_EXPORTS) # Define export macro for DLL declspec on Windows
-	target_compile_options(VEngineLib PRIVATE /wd4251) # Suppress DLL interface warnings
+	target_compile_options(VEngineLib PRIVATE /wd4251 /wd4324) # Suppress DLL interface and alignas padding warnings
 endif()
 add_library(VEngine::Lib ALIAS VEngineLib)
 
 add_executable(${PROJECT_NAME} ${APP_SOURCES})
 if (MSVC)
-	target_compile_options(${PROJECT_NAME} PRIVATE /wd4251) # Suppress DLL interface warnings
+	target_compile_options(${PROJECT_NAME} PRIVATE /wd4251 /wd4324)
 endif()
 
 # Common include paths for engine (public so tests and exe inherit)

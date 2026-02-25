@@ -8,9 +8,9 @@ namespace ve {
 
 static void formatCount(char* buf, size_t buf_size, uint32_t count) {
 	if (count >= 1000000)
-		snprintf(buf, buf_size, "%.1fM", count / 1000000.0f);
+		snprintf(buf, buf_size, "%.1fM", static_cast<double>(count) / 1000000.0);
 	else if (count >= 1000)
-		snprintf(buf, buf_size, "%.1fK", count / 1000.0f);
+		snprintf(buf, buf_size, "%.1fK", static_cast<double>(count) / 1000.0);
 	else
 		snprintf(buf, buf_size, "%u", count);
 }

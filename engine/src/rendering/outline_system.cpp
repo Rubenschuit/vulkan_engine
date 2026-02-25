@@ -576,7 +576,7 @@ void OutlineSystem::dispatchJFA(VeFrameInfo& fi, float outline_width) {
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
 			*m_jfa_step_pipeline_layout, 0, {*step_set}, {});
 
-		JfaStepPushConstant step_push{.image_size = glm::ivec2(w, h), .step_size = step_size};
+		JfaStepPushConstant step_push{.image_size = glm::ivec2(w, h), .step_size = step_size, ._pad = 0};
 		cmd.pushConstants(*m_jfa_step_pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0,
 			vk::ArrayProxy<const uint8_t>(sizeof(step_push), reinterpret_cast<const uint8_t*>(&step_push)));
 		cmd.dispatch(groups_x, groups_y, 1);

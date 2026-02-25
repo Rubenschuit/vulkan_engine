@@ -39,6 +39,9 @@ endif()
 
 project(${NAME} VERSION 0.1)
 
+# Required so static dependencies (KTX, etc.) are built with -fPIC when linked into our shared library
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 # Prevent Windows.h from defining min/max macros that break std::min/std::max
 if(WIN32)
 	add_compile_definitions(NOMINMAX)

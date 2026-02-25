@@ -32,6 +32,7 @@ static VkDescriptorPool createImguiDescriptorPool(vk::raii::Device& device) {
     };
     VkDescriptorPoolCreateInfo pool_info{
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .pNext = nullptr,
         .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
         .maxSets = 1000 * static_cast<uint32_t>(pool_sizes.size()),
         .poolSizeCount = static_cast<uint32_t>(pool_sizes.size()),

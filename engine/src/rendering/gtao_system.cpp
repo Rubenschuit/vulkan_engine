@@ -340,6 +340,7 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 		.inv_focal_y = 1.0f / proj[1][1],
 		.proj_22 = proj[2][2],
 		.proj_32 = proj[3][2],
+		._pad = 0.0f,
 	};
 	cmd.pushConstants(
 		*m_gtao_pipeline_layout,
@@ -398,6 +399,7 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 		.direction_x = 1,
 		.direction_y = 0,
 		.sharpness = 16.0f,
+		._pad = 0.0f,
 	};
 	cmd.pushConstants(
 		*m_blur_pipeline_layout,
@@ -452,6 +454,7 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 		.direction_x = 0,
 		.direction_y = 1,
 		.sharpness = 16.0f,
+		._pad = 0.0f,
 	};
 	cmd.pushConstants(
 		*m_blur_pipeline_layout,
