@@ -89,25 +89,30 @@ endif()
 # MikkTSpace (vendored in external/mikktspace) for tangent generation when glTF has no TANGENT
 set(MIKKTSPACE_DIR "${PROJECT_SOURCE_DIR}/external/mikktspace")
 if(EXISTS "${MIKKTSPACE_DIR}/mikktspace.c")
-	target_sources(VEngineLib PRIVATE ${MIKKTSPACE_DIR}/mikktspace.c)
-	target_include_directories(VEngineLib SYSTEM PRIVATE ${MIKKTSPACE_DIR})
-	set_source_files_properties(${MIKKTSPACE_DIR}/mikktspace.c PROPERTIES
-		SKIP_PRECOMPILE_HEADERS ON
-		COMPILE_OPTIONS "-w"
-	)
+	add_library(ve_mikktspace OBJECT ${MIKKTSPACE_DIR}/mikktspace.c)
+	target_include_directories(ve_mikktspace SYSTEM PUBLIC ${MIKKTSPACE_DIR})
+	if(MSVC)
+		target_compile_options(ve_mikktspace PRIVATE /W0)
+	else()
+		target_compile_options(ve_mikktspace PRIVATE -w)
+	endif()
+	target_link_libraries(VEngineLib PRIVATE ve_mikktspace)
 	message(STATUS "MikkTSpace (vendored): ${MIKKTSPACE_DIR}")
 endif()
 
 # ImGuizmo (vendored in external/imguizmo) for viewport transform gizmos
 set(IMGUIZMO_DIR "${PROJECT_SOURCE_DIR}/external/imguizmo")
 if(EXISTS "${IMGUIZMO_DIR}/ImGuizmo.cpp")
-	target_sources(VEngineLib PRIVATE ${IMGUIZMO_DIR}/ImGuizmo.cpp)
-	target_include_directories(VEngineLib SYSTEM PRIVATE ${IMGUIZMO_DIR})
+	add_library(ve_imguizmo OBJECT ${IMGUIZMO_DIR}/ImGuizmo.cpp)
+	target_include_directories(ve_imguizmo SYSTEM PUBLIC ${IMGUIZMO_DIR})
+	target_include_directories(ve_imguizmo SYSTEM PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+	if(MSVC)
+		target_compile_options(ve_imguizmo PRIVATE /W0)
+	else()
+		target_compile_options(ve_imguizmo PRIVATE -w)
+	endif()
+	target_link_libraries(VEngineLib PRIVATE ve_imguizmo)
 	target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${IMGUIZMO_DIR})
-	set_source_files_properties(${IMGUIZMO_DIR}/ImGuizmo.cpp PROPERTIES
-		SKIP_PRECOMPILE_HEADERS ON
-		COMPILE_OPTIONS "-w"
-	)
 	message(STATUS "ImGuizmo (vendored): ${IMGUIZMO_DIR}")
 endif()
 

@@ -140,7 +140,11 @@ else()
 			GIT_REPOSITORY https://github.com/g-truc/glm.git
 			GIT_TAG 1.0.1
 		)
-		FetchContent_MakeAvailable(glm)
+		# GLM is header-only; skip its CMakeLists.txt to avoid cmake_minimum_required deprecation
+		FetchContent_GetProperties(glm)
+		if(NOT glm_POPULATED)
+			FetchContent_Populate(glm)
+		endif()
 		set(GLM_INCLUDE_DIRS ${glm_SOURCE_DIR})
 	endif()
 	if (GLM_INCLUDE_DIRS)

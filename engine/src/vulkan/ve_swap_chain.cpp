@@ -220,7 +220,7 @@ void VeSwapChain::createColorResources() {
 		m_offscreen_image_format,
 		vk::ImageTiling::eOptimal,
 		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransientAttachment,
-		vk::MemoryPropertyFlagBits::eLazilyAllocated,
+		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		vk::ImageAspectFlagBits::eColor,
 		false,
 		1);
