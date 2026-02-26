@@ -31,6 +31,12 @@ public:
 	void render(VeFrameInfo& frame_info,
 	            const std::vector<PbrRenderSystem::InstanceGroup>& opaque_groups) const;
 
+	/// Record a range of opaque groups [begin_idx, end_idx) for depth-only rendering.
+	/// The CB must already be recording. Binds pipeline, descriptor set, and iterates groups.
+	void recordRange(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame_info,
+	                 const std::vector<PbrRenderSystem::InstanceGroup>& opaque_groups,
+	                 uint32_t begin_idx, uint32_t end_idx) const;
+
 	void recreatePipeline(vk::SampleCountFlagBits sample_count) {
 		m_ve_pipeline.reset();
 		createPipeline(sample_count);

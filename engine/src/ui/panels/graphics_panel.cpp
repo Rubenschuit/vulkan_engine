@@ -207,6 +207,15 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UICon
 		ImGui::SetTooltip("Use 3D cluster grid to cull lights per-fragment");
 
 	ImGui::Separator();
+	ImGui::Text("Multi-threading:");
+	ImGui::SliderInt("Min parallel groups", &ctx.min_parallel_groups, 0, 2048);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Minimum opaque draw groups to enable parallel command recording.\n0 = always parallel");
+	ImGui::SliderInt("Min cull entities", &ctx.min_parallel_cull_entities, 0, 4096);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Minimum mesh entities to enable parallel frustum culling.\n0 = always parallel");
+
+	ImGui::Separator();
 	ImGui::Text("LOD:");
 	{
 		const char* lod_items[] = {"Auto", "LOD 0", "LOD 1", "LOD 2", "LOD 3"};

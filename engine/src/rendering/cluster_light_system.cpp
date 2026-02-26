@@ -271,7 +271,8 @@ void ClusterLightSystem::dispatch(VeFrameInfo& frame_info, const VeCamera& camer
 }
 
 void ClusterLightSystem::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D screen_extent) {
-	m_ve_device.getDevice().waitIdle();
+	// Precondition: device must be idle
+	m_ve_device.assertDeviceIdle();
 	createBuffers(screen_extent);
 	createDescriptorSets(descriptor_pool);
 }

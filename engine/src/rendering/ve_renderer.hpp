@@ -2,9 +2,11 @@
 It manages the swap chain and command buffers. Default present mode is immediate. */
 #pragma once
 #include "ve_export.hpp"
+#include "rendering/frame_profiler.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_image.hpp"
 #include "vulkan/ve_command_resource_manager.hpp"
+#include "vulkan/ve_thread_pool.hpp"
 #include "platform/ve_window.hpp"
 #include "vulkan/ve_swap_chain.hpp"
 #include <memory>
@@ -50,11 +52,11 @@ public:
 	// When false is returned (e.g. swap chain out of date), the command buffer is not valid for use.
 	bool beginFrame();
 	void submitCompute(vk::raii::CommandBuffer& compute_command_buffer);
-	void beginDepthPrePass(vk::raii::CommandBuffer& command_buffer);
+	void beginDepthPrePass(vk::raii::CommandBuffer& command_buffer, bool secondary_contents = false);
 	void endDepthPrePass(vk::raii::CommandBuffer& command_buffer);
 
-	void beginSceneRender(vk::raii::CommandBuffer& command_buffer, bool load_depth = false);
-	// Ends dynamic rendering for the scene but does not transition to Present.
+	void beginSceneRender(vk::raii::CommandBuffer& command_buffer,
+		bool load_depth = false, bool secondary_contents = false, bool resolve_msaa = true);
 	void endSceneRender(vk::raii::CommandBuffer& command_buffer);
 
 	// Start rendering to the swapchain (editor_mode=false) or viewport image (editor_mode=true).
@@ -105,13 +107,20 @@ public:
 	void recreateSwapChain();
 	void setSwapChainNeedsRecreation() { m_swap_chain_needs_recreation = true; }
 
+	void waitIdle() { m_ve_device.getDevice().waitIdle(); }
 	CommandResourceManager& getCommandManager() { return m_command_manager; }
+	VeThreadPool& getThreadPool() { return *m_thread_pool; }
 
-	float getGpuTime() const { return m_gpu_time; }
-	float getComputeGpuTime() const { return m_compute_gpu_time; }
-	float getGpuOverlap() const { return m_gpu_overlap; }
-	vk::QueryPool getQueryPool() const { return *m_query_pool; }
-	uint32_t getComputeStartQuery() const { return getCurrentFrame() * 4; }
+	/// Inheritance info for secondary CBs recording inside the scene render pass.
+	vk::CommandBufferInheritanceRenderingInfo getSceneInheritanceInfo() const;
+	/// Inheritance info for secondary CBs recording inside the depth prepass.
+	vk::CommandBufferInheritanceRenderingInfo getDepthPrepassInheritanceInfo() const;
+
+	FrameProfiler& getProfiler() { return m_profiler; }
+	const ProfileResults& getProfileResults() const { return m_profiler.getResults(); }
+	float getGpuTime() const { return m_profiler.getResults().gpu(ProfileTimer::FRAME_TOTAL); }
+	float getComputeGpuTime() const { return m_profiler.getResults().gpu(ProfileTimer::COMPUTE_TOTAL); }
+	float getGpuOverlap() const { return m_profiler.getResults().gpu_overlap; }
 
 	bool hasHdrSupport() const { return m_ve_device.hasHdrColorSpaceExtension(); }
 	void setHdrEnabled(bool enabled) { m_hdr_enabled = hasHdrSupport() && enabled; m_swap_chain_needs_recreation = true; }
@@ -136,11 +145,12 @@ private:
 	vk::SampleCountFlagBits m_desired_num_samples = vk::SampleCountFlagBits::e1;
 	vk::Extent2D m_scene_render_extent{0, 0};  // 0 = use swapchain extent
 
-	vk::raii::QueryPool m_query_pool = nullptr;
-	float m_gpu_time = 0.0f;         // graphics-only GPU time
-	float m_compute_gpu_time = 0.0f; // compute-only GPU time
-	float m_gpu_overlap = 0.0f;      // compute/graphics overlap
-	std::vector<bool> m_query_active;
+	FrameProfiler m_profiler;
+
+	// Multi-threaded command recording
+	std::unique_ptr<VeThreadPool> m_thread_pool;
+	vk::Format m_depth_format = vk::Format::eUndefined;
+	vk::Format m_scene_color_format = vk::Format::eUndefined; // cached for inheritance info pointer stability
 
 	// Viewport image for editor mode (render-to-texture)
 	std::unique_ptr<VeImage> m_viewport_image;

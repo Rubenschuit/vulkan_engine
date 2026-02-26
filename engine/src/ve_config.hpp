@@ -56,6 +56,11 @@ static_assert(std::size(LOD_RATIOS) == MAX_LOD_LEVELS,
 static_assert(std::size(LOD_SCREEN_THRESHOLDS) == MAX_LOD_LEVELS - 1,
               "LOD_SCREEN_THRESHOLDS must have MAX_LOD_LEVELS-1 entries");
 
+// Multi-threaded command recording
+constexpr uint32_t MAX_RENDER_WORKERS = 8;
+constexpr uint32_t MIN_PARALLEL_GROUPS = 128; // below this, prefer single-threaded
+constexpr uint32_t MIN_PARALLEL_CULL_ENTITIES = 64; // below this, single-threaded culling
+
 constexpr bool MSAA_ENABLED = true;
 #ifdef __APPLE__
 	constexpr bool ENABLE_RAY_TRACING = false; // not supported on moltenVK
@@ -96,9 +101,3 @@ inline const std::vector<const char*> VALIDATION_LAYERS = {
 };
 
 }// namespace ve
-
-// TODO: Windows: test separate transfer queue on Windows with a discrete GPU
-// TODO: Consdider consolidating index and vertex buffer into single buffer and use offsets
-// TODO: consider moving the timeline semaphore from VeSwapChain somewhere else
-// TODO: Centralise frame time measurement code (e.g. in Sandbox/imgui_layer)
-// TODO: Fix flashbang upon startup of veapp

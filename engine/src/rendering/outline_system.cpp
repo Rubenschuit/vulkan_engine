@@ -390,7 +390,7 @@ void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_
 		fi.instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
 	}
 
-	auto& cmd = fi.command_buffer;
+	auto& cmd = fi.cmd();
 	uint32_t frame = fi.current_frame;
 
 	vk::ImageMemoryBarrier2 mask_to_attachment{
@@ -493,7 +493,7 @@ void OutlineSystem::dispatchJFA(VeFrameInfo& fi, float outline_width) {
 	if (!m_has_outline)
 		return;
 
-	auto& cmd = fi.command_buffer;
+	auto& cmd = fi.cmd();
 	uint32_t frame = fi.current_frame;
 	uint32_t w = m_extent.width, h = m_extent.height;
 	uint32_t groups_x = (w + 15) / 16;
@@ -650,7 +650,8 @@ void OutlineSystem::composite(
 
 void OutlineSystem::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D extent,
                              vk::Format composite_color_format) {
-	m_ve_device.getDevice().waitIdle();
+	// Precondition: device must be idle
+	m_ve_device.assertDeviceIdle();
 	m_extent = extent;
 	createImages(extent);
 	m_composite_pipeline.reset();

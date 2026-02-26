@@ -232,7 +232,7 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info) const {
 }
 
 void PbrRenderSystem::renderOpaqueGroup(
-	VeFrameInfo& frame_info,
+	vk::raii::CommandBuffer& cmd,
 	const InstanceGroup& group,
 	VkDescriptorSet& bound_material_set,
 	VeMesh*& bound_mesh,
@@ -241,7 +241,7 @@ void PbrRenderSystem::renderOpaqueGroup(
 	// Bind material descriptor set (set 1) only when it changes
 	if (group.material_set != bound_material_set) {
 		bound_material_set = group.material_set;
-		frame_info.command_buffer.bindDescriptorSets(
+		cmd.bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics,
 			*m_pipeline_layout,
 			1,
@@ -252,9 +252,9 @@ void PbrRenderSystem::renderOpaqueGroup(
 
 	// Set dynamic state
 	if (group.double_sided)
-		frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eNone);
+		cmd.setCullMode(vk::CullModeFlagBits::eNone);
 	else
-		frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eBack);
+		cmd.setCullMode(vk::CullModeFlagBits::eBack);
 
 	// Push per-batch material constants
 	PbrPushConstantData push{
@@ -265,7 +265,7 @@ void PbrRenderSystem::renderOpaqueGroup(
 		.depth_offset = (group.alpha_cutoff > 0.0f) ? MASK_DEPTH_OFFSET : 0.0f,
 		.lod_level = group.lod_level
 	};
-	frame_info.command_buffer.pushConstants(
+	cmd.pushConstants(
 		*m_pipeline_layout,
 		vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 		0,
@@ -276,39 +276,45 @@ void PbrRenderSystem::renderOpaqueGroup(
 	if (group.mesh != bound_mesh || group.lod_level != bound_lod) {
 		bound_mesh = group.mesh;
 		bound_lod = group.lod_level;
-		bound_mesh->bindVertexBuffer(frame_info.command_buffer);
-		bound_mesh->bindLodIndexBuffer(frame_info.command_buffer, bound_lod);
+		bound_mesh->bindVertexBuffer(cmd);
+		bound_mesh->bindLodIndexBuffer(cmd, bound_lod);
 	}
 
 	// Instanced draw (firstInstance=0, shader uses instance_offset push constant for SSBO indexing)
-	group.mesh->drawIndexedLod(frame_info.command_buffer, group.lod_level, group.instance_count, 0);
+	group.mesh->drawIndexedLod(cmd, group.lod_level, group.instance_count, 0);
 }
 
-void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info) const {
+void PbrRenderSystem::recordOpaqueRange(
+	vk::raii::CommandBuffer& cmd, VeFrameInfo& frame_info,
+	uint32_t begin_idx, uint32_t end_idx) const {
+
+	if (begin_idx >= end_idx)
+		return;
+
 	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
 	bool mask = frame_info.shadow_mask_active;
 	auto& pipeline = mask ? m_pipelines_mask[mode] : m_pipelines[mode];
-	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
 
-	// Bind global (set 0), shadow (set 2), and shadow mask (set 3) once
-	frame_info.command_buffer.bindDescriptorSets(
+	// Bind global (set 0), shadow (set 2), shadow mask (set 3), cluster (set 4), AO (set 5)
+	cmd.bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		0, {*frame_info.global_descriptor_set}, {});
-	frame_info.command_buffer.bindDescriptorSets(
+	cmd.bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		2, {*frame_info.shadow_descriptor_set}, {});
 	if (frame_info.shadow_mask_descriptor_set) {
-		frame_info.command_buffer.bindDescriptorSets(
+		cmd.bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			3, {**frame_info.shadow_mask_descriptor_set}, {});
 	}
 	if (frame_info.cluster_descriptor_set) {
-		frame_info.command_buffer.bindDescriptorSets(
+		cmd.bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			4, {**frame_info.cluster_descriptor_set}, {});
 	}
 	if (frame_info.ao_descriptor_set) {
-		frame_info.command_buffer.bindDescriptorSets(
+		cmd.bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			5, {**frame_info.ao_descriptor_set}, {});
 	}
@@ -317,55 +323,58 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info) const {
 	VeMesh* bound_mesh = nullptr;
 	uint32_t bound_lod = UINT32_MAX;
 
-	// Initial state for non-MASK geometry
-	frame_info.command_buffer.setDepthCompareOp(
-		m_depth_prepass_active ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eLess);
-	frame_info.command_buffer.setDepthBias(0.0f, 0.0f, 0.0f);
-	frame_info.command_buffer.setDepthWriteEnable(VK_TRUE);
+	// Determine initial depth state based on first group in range
+	bool mask_state = (m_opaque_groups[begin_idx].alpha_cutoff > 0.0f);
+	cmd.setDepthCompareOp(
+		(m_depth_prepass_active || mask_state) ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eLess);
+	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
+	cmd.setDepthWriteEnable(VK_TRUE);
 
-	// Groups are sorted non-MASK first, then MASK.
-	// When we hit the first MASK group, switch to eLessOrEqual and use a
-	// depth offset (push constant) to push them slightly towards the camera.
-	bool mask_state = false;
-	for (const auto& group : m_opaque_groups) {
+	for (uint32_t i = begin_idx; i < end_idx; ++i) {
+		const auto& group = m_opaque_groups[i];
 		if (group.alpha_cutoff > 0.0f && !mask_state) {
-			frame_info.command_buffer.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
+			cmd.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
 			mask_state = true;
 		}
-		renderOpaqueGroup(frame_info, group, bound_material_set, bound_mesh, bound_lod);
+		renderOpaqueGroup(cmd, group, bound_material_set, bound_mesh, bound_lod);
 	}
+}
+
+void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info) const {
+	recordOpaqueRange(frame_info.cmd(), frame_info,
+		0, static_cast<uint32_t>(m_opaque_groups.size()));
 }
 
 void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
 	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
 	bool mask = frame_info.shadow_mask_active;
 	auto& pipeline = mask ? m_pipelines_mask[mode] : m_pipelines[mode];
-	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
+	frame_info.cmd().bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
 
 	// eLessOrEqual so transparent surfaces coplanar with opaque geometry (decal overlays)
 	// consistently pass the depth test and render on top.
-	frame_info.command_buffer.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
-	frame_info.command_buffer.setDepthBias(0.0f, 0.0f, 0.0f);
+	frame_info.cmd().setDepthCompareOp(vk::CompareOp::eLessOrEqual);
+	frame_info.cmd().setDepthBias(0.0f, 0.0f, 0.0f);
 
 	// Bind global (set 0), shadow (set 2), and shadow mask (set 3) once
-	frame_info.command_buffer.bindDescriptorSets(
+	frame_info.cmd().bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		0, {*frame_info.global_descriptor_set}, {});
-	frame_info.command_buffer.bindDescriptorSets(
+	frame_info.cmd().bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		2, {*frame_info.shadow_descriptor_set}, {});
 	if (frame_info.shadow_mask_descriptor_set) {
-		frame_info.command_buffer.bindDescriptorSets(
+		frame_info.cmd().bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			3, {**frame_info.shadow_mask_descriptor_set}, {});
 	}
 	if (frame_info.cluster_descriptor_set) {
-		frame_info.command_buffer.bindDescriptorSets(
+		frame_info.cmd().bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			4, {**frame_info.cluster_descriptor_set}, {});
 	}
 	if (frame_info.ao_descriptor_set) {
-		frame_info.command_buffer.bindDescriptorSets(
+		frame_info.cmd().bindDescriptorSets(
 			vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			5, {**frame_info.ao_descriptor_set}, {});
 	}
@@ -378,7 +387,7 @@ void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
 		// Bind material descriptor set (set 1) only when it changes
 		if (d.material_set != bound_material_set) {
 			bound_material_set = d.material_set;
-			frame_info.command_buffer.bindDescriptorSets(
+			frame_info.cmd().bindDescriptorSets(
 				vk::PipelineBindPoint::eGraphics,
 				*m_pipeline_layout,
 				1,
@@ -391,13 +400,13 @@ void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
 
 		// Set dynamic state
 		if (alpha_props.double_sided)
-			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eNone);
+			frame_info.cmd().setCullMode(vk::CullModeFlagBits::eNone);
 		else
-			frame_info.command_buffer.setCullMode(vk::CullModeFlagBits::eBack);
+			frame_info.cmd().setCullMode(vk::CullModeFlagBits::eBack);
 		// No depth writes in the transparent pass. The opaque pass already provides
 		// correct occlusion against opaque geometry.
-		frame_info.command_buffer.setDepthWriteEnable(VK_FALSE);
-		frame_info.command_buffer.setDepthBias(0.0f, 0.0f, 0.0f);
+		frame_info.cmd().setDepthWriteEnable(VK_FALSE);
+		frame_info.cmd().setDepthBias(0.0f, 0.0f, 0.0f);
 
 		// Push per-object material constants
 		PbrPushConstantData push{
@@ -410,7 +419,7 @@ void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
 			.depth_offset = 0.0f,
 			.lod_level = d.lod_level
 		};
-		frame_info.command_buffer.pushConstants(
+		frame_info.cmd().pushConstants(
 			*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 			0,
@@ -421,12 +430,12 @@ void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info) const {
 		if (d.mesh_ptr != bound_mesh || d.lod_level != bound_lod) {
 			bound_mesh = d.mesh_ptr;
 			bound_lod = d.lod_level;
-			bound_mesh->bindVertexBuffer(frame_info.command_buffer);
-			bound_mesh->bindLodIndexBuffer(frame_info.command_buffer, bound_lod);
+			bound_mesh->bindVertexBuffer(frame_info.cmd());
+			bound_mesh->bindLodIndexBuffer(frame_info.cmd(), bound_lod);
 		}
 
 		// Single-instance draw (transparent objects not batched, preserve back-to-front order)
-		d.mesh_ptr->drawIndexedLod(frame_info.command_buffer, d.lod_level, 1, 0);
+		d.mesh_ptr->drawIndexedLod(frame_info.cmd(), d.lod_level, 1, 0);
 	}
 }
 

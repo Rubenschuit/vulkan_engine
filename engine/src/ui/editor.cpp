@@ -29,6 +29,7 @@ bool Editor::handleModeTransition() {
 	bool editor_mode = m_state.editor_mode;
 	bool resized = false;
 	if (!editor_mode && m_was_editor_mode) {
+		m_renderer.waitIdle();
 		m_renderer.resetSceneRenderExtent();
 		resized = true;
 	}
@@ -43,6 +44,7 @@ bool Editor::handleViewportResize() {
 	if (vp_w > 0 && vp_h > 0 &&
 		(std::abs(static_cast<int>(vp_w) - static_cast<int>(cur_extent.width)) > 4 ||
 		 std::abs(static_cast<int>(vp_h) - static_cast<int>(cur_extent.height)) > 4)) {
+		m_renderer.waitIdle();
 		m_renderer.resizeSceneRender(vp_w, vp_h);
 		m_renderer.resizeViewportImage(vp_w, vp_h);
 		registerViewportImage();

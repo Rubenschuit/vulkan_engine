@@ -123,16 +123,16 @@ void AxesRenderSystem::createAxesModel() {
 
 // Performs one draw call for the coordinate axes model
 void AxesRenderSystem::render(VeFrameInfo& frame_info) const {
-	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-	frame_info.command_buffer.bindDescriptorSets(
+	frame_info.cmd().bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	frame_info.cmd().bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,
 		0,
 		{*frame_info.global_descriptor_set},
 		{}
 	);
-	m_axes_mesh->bindVertexBuffer(frame_info.command_buffer);
-	m_axes_mesh->draw(frame_info.command_buffer);
+	m_axes_mesh->bindVertexBuffer(frame_info.cmd());
+	m_axes_mesh->draw(frame_info.cmd());
 }
 
 }

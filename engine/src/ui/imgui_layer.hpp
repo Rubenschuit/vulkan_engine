@@ -48,9 +48,28 @@ struct VENGINE_API UIContext {
 	// read-only stats (engine writes, UI reads)
 	struct Stats {
 		float cpu_time = 0.0f;
+		float fence_wait = 0.0f;
 		float gpu_time = 0.0f;
 		float compute_gpu_time = 0.0f;
 		float gpu_overlap = 0.0f;
+
+		// Per-system GPU breakdown
+		float gpu_shadow_maps = 0.0f;
+		float gpu_depth_prepass = 0.0f;
+		float gpu_gtao = 0.0f;
+		float gpu_scene_render = 0.0f;
+		float gpu_bloom = 0.0f;
+		float gpu_post_process = 0.0f;
+
+		// Per-system CPU breakdown
+		float cpu_culling = 0.0f;
+		float cpu_shadow_maps = 0.0f;
+		float cpu_depth_prepass = 0.0f;
+		float cpu_gtao = 0.0f;
+		float cpu_scene_render = 0.0f;
+		float cpu_bloom = 0.0f;
+		float cpu_post_process = 0.0f;
+
 		uint32_t cull_total_objects = 0;
 		uint32_t cull_visible_objects = 0;
 		uint32_t visible_triangles = 0;
@@ -74,6 +93,13 @@ struct VENGINE_API UIContext {
 
 	// culling
 	bool enable_frustum_culling = true;
+
+	// GPU profiling
+	bool gpu_profiling = false;
+
+	// multi-threading thresholds
+	int min_parallel_groups = static_cast<int>(ve::MIN_PARALLEL_GROUPS);
+	int min_parallel_cull_entities = static_cast<int>(ve::MIN_PARALLEL_CULL_ENTITIES);
 
 	// LOD override
 	int lod_force_level = -1;  // -1 = auto (normal LOD selection), 0..3 = force specific LOD

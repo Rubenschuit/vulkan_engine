@@ -54,6 +54,11 @@ public:
 	void prepareFrame(VeFrameInfo& frame_info) const;
 	void renderOpaque(VeFrameInfo& frame_info) const;
 	void renderTransparent(VeFrameInfo& frame_info) const;
+
+	/// Record a range of opaque groups [begin_idx, end_idx) to the given command buffer.
+	/// The CB must already be recording. Binds pipeline, descriptor sets, and iterates groups.
+	void recordOpaqueRange(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame_info,
+		uint32_t begin_idx, uint32_t end_idx) const;
 	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
 		for (auto& p : m_pipelines) 
 			p.reset();
@@ -89,7 +94,7 @@ private:
 		const vk::raii::DescriptorSetLayout& cluster_set_layout,
 		const vk::raii::DescriptorSetLayout& ao_set_layout);
 	void createPipelines(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
-	void renderOpaqueGroup(VeFrameInfo& frame_info, const InstanceGroup& group,
+	void renderOpaqueGroup(vk::raii::CommandBuffer& cmd, const InstanceGroup& group,
 		VkDescriptorSet& bound_material_set, VeMesh*& bound_mesh, uint32_t& bound_lod) const;
 
 	VeDevice& m_ve_device;

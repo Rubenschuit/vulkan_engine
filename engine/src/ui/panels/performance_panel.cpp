@@ -30,23 +30,53 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	}
 	float dt = std::chrono::duration<float, std::chrono::seconds::period>(now - m_last_time).count();
 	m_last_time = now;
+	if (dt > 1.0f)
+		dt = 0.0f; // Clamp: prevents FPS spike after panel re-enable
 
 	m_cpu_time_sum += context.stats.cpu_time;
+	m_fence_wait_sum += context.stats.fence_wait;
 	m_gpu_time_sum += context.stats.gpu_time;
 	m_compute_gpu_time_sum += context.stats.compute_gpu_time;
 	m_gpu_overlap_sum += context.stats.gpu_overlap;
 	m_accumulated_dt += dt;
 	m_frame_count++;
 
+	// Per-system breakdown accumulation
+	const float gpu_src[] = {
+		0.0f, context.stats.gpu_shadow_maps, context.stats.gpu_depth_prepass,
+		context.stats.gpu_gtao, context.stats.gpu_scene_render,
+		context.stats.gpu_bloom, context.stats.gpu_post_process
+	};
+	const float cpu_src[] = {
+		context.stats.cpu_culling, context.stats.cpu_shadow_maps,
+		context.stats.cpu_depth_prepass, context.stats.cpu_gtao,
+		context.stats.cpu_scene_render, context.stats.cpu_bloom,
+		context.stats.cpu_post_process
+	};
+	for (int i = 0; i < BREAKDOWN_COUNT; i++) {
+		m_gpu_breakdown_sum[i] += gpu_src[i];
+		m_cpu_breakdown_sum[i] += cpu_src[i];
+	}
+
 	if (m_frame_count >= 60) {
 		m_fps = (m_accumulated_dt > 0.0f) ? (60.0f / m_accumulated_dt) : 0.0f;
 		m_frame_time_ms = (m_accumulated_dt / 60.0f) * 1000.0f;
 		m_cpu_time_ms = m_cpu_time_sum / 60.0f;
+		m_fence_wait_ms = m_fence_wait_sum / 60.0f;
 		m_gpu_time_ms = m_gpu_time_sum / 60.0f;
 		m_compute_gpu_time_ms = m_compute_gpu_time_sum / 60.0f;
 		m_gpu_overlap_ms = m_gpu_overlap_sum / 60.0f;
+
+		for (int i = 0; i < BREAKDOWN_COUNT; i++) {
+			m_gpu_breakdown_ms[i] = m_gpu_breakdown_sum[i] / 60.0f;
+			m_cpu_breakdown_ms[i] = m_cpu_breakdown_sum[i] / 60.0f;
+			m_gpu_breakdown_sum[i] = 0.0f;
+			m_cpu_breakdown_sum[i] = 0.0f;
+		}
+
 		m_frame_count = 0;
 		m_cpu_time_sum = 0.0f;
+		m_fence_wait_sum = 0.0f;
 		m_gpu_time_sum = 0.0f;
 		m_compute_gpu_time_sum = 0.0f;
 		m_gpu_overlap_sum = 0.0f;
@@ -79,7 +109,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 		if (ImGui::Begin("##PerfOverlay", &context.show_performance, overlay_flags)) {
 			ImGui::Text("%.0f FPS  (%.2f ms)", m_fps, m_frame_time_ms);
-			ImGui::TextDisabled("CPU %.2f ms | GPU %.2f ms", m_cpu_time_ms, m_gpu_time_ms);
+			ImGui::TextDisabled("CPU %.2f ms | Fence %.2f ms | GPU %.2f ms", m_cpu_time_ms, m_fence_wait_ms, m_gpu_time_ms);
 			if (m_compute_gpu_time_ms > 0.01f) {
 				ImGui::SameLine();
 				ImGui::TextDisabled(" | Compute %.2f ms", m_compute_gpu_time_ms);
@@ -116,6 +146,9 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	char val[64];
 	snprintf(val, sizeof(val), "%.2f ms", m_cpu_time_ms);
 	row("CPU", val);
+	snprintf(val, sizeof(val), "%.2f ms", m_fence_wait_ms);
+	row("Fence Wait", val);
+	ImGui::Checkbox("GPU Profiling", &context.gpu_profiling);
 	snprintf(val, sizeof(val), "%.2f ms", m_gpu_time_ms);
 	row("GPU Graphics", val);
 	if (m_compute_gpu_time_ms > 0.01f) {
@@ -185,6 +218,56 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 	if (m_renderer.isHdrEnabled())
 		row("HDR", "Enabled");
+
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::Spacing();
+
+	// --- Per-system breakdown table ---
+	static const char* breakdown_labels[] = {
+		"Culling", "Shadows", "Depth Pass", "GTAO", "Scene", "Bloom", "Post Process"
+	};
+
+	if (ImGui::BeginTable("##Breakdown", 3, ImGuiTableFlags_None)) {
+		ImGui::TableSetupColumn("System", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableSetupColumn("CPU", ImGuiTableColumnFlags_WidthFixed, 65.0f);
+		ImGui::TableSetupColumn("GPU", ImGuiTableColumnFlags_WidthFixed, 65.0f);
+
+		ImGui::TableNextRow();
+		ImGui::TableNextColumn(); ImGui::TextDisabled("System");
+		ImGui::TableNextColumn(); ImGui::TextDisabled("CPU (ms)");
+		ImGui::TableNextColumn(); ImGui::TextDisabled("GPU (ms)");
+
+		float cpu_total = 0.0f;
+		float gpu_total = 0.0f;
+		for (int i = 0; i < BREAKDOWN_COUNT; i++) {
+			float cpu = m_cpu_breakdown_ms[i];
+			float gpu = m_gpu_breakdown_ms[i];
+			cpu_total += cpu;
+			gpu_total += gpu;
+
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+			ImGui::Text("%s", breakdown_labels[i]);
+			ImGui::TableNextColumn();
+			ImGui::Text("%.2f", cpu);
+			ImGui::TableNextColumn();
+			ImGui::Text("%.2f", gpu);
+		}
+
+		ImGui::TableNextRow();
+		ImGui::TableNextColumn();
+		ImGui::Separator();
+		ImGui::TextDisabled("Total");
+		ImGui::TableNextColumn();
+		ImGui::Separator();
+		ImGui::Text("%.2f", cpu_total);
+		ImGui::TableNextColumn();
+		ImGui::Separator();
+		ImGui::Text("%.2f", gpu_total);
+
+		ImGui::EndTable();
+	}
 
 	ImGui::End();
 }

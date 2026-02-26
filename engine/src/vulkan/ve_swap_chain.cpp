@@ -534,8 +534,9 @@ void VeSwapChain::transitionResolveTargetLayout(
 }
 
 void VeSwapChain::resizeOffscreenResources(vk::Extent2D extent) {
+	// Precondition: device must be idle
+	m_ve_device.assertDeviceIdle();
 	m_offscreen_extent = extent;
-	m_ve_device.getDevice().waitIdle();
 	createColorResources();
 	createDepthResources();
 	VE_LOGI("Offscreen resources resized to " << extent.width << "x" << extent.height);

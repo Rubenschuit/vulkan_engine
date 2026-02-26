@@ -8,18 +8,17 @@
 
 namespace ve {
 // Constructor, initializes swap chain with present mode immediate and command buffers
-VeRenderer::VeRenderer(VeDevice& device, VeWindow& window) : m_ve_device(device), m_command_manager(device), m_ve_window(window) {
+VeRenderer::VeRenderer(VeDevice& device, VeWindow& window)
+	: m_ve_device(device), m_command_manager(device), m_ve_window(window), m_profiler(device) {
 	m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, m_ve_window.getExtent(), m_desired_num_samples, m_present_mode, m_hdr_enabled);
 	createViewportResources();
 
-	// Create query pool for GPU timing (4 per frame: compute start/end, graphics start/end)
-	vk::QueryPoolCreateInfo query_pool_info{
-		.sType = vk::StructureType::eQueryPoolCreateInfo,
-		.queryType = vk::QueryType::eTimestamp,
-		.queryCount = 4 * ve::MAX_FRAMES_IN_FLIGHT
-	};
-	m_query_pool = vk::raii::QueryPool(m_ve_device.getDevice(), query_pool_info);
-	m_query_active.resize(ve::MAX_FRAMES_IN_FLIGHT, false);
+	// Cache formats and create worker thread pool
+	m_depth_format = m_ve_device.findDepthFormat();
+	m_scene_color_format = getOffscreenImageFormat();
+	uint32_t hw = std::thread::hardware_concurrency();
+	uint32_t workers = (hw > 2) ? std::min(hw - 1, static_cast<uint32_t>(MAX_RENDER_WORKERS)) : 2u;
+	m_thread_pool = std::make_unique<VeThreadPool>(m_command_manager, workers);
 }
 
 VeRenderer::~VeRenderer() {}
@@ -63,8 +62,8 @@ void VeRenderer::recreateSwapChain() {
 		glfwWaitEvents();
 	}
 
-	// Create a new swap chain when device is idle
-	m_ve_device.getDevice().waitIdle();
+	// Precondition: device must be idle (caller responsibility)
+	m_ve_device.assertDeviceIdle();
 	extent = m_ve_window.getExtent();
 	if (m_ve_swap_chain == nullptr) {
 		m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent, m_desired_num_samples, m_present_mode, m_hdr_enabled);
@@ -75,6 +74,7 @@ void VeRenderer::recreateSwapChain() {
 		m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, extent, m_desired_num_samples, m_present_mode, m_hdr_enabled, old_swap_chain);
 	}
 	m_swap_chain_needs_recreation = false;
+	m_scene_color_format = getOffscreenImageFormat();
 	// Re-apply scene render extent if editor mode has a custom extent set
 	if (m_scene_render_extent.width > 0 && m_scene_render_extent.height > 0)
 		m_ve_swap_chain->resizeOffscreenResources(m_scene_render_extent);
@@ -88,8 +88,12 @@ void VeRenderer::recreateSwapChain() {
 bool VeRenderer::beginFrame() {
 	assert(!m_is_frame_started && "Can't call beginFrame while already in progress");
 
-	// Wait until image is available
+	// Wait until image is available (measure fence wait time)
+	auto fence_start = std::chrono::steady_clock::now();
 	m_ve_swap_chain->waitForCurrentFence();
+	auto fence_end = std::chrono::steady_clock::now();
+	float fence_ms = std::chrono::duration<float, std::chrono::milliseconds::period>(fence_end - fence_start).count();
+	m_profiler.recordFenceWait(fence_ms);
 
 	// Acquire an image from the swap chain
 	vk::Result result = m_ve_swap_chain->acquireNextImage(&m_current_image_index);
@@ -114,49 +118,12 @@ bool VeRenderer::beginFrame() {
 	auto& command_buffer = getCurrentCommandBuffer();
 	uint32_t frame_index = m_ve_swap_chain->getCurrentFrame();
 
-	// Retrieve results from the previous time this frame slot was used.
-	// Read compute and graphics pairs separately: the compute start timestamp
-	// may not be written when particle systems are disabled.
-	// Layout per frame: [compute_start, compute_end, graphics_start, graphics_end]
-	if (m_query_active[frame_index]) {
-		uint32_t base = frame_index * 4;
-		float period = m_ve_device.getDeviceProperties().limits.timestampPeriod;
-		float ns_to_ms = period / 1000000.0f;
-
-		// Graphics timestamps (always written)
-		std::array<uint64_t, 2> gfx_ts;
-		vk::Result gfx_result = (*m_ve_device.getDevice()).getQueryPoolResults(
-			*m_query_pool, base + 2, 2, gfx_ts.size() * sizeof(uint64_t),
-			gfx_ts.data(), sizeof(uint64_t), vk::QueryResultFlagBits::e64
-		);
-		if (gfx_result == vk::Result::eSuccess) {
-			m_gpu_time = static_cast<float>(gfx_ts[1] - gfx_ts[0]) * ns_to_ms;
-		}
-
-		// Compute timestamps (start may be missing when particle systems are disabled)
-		std::array<uint64_t, 2> comp_ts;
-		vk::Result comp_result = (*m_ve_device.getDevice()).getQueryPoolResults(
-			*m_query_pool, base, 2, comp_ts.size() * sizeof(uint64_t),
-			comp_ts.data(), sizeof(uint64_t), vk::QueryResultFlagBits::e64
-		);
-		if (comp_result == vk::Result::eSuccess) {
-			m_compute_gpu_time = static_cast<float>(comp_ts[1] - comp_ts[0]) * ns_to_ms;
-
-			// Overlap: how much compute and graphics executed simultaneously
-			if (gfx_result == vk::Result::eSuccess) {
-				uint64_t overlap_start = std::max(comp_ts[0], gfx_ts[0]);
-				uint64_t overlap_end = std::min(comp_ts[1], gfx_ts[1]);
-				m_gpu_overlap = (overlap_end > overlap_start)
-					? static_cast<float>(overlap_end - overlap_start) * ns_to_ms
-					: 0.0f;
-			}
-		} else {
-			m_compute_gpu_time = 0.0f;
-			m_gpu_overlap = 0.0f;
-		}
-	}
+	// Resolve GPU timing results from the previous use of this frame slot
+	m_profiler.beginFrame(frame_index);
 
 	m_command_manager.resetPrimaries(frame_index);
+	m_thread_pool->resetFrame(frame_index);
+	m_command_manager.resetThreadFrame(m_command_manager.getMainThreadSlot(), frame_index);
 	vk::CommandBufferBeginInfo info{
 		.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit
 	};
@@ -169,14 +136,10 @@ bool VeRenderer::beginFrame() {
 	auto& ui_command_buffer = getCurrentUICommandBuffer();
 	ui_command_buffer.begin(info);
 
-	// Reset and write start timestamps from each command buffer's own queue
-	uint32_t base = frame_index * 4;
-	compute_command_buffer.resetQueryPool(*m_query_pool, base, 2);     // compute range [base, base+1]
-	// NOTE: compute start timestamp is written by the application before the first compute dispatch.
+	m_profiler.resetAllQueries(command_buffer, compute_command_buffer, frame_index);
 
-	command_buffer.resetQueryPool(*m_query_pool, base + 2, 2);         // graphics range [base+2, base+3]
-	command_buffer.writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, *m_query_pool, base + 2);
-	m_query_active[frame_index] = true;
+	// Write FRAME_TOTAL start timestamp on graphics queue
+	m_profiler.beginGpuTimer(command_buffer, ProfileTimer::FRAME_TOTAL);
 
 	return true;
 }
@@ -187,10 +150,9 @@ void VeRenderer::endFrame() {
 
 	auto& scene_cb = getCurrentCommandBuffer();
 	auto& ui_cb = getCurrentUICommandBuffer();
-	uint32_t frame_index = m_ve_swap_chain->getCurrentFrame();
 
 	// End scene CB with graphics end timestamp
-	scene_cb.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, *m_query_pool, frame_index * 4 + 3);
+	m_profiler.endGpuTimer(scene_cb, ProfileTimer::FRAME_TOTAL);
 	scene_cb.end();
 
 	// Finalize UI CB: transition swapchain to present, then end
@@ -217,7 +179,7 @@ void VeRenderer::endFrame() {
 	m_is_frame_started = false;
 }
 
-void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
+void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer, bool secondary_contents) {
 	assert(m_is_frame_started && "Can't begin depth pre-pass while frame is not in progress");
 	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin depth pre-pass on command buffer from a different frame");
 
@@ -254,7 +216,13 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
 		depth_attachment_info.resolveImageView = *m_ve_swap_chain->getResolvedDepthImageView();
 		depth_attachment_info.resolveImageLayout = vk::ImageLayout::eDepthAttachmentOptimal;
 	}
+
+	vk::RenderingFlags flags{};
+	if (secondary_contents)
+		flags |= vk::RenderingFlagBits::eContentsSecondaryCommandBuffers;
+
 	vk::RenderingInfo rendering_info = {
+		.flags = flags,
 		.renderArea = { .offset = { 0, 0 }, .extent = extent },
 		.layerCount = 1,
 		.colorAttachmentCount = 0,
@@ -263,13 +231,18 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
 	};
 
 	command_buffer.beginRendering(rendering_info);
-	command_buffer.setViewport(0, vk::Viewport{
-		.x = 0.0f, .y = 0.0f,
-		.width = static_cast<float>(extent.width),
-		.height = static_cast<float>(extent.height),
-		.minDepth = 0.0f, .maxDepth = 1.0f
-	});
-	command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = extent});
+
+	// Only set viewport/scissor on the primary when not using secondary contents
+	// (secondary CBs must set their own viewport/scissor)
+	if (!secondary_contents) {
+		command_buffer.setViewport(0, vk::Viewport{
+			.x = 0.0f, .y = 0.0f,
+			.width = static_cast<float>(extent.width),
+			.height = static_cast<float>(extent.height),
+			.minDepth = 0.0f, .maxDepth = 1.0f
+		});
+		command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = extent});
+	}
 }
 
 void VeRenderer::endDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
@@ -291,17 +264,15 @@ void VeRenderer::endDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
 	command_buffer.pipelineBarrier2(dep_info);
 }
 
-// Transitions the swap chain image and multi sampled color image
-// to color_attachment_optimal. Begins dynamic rendering.
-void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer, bool load_depth) {
+// Transitions the resolve target to color_attachment_optimal. Begins dynamic rendering.
+void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer,
+	bool load_depth, bool secondary_contents, bool resolve_msaa) {
 	assert(m_is_frame_started && "Can't call beginRender while frame is not in progress");
 	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin render on command buffer from a different frame");
 
 	auto extent = getExtent();
-	auto height = extent.height;
-	auto width = extent.width;
 
-	// Transition the resolve target to eColorAttachmentOptimal
+	// Transition resolve target to eColorAttachmentOptimal
 	m_ve_swap_chain->transitionResolveTargetLayout(
 		command_buffer,
 		vk::ImageLayout::eUndefined,
@@ -321,13 +292,15 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer, bool 
 			.sType = vk::StructureType::eRenderingAttachmentInfo,
 			.imageView = *m_ve_swap_chain->getColorImageView(),
 			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-			.resolveMode = vk::ResolveModeFlagBits::eAverage,
-			.resolveImageView = *m_ve_swap_chain->getResolveTargetImageView(),
-			.resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
 			.loadOp = vk::AttachmentLoadOp::eClear,
-			.storeOp = vk::AttachmentStoreOp::eDontCare,
+			.storeOp = resolve_msaa ? vk::AttachmentStoreOp::eDontCare : vk::AttachmentStoreOp::eStore,
 			.clearValue = vk::ClearColorValue(0.01f, 0.01f, 0.01f, 1.0f)
 		};
+		if (resolve_msaa) {
+			color_attachment_info.resolveMode = vk::ResolveModeFlagBits::eAverage;
+			color_attachment_info.resolveImageView = *m_ve_swap_chain->getResolveTargetImageView();
+			color_attachment_info.resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+		}
 	} else {
 		color_attachment_info = {
 			.sType = vk::StructureType::eRenderingAttachmentInfo,
@@ -347,15 +320,18 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer, bool 
 		.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
 	};
 
-	// Resolve MSAA depth at end of scene render so the resolved depth includes
-	// all geometry (opaque + MASK alpha-tested).
-	if (m_ve_swap_chain->hasResolvedDepth()) {
+	if (m_ve_swap_chain->hasResolvedDepth() && resolve_msaa) {
 		depth_attachment_info.resolveMode = vk::ResolveModeFlagBits::eSampleZero;
 		depth_attachment_info.resolveImageView = *m_ve_swap_chain->getResolvedDepthImageView();
 		depth_attachment_info.resolveImageLayout = vk::ImageLayout::eDepthAttachmentOptimal;
 	}
 
+	vk::RenderingFlags flags{};
+	if (secondary_contents)
+		flags |= vk::RenderingFlagBits::eContentsSecondaryCommandBuffers;
+
 	vk::RenderingInfo rendering_info = {
+		.flags = flags,
 		.renderArea = { .offset = { 0, 0 }, .extent = extent },
 		.layerCount = 1,
 		.colorAttachmentCount = 1,
@@ -363,18 +339,19 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer, bool 
 		.pDepthAttachment = &depth_attachment_info
 	};
 
-	// Begin dynamic rendering
 	command_buffer.beginRendering(rendering_info);
-	command_buffer.setViewport(0, vk::Viewport{
-		.x = 0.0f, .y = 0.0f,
-		.width = static_cast<float>(width),
-		.height = static_cast<float>(height),
-		.minDepth = 0.0f, .maxDepth = 1.0f
-	});
-	command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = extent});
+
+	if (!secondary_contents) {
+		command_buffer.setViewport(0, vk::Viewport{
+			.x = 0.0f, .y = 0.0f,
+			.width = static_cast<float>(extent.width),
+			.height = static_cast<float>(extent.height),
+			.minDepth = 0.0f, .maxDepth = 1.0f
+		});
+		command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = extent});
+	}
 }
 
-// Ends the dynamic rendering pass and transitions the swap chain image to presentation
 void VeRenderer::endSceneRender(vk::raii::CommandBuffer& command_buffer) {
 	assert(m_is_frame_started && "Can't call endRender while frame is not in progress");
 	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end render on command buffer from a different frame");
@@ -603,7 +580,8 @@ void VeRenderer::resizeViewportImage(uint32_t width, uint32_t height) {
 	if (m_viewport_image && m_viewport_image->getWidth() == width && m_viewport_image->getHeight() == height)
 		return;
 
-	m_ve_device.getDevice().waitIdle();
+	// Precondition: device must be idle
+	m_ve_device.assertDeviceIdle();
 	auto format = m_ve_swap_chain->getSwapChainImageFormat();
 
 	m_viewport_image = std::make_unique<VeImage>(
@@ -650,8 +628,7 @@ void VeRenderer::submitCompute(vk::raii::CommandBuffer& compute_command_buffer) 
 	assert(m_is_frame_started && "Can't call submitCompute while frame is not in progress");
 	assert(&compute_command_buffer == &getCurrentComputeCommandBuffer() && "Can't submit compute on command buffer from a different frame");
 
-	uint32_t frame_index = m_ve_swap_chain->getCurrentFrame();
-	compute_command_buffer.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, *m_query_pool, frame_index * 4 + 1);
+	m_profiler.endGpuTimer(compute_command_buffer, ProfileTimer::COMPUTE_TOTAL);
 	compute_command_buffer.end();
 
 	m_ve_swap_chain->submitComputeWork(*compute_command_buffer);
@@ -690,6 +667,23 @@ const char* VeRenderer::getHDRColorModeString() const {
 		case HDRColorMode::HDR10_PQ: return "HDR10 (PQ)";
 		default:                     return "";
 	}
+}
+
+vk::CommandBufferInheritanceRenderingInfo VeRenderer::getSceneInheritanceInfo() const {
+	return vk::CommandBufferInheritanceRenderingInfo{
+		.colorAttachmentCount = 1,
+		.pColorAttachmentFormats = &m_scene_color_format,
+		.depthAttachmentFormat = m_depth_format,
+		.rasterizationSamples = m_desired_num_samples
+	};
+}
+
+vk::CommandBufferInheritanceRenderingInfo VeRenderer::getDepthPrepassInheritanceInfo() const {
+	return vk::CommandBufferInheritanceRenderingInfo{
+		.colorAttachmentCount = 0,
+		.depthAttachmentFormat = m_depth_format,
+		.rasterizationSamples = m_desired_num_samples
+	};
 }
 
 }

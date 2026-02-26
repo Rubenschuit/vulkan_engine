@@ -396,7 +396,8 @@ void ShadowMaskSystem::dispatch(VeFrameInfo& frame_info) {
 void ShadowMaskSystem::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D mask_extent,
 	vk::Extent2D depth_extent,
 	const vk::raii::ImageView& depth_image_view, const vk::raii::Image& depth_image) {
-	m_ve_device.getDevice().waitIdle();
+	// Precondition: device must be idle
+	m_ve_device.assertDeviceIdle();
 	m_extent = mask_extent;
 	m_depth_extent = depth_extent;
 	m_depth_image = *depth_image;
@@ -432,7 +433,8 @@ void ShadowMaskSystem::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D 
 }
 
 void ShadowMaskSystem::setShadowSamples(uint32_t pcf_samples, uint32_t pcss_filter_samples) {
-	m_ve_device.getDevice().waitIdle();
+	// Precondition: device must be idle
+	m_ve_device.assertDeviceIdle();
 	m_pcf_samples = pcf_samples;
 	m_pcss_filter_samples = pcss_filter_samples;
 	createPipelines();

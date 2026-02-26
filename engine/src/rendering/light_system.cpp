@@ -129,9 +129,9 @@ void LightSystem::createPipeline(vk::Format color_format, vk::SampleCountFlagBit
 
 // Renders billboard quads for each point light
 void LightSystem::render(VeFrameInfo& frame_info) const {
-	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	frame_info.cmd().bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 	std::array<vk::DescriptorSet, 2> sets{*frame_info.global_descriptor_set, *frame_info.texture_descriptor_set};
-	frame_info.command_buffer.bindDescriptorSets(
+	frame_info.cmd().bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,
 		0,
@@ -147,13 +147,13 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 		push.scale = tc.getScale().x;
 		push.color = glm::vec4{pl.getColor(), pl.getIntensity()};
 		push.billboard_type = 0;
-		frame_info.command_buffer.pushConstants(
+		frame_info.cmd().pushConstants(
 			*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 			0,
 			vk::ArrayProxy<const uint8_t>(sizeof(SimplePushConstantData), reinterpret_cast<const uint8_t*>(&push))
 		);
-		frame_info.command_buffer.draw(6, 1, 0, 0);
+		frame_info.cmd().draw(6, 1, 0, 0);
 	}
 
 	// Celestial billboards for directional lights (sun/moon)
@@ -166,13 +166,13 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 		push.color = glm::vec4{dl.color, dl.intensity * CELESTIAL_INTENSITY_BOOST};
 		push.scale = CELESTIAL_SCALE;
 		push.billboard_type = (dl.celestial_type == CelestialType::Sun) ? 2 : 1;
-		frame_info.command_buffer.pushConstants(
+		frame_info.cmd().pushConstants(
 			*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 			0,
 			vk::ArrayProxy<const uint8_t>(sizeof(SimplePushConstantData), reinterpret_cast<const uint8_t*>(&push))
 		);
-		frame_info.command_buffer.draw(6, 1, 0, 0);
+		frame_info.cmd().draw(6, 1, 0, 0);
 	}
 
 	// Spot light billboards
@@ -183,13 +183,13 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 			.scale = tc.getScale().x,
 			.billboard_type = 3,
 		};
-		frame_info.command_buffer.pushConstants(
+		frame_info.cmd().pushConstants(
 			*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 			0,
 			vk::ArrayProxy<const uint8_t>(sizeof(SimplePushConstantData), reinterpret_cast<const uint8_t*>(&push))
 		);
-		frame_info.command_buffer.draw(6, 1, 0, 0);
+		frame_info.cmd().draw(6, 1, 0, 0);
 	}
 }
 

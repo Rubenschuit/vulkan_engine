@@ -281,7 +281,7 @@ void GtaoSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 }
 
 void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
-	auto& cmd = frame_info.command_buffer;
+	auto& cmd = frame_info.cmd();
 	uint32_t frame = frame_info.current_frame;
 
 	// ===== Pre-GTAO barriers =====
@@ -503,7 +503,8 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 void GtaoSystem::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D ao_extent,
 	vk::Extent2D depth_extent,
 	const vk::raii::ImageView& depth_image_view, const vk::raii::Image& depth_image) {
-	m_ve_device.getDevice().waitIdle();
+	// Precondition: device must be idle
+	m_ve_device.assertDeviceIdle();
 	m_extent = ao_extent;
 	m_depth_extent = depth_extent;
 	m_depth_image = *depth_image;

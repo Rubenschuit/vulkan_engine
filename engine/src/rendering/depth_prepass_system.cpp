@@ -77,11 +77,13 @@ void DepthPrePassSystem::createPipeline(vk::SampleCountFlagBits sample_count) {
 		pipeline_config);
 }
 
-void DepthPrePassSystem::render(
-	VeFrameInfo& frame_info,
-	const std::vector<PbrRenderSystem::InstanceGroup>& opaque_groups) const {
+void DepthPrePassSystem::recordRange(
+	vk::raii::CommandBuffer& cmd, VeFrameInfo& frame_info,
+	const std::vector<PbrRenderSystem::InstanceGroup>& opaque_groups,
+	uint32_t begin_idx, uint32_t end_idx) const {
 
-	auto& cmd = frame_info.command_buffer;
+	if (begin_idx >= end_idx)
+		return;
 
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 
@@ -93,7 +95,8 @@ void DepthPrePassSystem::render(
 	VeMesh* bound_mesh = nullptr;
 	uint32_t bound_lod = UINT32_MAX;
 
-	for (const auto& group : opaque_groups) {
+	for (uint32_t i = begin_idx; i < end_idx; ++i) {
+		const auto& group = opaque_groups[i];
 		// Skip MASK groups: the depth-only shader cannot do alpha testing, so it would
 		// write depth for transparent areas and block the wall behind from rendering.
 		// MASK geometry renders in a second color pass with eLessOrEqual instead.
@@ -128,6 +131,14 @@ void DepthPrePassSystem::render(
 		// Instanced draw
 		group.mesh->drawIndexedLod(cmd, group.lod_level, group.instance_count, 0);
 	}
+}
+
+void DepthPrePassSystem::render(
+	VeFrameInfo& frame_info,
+	const std::vector<PbrRenderSystem::InstanceGroup>& opaque_groups) const {
+
+	recordRange(frame_info.cmd(), frame_info, opaque_groups,
+		0, static_cast<uint32_t>(opaque_groups.size()));
 }
 
 } // namespace ve

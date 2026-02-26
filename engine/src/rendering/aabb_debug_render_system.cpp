@@ -120,8 +120,8 @@ void AabbDebugRenderSystem::render(VeFrameInfo& frame_info) const {
 
 	m_vertex_buffer->writeToBuffer(vertices.data(), vertices.size() * sizeof(VeMesh::Vertex));
 
-	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-	frame_info.command_buffer.bindDescriptorSets(
+	frame_info.cmd().bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	frame_info.cmd().bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,
 		0,
@@ -131,8 +131,8 @@ void AabbDebugRenderSystem::render(VeFrameInfo& frame_info) const {
 
 	vk::Buffer buffers[] = {*m_vertex_buffer->getBuffer()};
 	vk::DeviceSize offsets[] = {0};
-	frame_info.command_buffer.bindVertexBuffers(0, buffers, offsets);
-	frame_info.command_buffer.draw(static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+	frame_info.cmd().bindVertexBuffers(0, buffers, offsets);
+	frame_info.cmd().draw(static_cast<uint32_t>(vertices.size()), 1, 0, 0);
 }
 
 void AabbDebugRenderSystem::recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {

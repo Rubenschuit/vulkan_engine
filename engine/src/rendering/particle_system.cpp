@@ -530,9 +530,9 @@ void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 // Instance rendering is used to draw a quad for each particle.
 void ParticleSystem::render(VeFrameInfo& frame_info) const {
 	if (!m_enabled) return;
-	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipeline->getPipeline());
+	frame_info.cmd().bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipeline->getPipeline());
 
-	frame_info.command_buffer.bindDescriptorSets(
+	frame_info.cmd().bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,
 		0,
@@ -542,10 +542,10 @@ void ParticleSystem::render(VeFrameInfo& frame_info) const {
 	vk::DeviceSize offsets[] = { 0 };
 	// Use Render Buffer (compacted) instead of simulation buffer
 	vk::Buffer buffers[] = { *m_render_buffers[frame_info.current_frame]->getBuffer() };
-	frame_info.command_buffer.bindVertexBuffers(0, buffers, offsets);
+	frame_info.cmd().bindVertexBuffers(0, buffers, offsets);
 
 	// Indirect Draw
-	frame_info.command_buffer.drawIndirect(
+	frame_info.cmd().drawIndirect(
 		*m_indirect_buffers[frame_info.current_frame]->getBuffer(),
 		0,
 		1,

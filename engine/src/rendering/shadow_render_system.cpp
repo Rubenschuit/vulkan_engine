@@ -551,7 +551,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 
 		if (current_unique_meshes != m_cached_unique_meshes) {
 			m_cached_unique_meshes = std::move(current_unique_meshes);
-			rebuildMegaBuffers(frame_info.command_buffer, m_cached_unique_meshes);
+			rebuildMegaBuffers(frame_info.cmd(), m_cached_unique_meshes);
 
 			// Barrier: transfer writes must complete before vertex/index reads
 			vk::MemoryBarrier2 transfer_barrier{
@@ -566,7 +566,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 				.memoryBarrierCount = 1,
 				.pMemoryBarriers = &transfer_barrier,
 			};
-			frame_info.command_buffer.pipelineBarrier2(transfer_dep);
+			frame_info.cmd().pipelineBarrier2(transfer_dep);
 		}
 	}
 
@@ -644,7 +644,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 		}
 	}
 
-	auto& command_buffer = frame_info.command_buffer;
+	auto& command_buffer = frame_info.cmd();
 	vk::Extent2D shadow_extent{SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION};
 
 	// CSM multiview: single render pass for all cascades
@@ -842,7 +842,7 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 
 	const vk::raii::DescriptorSet& shadow_global_set = m_shadow_global_descriptor_sets[frame_info.current_frame][light_index];
 
-	frame_info.command_buffer.bindDescriptorSets(
+	frame_info.cmd().bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,
 		0,
@@ -852,8 +852,8 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 
 	if (m_mega_shadow_vbo && m_mega_ibo && !m_mega_entries.empty()) {
 		// Mega-buffer path: single VBO/IBO bind, per-group drawIndexed with push constants
-		frame_info.command_buffer.bindVertexBuffers(0, {*m_mega_shadow_vbo->getBuffer()}, {vk::DeviceSize{0}});
-		frame_info.command_buffer.bindIndexBuffer(*m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
+		frame_info.cmd().bindVertexBuffers(0, {*m_mega_shadow_vbo->getBuffer()}, {vk::DeviceSize{0}});
+		frame_info.cmd().bindIndexBuffer(*m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
 
 		for (const auto& group : instance_groups) {
 			auto it = m_mega_entries.find(group.mesh);
@@ -865,14 +865,14 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 
 			ShadowPushConstantData push{};
 			push.instance_offset = group.first_instance;
-			frame_info.command_buffer.pushConstants(
+			frame_info.cmd().pushConstants(
 				*m_pipeline_layout,
 				vk::ShaderStageFlagBits::eVertex,
 				0,
 				vk::ArrayProxy<const uint8_t>(sizeof(ShadowPushConstantData), reinterpret_cast<const uint8_t*>(&push))
 			);
 
-			frame_info.command_buffer.drawIndexed(
+			frame_info.cmd().drawIndexed(
 				lod_entry.index_count, group.instance_count,
 				lod_entry.first_index, static_cast<int32_t>(mega.vertex_offset), 0);
 		}

@@ -26,10 +26,12 @@ private:
 	float m_fps = 0.0f;
 	float m_frame_time_ms = 0.0f;
 	float m_cpu_time_ms = 0.0f;
+	float m_fence_wait_ms = 0.0f;
 	float m_gpu_time_ms = 0.0f;
 	float m_compute_gpu_time_ms = 0.0f;
 	float m_gpu_overlap_ms = 0.0f;
 	float m_cpu_time_sum = 0.0f;
+	float m_fence_wait_sum = 0.0f;
 	float m_gpu_time_sum = 0.0f;
 	float m_compute_gpu_time_sum = 0.0f;
 	float m_gpu_overlap_sum = 0.0f;
@@ -38,6 +40,13 @@ private:
 	int m_history_offset = 0;
 	float m_graph_update_timer = 0.0f;
 	int m_graph_frames = 0;
+
+	// Per-system breakdown
+	static constexpr int BREAKDOWN_COUNT = 7;
+	float m_gpu_breakdown_ms[BREAKDOWN_COUNT] = {};
+	float m_gpu_breakdown_sum[BREAKDOWN_COUNT] = {};
+	float m_cpu_breakdown_ms[BREAKDOWN_COUNT] = {};
+	float m_cpu_breakdown_sum[BREAKDOWN_COUNT] = {};
 };
 
 } // namespace ve

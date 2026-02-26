@@ -167,8 +167,8 @@ void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 		m_pending_load = std::nullopt;
 	}
 
-	frame_info.command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-	frame_info.command_buffer.bindDescriptorSets(
+	frame_info.cmd().bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	frame_info.cmd().bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,
 		{},
@@ -192,16 +192,16 @@ void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 	push.params.y = m_settings.is_day ? 1.05f : 0.9f;   // R
 	push.params.z = m_settings.is_day ? 1.0f : 0.95f;   // G
 	push.params.w = m_settings.is_day ? 0.95f : 1.1f;   // B
-	frame_info.command_buffer.pushConstants(
+	frame_info.cmd().pushConstants(
 		*m_pipeline_layout,
 		vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 		0,
 		vk::ArrayProxy<const uint8_t>(sizeof(SkyboxPushConstantData), reinterpret_cast<const uint8_t*>(&push))
 	);
 
-	cube->bindVertexBuffer(frame_info.command_buffer);
-	cube->bindIndexBuffer(frame_info.command_buffer);
-	cube->drawIndexed(frame_info.command_buffer);
+	cube->bindVertexBuffer(frame_info.cmd());
+	cube->bindIndexBuffer(frame_info.cmd());
+	cube->drawIndexed(frame_info.cmd());
 }
 
 } // namespace ve

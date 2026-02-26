@@ -6,6 +6,7 @@ namespace ve {
 
 CommandResourceManager::CommandResourceManager(VeDevice& device) : m_device(device) {
 	createPrimaryResources();
+	m_main_thread_slot = registerThread();
 }
 
 CommandResourceManager::~CommandResourceManager() {}
@@ -109,10 +110,16 @@ void CommandResourceManager::resetThreadFrame(ThreadSlot slot, uint32_t frame_in
 	assert(slot.valid() && slot.id < m_slots.size());
 	assert(frame_index < MAX_FRAMES_IN_FLIGHT);
 
-	auto& state = m_slots[slot.id].frames[frame_index];
-	// All CBs go to initial state, memory stays in pool, handles remain valid
+	// Mark for lazy reset on next acquire
+	m_slots[slot.id].frames[frame_index].needs_reset = true;
+}
+
+void CommandResourceManager::ensureReset(PerFrameState& state) {
+	if (!state.needs_reset)
+		return;
 	state.pool.reset({});
 	state.active_count = 0;
+	state.needs_reset = false;
 }
 
 vk::raii::CommandBuffer& CommandResourceManager::acquireSecondary(
@@ -122,6 +129,7 @@ vk::raii::CommandBuffer& CommandResourceManager::acquireSecondary(
 	assert(frame_index < MAX_FRAMES_IN_FLIGHT);
 
 	auto& state = m_slots[slot.id].frames[frame_index];
+	ensureReset(state);
 
 	// Reuse existing buffer
 	if (state.active_count < static_cast<uint32_t>(state.buffers.size())) {
@@ -147,6 +155,48 @@ vk::raii::CommandBuffer& CommandResourceManager::acquireSecondary(
 	vk::CommandBufferBeginInfo begin_info{
 		.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit
 	};
+	cb.begin(begin_info);
+	state.active_count++;
+	return cb;
+}
+
+vk::raii::CommandBuffer& CommandResourceManager::acquireSecondary(
+	ThreadSlot slot, uint32_t frame_index,
+	const vk::CommandBufferInheritanceRenderingInfo& rendering_info) {
+
+	assert(slot.valid() && slot.id < m_slots.size());
+	assert(frame_index < MAX_FRAMES_IN_FLIGHT);
+
+	auto& state = m_slots[slot.id].frames[frame_index];
+	ensureReset(state);
+
+	vk::CommandBufferInheritanceInfo inheritance{
+		.pNext = &rendering_info
+	};
+	vk::CommandBufferBeginInfo begin_info{
+		.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit
+		       | vk::CommandBufferUsageFlagBits::eRenderPassContinue,
+		.pInheritanceInfo = &inheritance
+	};
+
+	// Reuse existing buffer
+	if (state.active_count < static_cast<uint32_t>(state.buffers.size())) {
+		auto& cb = state.buffers[state.active_count];
+		cb.begin(begin_info);
+		state.active_count++;
+		return cb;
+	}
+
+	// Allocate a new secondary from the pool
+	vk::CommandBufferAllocateInfo alloc_info{
+		.commandPool = *state.pool,
+		.level = vk::CommandBufferLevel::eSecondary,
+		.commandBufferCount = 1
+	};
+	auto new_buffers = vk::raii::CommandBuffers(m_device.getDevice(), alloc_info);
+	state.buffers.push_back(std::move(new_buffers.front()));
+
+	auto& cb = state.buffers.back();
 	cb.begin(begin_info);
 	state.active_count++;
 	return cb;

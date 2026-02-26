@@ -210,21 +210,18 @@ private:
 	// --- Timing ---
 	using clock = std::chrono::steady_clock;
 	clock::time_point m_last_frame_time{clock::now()};
-	clock::time_point m_cpu_start;
 	float m_total_time{0.0f};
-	uint32_t m_fps_frame_count{0};
-	double m_sum_frame_ms{0.0};
 	float m_frame_time{0.0f};
 
 	InputActions m_last_input_actions;
 	bool m_shadow_mask_half_res = false;
+	bool m_was_parallel = false;
 	bool m_gtao_half_res = true;
 	int m_pcf_samples = 8;
 	int m_pcss_filter_samples = 16;
 	Topology m_last_topology = Topology::TRIANGLE_LIST;
 
 	void setWindowTitle();
-	void updateFPSStats();
 };
 
 } // namespace ve

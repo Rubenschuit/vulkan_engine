@@ -61,12 +61,21 @@ public:
 	/// The returned CB is already in the recording state (begin called).
 	vk::raii::CommandBuffer& acquireSecondary(ThreadSlot slot, uint32_t frame_index);
 
+	/// Acquire a secondary CB for use inside a dynamic rendering pass.
+	/// Begun with eRenderPassContinue + inheritance rendering info.
+	vk::raii::CommandBuffer& acquireSecondary(
+		ThreadSlot slot, uint32_t frame_index,
+		const vk::CommandBufferInheritanceRenderingInfo& rendering_info);
+
 	uint32_t secondaryCount(ThreadSlot slot, uint32_t frame_index) const;
 
 	// ── Pool accessors ─────────────────────────────────────────────
 
 	vk::raii::CommandPool& getGraphicsPool() { return m_graphics_pool; }
 	vk::raii::CommandPool& getComputePool() { return m_compute_pool; }
+
+	/// Main-thread slot for acquiring secondary CBs on the main thread.
+	ThreadSlot getMainThreadSlot() const { return m_main_thread_slot; }
 
 private:
 	void createPrimaryResources();
@@ -86,13 +95,17 @@ private:
 		vk::raii::CommandPool pool{nullptr};                // eTransient, graphics family
 		std::vector<vk::raii::CommandBuffer> buffers;       // watermark array
 		uint32_t active_count = 0;
+		bool needs_reset = false;                           // lazy reset on first acquire
 	};
+
+	void ensureReset(PerFrameState& state);
 
 	struct SlotData {
 		std::array<PerFrameState, MAX_FRAMES_IN_FLIGHT> frames;
 	};
 
 	std::vector<SlotData> m_slots;
+	ThreadSlot m_main_thread_slot;
 	mutable std::mutex m_registration_mutex; // only protects registerThread()
 };
 

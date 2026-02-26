@@ -204,8 +204,13 @@ struct VeFrameInfo {
 	VeScene* active_scene = nullptr;  // For per-object descriptor set lookup
 	vk::raii::DescriptorSet& cubemap_descriptor_set;
 	vk::raii::DescriptorSet& shadow_descriptor_set;
-	vk::raii::CommandBuffer& command_buffer;
+	vk::raii::CommandBuffer* command_buffer;
 	vk::raii::CommandBuffer& compute_command_buffer;
+
+	vk::raii::CommandBuffer& cmd() const {
+		assert(command_buffer && "command_buffer is null");
+		return *command_buffer;
+	}
 	ve::VeCamera& camera;
 	Registry* registry = nullptr;
 	std::vector<VisibleObject>& visible_objects;
@@ -233,10 +238,6 @@ struct VeFrameInfo {
 
 	// Clustered forward shading descriptor set (Set 4, null when clustering disabled)
 	vk::raii::DescriptorSet* cluster_descriptor_set = nullptr;
-
-	// GPU timing: compute systems write the start timestamp after their barriers resolve.
-	vk::QueryPool compute_query_pool = VK_NULL_HANDLE;
-	uint32_t compute_start_query = 0;
 
 	// Selection outline
 	Entity selected_entity = Entity::null();

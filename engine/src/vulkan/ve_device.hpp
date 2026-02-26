@@ -91,6 +91,13 @@ public:
 		const std::vector<vk::DeviceSize>& buffer_offsets,
 		const std::vector<vk::Extent3D>& extents);
 
+	// no-op if already idle
+#ifndef NDEBUG
+	void assertDeviceIdle() { m_device.waitIdle(); }
+#else
+	void assertDeviceIdle() {}
+#endif
+
 	const vk::PhysicalDeviceProperties getDeviceProperties() const { return m_physical_device.getProperties(); }
 	vk::SampleCountFlagBits getSampleCount() const { return m_max_msaa_samples; };
 	bool hasHdrColorSpaceExtension() const { return m_has_hdr_instance_extension; }
