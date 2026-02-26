@@ -58,7 +58,7 @@ public:
 	bool compareSwapFormats(const VeSwapChain& other) const;
 	vk::Result acquireNextImage(uint32_t* imageIndex);
 	void submitComputeWork(vk::CommandBuffer commandBuffer);
-	vk::Result submitAndPresent(vk::CommandBuffer commandBuffer, uint32_t* imageIndex);
+	vk::Result submitAndPresent(vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* imageIndex);
 	void waitForCurrentFence();
 	void resetCurrentFence();
 	void advanceFrame();

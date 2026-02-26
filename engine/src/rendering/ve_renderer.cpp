@@ -8,9 +8,8 @@
 
 namespace ve {
 // Constructor, initializes swap chain with present mode immediate and command buffers
-VeRenderer::VeRenderer(VeDevice& device, VeWindow& window) : m_ve_device(device), m_ve_window(window) {
+VeRenderer::VeRenderer(VeDevice& device, VeWindow& window) : m_ve_device(device), m_command_manager(device), m_ve_window(window) {
 	m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, m_ve_window.getExtent(), m_desired_num_samples, m_present_mode, m_hdr_enabled);
-	createCommandBuffers();
 	createViewportResources();
 
 	// Create query pool for GPU timing (4 per frame: compute start/end, graphics start/end)
@@ -45,30 +44,15 @@ uint32_t VeRenderer::getCurrentFrame() const {
 }
 vk::raii::CommandBuffer& VeRenderer::getCurrentCommandBuffer() {
 	assert(m_is_frame_started && "Frame is not in progress");
-	return m_command_buffers[m_ve_swap_chain->getCurrentFrame()];
+	return m_command_manager.getGraphicsPrimary(m_ve_swap_chain->getCurrentFrame());
 }
 vk::raii::CommandBuffer& VeRenderer::getCurrentComputeCommandBuffer() {
 	assert(m_is_frame_started && "Frame is not in progress");
-	return m_compute_command_buffers[m_ve_swap_chain->getCurrentFrame()];
+	return m_command_manager.getComputePrimary(m_ve_swap_chain->getCurrentFrame());
 }
-
-void VeRenderer::createCommandBuffers() {
-	vk::CommandBufferAllocateInfo alloc_info{
-		.sType = vk::StructureType::eCommandBufferAllocateInfo,
-		.commandPool = *m_ve_device.getCommandPool(),
-		.level = vk::CommandBufferLevel::ePrimary,
-		.commandBufferCount = ve::MAX_FRAMES_IN_FLIGHT
-	};
-	m_command_buffers = vk::raii::CommandBuffers(m_ve_device.getDevice(), alloc_info);
-	assert(m_command_buffers.size() == ve::MAX_FRAMES_IN_FLIGHT && "Failed to allocate command buffers");
-	vk::CommandBufferAllocateInfo alloc_info_compute{
-		.sType = vk::StructureType::eCommandBufferAllocateInfo,
-		.commandPool = *m_ve_device.getComputeCommandPool(),
-		.level = vk::CommandBufferLevel::ePrimary,
-		.commandBufferCount = ve::MAX_FRAMES_IN_FLIGHT
-	};
-	m_compute_command_buffers = vk::raii::CommandBuffers(m_ve_device.getDevice(), alloc_info_compute);
-	assert(m_compute_command_buffers.size() == ve::MAX_FRAMES_IN_FLIGHT && "Failed to allocate command buffers");
+vk::raii::CommandBuffer& VeRenderer::getCurrentUICommandBuffer() {
+	assert(m_is_frame_started && "Frame is not in progress");
+	return m_command_manager.getUIPrimary(m_ve_swap_chain->getCurrentFrame());
 }
 
 void VeRenderer::recreateSwapChain() {
@@ -172,16 +156,18 @@ bool VeRenderer::beginFrame() {
 		}
 	}
 
-	command_buffer.reset();
+	m_command_manager.resetPrimaries(frame_index);
 	vk::CommandBufferBeginInfo info{
 		.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit
 	};
 	command_buffer.begin(info);
 
-	// Also begin compute command buffer
+	// Also begin compute and UI command buffers
 	auto& compute_command_buffer = getCurrentComputeCommandBuffer();
-	compute_command_buffer.reset();
 	compute_command_buffer.begin(info);
+
+	auto& ui_command_buffer = getCurrentUICommandBuffer();
+	ui_command_buffer.begin(info);
 
 	// Reset and write start timestamps from each command buffer's own queue
 	uint32_t base = frame_index * 4;
@@ -195,22 +181,24 @@ bool VeRenderer::beginFrame() {
 	return true;
 }
 
-// End the command buffer recording, submits the command buffer and presents the image.
-void VeRenderer::endFrame(vk::raii::CommandBuffer& command_buffer) {
+// End scene + UI command buffers, submit both, present, and advance the frame.
+void VeRenderer::endFrame() {
 	assert(m_is_frame_started && "Can't call endFrame while frame is not in progress");
-	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end frame on command buffer from a different frame");
 
+	auto& scene_cb = getCurrentCommandBuffer();
+	auto& ui_cb = getCurrentUICommandBuffer();
 	uint32_t frame_index = m_ve_swap_chain->getCurrentFrame();
 
-	// Write graphics end timestamp
-	command_buffer.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, *m_query_pool, frame_index * 4 + 3);
+	// End scene CB with graphics end timestamp
+	scene_cb.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, *m_query_pool, frame_index * 4 + 3);
+	scene_cb.end();
 
-	transitionToPresent(command_buffer);
-	command_buffer.end();
+	// Finalize UI CB: transition swapchain to present, then end
+	transitionToPresent(ui_cb);
+	ui_cb.end();
 
-	// submit graphics and present
-	// Submit the command buffer, present the image in accordance with the timeline semaphore values
-	auto result = m_ve_swap_chain->submitAndPresent(*command_buffer, &m_current_image_index);
+	// Submit both CBs in order, then present
+	auto result = m_ve_swap_chain->submitAndPresent(*scene_cb, *ui_cb, &m_current_image_index);
 
 	if (result == vk::Result::eErrorOutOfDateKHR) {
 		VE_LOGD("Result of present is eErrorOutOfDateKHR, setting flag.");
@@ -509,24 +497,36 @@ void VeRenderer::endPostProcessRender(vk::raii::CommandBuffer& command_buffer, b
 	}
 }
 
-void VeRenderer::beginEditorUIRender(vk::raii::CommandBuffer& command_buffer) {
-	assert(m_is_frame_started && "Can't call beginEditorUIRender while frame is not in progress");
+void VeRenderer::beginUIRecording(bool editor_mode) {
+	assert(m_is_frame_started && "Can't call beginUIRecording while frame is not in progress");
 
-	// Transition swapchain for ImGui rendering
-	m_ve_swap_chain->transitionImageLayout(
-		command_buffer,
-		m_current_image_index,
-		vk::ImageLayout::eUndefined,
-		vk::ImageLayout::eColorAttachmentOptimal,
-		{},
-		vk::AccessFlagBits2::eColorAttachmentWrite,
-		vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-		vk::PipelineStageFlagBits2::eColorAttachmentOutput
-	);
-}
+	auto& ui_cb = getCurrentUICommandBuffer();
 
-void VeRenderer::endEditorUIRender(vk::raii::CommandBuffer& /*command_buffer*/) {
-	// Nothing extra needed — transitionToPresent handles the final transition
+	if (editor_mode) {
+		// Editor mode: scene rendered to viewport image, swapchain is untouched.
+		// Transition swapchain from eUndefined to eColorAttachmentOptimal for ImGui.
+		m_ve_swap_chain->transitionImageLayout(
+			ui_cb,
+			m_current_image_index,
+			vk::ImageLayout::eUndefined,
+			vk::ImageLayout::eColorAttachmentOptimal,
+			{},
+			vk::AccessFlagBits2::eColorAttachmentWrite,
+			vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+			vk::PipelineStageFlagBits2::eColorAttachmentOutput
+		);
+	} else {
+		// Fullscreen mode: scene CB wrote to swapchain via post-process.
+		// Memory barrier ensures scene writes are visible before UI renders on top.
+		vk::MemoryBarrier2 barrier{
+			.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+			.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+			.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+			.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentRead | vk::AccessFlagBits2::eColorAttachmentWrite
+		};
+		vk::DependencyInfo dep{.memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
+		ui_cb.pipelineBarrier2(dep);
+	}
 }
 
 void VeRenderer::createViewportResources() {
@@ -631,7 +631,6 @@ void VeRenderer::resizeViewportImage(uint32_t width, uint32_t height) {
 
 void VeRenderer::transitionToPresent(vk::raii::CommandBuffer& command_buffer) {
 	assert(m_is_frame_started && "Can't call transitionToPresent while frame is not in progress");
-	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't transition on command buffer from a different frame");
 	// After all rendering, transition swap chain image to presentation
 	m_ve_swap_chain->transitionImageLayout(
 		command_buffer,

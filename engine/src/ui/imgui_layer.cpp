@@ -294,20 +294,17 @@ void ImGuiLayer::renderUI(UIContext& context, EditorState& editor_state,
 						   std::function<void(UIContext&)> appUiCallback) {
 	beginFrame();
 
+	auto& ui_cb = m_renderer.getCurrentUICommandBuffer();
+
 	if (editor_state.editor_mode) {
 		renderDockSpace();
 		if (appUiCallback)
 			appUiCallback(context);
-
-		// In editor mode: transition swapchain for ImGui, then clear-render onto it
-		m_renderer.beginEditorUIRender(m_renderer.getCurrentCommandBuffer());
-		endFrame(m_renderer.getCurrentCommandBuffer(), true);
-		m_renderer.endEditorUIRender(m_renderer.getCurrentCommandBuffer());
+		endFrame(ui_cb, true);  // clear_target=true: swapchain is fresh
 	} else {
-		// Fullscreen mode: render app callback (performance panel, etc.)
 		if (appUiCallback)
 			appUiCallback(context);
-		endFrame(m_renderer.getCurrentCommandBuffer());
+		endFrame(ui_cb);  // load existing content from scene post-process
 	}
 }
 

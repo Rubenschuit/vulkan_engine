@@ -115,7 +115,9 @@ void VeApplication::run() {
 		update();
 
 		if (!m_active_scene) {
-			m_ve_renderer.endFrame(m_ve_renderer.getCurrentCommandBuffer());
+			m_ve_renderer.beginUIRecording(m_editor->isEditorMode());
+			m_editor->renderUI(m_ui, nullptr, nullptr);
+			m_ve_renderer.endFrame();
 			continue;
 		}
 
@@ -128,9 +130,15 @@ void VeApplication::run() {
 		populateUBO(fi);
 		dispatchCompute(fi);
 		renderFrame(fi);
-		collectStats();
 
-		m_ve_renderer.endFrame(fi.command_buffer);
+		// UI on separate command buffer
+		bool editor_mode = m_editor->isEditorMode();
+		m_ve_renderer.beginUIRecording(editor_mode);
+		Registry* ui_registry = &m_active_scene->getRegistry();
+		m_editor->renderUI(m_ui, ui_registry, m_active_scene.get());
+
+		collectStats();
+		m_ve_renderer.endFrame();
 	}
 
 	m_ve_device.getDevice().waitIdle();
@@ -483,10 +491,6 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		m_outline_system->composite(command_buffer, fi.current_frame,
 			editor_state.outline_width, editor_state.outline_color);
 	m_ve_renderer.endPostProcessRender(command_buffer, editor_mode);
-
-	// UI
-	Registry* ui_registry = m_active_scene ? &m_active_scene->getRegistry() : nullptr;
-	m_editor->renderUI(m_ui, ui_registry, m_active_scene.get());
 }
 
 // ─── Stats Collection ────────────────────────────────────────────────────────

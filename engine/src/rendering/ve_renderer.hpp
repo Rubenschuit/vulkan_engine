@@ -4,6 +4,7 @@ It manages the swap chain and command buffers. Default present mode is immediate
 #include "ve_export.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_image.hpp"
+#include "vulkan/ve_command_resource_manager.hpp"
 #include "platform/ve_window.hpp"
 #include "vulkan/ve_swap_chain.hpp"
 #include <memory>
@@ -35,6 +36,7 @@ public:
 	uint32_t getCurrentImageIndex() const { assert(m_is_frame_started); return m_current_image_index; }
 	vk::raii::CommandBuffer& getCurrentCommandBuffer();
 	vk::raii::CommandBuffer& getCurrentComputeCommandBuffer();
+	vk::raii::CommandBuffer& getCurrentUICommandBuffer();
 	const vk::raii::ImageView& getSwapChainImageView(size_t index) const { return m_ve_swap_chain->getSwapChainImageViews()[index]; }
 	const vk::raii::ImageView& getResolveTargetImageView() const { return m_ve_swap_chain->getResolveTargetImageView(); }
 	const vk::raii::ImageView& getDepthImageView() const { return m_ve_swap_chain->getDepthImageView(); }
@@ -59,9 +61,9 @@ public:
 	void beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode = false);
 	void endPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode = false);
 
-	// In editor mode: prepare swapchain for ImGui rendering (transition + clear)
-	void beginEditorUIRender(vk::raii::CommandBuffer& command_buffer);
-	void endEditorUIRender(vk::raii::CommandBuffer& command_buffer);
+	// Prepare the UI command buffer for recording (barrier/transition).
+	// Call before ImGuiLayer::renderUI().
+	void beginUIRecording(bool editor_mode);
 
 	// Scene render extent (editor viewport resolution)
 	void resizeSceneRender(uint32_t w, uint32_t h);
@@ -74,9 +76,8 @@ public:
 	uint32_t getViewportWidth() const { return m_viewport_image ? m_viewport_image->getWidth() : 0; }
 	uint32_t getViewportHeight() const { return m_viewport_image ? m_viewport_image->getHeight() : 0; }
 
-	// Transition the current swapchain image to PresentSrcKHR, submits and presents it,
-	// and advances the current frame.
-	void endFrame(vk::raii::CommandBuffer& command_buffer);
+	// End scene + UI command buffers, submit both, present, and advance the frame.
+	void endFrame();
 
 	// only max or none MSAA supported for now
 	void setMSAAEnabled(bool enabled) { m_msaa_enabled = enabled; m_desired_num_samples = enabled ? m_ve_device.getSampleCount() : vk::SampleCountFlagBits::e1; m_swap_chain_needs_recreation = true; }
@@ -104,6 +105,8 @@ public:
 	void recreateSwapChain();
 	void setSwapChainNeedsRecreation() { m_swap_chain_needs_recreation = true; }
 
+	CommandResourceManager& getCommandManager() { return m_command_manager; }
+
 	float getGpuTime() const { return m_gpu_time; }
 	float getComputeGpuTime() const { return m_compute_gpu_time; }
 	float getGpuOverlap() const { return m_gpu_overlap; }
@@ -115,15 +118,13 @@ public:
 	bool isHdrEnabled() const { return m_hdr_enabled; }
 
 private:
-	void createCommandBuffers();
 	void createViewportResources();
 	void transitionToPresent(vk::raii::CommandBuffer& command_buffer);
 
 	VeDevice& m_ve_device;
+	CommandResourceManager m_command_manager;
 	VeWindow& m_ve_window;
 	std::unique_ptr<VeSwapChain> m_ve_swap_chain;
-	std::vector<vk::raii::CommandBuffer> m_command_buffers;
-	std::vector<vk::raii::CommandBuffer> m_compute_command_buffers;
 
 	vk::PresentModeKHR m_present_mode = vk::PresentModeKHR::eImmediate;
 	uint32_t m_current_image_index;

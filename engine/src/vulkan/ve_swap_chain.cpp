@@ -77,7 +77,7 @@ void VeSwapChain::submitComputeWork(vk::CommandBuffer command_buffer) {
 }
 
 // Returns result of queue.presentKHR()
-vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer command_buffer, uint32_t* image_index) {
+vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* image_index) {
 	// Wait on image-available (binary) and compute timeline before starting graphics work.
 	vk::PipelineStageFlags wait_stages[2] = {
 		vk::PipelineStageFlagBits::eColorAttachmentOutput, // swapchain image usage
@@ -103,13 +103,14 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer command_buffer, uint3
 	// Signal: render-finished (binary, for present) + compute_timeline (graphics signal for next frame's compute)
 	vk::Semaphore render_finished = *m_render_finished_semaphores[*image_index];
 	std::array<vk::Semaphore, 2> signal_sems{ render_finished, *m_compute_timeline };
+	std::array<vk::CommandBuffer, 2> cbs = {scene_cb, ui_cb};
 	vk::SubmitInfo submit_info{
 		.pNext = &timeline_info,
 		.waitSemaphoreCount = static_cast<uint32_t>(wait_sems.size()),
 		.pWaitSemaphores = wait_sems.data(),
 		.pWaitDstStageMask = wait_stages,
-		.commandBufferCount = 1,
-		.pCommandBuffers = &command_buffer,
+		.commandBufferCount = static_cast<uint32_t>(cbs.size()),
+		.pCommandBuffers = cbs.data(),
 		.signalSemaphoreCount = static_cast<uint32_t>(signal_sems.size()),
 		.pSignalSemaphores = signal_sems.data()
 	};
