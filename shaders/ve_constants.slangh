@@ -14,6 +14,10 @@
 #define MAX_LIGHTS_PER_CLUSTER   64
 #define MAX_CLUSTER_LIGHTS       1024
 
+// GPU-driven culling (keep in sync with ve_config.hpp)
+#define MAX_LOD_LEVELS           4
+#define MAX_GPU_OBJECTS          16384
+
 enum ShadowMode {
 	DISABLED = 0,
 	REGULAR = 1,

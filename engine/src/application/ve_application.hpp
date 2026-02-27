@@ -54,6 +54,8 @@ class PostProcessSystem;
 class OutlineSystem;
 class BindlessTextureRegistry;
 class MaterialSSBOManager;
+class GpuSceneManager;
+class GpuCullingSystem;
 class Editor;
 class VeScene;
 
@@ -126,7 +128,7 @@ private:
 	void initEditor();
 
 	// --- Main loop internals ---
-	VeFrameInfo buildFrameInfo();
+	VeFrameInfo buildFrameInfo(bool gpu_culling_active);
 	void applySettingChanges();
 	void populateUBO(VeFrameInfo& fi);
 	void dispatchCompute(VeFrameInfo& fi);
@@ -203,6 +205,8 @@ private:
 	std::unique_ptr<OutlineSystem> m_outline_system;
 	std::unique_ptr<BindlessTextureRegistry> m_bindless_registry;
 	std::unique_ptr<MaterialSSBOManager> m_material_ssbo_manager;
+	std::unique_ptr<GpuSceneManager> m_gpu_scene_manager;
+	std::unique_ptr<GpuCullingSystem> m_gpu_culling_system;
 
 	// --- Camera state ---
 	glm::mat4 m_prev_projection_view{1.0f};

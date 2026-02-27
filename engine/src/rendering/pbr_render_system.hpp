@@ -13,6 +13,7 @@
 namespace ve {
 	class VeDevice;
 	class VePipeline;
+	class VeBuffer;
 	class VeMesh;
 	class MeshComponent;
 	class BindlessTextureRegistry;
@@ -43,8 +44,14 @@ public:
 	void buildMegaBuffer(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh*>& meshes);
 
 	void prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr) const;
+	void prepareTransparents(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr) const;
 	void renderOpaque(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set) const;
-	void renderTransparent(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set) const;
+	void renderOpaqueGpuCulled(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
+	                           const VeBuffer& indirect_buffer, const VeBuffer& count_buffer,
+	                           uint32_t bucket_stride, uint32_t max_draw_count,
+	                           bool use_draw_count) const;
+	void renderTransparent(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
+	                       const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 
 	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
 		for (auto& p : m_pipelines)

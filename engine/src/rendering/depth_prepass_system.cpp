@@ -74,7 +74,7 @@ void DepthPrePassSystem::render(
 	mega_buffer.bindShadow(cmd);
 
 	for (uint32_t bucket = 0; bucket < bucket_count; bucket++) {
-		if (bucket_counts[bucket] == 0) 
+		if (bucket_counts[bucket] == 0)
 			continue;
 		bool is_double_sided = (bucket & 1);
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
@@ -83,6 +83,45 @@ void DepthPrePassSystem::render(
 			bucket_offsets[bucket] * sizeof(VkDrawIndexedIndirectCommand),
 			bucket_counts[bucket],
 			sizeof(VkDrawIndexedIndirectCommand));
+	}
+}
+
+void DepthPrePassSystem::renderGpuCulled(
+	VeFrameInfo& frame_info,
+	PbrMegaBuffer& mega_buffer,
+	const VeBuffer& indirect_buffer,
+	const VeBuffer& count_buffer,
+	uint32_t bucket_stride,
+	uint32_t max_draw_count,
+	uint32_t bucket_count,
+	bool use_draw_count) const {
+
+	if (!mega_buffer.isValid())
+		return;
+
+	auto& cmd = frame_info.cmd();
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		0, {*frame_info.global_descriptor_set}, {});
+
+	mega_buffer.bindShadow(cmd);
+
+	for (uint32_t bucket = 0; bucket < bucket_count; bucket++) {
+		bool is_double_sided = (bucket & 1);
+		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
+		auto offset = static_cast<vk::DeviceSize>(bucket * bucket_stride) * sizeof(VkDrawIndexedIndirectCommand);
+		if (use_draw_count) {
+			cmd.drawIndexedIndirectCount(
+				*indirect_buffer.getBuffer(), offset,
+				*count_buffer.getBuffer(), bucket * sizeof(uint32_t),
+				max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
+		} else {
+			// TODO: Without drawIndexedIndirectCount, empty draw commands
+			// are still submitted. A GPU compaction pass could avoid these no-op draws.
+			cmd.drawIndexedIndirect(
+				*indirect_buffer.getBuffer(), offset,
+				max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
+		}
 	}
 }
 

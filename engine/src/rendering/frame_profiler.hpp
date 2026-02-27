@@ -84,6 +84,10 @@ private:
 			 + (is_end ? 1 : 0);
 	}
 
+	static bool isTotalTimer(ProfileTimer timer) {
+		return timer == ProfileTimer::FRAME_TOTAL || timer == ProfileTimer::COMPUTE_TOTAL;
+	}
+
 	VeDevice& m_device;
 	vk::raii::QueryPool m_query_pool{nullptr};
 	float m_ticks_to_ms = 0.0f;

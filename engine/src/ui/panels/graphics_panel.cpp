@@ -202,6 +202,9 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UICon
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Skip drawing objects outside the camera view");
 	ImGui::Checkbox("Depth Pre-Pass", &ctx.depth_prepass_enabled);
+	ImGui::Checkbox("GPU Culling", &ctx.gpu_culling_enabled);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("GPU-driven frustum culling via compute shader");
 	ImGui::Checkbox("Clustered Lighting", &ctx.cluster_enabled);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Use 3D cluster grid to cull lights per-fragment");

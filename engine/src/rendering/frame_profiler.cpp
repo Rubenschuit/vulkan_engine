@@ -19,7 +19,8 @@ FrameProfiler::FrameProfiler(VeDevice& device) : m_device(device) {
 
 void FrameProfiler::beginFrame(uint32_t frame_index) {
 	// Resolve GPU results from the previous use of this frame slot
-	if (m_gpu_enabled && m_frame_active[frame_index]) {
+	// Total timers are always active; individual timers only when profiling is enabled
+	if (m_frame_active[frame_index]) {
 		uint32_t base = frame_index * QUERIES_PER_FRAME;
 
 		std::array<uint64_t, QUERIES_PER_FRAME * 2> raw{};
@@ -83,13 +84,13 @@ void FrameProfiler::beginFrame(uint32_t frame_index) {
 		}
 	}
 
-	m_frame_active[frame_index] = m_gpu_enabled;
+	m_frame_active[frame_index] = true;
 	m_gpu_active[frame_index].fill(false);
 	m_current_frame = frame_index;
 }
 
 void FrameProfiler::beginGpuTimer(vk::raii::CommandBuffer& cmd, ProfileTimer timer) {
-	if (!m_gpu_enabled)
+	if (!m_gpu_enabled && !isTotalTimer(timer))
 		return;
 	uint32_t idx = queryIndex(m_current_frame, timer, false);
 	cmd.writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, *m_query_pool, idx);
@@ -97,7 +98,7 @@ void FrameProfiler::beginGpuTimer(vk::raii::CommandBuffer& cmd, ProfileTimer tim
 }
 
 void FrameProfiler::endGpuTimer(vk::raii::CommandBuffer& cmd, ProfileTimer timer) {
-	if (!m_gpu_enabled)
+	if (!m_gpu_enabled && !isTotalTimer(timer))
 		return;
 	uint32_t idx = queryIndex(m_current_frame, timer, true);
 	cmd.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, *m_query_pool, idx);
@@ -117,8 +118,6 @@ void FrameProfiler::endCpuTimer(ProfileTimer timer) {
 void FrameProfiler::resetAllQueries(vk::raii::CommandBuffer& graphics_cmd,
 									 vk::raii::CommandBuffer& compute_cmd,
 									 uint32_t frame_index) {
-	if (!m_gpu_enabled)
-		return;
 	static constexpr uint32_t GRAPHICS_TIMER_COUNT = static_cast<uint32_t>(ProfileTimer::COMPUTE_TOTAL);
 	static constexpr uint32_t COMPUTE_TIMER_COUNT = TIMER_COUNT - GRAPHICS_TIMER_COUNT;
 

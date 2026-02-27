@@ -29,6 +29,8 @@
 #include "rendering/outline_system.hpp"
 #include "rendering/bindless_texture_registry.hpp"
 #include "rendering/material_ssbo_manager.hpp"
+#include "rendering/gpu_scene_manager.hpp"
+#include "rendering/gpu_culling_system.hpp"
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -129,7 +131,9 @@ void VeApplication::run() {
 
 		// Engine pipeline
 		applySettingChanges();
-		VeFrameInfo fi = buildFrameInfo();
+		bool gpu_culling = m_ui.gpu_culling_enabled
+			&& m_gpu_scene_manager->getDispatchCount() > 0;
+		VeFrameInfo fi = buildFrameInfo(gpu_culling);
 		populateUBO(fi);
 		dispatchCompute(fi);
 		renderFrame(fi);
@@ -175,6 +179,11 @@ void VeApplication::setActiveScene(std::unique_ptr<VeScene> scene) {
 			m_pbr_render_system->buildMegaBuffer(*cmd, all_meshes);
 			m_ve_device.endSingleTimeCommands(*cmd);
 		}
+
+		// Register all mesh entities with GPU scene manager
+		m_gpu_scene_manager->subscribeToRegistry(registry);
+		m_gpu_scene_manager->registerAllObjects(registry,
+			m_pbr_render_system->getMegaBuffer(), *m_material_ssbo_manager);
 	}
 }
 
@@ -190,6 +199,7 @@ void VeApplication::unloadScene() {
 	// Reset render systems that hold scene-specific resources or state
 	// TODO: Improve this
 	m_pbr_render_system->resetMegaBuffer();
+	m_gpu_scene_manager->reset();
 	m_material_ssbo_manager->reset();
 	m_bindless_registry->reset();
 	m_active_scene.reset();
@@ -256,11 +266,14 @@ void VeApplication::processSceneLoadRequest() {
 				if (!all_meshes.empty()) {
 					m_ve_device.getDevice().waitIdle();
 					m_pbr_render_system->resetMegaBuffer();
+					m_gpu_scene_manager->reset();
 					m_material_ssbo_manager->reset();
 					m_bindless_registry->reset();
 					auto cmd = m_ve_device.beginSingleTimeCommands();
 					m_pbr_render_system->buildMegaBuffer(*cmd, all_meshes);
 					m_ve_device.endSingleTimeCommands(*cmd);
+					m_gpu_scene_manager->registerAllObjects(registry,
+						m_pbr_render_system->getMegaBuffer(), *m_material_ssbo_manager);
 				}
 			}
 			break;
@@ -273,7 +286,7 @@ void VeApplication::processSceneLoadRequest() {
 
 // ─── Frame Info Construction ─────────────────────────────────────────────────
 
-VeFrameInfo VeApplication::buildFrameInfo() {
+VeFrameInfo VeApplication::buildFrameInfo(bool gpu_culling_active) {
 	auto& command_buffer = m_ve_renderer.getCurrentCommandBuffer();
 	auto& compute_command_buffer = m_ve_renderer.getCurrentComputeCommandBuffer();
 	auto current_frame = m_ve_renderer.getCurrentFrame();
@@ -286,8 +299,12 @@ VeFrameInfo VeApplication::buildFrameInfo() {
 	auto extent = m_ve_renderer.getExtent();
 	glm::vec2 texel_size = {1.0f / static_cast<float>(extent.width), 1.0f / static_cast<float>(extent.height)};
 
+	vk::raii::DescriptorSet& global_set = gpu_culling_active
+		? m_gpu_culling_system->getGlobalDescriptorSet(current_frame)
+		: m_global_descriptor_sets[current_frame];
+
 	VeFrameInfo fi = {
-		.global_descriptor_set = m_global_descriptor_sets[current_frame],
+		.global_descriptor_set = global_set,
 		.texture_descriptor_set = m_particle_descriptor_set,
 		.material_descriptor_set = material_descriptor_set,
 		.active_scene = m_active_scene.get(),
@@ -317,6 +334,7 @@ VeFrameInfo VeApplication::buildFrameInfo() {
 		.instance_capacity = INITIAL_INSTANCE_CAPACITY,
 		.shadow_mode = m_ui.shadow_mode,
 		.csm_data = {},
+		.gpu_culling_active = gpu_culling_active,
 		.selected_entity = m_editor->getState().selected_entity,
 	};
 
@@ -423,6 +441,13 @@ void VeApplication::dispatchCompute(VeFrameInfo& fi) {
 	// Record compute start timestamp
 	m_ve_renderer.getProfiler().beginGpuTimer(fi.compute_command_buffer, ProfileTimer::COMPUTE_TOTAL);
 
+	// GPU culling: upload dirty transforms and dispatch
+	if (fi.gpu_culling_active) {
+		m_gpu_scene_manager->updateDirtyTransforms(current_frame,
+			m_active_scene->getRegistry(), fi.compute_command_buffer);
+		m_gpu_culling_system->dispatch(fi, *m_gpu_scene_manager);
+	}
+
 	// Record compute commands
 	m_fireworks_system->recordComputeCommands(fi);
 	m_particle_system->recordComputeCommands(fi);
@@ -453,27 +478,44 @@ void VeApplication::dispatchCompute(VeFrameInfo& fi) {
 void VeApplication::renderFrame(VeFrameInfo& fi) {
 	auto& command_buffer = fi.cmd();
 
-	// Culling
 	auto& profiler = m_ve_renderer.getProfiler();
-	profiler.beginCpuTimer(ProfileTimer::CULLING);
-	m_culling_system->setCullingEnabled(m_ui.enable_frustum_culling);
-	m_culling_system->setForceLodLevel(m_ui.lod_force_level);
-	m_culling_system->setLodThresholds(m_ui.lod_screen_thresholds);
-	m_culling_system->setLodHysteresis(m_ui.lod_hysteresis);
-	m_culling_system->setMinParallelEntities(static_cast<uint32_t>(m_ui.min_parallel_cull_entities));
-	m_culling_system->cullObjects(fi, &m_ve_renderer.getThreadPool());
-	profiler.endCpuTimer(ProfileTimer::CULLING);
+	auto& registry = m_active_scene->getRegistry();
+	auto& bindless_set = m_bindless_registry->getDescriptorSet();
+	m_pbr_render_system->setDepthPrePassActive(m_ui.depth_prepass_enabled);
+
+	if (fi.gpu_culling_active) {
+		// GPU-culled path: only prepare transparents on CPU
+		profiler.beginCpuTimer(ProfileTimer::CULLING);
+		m_pbr_render_system->prepareTransparents(fi, *m_material_ssbo_manager);
+		profiler.endCpuTimer(ProfileTimer::CULLING);
+	} else {
+		// CPU culling fallback
+		profiler.beginCpuTimer(ProfileTimer::CULLING);
+		m_culling_system->setCullingEnabled(m_ui.enable_frustum_culling);
+		m_culling_system->setForceLodLevel(m_ui.lod_force_level);
+		m_culling_system->setLodThresholds(m_ui.lod_screen_thresholds);
+		m_culling_system->setLodHysteresis(m_ui.lod_hysteresis);
+		m_culling_system->setMinParallelEntities(static_cast<uint32_t>(m_ui.min_parallel_cull_entities));
+		m_culling_system->cullObjects(fi, &m_ve_renderer.getThreadPool());
+		profiler.endCpuTimer(ProfileTimer::CULLING);
+
+		m_pbr_render_system->prepareFrame(fi, *m_material_ssbo_manager);
+	}
 
 	// Collect stats
-	m_ui.stats.cull_total_objects = m_culling_system->getLastTotalMeshObjects();
-	m_ui.stats.cull_visible_objects = m_culling_system->getLastVisibleCount();
-
-	uint32_t tri_count = 0;
-	for (auto& vo : m_culling_system->getVisibleObjectsRef())
-		tri_count += vo.mesh->getMesh()->getLodIndexCount(vo.lod_level) / 3;
-	m_ui.stats.visible_triangles = tri_count;
-
-	auto& registry = m_active_scene->getRegistry();
+	if (fi.gpu_culling_active) {
+		m_ui.stats.cull_total_objects = m_gpu_scene_manager->getObjectCount();
+		// Readback is 1 frame cycle stale (written during previous use of this frame slot)
+		m_ui.stats.cull_visible_objects = m_gpu_culling_system->readbackDrawCounts(fi.current_frame);
+		m_ui.stats.visible_triangles = 0;
+	} else {
+		m_ui.stats.cull_total_objects = m_culling_system->getLastTotalMeshObjects();
+		m_ui.stats.cull_visible_objects = m_culling_system->getLastVisibleCount();
+		uint32_t tri_count = 0;
+		for (auto& vo : m_culling_system->getVisibleObjectsRef())
+			tri_count += vo.mesh->getMesh()->getLodIndexCount(vo.lod_level) / 3;
+		m_ui.stats.visible_triangles = tri_count;
+	}
 	m_ui.stats.num_point_lights = registry.activePointLightCount();
 	m_ui.stats.num_directional_lights = registry.activeDirectionalLightCount();
 
@@ -491,22 +533,27 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		profiler.endCpuTimer(ProfileTimer::SHADOW_MAPS);
 	}
 
-	// Prepare opaque/transparent draw data + indirect commands
-	m_pbr_render_system->prepareFrame(fi, *m_material_ssbo_manager);
-	m_pbr_render_system->setDepthPrePassActive(m_ui.depth_prepass_enabled);
+	uint32_t gpu_object_count = m_gpu_scene_manager->getDispatchCount();
 
-	auto& bindless_set = m_bindless_registry->getDescriptorSet();
-
-	// Depth prepass (indirect draws)
+	// Depth prepass
 	if (m_ui.depth_prepass_enabled) {
 		profiler.beginCpuTimer(ProfileTimer::DEPTH_PREPASS);
 		profiler.beginGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
 		m_ve_renderer.beginDepthPrePass(command_buffer);
-		m_depth_prepass_system->render(fi,
-			m_pbr_render_system->getMegaBuffer(),
-			m_pbr_render_system->getIndirectBuffer(fi.current_frame),
-			m_pbr_render_system->getDepthBucketOffsets(),
-			m_pbr_render_system->getDepthBucketCounts(), 2);
+		if (fi.gpu_culling_active) {
+			m_depth_prepass_system->renderGpuCulled(fi,
+				m_pbr_render_system->getMegaBuffer(),
+				m_gpu_culling_system->getIndirectBuffer(fi.current_frame),
+				m_gpu_culling_system->getCountBuffer(fi.current_frame),
+				MAX_GPU_OBJECTS, gpu_object_count, 2,
+				m_ve_device.supportsDrawIndirectCount());
+		} else {
+			m_depth_prepass_system->render(fi,
+				m_pbr_render_system->getMegaBuffer(),
+				m_pbr_render_system->getIndirectBuffer(fi.current_frame),
+				m_pbr_render_system->getDepthBucketOffsets(),
+				m_pbr_render_system->getDepthBucketCounts(), 2);
+		}
 		m_ve_renderer.endDepthPrePass(command_buffer);
 		profiler.endGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
 		profiler.endCpuTimer(ProfileTimer::DEPTH_PREPASS);
@@ -520,13 +567,22 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		}
 	}
 
-	// Scene render (MDI: ~4 indirect draw calls for opaques)
+	// Scene render
 	profiler.beginCpuTimer(ProfileTimer::SCENE_RENDER);
 	profiler.beginGpuTimer(command_buffer, ProfileTimer::SCENE_RENDER);
 	m_ve_renderer.beginSceneRender(command_buffer, m_ui.depth_prepass_enabled);
-	m_pbr_render_system->renderOpaque(fi, bindless_set);
+	if (fi.gpu_culling_active) {
+		m_pbr_render_system->renderOpaqueGpuCulled(fi, bindless_set,
+			m_gpu_culling_system->getIndirectBuffer(fi.current_frame),
+			m_gpu_culling_system->getCountBuffer(fi.current_frame),
+			MAX_GPU_OBJECTS, gpu_object_count,
+			m_ve_device.supportsDrawIndirectCount());
+	} else {
+		m_pbr_render_system->renderOpaque(fi, bindless_set);
+	}
 	m_skybox_render_system->render(fi);
-	m_pbr_render_system->renderTransparent(fi, bindless_set);
+	m_pbr_render_system->renderTransparent(fi, bindless_set,
+		fi.gpu_culling_active ? &m_global_descriptor_sets[fi.current_frame] : nullptr);
 	m_particle_system->render(fi);
 	if (m_ui.show_axes)
 		m_axes_render_system->render(fi);
@@ -725,19 +781,20 @@ void VeApplication::createDescriptors() {
 			+ 4*F          // culling + GTAO
 			+ 4*F          // particle
 			+ 10           // headroom
-			+ 5*F)         // outline (JFA init + 2 step dirs + 2 composite)
+			+ 5*F          // outline (JFA init + 2 step dirs + 2 composite)
+			+ 3*F)         // GPU culling (compute sets + global sets)
 		.addPoolSize(vk::DescriptorType::eUniformBuffer,
-			4*F + S*F + MAX_MATERIAL_SETS + 1 + 4*F)    // global + shadow + material + skybox + culling/GTAO
+			4*F + S*F + MAX_MATERIAL_SETS + 1 + 4*F + 2*F)
 		.addPoolSize(vk::DescriptorType::eCombinedImageSampler,
-			3*3 + MAX_MATERIAL_SETS*5 + 4*F)             // global samplers + material textures + outline composite
+			3*3 + MAX_MATERIAL_SETS*5 + 4*F)
 		.addPoolSize(vk::DescriptorType::eSampler,
-			2*F + F + F + 10)                             // bloom + post-process + depth + headroom
+			2*F + F + F + 10)
 		.addPoolSize(vk::DescriptorType::eSampledImage,
-			F + 4*F + 8*F + 10 + 3*F)                    // depth + GTAO + particle + headroom + outline JFA
+			F + 4*F + 8*F + 10 + 3*F)
 		.addPoolSize(vk::DescriptorType::eStorageBuffer,
-			22*F + F + S*F + 14*F)                        // culling + depth + shadow + particle
+			22*F + F + S*F + 14*F + 9*F)
 		.addPoolSize(vk::DescriptorType::eStorageImage,
-			F + 3*F + 3*F)                                // GTAO + particle + outline JFA
+			F + 3*F + 3*F)
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
 		.buildShared();
 
@@ -944,6 +1001,13 @@ void VeApplication::initSystems() {
 		m_ve_renderer.getExtent(),
 		m_ve_renderer.getSwapChainImageFormat()
 	);
+
+	// GPU-driven culling
+	m_gpu_scene_manager = std::make_unique<GpuSceneManager>(m_ve_device);
+	m_gpu_culling_system = std::make_unique<GpuCullingSystem>(m_ve_device);
+	m_gpu_culling_system->createDescriptorSets(*m_global_pool, *m_gpu_scene_manager);
+	m_gpu_culling_system->createGlobalDescriptorSets(*m_global_pool, *m_global_set_layout,
+		m_uniform_buffers, m_material_ssbo_manager->getBuffer());
 }
 
 void VeApplication::initEditor() {

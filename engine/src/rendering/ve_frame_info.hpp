@@ -20,12 +20,12 @@ class MeshComponent;
 // Per-instance transform data uploaded to the instance SSBO each frame.
 // Indexed by gl_InstanceIndex (SV_InstanceID in Slang) in vertex shaders.
 struct InstanceData {
-	alignas(16) glm::mat4 transform;            
-	alignas(16) glm::mat3x4 normal_transform;   
+	alignas(16) glm::mat4 transform;
+	alignas(16) glm::mat3x4 normal_transform;
 	alignas(4)  uint32_t material_index;        // index into MaterialGPU SSBO
 	alignas(4)  uint32_t lod_level;             // for debug visualization
 	alignas(4)  float    depth_offset;          // clip-space Z offset for MASK
-	alignas(4)  uint32_t material_flags;        // material flags for vertex shader (avoids material SSBO read)      
+	alignas(4)  uint32_t material_flags;        // material flags for vertex shader (avoids material SSBO read)
 };
 static_assert(sizeof(InstanceData) == 128, "InstanceData must be 128 bytes for SSBO alignment");
 
@@ -201,6 +201,7 @@ struct CsmCascadeData {
 	uint32_t  active_cascade_count = 0;
 };
 
+// TODO: restructure
 struct VeFrameInfo {
 	vk::raii::DescriptorSet& global_descriptor_set;
 	vk::raii::DescriptorSet& texture_descriptor_set;
@@ -230,7 +231,7 @@ struct VeFrameInfo {
 	// Shadow mode for pipeline variant selection (set by application, consumed by render systems)
 	ShadowMode shadow_mode = ShadowMode::REGULAR;
 
-	// CSM cascade data (filled by LightSystem, consumed by ShadowRenderSystem)
+	// Filled by LightSystem, consumed by ShadowRenderSystem
 	CsmCascadeData csm_data;
 
 	// Screen-space shadow mask descriptor set (Set 3, null when mask unavailable)
@@ -243,7 +244,7 @@ struct VeFrameInfo {
 	// Clustered forward shading descriptor set (Set 4, null when clustering disabled)
 	vk::raii::DescriptorSet* cluster_descriptor_set = nullptr;
 
-	// Selection outline
+	bool gpu_culling_active = false;
 	Entity selected_entity = Entity::null();
 };
 

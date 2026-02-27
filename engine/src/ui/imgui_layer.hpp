@@ -93,6 +93,7 @@ struct VENGINE_API UIContext {
 
 	// culling
 	bool enable_frustum_culling = true;
+	bool gpu_culling_enabled = false;
 
 	// GPU profiling
 	bool gpu_profiling = false;

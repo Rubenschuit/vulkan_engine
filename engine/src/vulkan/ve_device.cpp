@@ -307,6 +307,12 @@ void VeDevice::createLogicalDevice() {
 	m_compute_queue_index  = m_queue_family_indices.computeFamily;
 	m_transfer_queue_index = m_queue_family_indices.transferFamily;
 
+	// Query drawIndirectCount support
+	{
+		auto chain = m_physical_device.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan12Features>();
+		m_supports_draw_indirect_count = chain.get<vk::PhysicalDeviceVulkan12Features>().drawIndirectCount;
+	}
+
 	// Setup a chain of structures to enable required Vulkan features
 	// Note: Slang-generated SPIR-V for VS uses DrawParameters (BaseVertex/VertexIndex),
 	// so we must enable shaderDrawParameters from Vulkan 1.1 features.
@@ -318,6 +324,7 @@ void VeDevice::createLogicalDevice() {
 		{.features = {.multiDrawIndirect = true, .depthClamp = true, .samplerAnisotropy = true}},
 		{.multiview = true, .shaderDrawParameters = true},
 		{	// Vulkan 1.2 features (descriptor indexing + timeline semaphore)
+			.drawIndirectCount = m_supports_draw_indirect_count,
 			.descriptorIndexing = true,
 			.shaderSampledImageArrayNonUniformIndexing = true,
 			.descriptorBindingSampledImageUpdateAfterBind = true,
