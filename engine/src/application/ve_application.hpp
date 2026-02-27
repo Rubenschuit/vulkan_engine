@@ -35,7 +35,7 @@ struct VENGINE_API SceneLoadRequest {
 	std::filesystem::path gltf_path;
 };
 
-// Forward declarations for render systems
+// Forward declarations
 class CullingSystem;
 class ShadowRenderSystem;
 class DepthPrePassSystem;
@@ -52,6 +52,8 @@ class SkyboxRenderSystem;
 class BloomSystem;
 class PostProcessSystem;
 class OutlineSystem;
+class BindlessTextureRegistry;
+class MaterialSSBOManager;
 class Editor;
 class VeScene;
 
@@ -199,6 +201,8 @@ private:
 	std::unique_ptr<BloomSystem> m_bloom_system;
 	std::unique_ptr<PostProcessSystem> m_post_process_system;
 	std::unique_ptr<OutlineSystem> m_outline_system;
+	std::unique_ptr<BindlessTextureRegistry> m_bindless_registry;
+	std::unique_ptr<MaterialSSBOManager> m_material_ssbo_manager;
 
 	// --- Camera state ---
 	glm::mat4 m_prev_projection_view{1.0f};
@@ -215,7 +219,6 @@ private:
 
 	InputActions m_last_input_actions;
 	bool m_shadow_mask_half_res = false;
-	bool m_was_parallel = false;
 	bool m_gtao_half_res = true;
 	int m_pcf_samples = 8;
 	int m_pcss_filter_samples = 16;

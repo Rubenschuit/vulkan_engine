@@ -27,6 +27,8 @@
 #include "rendering/bloom_system.hpp"
 #include "rendering/post_process_system.hpp"
 #include "rendering/outline_system.hpp"
+#include "rendering/bindless_texture_registry.hpp"
+#include "rendering/material_ssbo_manager.hpp"
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -159,6 +161,20 @@ void VeApplication::setActiveScene(std::unique_ptr<VeScene> scene) {
 		glm::vec4 ambient = m_active_scene->getDefaultAmbient();
 		m_ui.ambient_light_color = glm::vec3(ambient);
 		m_ui.ambient_light_intensity = ambient.w;
+
+		// Build mega buffer from all meshes in the scene
+		auto& registry = m_active_scene->getRegistry();
+		std::vector<VeMesh*> all_meshes;
+		for (auto& mc : registry.meshes()) {
+			VeMesh* m = mc.getMesh();
+			if (m && std::find(all_meshes.begin(), all_meshes.end(), m) == all_meshes.end())
+				all_meshes.push_back(m);
+		}
+		if (!all_meshes.empty()) {
+			auto cmd = m_ve_device.beginSingleTimeCommands();
+			m_pbr_render_system->buildMegaBuffer(*cmd, all_meshes);
+			m_ve_device.endSingleTimeCommands(*cmd);
+		}
 	}
 }
 
@@ -170,6 +186,12 @@ void VeApplication::unloadScene() {
 	if (!m_active_scene)
 		return;
 	m_ve_device.getDevice().waitIdle();
+
+	// Reset render systems that hold scene-specific resources or state
+	// TODO: Improve this
+	m_pbr_render_system->resetMegaBuffer();
+	m_material_ssbo_manager->reset();
+	m_bindless_registry->reset();
 	m_active_scene.reset();
 }
 
@@ -221,8 +243,26 @@ void VeApplication::processSceneLoadRequest() {
 			break;
 		}
 		case SceneLoadRequest::Type::ADD_MODEL: {
-			if (m_active_scene)
+			if (m_active_scene) {
 				m_active_scene->addModel(m_pending_load.gltf_path);
+				// Rebuild mega buffer to include the new model's meshes
+				auto& registry = m_active_scene->getRegistry();
+				std::vector<VeMesh*> all_meshes;
+				for (auto& mc : registry.meshes()) {
+					VeMesh* m = mc.getMesh();
+					if (m && std::find(all_meshes.begin(), all_meshes.end(), m) == all_meshes.end())
+						all_meshes.push_back(m);
+				}
+				if (!all_meshes.empty()) {
+					m_ve_device.getDevice().waitIdle();
+					m_pbr_render_system->resetMegaBuffer();
+					m_material_ssbo_manager->reset();
+					m_bindless_registry->reset();
+					auto cmd = m_ve_device.beginSingleTimeCommands();
+					m_pbr_render_system->buildMegaBuffer(*cmd, all_meshes);
+					m_ve_device.endSingleTimeCommands(*cmd);
+				}
+			}
 			break;
 		}
 		default:
@@ -451,172 +491,52 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		profiler.endCpuTimer(ProfileTimer::SHADOW_MAPS);
 	}
 
-	// Prepare opaque/transparent draw data (single-threaded: mutates instance SSBO)
-	m_pbr_render_system->prepareFrame(fi);
+	// Prepare opaque/transparent draw data + indirect commands
+	m_pbr_render_system->prepareFrame(fi, *m_material_ssbo_manager);
 	m_pbr_render_system->setDepthPrePassActive(m_ui.depth_prepass_enabled);
 
-	const auto& opaque_groups = m_pbr_render_system->getOpaqueGroups();
-	uint32_t group_count = static_cast<uint32_t>(opaque_groups.size());
-	bool use_parallel = (group_count >= static_cast<uint32_t>(m_ui.min_parallel_groups));
+	auto& bindless_set = m_bindless_registry->getDescriptorSet();
 
-	// Log
-	if (use_parallel != m_was_parallel) {
-		VE_LOGI("Render mode: " << (use_parallel ? "parallel" : "single-threaded")
-			<< " (" << group_count << " opaque groups)");
-		m_was_parallel = use_parallel;
+	// Depth prepass (indirect draws)
+	if (m_ui.depth_prepass_enabled) {
+		profiler.beginCpuTimer(ProfileTimer::DEPTH_PREPASS);
+		profiler.beginGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
+		m_ve_renderer.beginDepthPrePass(command_buffer);
+		m_depth_prepass_system->render(fi,
+			m_pbr_render_system->getMegaBuffer(),
+			m_pbr_render_system->getIndirectBuffer(fi.current_frame),
+			m_pbr_render_system->getDepthBucketOffsets(),
+			m_pbr_render_system->getDepthBucketCounts(), 2);
+		m_ve_renderer.endDepthPrePass(command_buffer);
+		profiler.endGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
+		profiler.endCpuTimer(ProfileTimer::DEPTH_PREPASS);
+
+		if (m_ui.gtao_enabled) {
+			profiler.beginCpuTimer(ProfileTimer::GTAO);
+			profiler.beginGpuTimer(command_buffer, ProfileTimer::GTAO);
+			m_gtao_system->dispatch(fi);
+			profiler.endGpuTimer(command_buffer, ProfileTimer::GTAO);
+			profiler.endCpuTimer(ProfileTimer::GTAO);
+		}
 	}
 
-	auto& pool = m_ve_renderer.getThreadPool();
-	auto& cmd_manager = m_ve_renderer.getCommandManager();
-	uint32_t frame = fi.current_frame;
-	uint32_t N = pool.workerCount();
-	auto extent = m_ve_renderer.getExtent();
-	vk::Viewport viewport{
-		.x = 0.0f, .y = 0.0f,
-		.width = static_cast<float>(extent.width),
-		.height = static_cast<float>(extent.height),
-		.minDepth = 0.0f, .maxDepth = 1.0f
-	};
-	vk::Rect2D scissor{.offset = {0, 0}, .extent = extent};
-
-	if (use_parallel) {
-		// Dispatch depth prepass + opaque chunks
-		auto depth_inheritance = m_ve_renderer.getDepthPrepassInheritanceInfo();
-		auto scene_inheritance = m_ve_renderer.getSceneInheritanceInfo();
-		bool depth_prepass = m_ui.depth_prepass_enabled;
-
-		// Pre-compute which workers have actual work (begin < end)
-		uint32_t active_count = 0;
-		for (uint32_t wi = 0; wi < N; ++wi) {
-			uint32_t begin = (group_count * wi) / N;
-			uint32_t end = (group_count * (wi + 1)) / N;
-			if (begin < end)
-				active_count++;
-		}
-
-		std::vector<vk::CommandBuffer> depth_secondaries;
-		std::vector<vk::CommandBuffer> scene_secondaries;
-		if (depth_prepass)
-			depth_secondaries.reserve(active_count);
-		scene_secondaries.reserve(active_count + 1); // +1 for rest_cb
-		std::mutex secondaries_mutex;
-
-		pool.dispatch([&](uint32_t wi, ThreadSlot slot) {
-			uint32_t begin = (group_count * wi) / N;
-			uint32_t end = (group_count * (wi + 1)) / N;
-			if (begin >= end)
-				return;
-
-			vk::CommandBuffer depth_handle{};
-			// Depth prepass secondary
-			if (depth_prepass) {
-				auto& depth_cb = cmd_manager.acquireSecondary(slot, frame, depth_inheritance);
-				depth_cb.setViewport(0, viewport);
-				depth_cb.setScissor(0, scissor);
-				m_depth_prepass_system->recordRange(depth_cb, fi, opaque_groups, begin, end);
-				depth_cb.end();
-				depth_handle = *depth_cb;
-			}
-
-			// Opaque secondary
-			auto& scene_cb = cmd_manager.acquireSecondary(slot, frame, scene_inheritance);
-			scene_cb.setViewport(0, viewport);
-			scene_cb.setScissor(0, scissor);
-			m_pbr_render_system->recordOpaqueRange(scene_cb, fi, begin, end);
-			scene_cb.end();
-
-			std::lock_guard<std::mutex> lock(secondaries_mutex);
-			if (depth_prepass)
-				depth_secondaries.push_back(depth_handle);
-			scene_secondaries.push_back(*scene_cb);
-		});
-
-		// Execute depth prepass secondaries first, then GTAO if enabled
-		if (depth_prepass) {
-			profiler.beginCpuTimer(ProfileTimer::DEPTH_PREPASS);
-			profiler.beginGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
-			m_ve_renderer.beginDepthPrePass(command_buffer, true);
-			if (!depth_secondaries.empty())
-				command_buffer.executeCommands(depth_secondaries);
-			m_ve_renderer.endDepthPrePass(command_buffer);
-			profiler.endGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
-			profiler.endCpuTimer(ProfileTimer::DEPTH_PREPASS);
-
-			if (m_ui.gtao_enabled) {
-				profiler.beginCpuTimer(ProfileTimer::GTAO);
-				profiler.beginGpuTimer(command_buffer, ProfileTimer::GTAO);
-				m_gtao_system->dispatch(fi);
-				profiler.endGpuTimer(command_buffer, ProfileTimer::GTAO);
-				profiler.endCpuTimer(ProfileTimer::GTAO);
-			}
-		}
-
-		// Scene Render (all secondary cbs)
-		profiler.beginCpuTimer(ProfileTimer::SCENE_RENDER);
-		profiler.beginGpuTimer(command_buffer, ProfileTimer::SCENE_RENDER);
-		m_ve_renderer.beginSceneRender(command_buffer, depth_prepass, true);
-
-		// Main thread: record rest (skybox, transparent, particles, debug) into secondary CB
-		auto main_slot = cmd_manager.getMainThreadSlot();
-		auto& rest_cb = cmd_manager.acquireSecondary(main_slot, frame, scene_inheritance);
-		rest_cb.setViewport(0, viewport);
-		rest_cb.setScissor(0, scissor);
-
-		fi.command_buffer = &rest_cb;
-		m_skybox_render_system->render(fi);
-		m_pbr_render_system->renderTransparent(fi);
-		m_particle_system->render(fi);
-		if (m_ui.show_axes)
-			m_axes_render_system->render(fi);
-		if (m_ui.show_aabb_debug)
-			m_aabb_debug_render_system->render(fi);
-		m_light_system->render(fi);
-		m_fireworks_system->render(fi);
-		fi.command_buffer = &command_buffer;
-		rest_cb.end();
-
-		// Execute all: opaque chunks + rest
-		scene_secondaries.push_back(*rest_cb);
-		command_buffer.executeCommands(scene_secondaries);
-		m_ve_renderer.endSceneRender(command_buffer);
-		profiler.endGpuTimer(command_buffer, ProfileTimer::SCENE_RENDER);
-		profiler.endCpuTimer(ProfileTimer::SCENE_RENDER);
-	} else {  // Single-threaded path
-		if (m_ui.depth_prepass_enabled) {
-			profiler.beginCpuTimer(ProfileTimer::DEPTH_PREPASS);
-			profiler.beginGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
-			m_ve_renderer.beginDepthPrePass(command_buffer);
-			m_depth_prepass_system->render(fi, opaque_groups);
-			m_ve_renderer.endDepthPrePass(command_buffer);
-			profiler.endGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
-			profiler.endCpuTimer(ProfileTimer::DEPTH_PREPASS);
-
-			if (m_ui.gtao_enabled) {
-				profiler.beginCpuTimer(ProfileTimer::GTAO);
-				profiler.beginGpuTimer(command_buffer, ProfileTimer::GTAO);
-				m_gtao_system->dispatch(fi);
-				profiler.endGpuTimer(command_buffer, ProfileTimer::GTAO);
-				profiler.endCpuTimer(ProfileTimer::GTAO);
-			}
-		}
-
-		profiler.beginCpuTimer(ProfileTimer::SCENE_RENDER);
-		profiler.beginGpuTimer(command_buffer, ProfileTimer::SCENE_RENDER);
-		m_ve_renderer.beginSceneRender(command_buffer, m_ui.depth_prepass_enabled);
-		m_pbr_render_system->renderOpaque(fi);
-		m_skybox_render_system->render(fi);
-		m_pbr_render_system->renderTransparent(fi);
-		m_particle_system->render(fi);
-		if (m_ui.show_axes)
-			m_axes_render_system->render(fi);
-		if (m_ui.show_aabb_debug)
-			m_aabb_debug_render_system->render(fi);
-		m_light_system->render(fi);
-		m_fireworks_system->render(fi);
-		m_ve_renderer.endSceneRender(command_buffer);
-		profiler.endGpuTimer(command_buffer, ProfileTimer::SCENE_RENDER);
-		profiler.endCpuTimer(ProfileTimer::SCENE_RENDER);
-	}
+	// Scene render (MDI: ~4 indirect draw calls for opaques)
+	profiler.beginCpuTimer(ProfileTimer::SCENE_RENDER);
+	profiler.beginGpuTimer(command_buffer, ProfileTimer::SCENE_RENDER);
+	m_ve_renderer.beginSceneRender(command_buffer, m_ui.depth_prepass_enabled);
+	m_pbr_render_system->renderOpaque(fi, bindless_set);
+	m_skybox_render_system->render(fi);
+	m_pbr_render_system->renderTransparent(fi, bindless_set);
+	m_particle_system->render(fi);
+	if (m_ui.show_axes)
+		m_axes_render_system->render(fi);
+	if (m_ui.show_aabb_debug)
+		m_aabb_debug_render_system->render(fi);
+	m_light_system->render(fi);
+	m_fireworks_system->render(fi);
+	m_ve_renderer.endSceneRender(command_buffer);
+	profiler.endGpuTimer(command_buffer, ProfileTimer::SCENE_RENDER);
+	profiler.endCpuTimer(ProfileTimer::SCENE_RENDER);
 
 	// Selection outline: mask + JFA
 	auto& editor_state = m_editor->getState();
@@ -773,13 +693,11 @@ void VeApplication::createBuffers() {
 void VeApplication::createDescriptors() {
 	VE_LOGD("Creating descriptors");
 
-	// Global set layout: UBO (binding 0), instance SSBO (binding 1)
+	// Global set layout: UBO (binding 0), instance SSBO (binding 1), material SSBO (binding 2)
 	m_global_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eAllGraphics | vk::ShaderStageFlagBits::eCompute)
 		.addBinding(1, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eVertex)
-#if ENABLE_RAY_TRACING
-		.addBinding(2, vk::DescriptorType::eAccelerationStructureKHR, vk::ShaderStageFlagBits::eFragment)
-#endif
+		.addBinding(2, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment)
 		.build();
 
 	// Material set layout: albedo, normal, metallic-roughness, occlusion, emissive, UBO
@@ -823,9 +741,14 @@ void VeApplication::createDescriptors() {
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
 		.buildShared();
 
+	// Bindless texture registry + material SSBO manager (needed before global desc set writes)
+	m_bindless_registry = std::make_unique<BindlessTextureRegistry>(m_ve_device);
+	m_material_ssbo_manager = std::make_unique<MaterialSSBOManager>(m_ve_device, *m_bindless_registry);
+
 	// Global descriptor sets (per frame)
 	m_global_descriptor_sets.clear();
 	m_global_descriptor_sets.reserve(MAX_FRAMES_IN_FLIGHT);
+	auto material_ssbo_info = m_material_ssbo_manager->getBuffer().getDescriptorInfo();
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		auto buffer_info = m_uniform_buffers[i]->getDescriptorInfo();
 		auto instance_info = m_instance_buffers[i]->getDescriptorInfo();
@@ -833,6 +756,7 @@ void VeApplication::createDescriptors() {
 		VeDescriptorWriter(*m_global_set_layout, *m_global_pool)
 			.writeBuffer(0, &buffer_info)
 			.writeBuffer(1, &instance_info)
+			.writeBuffer(2, &material_ssbo_info)
 			.build(set);
 		m_global_descriptor_sets.push_back(std::move(set));
 	}
@@ -902,7 +826,7 @@ void VeApplication::initSystems() {
 
 	m_depth_prepass_system = std::make_unique<DepthPrePassSystem>(
 		m_ve_device, m_global_set_layout->getDescriptorSetLayout(),
-		m_ve_renderer.getSampleCount(), shader("shadow_shader.spv")
+		m_ve_renderer.getSampleCount(), shader("depth_prepass_shader.spv")
 	);
 
 	{
@@ -945,7 +869,7 @@ void VeApplication::initSystems() {
 	m_pbr_render_system = std::make_unique<PbrRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
-		m_material_set_layout->getDescriptorSetLayout(),
+		m_bindless_registry->getSetLayout(),
 		m_shadow_render_system->getShadowSetLayout(),
 		m_shadow_mask_system->getShadowMaskSetLayout(),
 		m_cluster_light_system->getOutputSetLayout(),

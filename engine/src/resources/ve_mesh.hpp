@@ -76,6 +76,7 @@ public:
 	uint32_t getLodCount() const { return 1 + static_cast<uint32_t>(m_lod_levels.size()); }
 	uint32_t getLodIndexCount(uint32_t lod) const;
 	VeBuffer& getLodIndexBuffer(uint32_t lod) const;
+	VeBuffer& getVertexBuffer() const { return *m_vertex_buffer; }
 	VeBuffer& getShadowVertexBuffer() const { return *m_shadow_vertex_buffer; }
 	VeBuffer& getIndexBuffer() const { return *m_index_buffer; }
 

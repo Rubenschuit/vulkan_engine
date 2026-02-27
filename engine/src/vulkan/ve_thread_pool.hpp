@@ -35,7 +35,7 @@ private:
 	void workerLoop(uint32_t worker_index);
 
 	CommandResourceManager& m_cmd_manager;
-	std::vector<std::jthread> m_workers;
+	std::vector<std::thread> m_workers;
 	std::vector<ThreadSlot> m_slots;
 
 	// Epoch-based dispatch synchronization

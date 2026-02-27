@@ -15,12 +15,16 @@ struct CsmUniformBuffer {
 [vk::binding(0, 0)]
 ConstantBuffer<CsmUniformBuffer> ubo;
 
-// Per-instance transforms stored in SSBO
+// Per-instance transforms stored in SSBO (must match 128-byte C++ InstanceData)
 struct InstanceData {
 	float4x4 transform;
 	float4   normal_col0;
 	float4   normal_col1;
 	float4   normal_col2;
+	uint     material_index;
+	uint     lod_level;
+	float    depth_offset;
+	uint     material_flags;
 };
 [vk::binding(1, 0)]
 StructuredBuffer<InstanceData> instances;

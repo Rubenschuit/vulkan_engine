@@ -20,10 +20,14 @@ class MeshComponent;
 // Per-instance transform data uploaded to the instance SSBO each frame.
 // Indexed by gl_InstanceIndex (SV_InstanceID in Slang) in vertex shaders.
 struct InstanceData {
-	alignas(16) glm::mat4 transform;            // 64 bytes — world transform
-	alignas(16) glm::mat3x4 normal_transform;   // 48 bytes — normal matrix (3 columns packed as vec4)
+	alignas(16) glm::mat4 transform;            
+	alignas(16) glm::mat3x4 normal_transform;   
+	alignas(4)  uint32_t material_index;        // index into MaterialGPU SSBO
+	alignas(4)  uint32_t lod_level;             // for debug visualization
+	alignas(4)  float    depth_offset;          // clip-space Z offset for MASK
+	alignas(4)  uint32_t material_flags;        // material flags for vertex shader (avoids material SSBO read)      
 };
-static_assert(sizeof(InstanceData) == 112, "InstanceData must be 112 bytes for SSBO alignment");
+static_assert(sizeof(InstanceData) == 128, "InstanceData must be 128 bytes for SSBO alignment");
 
 // Cached visible object built once per frame by the culling system.
 // Stores Entity + direct MeshComponent* for zero-lookup rendering.

@@ -2,6 +2,7 @@
 #include "ve_export.hpp"
 #include "ve_config.hpp"
 #include "rendering/ve_frame_info.hpp"
+#include "rendering/pbr_mega_buffer.hpp"
 #include "resources/ve_material_properties.hpp"
 
 #include <array>
@@ -14,29 +15,18 @@ namespace ve {
 	class VePipeline;
 	class VeMesh;
 	class MeshComponent;
+	class BindlessTextureRegistry;
+	class MaterialSSBOManager;
 }
 
 namespace ve {
 
 class VENGINE_API PbrRenderSystem {
 public:
-	// Instanced draw groups: opaque drawables merged by (mesh, lod, material) for batched draws
-	struct InstanceGroup {
-		VeMesh* mesh = nullptr;
-		uint32_t lod_level = 0;
-		VkDescriptorSet material_set = VK_NULL_HANDLE;
-		uint32_t first_instance = 0;  // offset into SSBO
-		uint32_t instance_count = 0;
-		float has_texture = 0.0f;
-		float alpha_cutoff = 0.0f;
-		uint32_t material_flags = 0;
-		bool double_sided = false;
-	};
-
 	PbrRenderSystem(
 		VeDevice& device,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
-		const vk::raii::DescriptorSetLayout& material_set_layout,
+		const vk::raii::DescriptorSetLayout& bindless_set_layout,
 		const vk::raii::DescriptorSetLayout& shadow_set_layout,
 		const vk::raii::DescriptorSetLayout& shadow_mask_set_layout,
 		const vk::raii::DescriptorSetLayout& cluster_set_layout,
@@ -49,20 +39,17 @@ public:
 	PbrRenderSystem(const PbrRenderSystem&) = delete;
 	PbrRenderSystem& operator=(const PbrRenderSystem&) = delete;
 
-	void renderObjects(VeFrameInfo& frame_info) const;
-	/// Call prepareFrame once, then renderOpaque, then (e.g. skybox), then renderTransparent.
-	void prepareFrame(VeFrameInfo& frame_info) const;
-	void renderOpaque(VeFrameInfo& frame_info) const;
-	void renderTransparent(VeFrameInfo& frame_info) const;
+	// Build the mega buffer from all meshes in the scene. Call once after scene load.
+	void buildMegaBuffer(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh*>& meshes);
 
-	/// Record a range of opaque groups [begin_idx, end_idx) to the given command buffer.
-	/// The CB must already be recording. Binds pipeline, descriptor sets, and iterates groups.
-	void recordOpaqueRange(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame_info,
-		uint32_t begin_idx, uint32_t end_idx) const;
+	void prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr) const;
+	void renderOpaque(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set) const;
+	void renderTransparent(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set) const;
+
 	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
-		for (auto& p : m_pipelines) 
+		for (auto& p : m_pipelines)
 			p.reset();
-		for (auto& p : m_pipelines_mask) 
+		for (auto& p : m_pipelines_mask)
 			p.reset();
 		createPipelines(color_format, sample_count);
 	}
@@ -74,28 +61,36 @@ public:
 	void setShadowSamples(uint32_t pcf_samples, uint32_t pcss_filter_samples) {
 		m_pcf_samples = pcf_samples;
 		m_pcss_filter_samples = pcss_filter_samples;
-		for (auto& p : m_pipelines) 
+		for (auto& p : m_pipelines)
 			p.reset();
-		for (auto& p : m_pipelines_mask) 
+		for (auto& p : m_pipelines_mask)
 			p.reset();
 		createPipelines(m_color_format, m_sample_count);
 	}
 
-	const std::vector<InstanceGroup>& getOpaqueGroups() const { return m_opaque_groups; }
+	uint32_t getOpaqueDrawCount() const { return m_total_indirect_count; }
 	void setDepthPrePassActive(bool active) { m_depth_prepass_active = active; }
+
+	PbrMegaBuffer& getMegaBuffer() { return *m_mega_buffer; }
+	const PbrMegaBuffer& getMegaBuffer() const { return *m_mega_buffer; }
+
+	void resetMegaBuffer() { m_mega_buffer->clear(); m_total_indirect_count = 0; }
+
+	// Depth prepass uses buckets 0-1 from the main indirect buffer
+	const uint32_t* getDepthBucketOffsets() const { return m_bucket_offsets; }
+	const uint32_t* getDepthBucketCounts() const { return m_bucket_counts; }
+	const VeBuffer& getIndirectBuffer(uint32_t frame) const { return *m_indirect_buffers[frame]; }
 
 private:
 	bool m_depth_prepass_active = false;
 	void createPipelineLayout(
 		const vk::raii::DescriptorSetLayout& global_set_layout,
-		const vk::raii::DescriptorSetLayout& material_set_layout,
+		const vk::raii::DescriptorSetLayout& bindless_set_layout,
 		const vk::raii::DescriptorSetLayout& shadow_set_layout,
 		const vk::raii::DescriptorSetLayout& shadow_mask_set_layout,
 		const vk::raii::DescriptorSetLayout& cluster_set_layout,
 		const vk::raii::DescriptorSetLayout& ao_set_layout);
 	void createPipelines(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
-	void renderOpaqueGroup(vk::raii::CommandBuffer& cmd, const InstanceGroup& group,
-		VkDescriptorSet& bound_material_set, VeMesh*& bound_mesh, uint32_t& bound_lod) const;
 
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;
@@ -105,25 +100,37 @@ private:
 
 	uint32_t m_pcf_samples = 8;
 	uint32_t m_pcss_filter_samples = 16;
-	static constexpr uint32_t SHADOW_MODE_COUNT = 4;  // DISABLED, REGULAR, PCF, PCSS
+	static constexpr uint32_t SHADOW_MODE_COUNT = 4;
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
-	std::array<std::unique_ptr<VePipeline>, SHADOW_MODE_COUNT> m_pipelines;      // mask off
-	std::array<std::unique_ptr<VePipeline>, SHADOW_MODE_COUNT> m_pipelines_mask; // mask on
+	std::array<std::unique_ptr<VePipeline>, SHADOW_MODE_COUNT> m_pipelines;
+	std::array<std::unique_ptr<VePipeline>, SHADOW_MODE_COUNT> m_pipelines_mask;
+
+	std::unique_ptr<PbrMegaBuffer> m_mega_buffer;
+
+	// Indirect draw (opaque): 4 buckets (non-MASK back, non-MASK double, MASK back, MASK double)
+	// Depth prepass uses buckets 0-1 (non-MASK only) from the same buffer.
+	static constexpr uint32_t BUCKET_COUNT = 4;
+	mutable std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_indirect_buffers;
+	mutable uint32_t m_bucket_offsets[BUCKET_COUNT]{};
+	mutable uint32_t m_bucket_counts[BUCKET_COUNT]{};
+	mutable uint32_t m_total_indirect_count = 0;
+
+	// Persistent scratch vectors (avoid per-frame heap allocation)
+	mutable std::vector<VkDrawIndexedIndirectCommand> m_indirect_cmds;
 
 	struct Drawable {
-		VkDescriptorSet material_set;
 		Entity entity;
 		MeshComponent* mesh = nullptr;
-		VeMesh* mesh_ptr = nullptr;         // cached mesh->getMesh() — avoids pointer chase during sort
-		VeMaterial* material_ptr = nullptr;  // cached mesh->getMaterial()
+		VeMesh* mesh_ptr = nullptr;
+		VeMaterial* material_ptr = nullptr;
 		float dist_sq = 0.0f;
 		AlphaMode alpha_mode = AlphaMode::ALPHA_OPAQUE;
-		uint32_t ssbo_index = 0;  // index into instance SSBO (set in prepareFrame)
+		bool double_sided = false;
+		uint32_t ssbo_index = 0;
 		uint32_t lod_level = 0;
 	};
 	mutable std::vector<Drawable> m_opaque_drawables;
 	mutable std::vector<Drawable> m_transparent_drawables;
-	mutable std::vector<InstanceGroup> m_opaque_groups;
 };
 
 } // namespace ve

@@ -61,6 +61,10 @@ constexpr uint32_t MAX_RENDER_WORKERS = 8;
 constexpr uint32_t MIN_PARALLEL_GROUPS = 128; // below this, prefer single-threaded
 constexpr uint32_t MIN_PARALLEL_CULL_ENTITIES = 64; // below this, single-threaded culling
 
+// Bindless textures + Multi-Draw Indirect
+constexpr uint32_t MAX_BINDLESS_TEXTURES = 16384;
+constexpr uint32_t MAX_GPU_MATERIALS = 8192;
+
 constexpr bool MSAA_ENABLED = true;
 #ifdef __APPLE__
 	constexpr bool ENABLE_RAY_TRACING = false; // not supported on moltenVK

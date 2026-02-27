@@ -22,6 +22,7 @@ public:
 
 	// getters
 	vk::raii::Buffer& getBuffer() { return m_buffer; }
+	const vk::raii::Buffer& getBuffer() const { return m_buffer; }
 	void* getMappedMemory() const { return m_mapped; }
 	uint32_t getInstanceCount() const { return m_instance_count; }
 	vk::DeviceSize getInstanceSize() const { return m_instance_size; }

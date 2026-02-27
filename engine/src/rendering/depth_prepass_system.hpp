@@ -1,7 +1,6 @@
 #pragma once
 #include "ve_export.hpp"
 #include "rendering/ve_frame_info.hpp"
-#include "rendering/pbr_render_system.hpp"
 
 #include <memory>
 #include <vector>
@@ -10,6 +9,8 @@
 namespace ve {
 	class VeDevice;
 	class VePipeline;
+	class VeBuffer;
+	class PbrMegaBuffer;
 }
 
 namespace ve {
@@ -26,16 +27,14 @@ public:
 	DepthPrePassSystem(const DepthPrePassSystem&) = delete;
 	DepthPrePassSystem& operator=(const DepthPrePassSystem&) = delete;
 
-	// Render depth for all opaque groups. Must be called AFTER PbrRenderSystem::prepareFrame()
-	// and between beginDepthPrePass/endDepthPrePass.
+	// Render depth using indirect draw commands from PbrRenderSystem.
+	// Must be called AFTER PbrRenderSystem::prepareFrame().
 	void render(VeFrameInfo& frame_info,
-	            const std::vector<PbrRenderSystem::InstanceGroup>& opaque_groups) const;
-
-	/// Record a range of opaque groups [begin_idx, end_idx) for depth-only rendering.
-	/// The CB must already be recording. Binds pipeline, descriptor set, and iterates groups.
-	void recordRange(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame_info,
-	                 const std::vector<PbrRenderSystem::InstanceGroup>& opaque_groups,
-	                 uint32_t begin_idx, uint32_t end_idx) const;
+	            PbrMegaBuffer& mega_buffer,
+	            const VeBuffer& indirect_buffer,
+	            const uint32_t* bucket_offsets,
+	            const uint32_t* bucket_counts,
+	            uint32_t bucket_count) const;
 
 	void recreatePipeline(vk::SampleCountFlagBits sample_count) {
 		m_ve_pipeline.reset();

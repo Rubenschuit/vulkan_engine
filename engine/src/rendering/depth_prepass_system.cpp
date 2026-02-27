@@ -1,16 +1,12 @@
 #include "pch.hpp"
 #include "rendering/depth_prepass_system.hpp"
+#include "rendering/pbr_mega_buffer.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_pipeline.hpp"
+#include "vulkan/ve_buffer.hpp"
 #include "resources/ve_mesh.hpp"
-#include "utils/ve_log.hpp"
 
 namespace ve {
-
-struct DepthPrePassPushConstant {
-	alignas(4) uint32_t instance_offset;
-};
-static_assert(sizeof(DepthPrePassPushConstant) == 4);
 
 DepthPrePassSystem::DepthPrePassSystem(
 	VeDevice& device,
@@ -26,19 +22,13 @@ DepthPrePassSystem::~DepthPrePassSystem() = default;
 
 void DepthPrePassSystem::createPipelineLayout(
 	const vk::raii::DescriptorSetLayout& global_set_layout) {
-	vk::PushConstantRange push_constant_range{
-		.stageFlags = vk::ShaderStageFlagBits::eVertex,
-		.offset = 0,
-		.size = sizeof(DepthPrePassPushConstant)
-	};
-
 	vk::DescriptorSetLayout layouts[1] = {*global_set_layout};
 	vk::PipelineLayoutCreateInfo pipeline_layout_info{
 		.sType = vk::StructureType::ePipelineLayoutCreateInfo,
 		.setLayoutCount = 1,
 		.pSetLayouts = layouts,
-		.pushConstantRangeCount = 1,
-		.pPushConstantRanges = &push_constant_range
+		.pushConstantRangeCount = 0,
+		.pPushConstantRanges = nullptr
 	};
 
 	m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), pipeline_layout_info);
@@ -48,97 +38,52 @@ void DepthPrePassSystem::createPipeline(vk::SampleCountFlagBits sample_count) {
 	PipelineConfigInfo pipeline_config{};
 	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
 
-	// Depth-only: no color attachment
 	pipeline_config.color_format = vk::Format::eUndefined;
-
-	// Position-only vertex layout (same as shadow pass)
 	pipeline_config.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptionsShadow();
 	pipeline_config.binding_descriptions = VeMesh::Vertex::getShadowBindingDescriptions();
-
-	// Match scene MSAA sample count (unlike shadow maps which are always 1x)
 	pipeline_config.multisample_info.rasterizationSamples = sample_count;
-
-	// Back-face culling default, with dynamic override for double-sided
 	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eBack;
 	pipeline_config.dynamic_state_enables.push_back(vk::DynamicState::eCullMode);
 	pipeline_config.dynamic_state_info.dynamicStateCount =
 		static_cast<uint32_t>(pipeline_config.dynamic_state_enables.size());
 	pipeline_config.dynamic_state_info.pDynamicStates = pipeline_config.dynamic_state_enables.data();
-
-	// Standard depth test + write
 	pipeline_config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	pipeline_config.depth_stencil_info.depthWriteEnable = VK_TRUE;
 	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLess;
-
 	pipeline_config.pipeline_layout = *m_pipeline_layout;
-	m_ve_pipeline = std::make_unique<VePipeline>(
-		m_ve_device,
-		m_shader_path,
-		pipeline_config);
-}
 
-void DepthPrePassSystem::recordRange(
-	vk::raii::CommandBuffer& cmd, VeFrameInfo& frame_info,
-	const std::vector<PbrRenderSystem::InstanceGroup>& opaque_groups,
-	uint32_t begin_idx, uint32_t end_idx) const {
-
-	if (begin_idx >= end_idx)
-		return;
-
-	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-
-	// Bind global descriptor set (set 0): UBO + instance SSBO
-	cmd.bindDescriptorSets(
-		vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
-		0, {*frame_info.global_descriptor_set}, {});
-
-	VeMesh* bound_mesh = nullptr;
-	uint32_t bound_lod = UINT32_MAX;
-
-	for (uint32_t i = begin_idx; i < end_idx; ++i) {
-		const auto& group = opaque_groups[i];
-		// Skip MASK groups: the depth-only shader cannot do alpha testing, so it would
-		// write depth for transparent areas and block the wall behind from rendering.
-		// MASK geometry renders in a second color pass with eLessOrEqual instead.
-		if (group.alpha_cutoff > 0.0f)
-			continue;
-
-		// Dynamic cull mode for double-sided geometry
-		if (group.double_sided)
-			cmd.setCullMode(vk::CullModeFlagBits::eNone);
-		else
-			cmd.setCullMode(vk::CullModeFlagBits::eBack);
-
-		// Push instance_offset for SSBO indexing
-		DepthPrePassPushConstant push{
-			.instance_offset = group.first_instance
-		};
-		cmd.pushConstants(
-			*m_pipeline_layout,
-			vk::ShaderStageFlagBits::eVertex,
-			0,
-			vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push))
-		);
-
-		// Bind shadow VBO + LOD IBO (position-only, if mesh or LOD changed)
-		if (group.mesh != bound_mesh || group.lod_level != bound_lod) {
-			bound_mesh = group.mesh;
-			bound_lod = group.lod_level;
-			bound_mesh->bindShadowVertexBuffer(cmd);
-			bound_mesh->bindLodIndexBuffer(cmd, bound_lod);
-		}
-
-		// Instanced draw
-		group.mesh->drawIndexedLod(cmd, group.lod_level, group.instance_count, 0);
-	}
+	m_ve_pipeline = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
 }
 
 void DepthPrePassSystem::render(
 	VeFrameInfo& frame_info,
-	const std::vector<PbrRenderSystem::InstanceGroup>& opaque_groups) const {
+	PbrMegaBuffer& mega_buffer,
+	const VeBuffer& indirect_buffer,
+	const uint32_t* bucket_offsets,
+	const uint32_t* bucket_counts,
+	uint32_t bucket_count) const {
 
-	recordRange(frame_info.cmd(), frame_info, opaque_groups,
-		0, static_cast<uint32_t>(opaque_groups.size()));
+	if (!mega_buffer.isValid())
+		return;
+
+	auto& cmd = frame_info.cmd();
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		0, {*frame_info.global_descriptor_set}, {});
+
+	mega_buffer.bindShadow(cmd);
+
+	for (uint32_t bucket = 0; bucket < bucket_count; bucket++) {
+		if (bucket_counts[bucket] == 0) 
+			continue;
+		bool is_double_sided = (bucket & 1);
+		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
+		cmd.drawIndexedIndirect(
+			*indirect_buffer.getBuffer(),
+			bucket_offsets[bucket] * sizeof(VkDrawIndexedIndirectCommand),
+			bucket_counts[bucket],
+			sizeof(VkDrawIndexedIndirectCommand));
+	}
 }
 
 } // namespace ve

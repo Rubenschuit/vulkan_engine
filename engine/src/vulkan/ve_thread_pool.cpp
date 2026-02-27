@@ -20,7 +20,9 @@ VeThreadPool::VeThreadPool(CommandResourceManager& cmd_manager, uint32_t num_wor
 VeThreadPool::~VeThreadPool() {
 	m_shutdown.store(true, std::memory_order_release);
 	m_dispatch_cv.notify_all();
-	// std::jthread destructor requests stop and joins automatically
+	for (auto& w : m_workers)
+		if (w.joinable())
+			w.join();
 }
 
 ThreadSlot VeThreadPool::getSlot(uint32_t worker_index) const {

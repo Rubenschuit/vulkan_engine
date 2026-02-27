@@ -25,14 +25,21 @@ public:
 			vk::DescriptorType descriptor_type,
 			vk::ShaderStageFlags stage_flags,
 			uint32_t count = 1);
+		Builder &setBindingFlags(uint32_t binding, vk::DescriptorBindingFlags flags);
+		Builder &setLayoutFlags(vk::DescriptorSetLayoutCreateFlags flags);
 		std::unique_ptr<VeDescriptorSetLayout> build() const;
 
 	private:
 		VeDevice &m_ve_device;
 		std::unordered_map<uint32_t, vk::DescriptorSetLayoutBinding> m_bindings{};
+		std::unordered_map<uint32_t, vk::DescriptorBindingFlags> m_binding_flags{};
+		vk::DescriptorSetLayoutCreateFlags m_layout_flags{};
 	};
 
-	VeDescriptorSetLayout(VeDevice &ve_device, std::unordered_map<uint32_t, vk::DescriptorSetLayoutBinding> bindings_map);
+	VeDescriptorSetLayout(VeDevice &ve_device,
+		std::unordered_map<uint32_t, vk::DescriptorSetLayoutBinding> bindings_map,
+		std::unordered_map<uint32_t, vk::DescriptorBindingFlags> binding_flags_map = {},
+		vk::DescriptorSetLayoutCreateFlags layout_flags = {});
 	~VeDescriptorSetLayout();
 
 	VeDescriptorSetLayout(const VeDescriptorSetLayout &) = delete;
@@ -56,7 +63,7 @@ public:
 		Builder(VeDevice &ve_device) : m_ve_device{ve_device} {}
 
 		Builder &addPoolSize(vk::DescriptorType descriptor_type, uint32_t count);
-		Builder &setPoolFlags(vk::DescriptorPoolCreateFlagBits flags);
+		Builder &setPoolFlags(vk::DescriptorPoolCreateFlags flags);
 		Builder &setMaxSets(uint32_t count);
 			std::unique_ptr<VeDescriptorPool> build() const;
 			std::shared_ptr<VeDescriptorPool> buildShared() const;
@@ -65,19 +72,21 @@ public:
 		VeDevice &m_ve_device;
 		std::vector<vk::DescriptorPoolSize> m_pool_sizes{};
 		uint32_t m_max_sets = 1000;
-		vk::DescriptorPoolCreateFlagBits m_pool_flags{};
+		vk::DescriptorPoolCreateFlags m_pool_flags{};
 	};
 
 	VeDescriptorPool(
 		VeDevice &ve_device,
 		uint32_t max_sets,
-		vk::DescriptorPoolCreateFlagBits pool_flags,
+		vk::DescriptorPoolCreateFlags pool_flags,
 		const std::vector<vk::DescriptorPoolSize> &pool_sizes);
 	~VeDescriptorPool();
 	VeDescriptorPool(const VeDescriptorPool &) = delete;
 	VeDescriptorPool &operator=(const VeDescriptorPool &) = delete;
 
 	void allocateDescriptor(const vk::raii::DescriptorSetLayout& descriptor_set_layout, vk::raii::DescriptorSet& descriptor_set) const;
+	void allocateDescriptorVariableCount(const vk::raii::DescriptorSetLayout& descriptor_set_layout,
+		vk::raii::DescriptorSet& descriptor_set, uint32_t variable_count) const;
 
 	void resetPool();
 
@@ -93,6 +102,7 @@ public:
 
 	VeDescriptorWriter &writeBuffer(uint32_t binding, vk::DescriptorBufferInfo *buffer_info);
 	VeDescriptorWriter &writeImage(uint32_t binding, vk::DescriptorImageInfo *image_info);
+	VeDescriptorWriter &writeImageArray(uint32_t binding, vk::DescriptorImageInfo *image_infos, uint32_t count);
 
 	void build(vk::raii::DescriptorSet &set);
 	void overwrite(vk::raii::DescriptorSet &set);

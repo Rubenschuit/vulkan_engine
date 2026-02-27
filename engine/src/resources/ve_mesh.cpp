@@ -108,7 +108,7 @@ void VeMesh::createVertexBuffers(const std::vector<Vertex>& vertices) {
 		m_ve_device,
 		sizeof(vertices[0]),
 		m_vertex_count,
-		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		1
 	);

@@ -97,15 +97,36 @@ struct UniformBuffer {
 [vk::binding(0, 0)]
 ConstantBuffer<UniformBuffer> ubo;
 
-// Per-instance transforms stored in SSBO, indexed by SV_InstanceID (always 0-based)
+// Per-instance transforms stored in SSBO, indexed by SV_VulkanInstanceID (= gl_InstanceIndex = firstInstance + i)
 struct InstanceData {
 	float4x4 transform;
 	float4   normal_col0;
 	float4   normal_col1;
 	float4   normal_col2;
+	uint     material_index;
+	uint     lod_level;
+	float    depth_offset;
+	uint     material_flags;
 };
 [vk::binding(1, 0)]
 StructuredBuffer<InstanceData> instances;
+
+struct MaterialGPU {
+	float4 base_color_factor;
+	float4 emissive_pad;
+	float4 params;
+	float4 extra;
+	uint   albedo_index;
+	uint   normal_index;
+	uint   metallic_roughness_index;
+	uint   occlusion_index;
+	uint   emissive_index;
+	uint   material_flags;
+	float  alpha_cutoff;
+	uint   _pad;
+};
+[vk::binding(2, 0)]
+StructuredBuffer<MaterialGPU> materials;
 
 // ============================================================================
 // Shadow map bindings (set 2)

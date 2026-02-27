@@ -241,15 +241,15 @@ bool VeDevice::isDeviceSuitable(const vk::raii::PhysicalDevice& phyisical_device
 	// Fourth, it must support the required features
 	auto features = phyisical_device.getFeatures2<vk::PhysicalDeviceFeatures2,
 											vk::PhysicalDeviceVulkan11Features,
+											vk::PhysicalDeviceVulkan12Features,
 											vk::PhysicalDeviceVulkan13Features,
-											vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
-											vk::PhysicalDeviceTimelineSemaphoreFeatures>();
+											vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
 	if (!features.get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy ||
 		!features.get<vk::PhysicalDeviceVulkan11Features>().multiview ||
+		!features.get<vk::PhysicalDeviceVulkan12Features>().timelineSemaphore ||
 		!features.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering ||
 		!features.get<vk::PhysicalDeviceVulkan13Features>().synchronization2 ||
-		!features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState ||
-		!features.get<vk::PhysicalDeviceTimelineSemaphoreFeatures>().timelineSemaphore) {
+		!features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState) {
 		return false;
 	}
 
@@ -312,14 +312,22 @@ void VeDevice::createLogicalDevice() {
 	// so we must enable shaderDrawParameters from Vulkan 1.1 features.
 	vk::StructureChain<vk::PhysicalDeviceFeatures2,
 					vk::PhysicalDeviceVulkan11Features,
+					vk::PhysicalDeviceVulkan12Features,
 					vk::PhysicalDeviceVulkan13Features,
-					vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
-					vk::PhysicalDeviceTimelineSemaphoreFeatures> feature_chain = {
-		{.features = {.depthClamp = true, .samplerAnisotropy = true}},
+					vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> feature_chain = {
+		{.features = {.multiDrawIndirect = true, .depthClamp = true, .samplerAnisotropy = true}},
 		{.multiview = true, .shaderDrawParameters = true},
+		{	// Vulkan 1.2 features (descriptor indexing + timeline semaphore)
+			.descriptorIndexing = true,
+			.shaderSampledImageArrayNonUniformIndexing = true,
+			.descriptorBindingSampledImageUpdateAfterBind = true,
+			.descriptorBindingPartiallyBound = true,
+			.descriptorBindingVariableDescriptorCount = true,
+			.runtimeDescriptorArray = true,
+			.timelineSemaphore = true,
+		},
 		{.synchronization2 = true, .dynamicRendering = true},
 		{.extendedDynamicState = true },
-		{.timelineSemaphore = true}
 	};
 
 	assert(m_required_device_extensions.size() > 0 && "At least one device extension must be enabled");
