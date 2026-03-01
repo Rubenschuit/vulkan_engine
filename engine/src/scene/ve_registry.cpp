@@ -413,6 +413,8 @@ void Registry::invalidateWorldTransform(Entity e) {
 	// Invalidate mesh AABB
 	invalidateMeshWorldAABBs(e);
 
+	m_events.emit(TransformInvalidatedEvent{e});
+
 	// Cascade to children
 	Entity child = m_hierarchy[idx].first_child;
 	while (!child.isNull()) {

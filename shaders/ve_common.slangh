@@ -187,9 +187,8 @@ static const float4x4 bias_matrix = float4x4(
 // KHR_lights_punctual attenuation: smooth windowed falloff within range, 1/d² when range=0
 float calculateAttenuation(float distance_sq, float range) {
 	if (range > 0.0) {
-		float dist = sqrt(distance_sq);
-		float ratio = dist / range;
-		float ratio2 = ratio * ratio;
+		float range_sq = range * range;
+		float ratio2 = distance_sq / range_sq;
 		float ratio4 = ratio2 * ratio2;
 		float window = clamp(1.0 - ratio4, 0.0, 1.0);
 		return (window * window) / max(distance_sq, 0.0001);
@@ -198,9 +197,10 @@ float calculateAttenuation(float distance_sq, float range) {
 }
 
 // Spot light angular attenuation: smooth falloff between inner and outer cone (glTF spec)
-float calculateSpotAttenuation(float3 light_to_frag, float3 spot_direction,
+// frag_to_light_n must be pre-normalized
+float calculateSpotAttenuation(float3 frag_to_light_n, float3 spot_direction,
                                 float cos_outer, float cos_inner) {
-	float cos_angle = dot(normalize(-light_to_frag), spot_direction);
+	float cos_angle = dot(-frag_to_light_n, spot_direction);
 	if (cos_angle < cos_outer)
 		return 0.0;
 	if (cos_angle > cos_inner)

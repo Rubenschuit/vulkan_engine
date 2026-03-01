@@ -19,6 +19,9 @@ namespace ve {
 	class VeDescriptorSetLayout;
 	class VeImage;
 	class Registry;
+	class GpuCullingSystem;
+	class PbrMegaBuffer;
+	class GpuSceneManager;
 }
 
 namespace ve {
@@ -40,8 +43,14 @@ public:
 	void updateUniformBuffer(uint32_t frame_index, UniformBufferObject& ubo,
 	                         const CsmCascadeData& csm_data);
 
-	// Render all shadow maps for all lights
+	// Render all shadow maps for all lights (CPU-driven path)
 	void renderShadowMaps(VeFrameInfo& frame_info);
+	void renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
+	                               GpuCullingSystem& gpu_cull,
+	                               PbrMegaBuffer& mega_buffer,
+	                               GpuSceneManager& scene_mgr);
+
+	void createGpuShadowDescriptorSets(GpuCullingSystem& gpu_cull);
 
 	// Get shadow descriptor set for a specific frame
 	vk::raii::DescriptorSet& getShadowDescriptorSet(uint32_t frame_index) {
@@ -150,6 +159,13 @@ private:
 		std::vector<LodMegaEntry> lod_entries; // [0]=LOD 0, [1]=LOD 1, ...
 	};
 	std::unordered_map<VeMesh*, MeshMegaEntry> m_mega_entries;
+
+	// GPU-culled CSM: per-cascade single-view descriptor sets
+	std::vector<std::vector<vk::raii::DescriptorSet>> m_gpu_cascade_descriptor_sets; // [frame][cascade]
+	std::vector<std::vector<std::unique_ptr<VeBuffer>>> m_csm_cascade_ubos;          // [frame][cascade], ShadowPassUBO
+
+	// GPU-culled point/spot lights
+	std::vector<std::vector<vk::raii::DescriptorSet>> m_gpu_shadow_descriptor_sets; // [frame][light_index]
 };
 
 }

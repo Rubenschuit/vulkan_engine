@@ -6,6 +6,7 @@
 
 #include <unordered_map>
 #include <glm/glm.hpp>
+#include <vulkan/vulkan_raii.hpp>
 
 namespace ve {
 
@@ -41,6 +42,8 @@ public:
 	void updateMaterial(uint32_t index, VeMaterial* mat);
 	void unregisterMaterial(VeMaterial* mat);
 
+	void flushToDevice(const vk::raii::CommandBuffer&);
+
 	// Clear all cached material mappings (call when scene changes)
 	void reset();
 
@@ -52,7 +55,9 @@ private:
 	VeDevice& m_ve_device;
 	BindlessTextureRegistry& m_texture_registry;
 
-	std::unique_ptr<VeBuffer> m_buffer;
+	std::unique_ptr<VeBuffer> m_buffer;          // device-local
+	std::unique_ptr<VeBuffer> m_staging_buffer;  // host-visible, persistently mapped
+	bool m_dirty = false;
 	std::unordered_map<VeMaterial*, uint32_t> m_material_to_index;
 	std::vector<uint32_t> m_free_list;
 	uint32_t m_next_index = 0;

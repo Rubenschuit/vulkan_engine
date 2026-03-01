@@ -1,5 +1,5 @@
 // Shadow mapping shader - depth-only pass from light's perspective
-// Per-instance transforms read from SSBO, indexed by SV_InstanceID + instance_offset
+// Per-instance transforms read from SSBO, indexed by SV_VulkanInstanceID + instance_offset
 
 struct VertexInput {
 	float3 in_pos : POSITION;
@@ -28,7 +28,7 @@ struct InstanceData {
 StructuredBuffer<InstanceData> instances;
 
 struct PushConstantData {
-	[vk::offset(0)] uint32_t instance_offset;  // SSBO offset (SV_InstanceID is 0-based in Slang)
+	[vk::offset(0)] uint32_t instance_offset;  // SSBO offset
 };
 [push_constant]
 PushConstantData push_constants;
@@ -38,7 +38,7 @@ struct VertexOutput {
 };
 
 [shader("vertex")]
-VertexOutput vertMain(VertexInput input, uint instance_id : SV_InstanceID) {
+VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID) {
 	VertexOutput output;
 
 	float4 pos = float4(input.in_pos, 1.0); // homogeneous coordinates

@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "rendering/ve_renderer.hpp"
 #include "rendering/ve_frame_info.hpp"
+#include "ve_tracy.hpp"
 
 #include <stdexcept>
 #include <algorithm>
@@ -19,9 +20,40 @@ VeRenderer::VeRenderer(VeDevice& device, VeWindow& window)
 	uint32_t hw = std::thread::hardware_concurrency();
 	uint32_t workers = (hw > 2) ? std::min(hw - 1, static_cast<uint32_t>(MAX_RENDER_WORKERS)) : 2u;
 	m_thread_pool = std::make_unique<VeThreadPool>(m_command_manager, workers);
+
+#ifdef TRACY_ENABLE
+	auto instanceProcAddr = m_ve_device.getInstance().getDispatcher()->vkGetInstanceProcAddr;
+	auto deviceProcAddr = m_ve_device.getDevice().getDispatcher()->vkGetDeviceProcAddr;
+	bool calibrated = m_ve_device.supportsCalibratedTimestamps();
+	auto createCtx = [&](vk::raii::CommandPool& pool, vk::raii::Queue& queue) -> TracyVkCtx {
+		vk::CommandBufferAllocateInfo alloc_info{
+			.commandPool = *pool,
+			.level = vk::CommandBufferLevel::ePrimary,
+			.commandBufferCount = 1
+		};
+		auto bufs = m_ve_device.getDevice().allocateCommandBuffers(alloc_info);
+		if (calibrated)
+			return TracyVkContextCalibrated(
+				*m_ve_device.getInstance(), *m_ve_device.getPhysicalDevice(),
+				*m_ve_device.getDevice(), *queue, *bufs[0],
+				instanceProcAddr, deviceProcAddr);
+		return TracyVkContext(
+			*m_ve_device.getInstance(), *m_ve_device.getPhysicalDevice(),
+			*m_ve_device.getDevice(), *queue, *bufs[0],
+			instanceProcAddr, deviceProcAddr);
+	};
+	m_tracy_graphics_ctx = createCtx(m_ve_device.getCommandPool(), m_ve_device.getQueue());
+	m_tracy_compute_ctx = createCtx(m_ve_device.getComputeCommandPool(), m_ve_device.getComputeQueue());
+#endif
 }
 
-VeRenderer::~VeRenderer() {}
+VeRenderer::~VeRenderer() {
+#ifdef TRACY_ENABLE
+	m_ve_device.getDevice().waitIdle();
+	TracyVkDestroy(m_tracy_graphics_ctx);
+	TracyVkDestroy(m_tracy_compute_ctx);
+#endif
+}
 
 float VeRenderer::getExtentAspectRatio() const {
 	auto extent = getExtent();
@@ -90,13 +122,20 @@ bool VeRenderer::beginFrame() {
 
 	// Wait until image is available (measure fence wait time)
 	auto fence_start = std::chrono::steady_clock::now();
-	m_ve_swap_chain->waitForCurrentFence();
+	{
+		ZoneScopedN("Fence Wait");
+		m_ve_swap_chain->waitForCurrentFence();
+	}
 	auto fence_end = std::chrono::steady_clock::now();
 	float fence_ms = std::chrono::duration<float, std::chrono::milliseconds::period>(fence_end - fence_start).count();
 	m_profiler.recordFenceWait(fence_ms);
 
 	// Acquire an image from the swap chain
-	vk::Result result = m_ve_swap_chain->acquireNextImage(&m_current_image_index);
+	vk::Result result;
+	{
+		ZoneScopedN("Acquire Image");
+		result = m_ve_swap_chain->acquireNextImage(&m_current_image_index);
+	}
 	if (result == vk::Result::eErrorOutOfDateKHR) {
 		VE_LOGD("Result of acquireNextImage is eErrorOutOfDateKHR, setting flag.");
 		m_swap_chain_needs_recreation = true;
@@ -136,6 +175,9 @@ bool VeRenderer::beginFrame() {
 	auto& ui_command_buffer = getCurrentUICommandBuffer();
 	ui_command_buffer.begin(info);
 
+	TracyVkCollect(m_tracy_graphics_ctx, *command_buffer);
+	TracyVkCollect(m_tracy_compute_ctx, *compute_command_buffer);
+
 	m_profiler.resetAllQueries(command_buffer, compute_command_buffer, frame_index);
 
 	// Write FRAME_TOTAL start timestamp on graphics queue
@@ -160,6 +202,7 @@ void VeRenderer::endFrame() {
 	ui_cb.end();
 
 	// Submit both CBs in order, then present
+	ZoneScopedN("Submit + Present");
 	auto result = m_ve_swap_chain->submitAndPresent(*scene_cb, *ui_cb, &m_current_image_index);
 
 	if (result == vk::Result::eErrorOutOfDateKHR) {
@@ -177,9 +220,11 @@ void VeRenderer::endFrame() {
 	if (result == vk::Result::eSuccess)
 		m_ve_swap_chain->advanceFrame();
 	m_is_frame_started = false;
+	FrameMark;
 }
 
-void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer, bool secondary_contents) {
+void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer,
+	bool secondary_contents, bool clear) {
 	assert(m_is_frame_started && "Can't begin depth pre-pass while frame is not in progress");
 	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin depth pre-pass on command buffer from a different frame");
 
@@ -188,7 +233,7 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer, bool
 	vk::RenderingAttachmentInfo depth_attachment_info = {
 		.imageView = *m_ve_swap_chain->getDepthImageView(),
 		.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-		.loadOp = vk::AttachmentLoadOp::eClear,
+		.loadOp = clear ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad,
 		.storeOp = vk::AttachmentStoreOp::eStore,
 		.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
 	};
@@ -196,21 +241,23 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer, bool
 	// When MSAA is active, resolve depth to a single-sample image at endRendering().
 	// Compute shaders (GTAO, shadow mask) read from the resolved depth instead of MSAA depth.
 	if (m_ve_swap_chain->hasResolvedDepth()) {
-		// Prepare resolved depth for resolve target.
-		vk::ImageMemoryBarrier2 prep{
-			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-			.dstStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
-			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-			.oldLayout = vk::ImageLayout::eUndefined,
-			.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = *m_ve_swap_chain->getResolvedDepthImage(),
-			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
-		};
-		vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &prep};
-		command_buffer.pipelineBarrier2(dep);
+		if (clear) {
+			// Prepare resolved depth for resolve target (only on first clear pass).
+			vk::ImageMemoryBarrier2 prep{
+				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+				.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
+				.dstStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
+				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+				.oldLayout = vk::ImageLayout::eUndefined,
+				.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = *m_ve_swap_chain->getResolvedDepthImage(),
+				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
+			};
+			vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &prep};
+			command_buffer.pipelineBarrier2(dep);
+		}
 
 		depth_attachment_info.resolveMode = vk::ResolveModeFlagBits::eSampleZero;
 		depth_attachment_info.resolveImageView = *m_ve_swap_chain->getResolvedDepthImageView();

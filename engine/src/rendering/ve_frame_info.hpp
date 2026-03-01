@@ -246,6 +246,7 @@ struct VeFrameInfo {
 
 	bool gpu_culling_active = false;
 	Entity selected_entity = Entity::null();
+	vk::raii::DescriptorSet* cpu_global_descriptor_set = nullptr;
 };
 
 }

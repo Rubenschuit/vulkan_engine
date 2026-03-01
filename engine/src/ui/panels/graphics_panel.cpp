@@ -205,6 +205,13 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UICon
 	ImGui::Checkbox("GPU Culling", &ctx.gpu_culling_enabled);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("GPU-driven frustum culling via compute shader");
+	if (ctx.gpu_culling_enabled) {
+		ImGui::Indent();
+		ImGui::Checkbox("Hi-Z Occlusion Culling", &ctx.hiz_occlusion_enabled);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Prev-frame Hi-Z occlusion culling.\nSkips objects occluded by previous frame's depth.\nRequires depth pre-pass enabled.");
+		ImGui::Unindent();
+	}
 	ImGui::Checkbox("Clustered Lighting", &ctx.cluster_enabled);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Use 3D cluster grid to cull lights per-fragment");

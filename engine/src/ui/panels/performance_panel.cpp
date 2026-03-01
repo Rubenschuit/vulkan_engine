@@ -117,8 +117,9 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 			char tri_buf[16];
 			formatCount(tri_buf, sizeof(tri_buf), context.stats.visible_triangles);
-			ImGui::TextDisabled("%s triangles  |  %u/%u objects",
-				tri_buf, context.stats.cull_visible_objects, context.stats.cull_total_objects);
+			ImGui::TextDisabled("%s triangles  |  %u/%u objects  |  %u draws",
+				tri_buf, context.stats.cull_visible_objects, context.stats.cull_total_objects,
+				context.stats.draw_calls);
 		}
 		ImGui::End();
 		return;
@@ -196,6 +197,8 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		context.stats.cull_visible_objects, context.stats.cull_total_objects, culled);
 	row("Objects", val);
 	row("Triangles", tri_buf);
+	snprintf(val, sizeof(val), "%u", context.stats.draw_calls);
+	row("Draw Calls", val);
 	snprintf(val, sizeof(val), "%u point, %u dir",
 		context.stats.num_point_lights, context.stats.num_directional_lights);
 	row("Lights", val);

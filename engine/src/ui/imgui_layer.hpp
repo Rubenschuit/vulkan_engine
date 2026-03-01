@@ -73,6 +73,7 @@ struct VENGINE_API UIContext {
 		uint32_t cull_total_objects = 0;
 		uint32_t cull_visible_objects = 0;
 		uint32_t visible_triangles = 0;
+		uint32_t draw_calls = 0;
 		uint32_t num_point_lights = 0;
 		uint32_t num_directional_lights = 0;
 	};
@@ -94,6 +95,7 @@ struct VENGINE_API UIContext {
 	// culling
 	bool enable_frustum_culling = true;
 	bool gpu_culling_enabled = false;
+	bool hiz_occlusion_enabled = false;
 
 	// GPU profiling
 	bool gpu_profiling = false;

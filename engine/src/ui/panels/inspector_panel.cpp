@@ -490,7 +490,9 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 	}
 
 	// Shadow toggle
-	ImGui::Checkbox("Cast Shadow", &mesh.has_shadow);
+	if (ImGui::Checkbox("Cast Shadow", &mesh.has_shadow))
+		if (mesh.getRegistry())
+			mesh.getRegistry()->events().emit(MeshDataChangedEvent{mesh.getEntity()});
 
 	// Material editing
 	VeMaterial* mat = mesh.getMaterial();
@@ -549,8 +551,11 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 			changed = true;
 	}, [&]() { factors.specular_factor = defaults.specular_factor; changed = true; });
 
-	if (changed)
+	if (changed) {
 		mat->setMaterialFactors(factors);
+		if (mesh.getRegistry())
+			mesh.getRegistry()->events().emit(MeshDataChangedEvent{mesh.getEntity()});
+	}
 
 	// Alpha properties
 	auto alpha = mat->getAlphaProps();
@@ -575,8 +580,11 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 	if (ImGui::Checkbox("Double Sided", &alpha.double_sided))
 		alpha_changed = true;
 
-	if (alpha_changed)
+	if (alpha_changed) {
 		mat->setAlphaProps(alpha);
+		if (mesh.getRegistry())
+			mesh.getRegistry()->events().emit(MeshDataChangedEvent{mesh.getEntity()});
+	}
 
 	// Texture thumbnails
 	if (ImGui::TreeNode("Textures")) {

@@ -253,3 +253,15 @@ FetchContent_Declare(meshoptimizer
 )
 FetchContent_MakeAvailable(meshoptimizer)
 message(STATUS "meshoptimizer: ${meshoptimizer_SOURCE_DIR}")
+
+# Tracy Profiler (optional, gated behind VE_ENABLE_TRACY)
+if(VE_ENABLE_TRACY)
+	include(FetchContent)
+	FetchContent_Declare(tracy
+		GIT_REPOSITORY https://github.com/wolfpld/tracy.git
+		GIT_TAG v0.13.1
+	)
+	set(TRACY_ENABLE ON CACHE BOOL "" FORCE)
+	FetchContent_MakeAvailable(tracy)
+	message(STATUS "Tracy profiler: ${tracy_SOURCE_DIR}")
+endif()

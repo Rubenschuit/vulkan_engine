@@ -44,12 +44,16 @@ public:
 	void buildMegaBuffer(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh*>& meshes);
 
 	void prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr) const;
-	void prepareTransparents(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr) const;
+	void prepareTransparents(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr,
+	                         const std::vector<uint32_t>& transparent_entity_indices) const;
 	void renderOpaque(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set) const;
 	void renderOpaqueGpuCulled(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
-	                           const VeBuffer& indirect_buffer, const VeBuffer& count_buffer,
-	                           uint32_t bucket_stride, uint32_t max_draw_count,
-	                           bool use_draw_count) const;
+	                           const VeBuffer& indirect_buffer,
+	                           const uint32_t* bucket_group_offsets,
+	                           const uint32_t* bucket_group_counts,
+	                           const VeBuffer* compacted_buffer = nullptr,
+	                           const VeBuffer* compact_count_buffer = nullptr,
+	                           const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 	void renderTransparent(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
 	                       const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 

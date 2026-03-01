@@ -39,6 +39,14 @@ struct ComponentRemovedEvent {
 	Entity entity;
 };
 
+struct TransformInvalidatedEvent {
+	Entity entity;
+};
+
+struct MeshDataChangedEvent {
+	Entity entity;
+};
+
 // Deferred deletion request (emitted by UI, processed at safe frame boundary)
 struct DeleteEntityRequest {
 	Entity entity;

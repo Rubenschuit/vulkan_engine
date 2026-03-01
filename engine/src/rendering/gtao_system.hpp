@@ -112,14 +112,14 @@ private:
 	vk::raii::Pipeline m_blur_pipeline{nullptr};
 
 	// Per-frame descriptor sets
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_compute_descriptor_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_blur_h_descriptor_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_blur_v_descriptor_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_output_descriptor_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_compute_descriptor_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_blur_h_descriptor_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_blur_v_descriptor_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_output_descriptor_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
 	vk::raii::DescriptorSet m_dummy_output_descriptor_set{nullptr};
 
 	// Cached depth image for barriers + descriptors (single-sample resolved depth)

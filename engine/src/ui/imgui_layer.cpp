@@ -113,6 +113,8 @@ void ImGuiLayer::beginFrame() {
 void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd, bool clear_target) {
     ImGui::Render();
     ImDrawData* draw_data = ImGui::GetDrawData();
+    if (!clear_target && draw_data->TotalVtxCount == 0)
+        return;
     // Render on top of the current swapchain image view
     VkImageView color_view = static_cast<VkImageView>(*m_renderer.getSwapChainImageView(m_renderer.getCurrentImageIndex()));
     const vk::RenderingAttachmentInfo color_attachment{

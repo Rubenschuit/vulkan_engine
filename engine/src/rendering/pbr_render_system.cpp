@@ -274,48 +274,42 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 	}
 }
 
-void PbrRenderSystem::prepareTransparents(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr) const {
+void PbrRenderSystem::prepareTransparents(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr,
+                                           const std::vector<uint32_t>& transparent_entity_indices) const {
 	m_transparent_drawables.clear();
-	auto& registry = *frame_info.registry;
-	auto& meshes = registry.meshes();
+	if (transparent_entity_indices.empty())
+		return;
 
+	auto& registry = *frame_info.registry;
 	FrustumPlane planes[6];
 	extractFrustumPlanes(frame_info.camera.getProj() * frame_info.camera.getView(), planes);
 
 	const glm::vec3 camera_pos = frame_info.camera.getPosition();
 	const glm::vec3 camera_fwd = frame_info.camera.getForward();
 
-	for (uint32_t i = 0; i < meshes.size(); i++) {
-		uint32_t entity_idx = meshes.entityAt(i);
-		Entity entity = registry.entityFromIndex(entity_idx);
-		if (!registry.transforms().has(entity_idx))
+	for (uint32_t entity_idx : transparent_entity_indices) {
+		MeshComponent* mesh = registry.meshes().get(entity_idx);
+		if (!mesh || !mesh->hasMesh() || !mesh->hasMaterial())
 			continue;
-		auto& mesh = meshes.data()[i];
-		if (!mesh.hasMesh() || !mesh.hasMaterial())
-			continue;
-		auto* mat = mesh.getMaterial();
-		MaterialAlphaProps alpha_props = mat->getAlphaProps();
-		float transmission = mat->getMaterialFactors().transmission_factor;
-		bool is_transparent = (alpha_props.alpha_mode == AlphaMode::BLEND) || (transmission > 0.0f);
-		if (!is_transparent)
-			continue;
-
-		const auto& aabb = mesh.getWorldAABB();
+		const auto& aabb = mesh->getWorldAABB();
 		if (!isAABBInFrustum(aabb, planes))
 			continue;
 
+		auto* mat = mesh->getMaterial();
+		MaterialAlphaProps alpha_props = mat->getAlphaProps();
+		Entity entity = registry.entityFromIndex(entity_idx);
 		glm::vec3 obj_pos = (aabb.min + aabb.max) * 0.5f;
 		float dist = glm::dot(obj_pos - camera_pos, camera_fwd);
 		m_transparent_drawables.push_back({
 			.entity = entity,
-			.mesh = &mesh,
-			.mesh_ptr = mesh.getMesh(),
+			.mesh = mesh,
+			.mesh_ptr = mesh->getMesh(),
 			.material_ptr = mat,
 			.dist_sq = dist,
 			.alpha_mode = alpha_props.alpha_mode,
 			.double_sided = alpha_props.double_sided,
 			.ssbo_index = 0,
-			.lod_level = mesh.cached_lod
+			.lod_level = mesh->cached_lod
 		});
 	}
 
@@ -348,8 +342,12 @@ void PbrRenderSystem::prepareTransparents(VeFrameInfo& frame_info, MaterialSSBOM
 
 void PbrRenderSystem::renderOpaqueGpuCulled(
 	VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
-	const VeBuffer& indirect_buffer, const VeBuffer& count_buffer,
-	uint32_t bucket_stride, uint32_t max_draw_count, bool use_draw_count) const {
+	const VeBuffer& indirect_buffer,
+	const uint32_t* bucket_group_offsets,
+	const uint32_t* bucket_group_counts,
+	const VeBuffer* compacted_buffer,
+	const VeBuffer* compact_count_buffer,
+	const vk::raii::DescriptorSet* global_set_override) const {
 
 	if (!m_mega_buffer->isValid())
 		return;
@@ -360,8 +358,9 @@ void PbrRenderSystem::renderOpaqueGpuCulled(
 	auto& pipeline = mask ? m_pipelines_mask[mode] : m_pipelines[mode];
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
 
+	auto& global_set = global_set_override ? *global_set_override : frame_info.global_descriptor_set;
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
-		0, {*frame_info.global_descriptor_set}, {});
+		0, {*global_set}, {});
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		1, {*bindless_set}, {});
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
@@ -381,23 +380,23 @@ void PbrRenderSystem::renderOpaqueGpuCulled(
 	cmd.setDepthWriteEnable(VK_TRUE);
 
 	for (uint32_t bucket = 0; bucket < BUCKET_COUNT; bucket++) {
+		if (bucket_group_counts[bucket] == 0)
+			continue;
 		bool is_mask = (bucket >= 2);
 		bool is_double_sided = (bucket & 1);
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
 		cmd.setDepthCompareOp(
 			(m_depth_prepass_active || is_mask) ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eLess);
-		auto offset = static_cast<vk::DeviceSize>(bucket * bucket_stride) * sizeof(VkDrawIndexedIndirectCommand);
-		if (use_draw_count) {
+		auto offset = static_cast<vk::DeviceSize>(bucket_group_offsets[bucket]) * sizeof(VkDrawIndexedIndirectCommand);
+		if (compacted_buffer && compact_count_buffer) {
 			cmd.drawIndexedIndirectCount(
-				*indirect_buffer.getBuffer(), offset,
-				*count_buffer.getBuffer(), bucket * sizeof(uint32_t),
-				max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
+				*compacted_buffer->getBuffer(), offset,
+				*compact_count_buffer->getBuffer(), bucket * sizeof(uint32_t),
+				bucket_group_counts[bucket], sizeof(VkDrawIndexedIndirectCommand));
 		} else {
-			// TODO: Without drawIndexedIndirectCount (e.g. MoltenVK), empty draw commands
-			// are still submitted. A GPU compaction pass could avoid these no-op draws.
 			cmd.drawIndexedIndirect(
 				*indirect_buffer.getBuffer(), offset,
-				max_draw_count, sizeof(VkDrawIndexedIndirectCommand));
+				bucket_group_counts[bucket], sizeof(VkDrawIndexedIndirectCommand));
 		}
 	}
 }

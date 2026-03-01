@@ -436,8 +436,9 @@ void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_
 	cmd.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = m_extent});
 
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_mask_pipeline->getPipeline());
+	auto& descriptor_set = fi.cpu_global_descriptor_set ? *fi.cpu_global_descriptor_set : fi.global_descriptor_set;
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_mask_pipeline_layout,
-		0, {*fi.global_descriptor_set}, {});
+		0, {*descriptor_set}, {});
 
 	uint32_t instance_idx = mask_instance_start;
 	VeMesh* bound_mesh = nullptr;

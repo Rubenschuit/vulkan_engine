@@ -76,9 +76,12 @@ void VeThreadPool::workerLoop(uint32_t worker_index) {
 		// Execute the task
 		m_current_task(worker_index, m_slots[worker_index]);
 
-		// Signal completion
-		if (m_done_count.fetch_add(1, std::memory_order_acq_rel) + 1 >= workerCount())
+		// Must hold mutex for notify to prevent lost wakeup between
+		// main thread predicate check and its entry into wait.
+		if (m_done_count.fetch_add(1, std::memory_order_acq_rel) + 1 >= workerCount()) {
+			std::lock_guard<std::mutex> lock(m_dispatch_mutex);
 			m_done_cv.notify_one();
+		}
 	}
 }
 

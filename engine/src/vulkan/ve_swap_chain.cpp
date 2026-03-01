@@ -436,9 +436,14 @@ vk::Extent2D VeSwapChain::chooseSwapExtent(const vk::SurfaceCapabilitiesKHR& cap
 }
 
 void VeSwapChain::waitForCurrentFence() {
-	while (vk::Result::eTimeout ==
-			m_ve_device.getDevice().waitForFences(*m_in_flight_fences[m_current_frame], vk::True, UINT64_MAX));
-	return;
+    constexpr uint64_t timeout_ns = 3'000'000'000ULL; // 3 seconds
+    vk::Result result;
+    while ((result = m_ve_device.getDevice().waitForFences(
+            *m_in_flight_fences[m_current_frame], vk::True, timeout_ns))
+           == vk::Result::eTimeout) {
+        VE_LOGW("Fence wait timeout on frame " << m_current_frame
+                 << " (timeline=" << m_compute_timeline_value << ")");
+    }
 }
 
 // Reset the fence of the current frame back to unsignaled state

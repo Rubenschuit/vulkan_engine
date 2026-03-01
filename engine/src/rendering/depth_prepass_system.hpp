@@ -39,11 +39,12 @@ public:
 	void renderGpuCulled(VeFrameInfo& frame_info,
 	                     PbrMegaBuffer& mega_buffer,
 	                     const VeBuffer& indirect_buffer,
-	                     const VeBuffer& count_buffer,
-	                     uint32_t bucket_stride,
-	                     uint32_t max_draw_count,
+	                     const uint32_t* bucket_group_offsets,
+	                     const uint32_t* bucket_group_counts,
 	                     uint32_t bucket_count,
-	                     bool use_draw_count) const;
+	                     const VeBuffer* compacted_buffer = nullptr,
+	                     const VeBuffer* compact_count_buffer = nullptr,
+	                     const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 
 	void recreatePipeline(vk::SampleCountFlagBits sample_count) {
 		m_ve_pipeline.reset();

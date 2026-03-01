@@ -1,5 +1,5 @@
 // CSM multiview shadow shader — renders all cascades in a single pass via SV_ViewID
-// Per-instance transforms read from SSBO, indexed by SV_InstanceID + instance_offset
+// Per-instance transforms read from SSBO, indexed by SV_VulkanInstanceID + instance_offset
 
 #include "ve_constants.slangh"
 
@@ -40,7 +40,7 @@ struct VertexOutput {
 };
 
 [shader("vertex")]
-VertexOutput vertMain(VertexInput input, uint instance_id : SV_InstanceID, uint view_id : SV_ViewID) {
+VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID, uint view_id : SV_ViewID) {
 	VertexOutput output;
 
 	float4 pos = float4(input.in_pos, 1.0);

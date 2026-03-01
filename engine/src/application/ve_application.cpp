@@ -27,10 +27,13 @@
 #include "rendering/bloom_system.hpp"
 #include "rendering/post_process_system.hpp"
 #include "rendering/outline_system.hpp"
+#include "rendering/scene_resource_manager.hpp"
 #include "rendering/bindless_texture_registry.hpp"
 #include "rendering/material_ssbo_manager.hpp"
 #include "rendering/gpu_scene_manager.hpp"
 #include "rendering/gpu_culling_system.hpp"
+#include "rendering/hiz_system.hpp"
+#include "ve_tracy.hpp"
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -38,6 +41,12 @@
 #include <cassert>
 
 namespace ve {
+
+static vk::Extent2D halveExtent(vk::Extent2D e, bool half) {
+	if (!half) 
+		return e;
+	return {std::max(1u, e.width / 2), std::max(1u, e.height / 2)};
+}
 
 VeApplication::VeApplication(const EngineConfig& config)
 	: m_ve_window(WIDTH, HEIGHT, APP_NAME),
@@ -49,6 +58,7 @@ VeApplication::VeApplication(const EngineConfig& config)
 
 	m_resource_manager = std::make_unique<VeResourceManager>(m_ve_device);
 	createBuffers();
+	m_scene_resources = std::make_unique<SceneResourceManager>(m_ve_device);
 	createDescriptors();
 	initSystems();
 	initEditor();
@@ -71,27 +81,24 @@ void VeApplication::run() {
 	while (!m_ve_window.shouldClose()) {
 		m_ve_window.pollEvents();
 
-		// Check for window resize BEFORE starting frame
-		if (m_ve_window.wasWindowResized()) {
-			VE_LOGD("Window resize detected in main loop, recreating swap chain.");
+		// Check for window resize or out-of-date swap chain BEFORE starting frame
+		if (m_ve_window.wasWindowResized() || m_ve_renderer.isSwapChainOutOfDate()) {
+			VE_LOGD("Swap chain recreation triggered in main loop.");
 			m_ve_device.getDevice().waitIdle();
 			m_ve_window.resetWindowResizedFlag();
 			m_ve_renderer.recreateSwapChain();
 			onSwapChainRecreated();
 			continue;
 		}
-		else if (m_ve_renderer.isSwapChainOutOfDate()) {
-			VE_LOGD("Swap chain out of date detected in main loop, recreating swap chain.");
-			m_ve_device.getDevice().waitIdle();
-			m_ve_renderer.recreateSwapChain();
-			onSwapChainRecreated();
-			continue;
-		}
 
 		m_ve_renderer.getProfiler().beginCpuTimer(ProfileTimer::FRAME_TOTAL);
+		ZoneScopedN("Frame");
 
-		if (!m_ve_renderer.beginFrame())
-			continue;
+		{
+			ZoneScopedN("Begin Frame");
+			if (!m_ve_renderer.beginFrame())
+				continue;
+		}
 
 		updateFrameTime();
 		m_total_time += m_frame_time;
@@ -127,25 +134,41 @@ void VeApplication::run() {
 		}
 
 		// Update scene
-		m_active_scene->update(m_frame_time);
+		{
+			ZoneScopedN("Scene Update");
+			m_active_scene->update(m_frame_time);
+		}
 
 		// Engine pipeline
 		applySettingChanges();
+		if (m_editor->beginFrame())
+			recreateResolutionDependentSystems(); // extent changed
 		bool gpu_culling = m_ui.gpu_culling_enabled
-			&& m_gpu_scene_manager->getDispatchCount() > 0;
+			&& m_scene_resources->getGpuSceneManager().hasRegisteredObjects();
+		m_gpu_culling_system->setHizEnabled(
+			m_ui.hiz_occlusion_enabled && m_ui.depth_prepass_enabled && gpu_culling);
 		VeFrameInfo fi = buildFrameInfo(gpu_culling);
-		populateUBO(fi);
+		{
+			ZoneScopedN("Populate UBO");
+			populateUBO(fi);
+		}
 		dispatchCompute(fi);
 		renderFrame(fi);
 
 		// UI on separate command buffer
 		bool editor_mode = m_editor->isEditorMode();
-		m_ve_renderer.beginUIRecording(editor_mode);
-		Registry* ui_registry = &m_active_scene->getRegistry();
-		m_editor->renderUI(m_ui, ui_registry, m_active_scene.get());
+		{
+			ZoneScopedN("UI");
+			m_ve_renderer.beginUIRecording(editor_mode);
+			Registry* ui_registry = &m_active_scene->getRegistry();
+			m_editor->renderUI(m_ui, ui_registry, m_active_scene.get());
+		}
 
-		collectStats();
-		m_ve_renderer.endFrame();
+		collectStats(fi);
+		{
+			ZoneScopedN("End Frame");
+			m_ve_renderer.endFrame();
+		}
 	}
 
 	m_ve_device.getDevice().waitIdle();
@@ -166,24 +189,7 @@ void VeApplication::setActiveScene(std::unique_ptr<VeScene> scene) {
 		m_ui.ambient_light_color = glm::vec3(ambient);
 		m_ui.ambient_light_intensity = ambient.w;
 
-		// Build mega buffer from all meshes in the scene
-		auto& registry = m_active_scene->getRegistry();
-		std::vector<VeMesh*> all_meshes;
-		for (auto& mc : registry.meshes()) {
-			VeMesh* m = mc.getMesh();
-			if (m && std::find(all_meshes.begin(), all_meshes.end(), m) == all_meshes.end())
-				all_meshes.push_back(m);
-		}
-		if (!all_meshes.empty()) {
-			auto cmd = m_ve_device.beginSingleTimeCommands();
-			m_pbr_render_system->buildMegaBuffer(*cmd, all_meshes);
-			m_ve_device.endSingleTimeCommands(*cmd);
-		}
-
-		// Register all mesh entities with GPU scene manager
-		m_gpu_scene_manager->subscribeToRegistry(registry);
-		m_gpu_scene_manager->registerAllObjects(registry,
-			m_pbr_render_system->getMegaBuffer(), *m_material_ssbo_manager);
+		m_scene_resources->loadScene(m_active_scene->getRegistry(), *m_pbr_render_system);
 	}
 }
 
@@ -194,14 +200,7 @@ Registry* VeApplication::getActiveRegistry() {
 void VeApplication::unloadScene() {
 	if (!m_active_scene)
 		return;
-	m_ve_device.getDevice().waitIdle();
-
-	// Reset render systems that hold scene-specific resources or state
-	// TODO: Improve this
-	m_pbr_render_system->resetMegaBuffer();
-	m_gpu_scene_manager->reset();
-	m_material_ssbo_manager->reset();
-	m_bindless_registry->reset();
+	m_scene_resources->unload(*m_pbr_render_system, *m_gpu_culling_system);
 	m_active_scene.reset();
 }
 
@@ -255,26 +254,8 @@ void VeApplication::processSceneLoadRequest() {
 		case SceneLoadRequest::Type::ADD_MODEL: {
 			if (m_active_scene) {
 				m_active_scene->addModel(m_pending_load.gltf_path);
-				// Rebuild mega buffer to include the new model's meshes
-				auto& registry = m_active_scene->getRegistry();
-				std::vector<VeMesh*> all_meshes;
-				for (auto& mc : registry.meshes()) {
-					VeMesh* m = mc.getMesh();
-					if (m && std::find(all_meshes.begin(), all_meshes.end(), m) == all_meshes.end())
-						all_meshes.push_back(m);
-				}
-				if (!all_meshes.empty()) {
-					m_ve_device.getDevice().waitIdle();
-					m_pbr_render_system->resetMegaBuffer();
-					m_gpu_scene_manager->reset();
-					m_material_ssbo_manager->reset();
-					m_bindless_registry->reset();
-					auto cmd = m_ve_device.beginSingleTimeCommands();
-					m_pbr_render_system->buildMegaBuffer(*cmd, all_meshes);
-					m_ve_device.endSingleTimeCommands(*cmd);
-					m_gpu_scene_manager->registerAllObjects(registry,
-						m_pbr_render_system->getMegaBuffer(), *m_material_ssbo_manager);
-				}
+				m_scene_resources->rebuildForModelAdd(
+					m_active_scene->getRegistry(), *m_pbr_render_system);
 			}
 			break;
 		}
@@ -336,6 +317,7 @@ VeFrameInfo VeApplication::buildFrameInfo(bool gpu_culling_active) {
 		.csm_data = {},
 		.gpu_culling_active = gpu_culling_active,
 		.selected_entity = m_editor->getState().selected_entity,
+		.cpu_global_descriptor_set = &m_global_descriptor_sets[current_frame],
 	};
 
 	return fi;
@@ -372,12 +354,7 @@ void VeApplication::applySettingChanges() {
 	// Shadow mask half-res toggle
 	if (m_ui.shadow_mask_half_res != m_shadow_mask_half_res) {
 		m_shadow_mask_half_res = m_ui.shadow_mask_half_res;
-		auto mask_extent = extent;
-		if (m_shadow_mask_half_res) {
-			mask_extent.width  = std::max(1u, mask_extent.width / 2);
-			mask_extent.height = std::max(1u, mask_extent.height / 2);
-		}
-		m_shadow_mask_system->recreate(*m_global_pool, mask_extent,
+		m_shadow_mask_system->recreate(*m_global_pool, halveExtent(extent, m_shadow_mask_half_res),
 			extent,
 			m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage());
 	}
@@ -387,12 +364,7 @@ void VeApplication::applySettingChanges() {
 	m_gtao_system->setIntensity(m_ui.gtao_intensity);
 	if (m_ui.gtao_half_res != m_gtao_half_res) {
 		m_gtao_half_res = m_ui.gtao_half_res;
-		auto ao_extent = extent;
-		if (m_gtao_half_res) {
-			ao_extent.width  = std::max(1u, ao_extent.width / 2);
-			ao_extent.height = std::max(1u, ao_extent.height / 2);
-		}
-		m_gtao_system->recreate(*m_global_pool, ao_extent,
+		m_gtao_system->recreate(*m_global_pool, halveExtent(extent, m_gtao_half_res),
 			extent,
 			m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage());
 	}
@@ -431,6 +403,7 @@ void VeApplication::populateUBO(VeFrameInfo& fi) {
 // ─── Compute Dispatch ────────────────────────────────────────────────────────
 
 void VeApplication::dispatchCompute(VeFrameInfo& fi) {
+	ZoneScopedN("Compute Dispatch");
 	auto current_frame = fi.current_frame;
 	auto extent = m_ve_renderer.getExtent();
 
@@ -441,20 +414,16 @@ void VeApplication::dispatchCompute(VeFrameInfo& fi) {
 	// Record compute start timestamp
 	m_ve_renderer.getProfiler().beginGpuTimer(fi.compute_command_buffer, ProfileTimer::COMPUTE_TOTAL);
 
-	// GPU culling: upload dirty transforms and dispatch
-	if (fi.gpu_culling_active) {
-		m_gpu_scene_manager->updateDirtyTransforms(current_frame,
-			m_active_scene->getRegistry(), fi.compute_command_buffer);
-		m_gpu_culling_system->dispatch(fi, *m_gpu_scene_manager);
-	}
-
 	// Record compute commands
-	m_fireworks_system->recordComputeCommands(fi);
-	m_particle_system->recordComputeCommands(fi);
-	if (fi.shadow_mask_active)
-		m_shadow_mask_system->dispatch(fi);
-	if (m_cluster_light_system->isEnabled())
-		m_cluster_light_system->dispatch(fi, m_camera, extent);
+	{
+		TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Compute");
+		m_fireworks_system->recordComputeCommands(fi);
+		m_particle_system->recordComputeCommands(fi);
+		if (fi.shadow_mask_active)
+			m_shadow_mask_system->dispatch(fi);
+		if (m_cluster_light_system->isEnabled())
+			m_cluster_light_system->dispatch(fi, m_camera, extent);
+	}
 
 	m_ve_renderer.submitCompute(fi.compute_command_buffer);
 
@@ -476,17 +445,28 @@ void VeApplication::dispatchCompute(VeFrameInfo& fi) {
 // ─── Render Frame ────────────────────────────────────────────────────────────
 
 void VeApplication::renderFrame(VeFrameInfo& fi) {
+	ZoneScopedN("Render Frame");
 	auto& command_buffer = fi.cmd();
+	[[maybe_unused]] auto tracy_gfx = m_ve_renderer.getTracyGraphicsCtx();
 
 	auto& profiler = m_ve_renderer.getProfiler();
-	auto& registry = m_active_scene->getRegistry();
-	auto& bindless_set = m_bindless_registry->getDescriptorSet();
+	auto& gpu_scene = m_scene_resources->getGpuSceneManager();
+	auto& material_mgr = m_scene_resources->getMaterialManager();
+	auto& bindless_set = m_scene_resources->getBindlessRegistry().getDescriptorSet();
 	m_pbr_render_system->setDepthPrePassActive(m_ui.depth_prepass_enabled);
+	material_mgr.flushToDevice(command_buffer);
 
 	if (fi.gpu_culling_active) {
-		// GPU-culled path: only prepare transparents on CPU
+		// GPU culling runs inline on graphics queue
+		TracyVkZone(tracy_gfx, *command_buffer, "GPU Cull");
+		gpu_scene.updateDirtyTransforms(fi.current_frame,
+			m_active_scene->getRegistry(), command_buffer);
+		m_gpu_culling_system->dispatch(command_buffer, fi, gpu_scene);
+
+		// CPU-side: only prepare transparents
 		profiler.beginCpuTimer(ProfileTimer::CULLING);
-		m_pbr_render_system->prepareTransparents(fi, *m_material_ssbo_manager);
+		m_pbr_render_system->prepareTransparents(fi, material_mgr,
+			gpu_scene.getTransparentEntityIndices());
 		profiler.endCpuTimer(ProfileTimer::CULLING);
 	} else {
 		// CPU culling fallback
@@ -499,66 +479,101 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		m_culling_system->cullObjects(fi, &m_ve_renderer.getThreadPool());
 		profiler.endCpuTimer(ProfileTimer::CULLING);
 
-		m_pbr_render_system->prepareFrame(fi, *m_material_ssbo_manager);
+		m_pbr_render_system->prepareFrame(fi, material_mgr);
 	}
 
-	// Collect stats
-	if (fi.gpu_culling_active) {
-		m_ui.stats.cull_total_objects = m_gpu_scene_manager->getObjectCount();
-		// Readback is 1 frame cycle stale (written during previous use of this frame slot)
-		m_ui.stats.cull_visible_objects = m_gpu_culling_system->readbackDrawCounts(fi.current_frame);
-		m_ui.stats.visible_triangles = 0;
-	} else {
-		m_ui.stats.cull_total_objects = m_culling_system->getLastTotalMeshObjects();
-		m_ui.stats.cull_visible_objects = m_culling_system->getLastVisibleCount();
-		uint32_t tri_count = 0;
-		for (auto& vo : m_culling_system->getVisibleObjectsRef())
-			tri_count += vo.mesh->getMesh()->getLodIndexCount(vo.lod_level) / 3;
-		m_ui.stats.visible_triangles = tri_count;
-	}
-	m_ui.stats.num_point_lights = registry.activePointLightCount();
-	m_ui.stats.num_directional_lights = registry.activeDirectionalLightCount();
-
-	// Editor viewport handling
-	if (m_editor->beginFrame())
-		recreateResolutionDependentSystems();
 	bool editor_mode = m_editor->isEditorMode();
 
 	// Shadow pass
 	if (m_ui.shadow_mode != ShadowMode::DISABLED) {
+		ZoneScopedN("Shadow Maps");
+		TracyVkZone(tracy_gfx, *command_buffer, "Shadow Maps");
 		profiler.beginCpuTimer(ProfileTimer::SHADOW_MAPS);
 		profiler.beginGpuTimer(command_buffer, ProfileTimer::SHADOW_MAPS);
-		m_shadow_render_system->renderShadowMaps(fi);
+		if (fi.gpu_culling_active)
+			m_shadow_render_system->renderShadowMapsGpuCulled(
+				fi, *m_gpu_culling_system, m_pbr_render_system->getMegaBuffer(), gpu_scene);
+		else
+			m_shadow_render_system->renderShadowMaps(fi);
 		profiler.endGpuTimer(command_buffer, ProfileTimer::SHADOW_MAPS);
 		profiler.endCpuTimer(ProfileTimer::SHADOW_MAPS);
 	}
 
-	uint32_t gpu_object_count = m_gpu_scene_manager->getDispatchCount();
+	bool hiz_active = fi.gpu_culling_active && m_gpu_culling_system->isHizEnabled()
+		&& m_ui.depth_prepass_enabled;
 
 	// Depth prepass
 	if (m_ui.depth_prepass_enabled) {
-		profiler.beginCpuTimer(ProfileTimer::DEPTH_PREPASS);
-		profiler.beginGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
-		m_ve_renderer.beginDepthPrePass(command_buffer);
-		if (fi.gpu_culling_active) {
-			m_depth_prepass_system->renderGpuCulled(fi,
-				m_pbr_render_system->getMegaBuffer(),
-				m_gpu_culling_system->getIndirectBuffer(fi.current_frame),
-				m_gpu_culling_system->getCountBuffer(fi.current_frame),
-				MAX_GPU_OBJECTS, gpu_object_count, 2,
-				m_ve_device.supportsDrawIndirectCount());
-		} else {
-			m_depth_prepass_system->render(fi,
-				m_pbr_render_system->getMegaBuffer(),
-				m_pbr_render_system->getIndirectBuffer(fi.current_frame),
-				m_pbr_render_system->getDepthBucketOffsets(),
-				m_pbr_render_system->getDepthBucketCounts(), 2);
+		{
+			ZoneScopedN("Depth Prepass");
+			TracyVkZone(tracy_gfx, *command_buffer, "Depth Prepass");
+			profiler.beginCpuTimer(ProfileTimer::DEPTH_PREPASS);
+			profiler.beginGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
+			m_ve_renderer.beginDepthPrePass(command_buffer);
+			if (fi.gpu_culling_active) {
+				auto* compact_buf = m_gpu_culling_system->compactionEnabled()
+					? &m_gpu_culling_system->getCompactedIndirectBuffer(fi.current_frame) : nullptr;
+				auto* compact_cnt = m_gpu_culling_system->compactionEnabled()
+					? &m_gpu_culling_system->getCompactCountBuffer(fi.current_frame) : nullptr;
+				m_depth_prepass_system->renderGpuCulled(fi,
+					m_pbr_render_system->getMegaBuffer(),
+					m_gpu_culling_system->getIndirectBuffer(fi.current_frame),
+					gpu_scene.getBucketGroupOffsets(),
+					gpu_scene.getBucketGroupCounts(), 2,
+					compact_buf, compact_cnt);
+			} else {
+				m_depth_prepass_system->render(fi,
+					m_pbr_render_system->getMegaBuffer(),
+					m_pbr_render_system->getIndirectBuffer(fi.current_frame),
+					m_pbr_render_system->getDepthBucketOffsets(),
+					m_pbr_render_system->getDepthBucketCounts(), 2);
+			}
+			m_ve_renderer.endDepthPrePass(command_buffer);
 		}
-		m_ve_renderer.endDepthPrePass(command_buffer);
+
+		// Build Hi-Z mip chain for next frame's occlusion culling
+		if (hiz_active) {
+			TracyVkZone(tracy_gfx, *command_buffer, "Hi-Z Build");
+			vk::ImageMemoryBarrier2 depth_to_read{
+				.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
+				.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+				.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+				.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+				.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+				.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = *m_ve_renderer.getResolvedDepthImage(),
+				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
+			};
+			vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_read};
+			command_buffer.pipelineBarrier2(dep);
+
+			m_hiz_system->generate(command_buffer, fi.current_frame);
+
+			vk::ImageMemoryBarrier2 depth_to_attach{
+				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+				.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
+				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
+					| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+				.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+				.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = *m_ve_renderer.getResolvedDepthImage(),
+				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
+			};
+			vk::DependencyInfo dep2{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_attach};
+			command_buffer.pipelineBarrier2(dep2);
+		}
+
 		profiler.endGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
 		profiler.endCpuTimer(ProfileTimer::DEPTH_PREPASS);
 
 		if (m_ui.gtao_enabled) {
+			ZoneScopedN("GTAO");
+			TracyVkZone(tracy_gfx, *command_buffer, "GTAO");
 			profiler.beginCpuTimer(ProfileTimer::GTAO);
 			profiler.beginGpuTimer(command_buffer, ProfileTimer::GTAO);
 			m_gtao_system->dispatch(fi);
@@ -568,31 +583,39 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 	}
 
 	// Scene render
-	profiler.beginCpuTimer(ProfileTimer::SCENE_RENDER);
-	profiler.beginGpuTimer(command_buffer, ProfileTimer::SCENE_RENDER);
-	m_ve_renderer.beginSceneRender(command_buffer, m_ui.depth_prepass_enabled);
-	if (fi.gpu_culling_active) {
-		m_pbr_render_system->renderOpaqueGpuCulled(fi, bindless_set,
-			m_gpu_culling_system->getIndirectBuffer(fi.current_frame),
-			m_gpu_culling_system->getCountBuffer(fi.current_frame),
-			MAX_GPU_OBJECTS, gpu_object_count,
-			m_ve_device.supportsDrawIndirectCount());
-	} else {
-		m_pbr_render_system->renderOpaque(fi, bindless_set);
+	{
+		ZoneScopedN("Scene Render");
+		TracyVkZone(tracy_gfx, *command_buffer, "Scene Render");
+		profiler.beginCpuTimer(ProfileTimer::SCENE_RENDER);
+		profiler.beginGpuTimer(command_buffer, ProfileTimer::SCENE_RENDER);
+		m_ve_renderer.beginSceneRender(command_buffer, m_ui.depth_prepass_enabled);
+		if (fi.gpu_culling_active) {
+			auto* compact_buf = m_gpu_culling_system->compactionEnabled()
+				? &m_gpu_culling_system->getCompactedIndirectBuffer(fi.current_frame) : nullptr;
+			auto* compact_cnt = m_gpu_culling_system->compactionEnabled()
+				? &m_gpu_culling_system->getCompactCountBuffer(fi.current_frame) : nullptr;
+			m_pbr_render_system->renderOpaqueGpuCulled(fi, bindless_set,
+				m_gpu_culling_system->getIndirectBuffer(fi.current_frame),
+				gpu_scene.getBucketGroupOffsets(),
+				gpu_scene.getBucketGroupCounts(),
+				compact_buf, compact_cnt);
+		} else {
+			m_pbr_render_system->renderOpaque(fi, bindless_set);
+		}
+		m_skybox_render_system->render(fi);
+		m_pbr_render_system->renderTransparent(fi, bindless_set,
+			fi.gpu_culling_active ? &m_global_descriptor_sets[fi.current_frame] : nullptr);
+		m_particle_system->render(fi);
+		if (m_ui.show_axes)
+			m_axes_render_system->render(fi);
+		if (m_ui.show_aabb_debug)
+			m_aabb_debug_render_system->render(fi);
+		m_light_system->render(fi);
+		m_fireworks_system->render(fi);
+		m_ve_renderer.endSceneRender(command_buffer);
+		profiler.endGpuTimer(command_buffer, ProfileTimer::SCENE_RENDER);
+		profiler.endCpuTimer(ProfileTimer::SCENE_RENDER);
 	}
-	m_skybox_render_system->render(fi);
-	m_pbr_render_system->renderTransparent(fi, bindless_set,
-		fi.gpu_culling_active ? &m_global_descriptor_sets[fi.current_frame] : nullptr);
-	m_particle_system->render(fi);
-	if (m_ui.show_axes)
-		m_axes_render_system->render(fi);
-	if (m_ui.show_aabb_debug)
-		m_aabb_debug_render_system->render(fi);
-	m_light_system->render(fi);
-	m_fireworks_system->render(fi);
-	m_ve_renderer.endSceneRender(command_buffer);
-	profiler.endGpuTimer(command_buffer, ProfileTimer::SCENE_RENDER);
-	profiler.endCpuTimer(ProfileTimer::SCENE_RENDER);
 
 	// Selection outline: mask + JFA
 	auto& editor_state = m_editor->getState();
@@ -605,6 +628,8 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 
 	// Bloom
 	if (m_ui.bloom_enabled) {
+		ZoneScopedN("Bloom");
+		TracyVkZone(tracy_gfx, *command_buffer, "Bloom");
 		profiler.beginCpuTimer(ProfileTimer::BLOOM);
 		profiler.beginGpuTimer(command_buffer, ProfileTimer::BLOOM);
 		m_bloom_system->render(command_buffer);
@@ -613,23 +638,48 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 	}
 
 	// Post-processing + outline composite
-	profiler.beginCpuTimer(ProfileTimer::POST_PROCESS);
-	profiler.beginGpuTimer(command_buffer, ProfileTimer::POST_PROCESS);
-	m_ve_renderer.beginPostProcessRender(command_buffer, editor_mode);
-	m_post_process_system->render(command_buffer, fi.post_process_push);
-	if (outline_active && m_outline_system->hasOutline())
-		m_outline_system->composite(command_buffer, fi.current_frame,
-			editor_state.outline_width, editor_state.outline_color);
-	m_ve_renderer.endPostProcessRender(command_buffer, editor_mode);
-	profiler.endGpuTimer(command_buffer, ProfileTimer::POST_PROCESS);
-	profiler.endCpuTimer(ProfileTimer::POST_PROCESS);
+	{
+		ZoneScopedN("Post Process");
+		TracyVkZone(tracy_gfx, *command_buffer, "Post Process");
+		profiler.beginCpuTimer(ProfileTimer::POST_PROCESS);
+		profiler.beginGpuTimer(command_buffer, ProfileTimer::POST_PROCESS);
+		m_ve_renderer.beginPostProcessRender(command_buffer, editor_mode);
+		m_post_process_system->render(command_buffer, fi.post_process_push);
+		if (outline_active && m_outline_system->hasOutline())
+			m_outline_system->composite(command_buffer, fi.current_frame,
+				editor_state.outline_width, editor_state.outline_color);
+		m_ve_renderer.endPostProcessRender(command_buffer, editor_mode);
+		profiler.endGpuTimer(command_buffer, ProfileTimer::POST_PROCESS);
+		profiler.endCpuTimer(ProfileTimer::POST_PROCESS);
+	}
 }
 
 // ─── Stats Collection ────────────────────────────────────────────────────────
 
-void VeApplication::collectStats() {
+void VeApplication::collectStats(const VeFrameInfo& fi) {
 	auto& profiler = m_ve_renderer.getProfiler();
 	profiler.endCpuTimer(ProfileTimer::FRAME_TOTAL);
+
+	// Scene stats
+	auto& registry = m_active_scene->getRegistry();
+	if (fi.gpu_culling_active) {
+		auto& gpu_scene = m_scene_resources->getGpuSceneManager();
+		m_ui.stats.cull_total_objects = gpu_scene.getTotalRegisteredCount();
+		// Readback is 1 frame cycle stale (written during previous use of this frame slot)
+		m_ui.stats.cull_visible_objects = m_gpu_culling_system->readbackDrawCounts(fi.current_frame);
+		m_ui.stats.visible_triangles = m_gpu_culling_system->readbackTriangleCount(fi.current_frame);
+		m_ui.stats.draw_calls = gpu_scene.getTotalGroups();
+	} else {
+		m_ui.stats.cull_total_objects = m_culling_system->getLastTotalMeshObjects();
+		m_ui.stats.cull_visible_objects = m_culling_system->getLastVisibleCount();
+		uint32_t tri_count = 0;
+		for (auto& vo : m_culling_system->getVisibleObjectsRef())
+			tri_count += vo.mesh->getMesh()->getLodIndexCount(vo.lod_level) / 3;
+		m_ui.stats.visible_triangles = tri_count;
+		m_ui.stats.draw_calls = m_pbr_render_system->getOpaqueDrawCount();
+	}
+	m_ui.stats.num_point_lights = registry.activePointLightCount();
+	m_ui.stats.num_directional_lights = registry.activeDirectionalLightCount();
 
 	const auto& results = profiler.getResults();
 	m_ui.stats.fence_wait = results.fence_wait_ms;
@@ -683,6 +733,7 @@ void VeApplication::recreatePipelines() {
 	m_imgui_layer->recreatePipeline();
 }
 
+// TODO: make cleaner
 void VeApplication::recreateResolutionDependentSystems() {
 	auto extent = m_ve_renderer.getExtent();
 	auto color_format = m_ve_renderer.getSwapChainImageFormat();
@@ -690,27 +741,18 @@ void VeApplication::recreateResolutionDependentSystems() {
 	m_bloom_system->recreateResources(extent, m_ve_renderer.getResolveTargetImageView());
 	m_cluster_light_system->recreate(*m_global_pool, extent);
 
-	{
-		auto mask_extent = extent;
-		if (m_shadow_mask_half_res) {
-			mask_extent.width  = std::max(1u, mask_extent.width / 2);
-			mask_extent.height = std::max(1u, mask_extent.height / 2);
-		}
-		m_shadow_mask_system->recreate(*m_global_pool, mask_extent,
-			extent,
-			m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage());
-	}
+	m_shadow_mask_system->recreate(*m_global_pool, halveExtent(extent, m_shadow_mask_half_res),
+		extent,
+		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage());
 
-	{
-		auto ao_extent = extent;
-		if (m_gtao_half_res) {
-			ao_extent.width  = std::max(1u, ao_extent.width / 2);
-			ao_extent.height = std::max(1u, ao_extent.height / 2);
-		}
-		m_gtao_system->recreate(*m_global_pool, ao_extent,
-			extent,
-			m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage());
-	}
+	m_gtao_system->recreate(*m_global_pool, halveExtent(extent, m_gtao_half_res),
+		extent,
+		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage());
+
+	m_hiz_system->recreate(*m_global_pool, extent,
+		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage());
+	m_gpu_culling_system->createHizDescriptorSets(*m_global_pool, m_scene_resources->getGpuSceneManager(), *m_hiz_system);
+	m_gpu_culling_system->createShadowHizDescriptorSets(*m_global_pool, m_scene_resources->getGpuSceneManager(), *m_hiz_system);
 
 	m_post_process_system->recreatePipeline(color_format, m_ve_renderer.getResolveTargetImageView(), m_bloom_system->getBloomTexture());
 	m_outline_system->recreate(*m_global_pool, extent, color_format);
@@ -798,14 +840,10 @@ void VeApplication::createDescriptors() {
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
 		.buildShared();
 
-	// Bindless texture registry + material SSBO manager (needed before global desc set writes)
-	m_bindless_registry = std::make_unique<BindlessTextureRegistry>(m_ve_device);
-	m_material_ssbo_manager = std::make_unique<MaterialSSBOManager>(m_ve_device, *m_bindless_registry);
-
 	// Global descriptor sets (per frame)
 	m_global_descriptor_sets.clear();
 	m_global_descriptor_sets.reserve(MAX_FRAMES_IN_FLIGHT);
-	auto material_ssbo_info = m_material_ssbo_manager->getBuffer().getDescriptorInfo();
+	auto material_ssbo_info = m_scene_resources->getMaterialManager().getBuffer().getDescriptorInfo();
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		auto buffer_info = m_uniform_buffers[i]->getDescriptorInfo();
 		auto instance_info = m_instance_buffers[i]->getDescriptorInfo();
@@ -886,36 +924,24 @@ void VeApplication::initSystems() {
 		m_ve_renderer.getSampleCount(), shader("depth_prepass_shader.spv")
 	);
 
-	{
-		auto mask_extent = m_ve_renderer.getExtent();
-		if (m_ui.shadow_mask_half_res) {
-			mask_extent.width  = std::max(1u, mask_extent.width / 2);
-			mask_extent.height = std::max(1u, mask_extent.height / 2);
-		}
-		m_shadow_mask_system = std::make_unique<ShadowMaskSystem>(
-			m_ve_device, *m_global_pool, *m_resource_manager,
-			m_global_set_layout->getDescriptorSetLayout(),
-			m_shadow_render_system->getShadowSetLayout(),
-			m_config.shaders_dir, mask_extent, m_ve_renderer.getExtent(),
-			m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage()
-		);
-		m_shadow_mask_half_res = m_ui.shadow_mask_half_res;
-	}
+	m_shadow_mask_system = std::make_unique<ShadowMaskSystem>(
+		m_ve_device, *m_global_pool, *m_resource_manager,
+		m_global_set_layout->getDescriptorSetLayout(),
+		m_shadow_render_system->getShadowSetLayout(),
+		m_config.shaders_dir, halveExtent(m_ve_renderer.getExtent(), m_ui.shadow_mask_half_res),
+		m_ve_renderer.getExtent(),
+		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage()
+	);
+	m_shadow_mask_half_res = m_ui.shadow_mask_half_res;
 
-	{
-		auto ao_extent = m_ve_renderer.getExtent();
-		if (m_ui.gtao_half_res) {
-			ao_extent.width  = std::max(1u, ao_extent.width / 2);
-			ao_extent.height = std::max(1u, ao_extent.height / 2);
-		}
-		m_gtao_system = std::make_unique<GtaoSystem>(
-			m_ve_device, *m_global_pool, *m_resource_manager,
-			m_global_set_layout->getDescriptorSetLayout(),
-			m_config.shaders_dir, ao_extent, m_ve_renderer.getExtent(),
-			m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage()
-		);
-		m_gtao_half_res = m_ui.gtao_half_res;
-	}
+	m_gtao_system = std::make_unique<GtaoSystem>(
+		m_ve_device, *m_global_pool, *m_resource_manager,
+		m_global_set_layout->getDescriptorSetLayout(),
+		m_config.shaders_dir, halveExtent(m_ve_renderer.getExtent(), m_ui.gtao_half_res),
+		m_ve_renderer.getExtent(),
+		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage()
+	);
+	m_gtao_half_res = m_ui.gtao_half_res;
 
 	m_cluster_light_system = std::make_unique<ClusterLightSystem>(
 		m_ve_device, *m_global_pool,
@@ -926,7 +952,7 @@ void VeApplication::initSystems() {
 	m_pbr_render_system = std::make_unique<PbrRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
-		m_bindless_registry->getSetLayout(),
+		m_scene_resources->getBindlessRegistry().getSetLayout(),
 		m_shadow_render_system->getShadowSetLayout(),
 		m_shadow_mask_system->getShadowMaskSetLayout(),
 		m_cluster_light_system->getOutputSetLayout(),
@@ -1003,11 +1029,24 @@ void VeApplication::initSystems() {
 	);
 
 	// GPU-driven culling
-	m_gpu_scene_manager = std::make_unique<GpuSceneManager>(m_ve_device);
-	m_gpu_culling_system = std::make_unique<GpuCullingSystem>(m_ve_device);
-	m_gpu_culling_system->createDescriptorSets(*m_global_pool, *m_gpu_scene_manager);
+	auto& gpu_scene = m_scene_resources->getGpuSceneManager();
+	m_gpu_culling_system = std::make_unique<GpuCullingSystem>(m_ve_device, m_config.shaders_dir);
+	m_gpu_culling_system->createDescriptorSets(*m_global_pool, gpu_scene);
+	m_gpu_culling_system->createShadowDescriptorSets(*m_global_pool, gpu_scene);
+	if (m_gpu_culling_system->compactionEnabled())
+		m_gpu_culling_system->createCompactionDescriptorSets(*m_global_pool);
 	m_gpu_culling_system->createGlobalDescriptorSets(*m_global_pool, *m_global_set_layout,
-		m_uniform_buffers, m_material_ssbo_manager->getBuffer());
+		m_uniform_buffers, m_scene_resources->getMaterialManager().getBuffer());
+
+	m_shadow_render_system->createGpuShadowDescriptorSets(*m_gpu_culling_system);
+
+	// Hi-Z occlusion culling
+	m_hiz_system = std::make_unique<HizSystem>(
+		m_ve_device, *m_global_pool, m_ve_renderer.getExtent(),
+		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage(),
+		m_config.shaders_dir);
+	m_gpu_culling_system->createHizDescriptorSets(*m_global_pool, gpu_scene, *m_hiz_system);
+	m_gpu_culling_system->createShadowHizDescriptorSets(*m_global_pool, gpu_scene, *m_hiz_system);
 }
 
 void VeApplication::initEditor() {
@@ -1029,10 +1068,6 @@ void VeApplication::initEditor() {
 }
 
 // ─── Camera ──────────────────────────────────────────────────────────────────
-
-void VeApplication::updateCamera() {
-	updateCamera(m_fov);
-}
 
 void VeApplication::updateCamera(float fov_radians) {
 	m_camera.updateIfDirty();

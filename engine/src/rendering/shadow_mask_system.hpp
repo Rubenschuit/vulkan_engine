@@ -111,10 +111,10 @@ private:
 		vk::raii::Pipeline{nullptr}, vk::raii::Pipeline{nullptr}};
 
 	// Per-frame descriptor sets
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_compute_descriptor_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_output_descriptor_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_compute_descriptor_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_output_descriptor_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
 
 	vk::raii::DescriptorSet m_dummy_output_descriptor_set{nullptr}; // for when shadow mask is disabled
 
@@ -122,8 +122,8 @@ private:
 	// shader reads data consistent with the previous frame's depth and shadow maps.
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_compute_ubos;
 	std::unique_ptr<VeBuffer> m_dummy_instance_buffer; // binding 1 (unused by compute)
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_compute_global_descriptor_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_compute_global_descriptor_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
 	UniformBufferObject m_prev_ubo_data{};
 	bool m_has_prev_data = false;
 

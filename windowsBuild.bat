@@ -2,10 +2,11 @@
 setlocal
 
 :: windowsBuild.bat
-:: Usage: windowsBuild.bat [debug|release|test|clean] [vs2022|vs2026]
+:: Usage: windowsBuild.bat [debug|release|test|tracy|clean] [vs2022|vs2026]
 ::   debug: builds in debug mode and runs the app
 ::   release (default): builds in release mode and runs the app
 ::   test: builds in debug mode with tests enabled, runs all tests via CTest
+::   tracy: builds in RelWithDebInfo with Tracy profiler enabled and runs the app
 ::   clean: removes the build directory and compiled shader files
 
 set MODE=%~1
@@ -24,6 +25,7 @@ if /I "%MODE%"=="clean" (
 set BUILD_TYPE=release
 if /I "%MODE%"=="debug" set BUILD_TYPE=debug
 if /I "%MODE%"=="test" set BUILD_TYPE=debug
+if /I "%MODE%"=="tracy" set BUILD_TYPE=RelWithDebInfo
 
 :: Set Visual Studio generator
 if /I "%VS_VERSION%"=="vs2022" set VS_GENERATOR=Visual Studio 17 2022
@@ -34,6 +36,7 @@ echo Using %VS_GENERATOR%
 :: CMake args
 set CMAKE_ARGS=-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 if /I "%MODE%"=="test" set CMAKE_ARGS=%CMAKE_ARGS% -DVE_BUILD_TESTS=ON
+if /I "%MODE%"=="tracy" set CMAKE_ARGS=%CMAKE_ARGS% -DVE_ENABLE_TRACY=ON
 
 :: Build directory
 set BUILD_DIR=build

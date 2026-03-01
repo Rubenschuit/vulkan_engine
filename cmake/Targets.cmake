@@ -47,6 +47,12 @@ endif()
 
 target_link_libraries(VEngineLib PUBLIC meshoptimizer)
 
+# Tracy Profiler
+if(VE_ENABLE_TRACY)
+	target_link_libraries(VEngineLib PUBLIC TracyClient)
+	target_compile_definitions(VEngineLib PUBLIC TRACY_ENABLE TRACY_VK_USE_SYMBOL_TABLE)
+endif()
+
 target_link_libraries(${PROJECT_NAME} PRIVATE VEngine::Lib)
 
 # For MinGW, prevent exception symbol conflicts when linking against DLL
@@ -108,6 +114,7 @@ if(EXISTS "${IMGUIZMO_DIR}/ImGuizmo.cpp")
 	target_include_directories(imguizmo SYSTEM PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 	if(MSVC)
 		target_compile_options(imguizmo PRIVATE /W0)
+		target_compile_definitions(imguizmo PRIVATE VENGINE_EXPORTS) # imconfig.h ties IMGUI_API to VENGINE_EXPORTS; match VEngineLib so ImGuizmo uses dllexport not dllimport
 	else()
 		target_compile_options(imguizmo PRIVATE -w)
 	endif()
@@ -141,7 +148,7 @@ else()
 	endforeach()
 endif()
 
-set_property(TARGET ${PROJECT_NAME} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/build")
+set_property(TARGET ${PROJECT_NAME} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 # Set sensible output directories for libs and executables when building locally
 if (NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)

@@ -104,17 +104,17 @@ private:
 	std::unique_ptr<VePipeline> m_composite_pipeline;
 
 	// --- Descriptor sets (per-frame) ---
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_jfa_init_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_jfa_step_a_to_b_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_jfa_step_b_to_a_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_jfa_init_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_jfa_step_a_to_b_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_jfa_step_b_to_a_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
 	// Composite reads from whichever JFA buffer has the final result
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_composite_a_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_composite_b_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_composite_a_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_composite_b_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
 };
 
 } // namespace ve

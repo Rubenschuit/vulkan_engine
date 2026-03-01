@@ -297,9 +297,10 @@ void ShadowMaskSystem::dispatch(VeFrameInfo& frame_info) {
 	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
 
 	// Barrier 1: depth buffer eDepthAttachmentOptimal -> eDepthStencilReadOnlyOptimal
+	// no src dependency needed because of timeline semaphore
 	vk::ImageMemoryBarrier2 depth_to_read{
-		.srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+		.srcStageMask = vk::PipelineStageFlagBits2::eNone,
+		.srcAccessMask = vk::AccessFlagBits2::eNone,
 		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
 		.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
@@ -375,8 +376,8 @@ void ShadowMaskSystem::dispatch(VeFrameInfo& frame_info) {
 	vk::ImageMemoryBarrier2 depth_to_attachment{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-		.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+		.dstStageMask = vk::PipelineStageFlagBits2::eNone,
+		.dstAccessMask = vk::AccessFlagBits2::eNone,  // graphics queue picks up via timeline semaphore
 		.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
 		.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,

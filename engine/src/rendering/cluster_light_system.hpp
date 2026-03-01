@@ -89,10 +89,10 @@ private:
 	std::unique_ptr<VeComputePipeline> m_compute_pipeline;
 
 	// Per-frame descriptor sets
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_compute_descriptor_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_output_descriptor_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_compute_descriptor_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_output_descriptor_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
 };
 
 } // namespace ve

@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <vector>
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_beta.h> // for VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
@@ -7,6 +8,15 @@
 namespace ve {
 
 constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+
+// Helper to create a std::array<T, N> where every element is T{nullptr}.
+// Avoids hardcoding the element count when MAX_FRAMES_IN_FLIGHT changes.
+template <typename T, size_t N = MAX_FRAMES_IN_FLIGHT>
+auto makeNullArray() {
+	return []<size_t... Is>(std::index_sequence<Is...>) {
+		return std::array<T, N>{ (static_cast<void>(Is), T{nullptr})... };
+	}(std::make_index_sequence<N>{});
+}
 
 // lights
 constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.04f); // w indicates light intensity
@@ -36,19 +46,19 @@ constexpr uint32_t MAX_SHADOW_LAYERS = NUM_CSM_CASCADES + MAX_POINT_SHADOW_LIGHT
 static_assert(SHADOW_MAP_RESOLUTION == CSM_SHADOW_MAP_RESOLUTION,
 	"Shadow map resolution and CSM resolution must match (unified shadow array)");
 
-// Clustered forward shading
-constexpr uint32_t CLUSTER_TILE_SIZE = 64;           // screen-space tile size in pixels
-constexpr uint32_t CLUSTER_Z_SLICES = 24;            // depth slices (logarithmic distribution)
-constexpr uint32_t MAX_LIGHTS_PER_CLUSTER = 64;      // max lights assignable per cluster
-constexpr uint32_t MAX_CLUSTER_LIGHTS = 1024;        // max total point lights for cluster path
-constexpr float CLUSTER_LIGHT_CUTOFF = 0.005f;       // intensity fraction for effective range (range=0 lights)
+// Clustered forward lighting
+constexpr uint32_t CLUSTER_TILE_SIZE = 64;            // screen-space tile size in pixels
+constexpr uint32_t CLUSTER_Z_SLICES = 24;             // depth slices (logarithmic distribution)
+constexpr uint32_t MAX_LIGHTS_PER_CLUSTER = 64;       // max lights assignable per cluster
+constexpr uint32_t MAX_CLUSTER_LIGHTS = 1024;         // max total point lights for cluster path
+constexpr float CLUSTER_LIGHT_CUTOFF = 0.005f;        // intensity fraction for effective range (range=0 lights)
 constexpr float CLUSTER_MAX_EFFECTIVE_RANGE = 500.0f; // cap for derived effective range
 
 // LOD (Level of Detail) configuration
 constexpr uint32_t MAX_LOD_LEVELS = 4;           // LOD 0 = full, LOD 1..3 = simplified
 constexpr float LOD_RATIOS[] = {1.0f, 0.5f, 0.25f, 0.125f};  // target triangle ratio per LOD
 constexpr float LOD_ERROR_THRESHOLD = 0.01f;     // meshoptimizer simplification error threshold
-constexpr float LOD_SCREEN_THRESHOLDS[] = {0.3f, 0.15f, 0.05f}; // screen fraction: LOD 0->1, 1->2, 2->3
+constexpr float LOD_SCREEN_THRESHOLDS[] = {0.70f, 0.35f, 0.15f}; // screen fraction: LOD 0->1, 1->2, 2->3
 constexpr float LOD_HYSTERESIS = 0.2f;             // 20% band to prevent LOD oscillation
 constexpr uint32_t LOD_MIN_TRIANGLES = 64;        // never simplify below this triangle count
 static_assert(std::size(LOD_RATIOS) == MAX_LOD_LEVELS,
@@ -69,6 +79,11 @@ constexpr uint32_t MAX_GPU_MATERIALS = 8192;
 constexpr uint32_t MAX_GPU_OBJECTS = 16384;
 constexpr uint32_t GPU_CULL_WORKGROUP_SIZE = 256;
 constexpr uint32_t GPU_CULL_BUCKET_COUNT = 4; // non-MASK back, non-MASK double, MASK back, MASK double
+constexpr uint32_t MAX_DRAW_GROUPS = 8192;         // up to MAX_LOD_LEVELS draw groups per unique mesh+material combo
+constexpr uint32_t MAX_LOD_INSTANCE_SLOTS = MAX_GPU_OBJECTS * MAX_LOD_LEVELS; // worst-case instance buffer size
+
+// Hi-Z occlusion culling
+constexpr uint32_t MAX_HIZ_MIPS = 13;
 
 constexpr bool MSAA_ENABLED = true;
 #ifdef __APPLE__

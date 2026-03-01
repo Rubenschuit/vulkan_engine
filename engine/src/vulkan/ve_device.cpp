@@ -353,6 +353,19 @@ void VeDevice::createLogicalDevice() {
 
 	std::vector<const char*> enabled_extensions = m_required_device_extensions;
 
+	// Enable optional extensions if supported
+	auto available_extensions = m_physical_device.enumerateDeviceExtensionProperties();
+	auto hasExtension = [&](const char* name) {
+		return std::ranges::any_of(available_extensions, [name](const auto& ext) {
+			return strcmp(ext.extensionName, name) == 0;
+		});
+	};
+	if (hasExtension(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME)) {
+		enabled_extensions.push_back(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME);
+		m_supports_calibrated_timestamps = true;
+		VE_LOGI("Enabled optional extension: " << VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME);
+	}
+
 	vk::DeviceCreateInfo device_create_info {
 		.pNext = &feature_chain.get<vk::PhysicalDeviceFeatures2>(),
 		.queueCreateInfoCount = static_cast<uint32_t>(queue_create_infos.size()),

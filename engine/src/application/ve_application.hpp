@@ -52,10 +52,9 @@ class SkyboxRenderSystem;
 class BloomSystem;
 class PostProcessSystem;
 class OutlineSystem;
-class BindlessTextureRegistry;
-class MaterialSSBOManager;
-class GpuSceneManager;
+class SceneResourceManager;
 class GpuCullingSystem;
+class HizSystem;
 class Editor;
 class VeScene;
 
@@ -133,13 +132,12 @@ private:
 	void populateUBO(VeFrameInfo& fi);
 	void dispatchCompute(VeFrameInfo& fi);
 	void renderFrame(VeFrameInfo& fi);
-	void collectStats();
+	void collectStats(const VeFrameInfo& fi);
 	void onSwapChainRecreated();
 	void recreatePipelines();
 	void recreateResolutionDependentSystems();
 
 	// --- Camera ---
-	void updateCamera();
 	void updateCamera(float fov_radians);
 	void updateUniformBuffer(uint32_t current_frame, UniformBufferObject& ubo);
 	void updateFrameTime();
@@ -203,10 +201,9 @@ private:
 	std::unique_ptr<BloomSystem> m_bloom_system;
 	std::unique_ptr<PostProcessSystem> m_post_process_system;
 	std::unique_ptr<OutlineSystem> m_outline_system;
-	std::unique_ptr<BindlessTextureRegistry> m_bindless_registry;
-	std::unique_ptr<MaterialSSBOManager> m_material_ssbo_manager;
-	std::unique_ptr<GpuSceneManager> m_gpu_scene_manager;
+	std::unique_ptr<SceneResourceManager> m_scene_resources;
 	std::unique_ptr<GpuCullingSystem> m_gpu_culling_system;
+	std::unique_ptr<HizSystem> m_hiz_system;
 
 	// --- Camera state ---
 	glm::mat4 m_prev_projection_view{1.0f};

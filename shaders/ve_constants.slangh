@@ -17,6 +17,11 @@
 // GPU-driven culling (keep in sync with ve_config.hpp)
 #define MAX_LOD_LEVELS           4
 #define MAX_GPU_OBJECTS          16384
+#define MAX_HIZ_MIPS             13
+#define GPU_CULL_BUCKET_COUNT    4
+
+// LOD screen-space thresholds (keep in sync with LOD_SCREEN_THRESHOLDS in ve_config.hpp)
+static const float LOD_SCREEN_THRESHOLDS[3] = { 0.70, 0.35, 0.15 };
 
 enum ShadowMode {
 	DISABLED = 0,

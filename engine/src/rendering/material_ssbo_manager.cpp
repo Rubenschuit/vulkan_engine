@@ -11,9 +11,14 @@ MaterialSSBOManager::MaterialSSBOManager(VeDevice& device, BindlessTextureRegist
 
 	m_buffer = std::make_unique<VeBuffer>(m_ve_device,
 		sizeof(MaterialGPU), MAX_GPU_MATERIALS,
-		vk::BufferUsageFlagBits::eStorageBuffer,
+		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+		vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+	m_staging_buffer = std::make_unique<VeBuffer>(m_ve_device,
+		sizeof(MaterialGPU), MAX_GPU_MATERIALS,
+		vk::BufferUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-	m_buffer->map();
+	m_staging_buffer->map();
 }
 
 MaterialSSBOManager::~MaterialSSBOManager() = default;
@@ -39,6 +44,33 @@ uint32_t MaterialSSBOManager::registerMaterial(VeMaterial* mat) {
 
 void MaterialSSBOManager::updateMaterial(uint32_t index, VeMaterial* mat) {
 	writeMaterialGPU(index, mat);
+}
+
+void MaterialSSBOManager::flushToDevice(const vk::raii::CommandBuffer& cmd) {
+	if (!m_dirty || m_next_index == 0)
+		return;
+
+	vk::DeviceSize size = static_cast<vk::DeviceSize>(m_next_index) * sizeof(MaterialGPU);
+	cmd.copyBuffer(*m_staging_buffer->getBuffer(), *m_buffer->getBuffer(),
+		vk::BufferCopy{0, 0, size});
+
+	vk::BufferMemoryBarrier2 barrier{
+		.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+		.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+		.dstStageMask = vk::PipelineStageFlagBits2::eVertexShader
+			| vk::PipelineStageFlagBits2::eFragmentShader
+			| vk::PipelineStageFlagBits2::eComputeShader,
+		.dstAccessMask = vk::AccessFlagBits2::eShaderStorageRead,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.buffer = *m_buffer->getBuffer(),
+		.offset = 0,
+		.size = size,
+	};
+	vk::DependencyInfo dep{.bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &barrier};
+	cmd.pipelineBarrier2(dep);
+
+	m_dirty = false;
 }
 
 void MaterialSSBOManager::reset() {
@@ -88,8 +120,9 @@ void MaterialSSBOManager::writeMaterialGPU(uint32_t index, VeMaterial* mat) {
 		._pad = 0,
 	};
 
-	m_buffer->writeToBuffer(&gpu, sizeof(MaterialGPU),
+	m_staging_buffer->writeToBuffer(&gpu, sizeof(MaterialGPU),
 		static_cast<vk::DeviceSize>(index) * sizeof(MaterialGPU));
+	m_dirty = true;
 }
 
 } // namespace ve

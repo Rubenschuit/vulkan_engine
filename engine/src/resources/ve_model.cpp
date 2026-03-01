@@ -938,6 +938,74 @@ static bool loadGltfFile(const std::filesystem::path& model_path, tinygltf::Mode
 	return true;
 }
 
+// Decompress buffer views that use EXT_meshopt_compression.
+// Decoded data is stored in a new buffer appended to the model.
+static void decompressMeshopt(tinygltf::Model& gltf) {
+	bool has_any = false;
+	for (const auto& bv : gltf.bufferViews)
+		if (bv.extensions.count("EXT_meshopt_compression")) {
+			has_any = true;
+			break;
+		}
+	if (!has_any)
+		return;
+
+	int decode_buf_idx = static_cast<int>(gltf.buffers.size());
+	gltf.buffers.emplace_back();
+
+	for (size_t i = 0; i < gltf.bufferViews.size(); i++) {
+		auto& bv = gltf.bufferViews[i];
+		auto ext_it = bv.extensions.find("EXT_meshopt_compression");
+		if (ext_it == bv.extensions.end())
+			continue;
+
+		const auto& ext = ext_it->second;
+		int src_buffer = ext.Get("buffer").GetNumberAsInt();
+		size_t src_offset = static_cast<size_t>(ext.Get("byteOffset").GetNumberAsInt());
+		size_t src_length = static_cast<size_t>(ext.Get("byteLength").GetNumberAsInt());
+		size_t stride = static_cast<size_t>(ext.Get("byteStride").GetNumberAsInt());
+		size_t count = static_cast<size_t>(ext.Get("count").GetNumberAsInt());
+		const std::string& mode = ext.Get("mode").Get<std::string>();
+
+		const unsigned char* src = gltf.buffers[static_cast<size_t>(src_buffer)].data.data() + src_offset;
+		size_t decoded_size = count * stride;
+
+		auto& decode_buf = gltf.buffers[static_cast<size_t>(decode_buf_idx)];
+		size_t decode_offset = decode_buf.data.size();
+		decode_buf.data.resize(decode_offset + decoded_size);
+
+		int result = -1;
+		if (mode == "ATTRIBUTES")
+			result = meshopt_decodeVertexBuffer(decode_buf.data.data() + decode_offset, count, stride, src, src_length);
+		else if (mode == "TRIANGLES")
+			result = meshopt_decodeIndexBuffer(decode_buf.data.data() + decode_offset, count, stride, src, src_length);
+		else if (mode == "INDICES")
+			result = meshopt_decodeIndexSequence(decode_buf.data.data() + decode_offset, count, stride, src, src_length);
+
+		if (result != 0) {
+			VE_LOGW("meshopt decompression failed for buffer view " << i);
+			decode_buf.data.resize(decode_offset);
+			continue;
+		}
+
+		if (ext.Has("filter")) {
+			const std::string& filter = ext.Get("filter").Get<std::string>();
+			if (filter == "OCTAHEDRAL")
+				meshopt_decodeFilterOct(decode_buf.data.data() + decode_offset, count, stride);
+			else if (filter == "QUATERNION")
+				meshopt_decodeFilterQuat(decode_buf.data.data() + decode_offset, count, stride);
+			else if (filter == "EXPONENTIAL")
+				meshopt_decodeFilterExp(decode_buf.data.data() + decode_offset, count, stride);
+		}
+
+		bv.buffer = decode_buf_idx;
+		bv.byteOffset = decode_offset;
+		bv.byteLength = decoded_size;
+		bv.byteStride = (mode == "ATTRIBUTES") ? stride : 0;
+		bv.extensions.erase(ext_it);
+	}
+}
+
 // Detect Blender glTF exporter and return appropriate emissive scale factor.
 static float detectEmissiveScale(const tinygltf::Model& gltf) {
 	std::string generator_lower = gltf.asset.generator;
@@ -1127,7 +1195,7 @@ static ParsedMaterial parseSingleMaterial(
 		}
 		if (ext.Has("glossinessFactor") && ext.Get("glossinessFactor").IsNumber()) {
 			float glossiness = static_cast<float>(ext.Get("glossinessFactor").Get<double>());
-			factors.roughness_factor = std::clamp(1.0f - glossiness, 0.0f, 1.0f);
+			factors.roughness_factor = std::clamp(glossiness, 0.0f, 1.0f);
 		}
 		if (ext.Has("specularFactor") && ext.Get("specularFactor").IsArray()) {
 			const auto& sf = ext.Get("specularFactor");
@@ -1317,6 +1385,8 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	tinygltf::Model gltf;
 	if (!loadGltfFile(model_path, gltf))
 		return;
+
+	decompressMeshopt(gltf);
 
 	// 2. Register embedded images for .glb support
 	std::string model_path_str = model_path.lexically_normal().generic_string();

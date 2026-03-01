@@ -53,7 +53,8 @@ fi
 BUILD_DIR="./build/$BUILD_TYPE"
 
 # Configure and build into ./build
-cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$BUILD_TYPE" $EXTRA_CMAKE_ARGS $EXTRA_WINDOWS_ARGS
+cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON $EXTRA_CMAKE_ARGS $EXTRA_WINDOWS_ARGS
+cp "$BUILD_DIR/compile_commands.json" ./compile_commands.json 2>/dev/null || true
 cmake --build "$BUILD_DIR" -j
 
 if [[ "$MODE" == 'test' ]]; then

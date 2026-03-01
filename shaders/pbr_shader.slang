@@ -71,7 +71,9 @@ VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID)
 // ----------------------------------------------------------------------------
 
 float3 fresnelSchlick(float cos_theta, float3 F0) {
-	return F0 + (1.0 - F0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
+	float t = clamp(1.0 - cos_theta, 0.0, 1.0);
+	float t2 = t * t;
+	return F0 + (1.0 - F0) * (t2 * t2 * t);
 }
 
 float distributionGGX(float3 N, float3 H, float roughness) {
@@ -136,9 +138,9 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	float roughness;
 	float3 F0;
 	if ((mat.material_flags & 16u) != 0u) {
-		// Spec-gloss texture
+		// Spec-gloss texture: params.y is glossinessFactor, mr.a is per-texel glossiness
 		metallic = 0.0;
-		roughness = (1.0 - mr.a) * mat.params.y;
+		roughness = 1.0 - mr.a * mat.params.y;
 		F0 = mat.extra.xyz * mr.rgb;
 	} else {
 		// Metallic-roughness texture
@@ -146,6 +148,7 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		roughness = mr.g * mat.params.y;
 		F0 = lerp(mat.extra.xyz, albedo.rgb, metallic);
 	}
+	roughness = max(roughness, 0.045);
 	float transmission = mat.params.w;
 	emissive_sample = emissive_sample * mat.emissive_pad.xyz * mat.params.z;
 
@@ -155,8 +158,7 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 	float3 world_normal = N;
 	if (ubo.render_mode == RenderMode::BRDF_MICROFACET || ubo.render_mode == RenderMode::NORMAL_MAP) {
 		float3 tangent_space_normal = normalize(normal_map.xyz * 2.0 - float3(1.0, 1.0, 1.0));
-		float3x3 TBN = transpose(float3x3(T, B, N));
-		world_normal = normalize(mul(TBN, tangent_space_normal));
+		world_normal = normalize(tangent_space_normal.x * T + tangent_space_normal.y * B + tangent_space_normal.z * N);
 	}
 
 	if (ubo.render_mode == RenderMode::NORMAL_VECTOR)
@@ -206,6 +208,12 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		return float4(heat * albedo.rgb, albedo.a);
 	}
 
+	// Precompute light-invariant terms
+	float NdotV = clamp(dot(world_normal, view_dir), 0.0, 1.0);
+	float G1_V = geometrySchlickGGX(NdotV, roughness);
+	float kD_factor = (1.0 - metallic) * (1.0 - transmission);
+	float3 diffuse_brdf = albedo.rgb / PI;
+
 	// Accumulate point + spot light contribution
 	float3 Lo = float3(0.0);
 	if (cluster_params.cluster_enabled != 0) {
@@ -227,27 +235,26 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 				uint spot_idx = light_idx - cluster_params.num_point_lights;
 				float cos_outer = ubo.spot_lights[spot_idx].direction.w;
 				float cos_inner = ubo.spot_lights[spot_idx].color.w;
-				float spot_atten = calculateSpotAttenuation(light_dir,
+				float spot_atten = calculateSpotAttenuation(L,
 					ubo.spot_lights[spot_idx].direction.xyz, cos_outer, cos_inner);
 				if (spot_atten <= 0.0) continue;
 				attenuation *= spot_atten;
 			}
 
-			float NdotV = clamp(dot(world_normal, view_dir), 0.0, 1.0);
 			float3 H = normalize(view_dir + L);
 			float3 radiance = light.color.xyz * attenuation;
 
 			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0);
 			float D = distributionGGX(world_normal, H, roughness);
-			float G = geometrySmith(NdotV, NdotL, roughness);
+			float G = G1_V * geometrySchlickGGX(NdotL, roughness);
 			float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
 
-			float3 kD = (1.0 - F) * (1.0 - metallic) * (1.0 - transmission);
+			float3 kD = (1.0 - F) * kD_factor;
 			uint shadow_key = light_idx;
 			if (light_idx >= cluster_params.num_point_lights)
 				shadow_key = MAX_LIGHTS + (light_idx - cluster_params.num_point_lights);
 			float pt_shadow = getPointShadow(shadow_key, shadow_terms, shadow_for_light);
-			Lo += (kD * albedo.rgb / PI + specular) * radiance * NdotL * pt_shadow;
+			Lo += (kD * diffuse_brdf + specular) * radiance * NdotL * pt_shadow;
 		}
 	} else {
 		// Brute-force point lights
@@ -257,7 +264,6 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 			float NdotL = clamp(dot(world_normal, L), 0.0, 1.0);
 			if (NdotL <= 0.0) continue;
 
-			float NdotV = clamp(dot(world_normal, view_dir), 0.0, 1.0);
 			float3 H = normalize(view_dir + L);
 			float distance_sq = dot(light_dir, light_dir);
 			float attenuation = calculateAttenuation(distance_sq, ubo.point_lights[i].position.w);
@@ -265,12 +271,12 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 
 			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0);
 			float D = distributionGGX(world_normal, H, roughness);
-			float G = geometrySmith(NdotV, NdotL, roughness);
+			float G = G1_V * geometrySchlickGGX(NdotL, roughness);
 			float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
 
-			float3 kD = (1.0 - F) * (1.0 - metallic) * (1.0 - transmission);
+			float3 kD = (1.0 - F) * kD_factor;
 			float pt_shadow = getPointShadow(i, shadow_terms, shadow_for_light);
-			Lo += (kD * albedo.rgb / PI + specular) * radiance * NdotL * pt_shadow;
+			Lo += (kD * diffuse_brdf + specular) * radiance * NdotL * pt_shadow;
 		}
 
 		// Brute-force spot lights
@@ -285,23 +291,22 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 
 			float cos_outer = ubo.spot_lights[i].direction.w;
 			float cos_inner = ubo.spot_lights[i].color.w;
-			float spot_atten = calculateSpotAttenuation(light_dir,
+			float spot_atten = calculateSpotAttenuation(L,
 				ubo.spot_lights[i].direction.xyz, cos_outer, cos_inner);
 			if (spot_atten <= 0.0) continue;
 			attenuation *= spot_atten;
 
-			float NdotV = clamp(dot(world_normal, view_dir), 0.0, 1.0);
 			float3 H = normalize(view_dir + L);
 			float3 radiance = ubo.spot_lights[i].color.xyz * attenuation;
 
 			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0);
 			float D = distributionGGX(world_normal, H, roughness);
-			float G = geometrySmith(NdotV, NdotL, roughness);
+			float G = G1_V * geometrySchlickGGX(NdotL, roughness);
 			float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
 
-			float3 kD = (1.0 - F) * (1.0 - metallic) * (1.0 - transmission);
+			float3 kD = (1.0 - F) * kD_factor;
 			float spot_shadow = getPointShadow(MAX_LIGHTS + i, shadow_terms, shadow_for_light);
-			Lo += (kD * albedo.rgb / PI + specular) * radiance * NdotL * spot_shadow;
+			Lo += (kD * diffuse_brdf + specular) * radiance * NdotL * spot_shadow;
 		}
 	}
 
@@ -311,18 +316,17 @@ float4 fragMain(VertexOutput in_vert) : SV_Target {
 		float NdotL = clamp(dot(world_normal, L), 0.0, 1.0);
 		if (NdotL <= 0.0) continue;
 
-		float NdotV = clamp(dot(world_normal, view_dir), 0.0, 1.0);
 		float3 H = normalize(view_dir + L);
 		float3 radiance = ubo.dir_lights[i].color.xyz;
 
 		float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0);
 		float D = distributionGGX(world_normal, H, roughness);
-		float G = geometrySmith(NdotV, NdotL, roughness);
+		float G = G1_V * geometrySchlickGGX(NdotL, roughness);
 		float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
-		float3 kD = (1.0 - F) * (1.0 - metallic) * (1.0 - transmission);
+		float3 kD = (1.0 - F) * kD_factor;
 
 		float dir_shadow = (i == ubo.csm_dir_light_index) ? csm_shadow : 1.0;
-		Lo += (kD * albedo.rgb / PI + specular) * radiance * NdotL * dir_shadow;
+		Lo += (kD * diffuse_brdf + specular) * radiance * NdotL * dir_shadow;
 	}
 
 	// SSAO

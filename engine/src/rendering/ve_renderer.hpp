@@ -2,6 +2,7 @@
 It manages the swap chain and command buffers. Default present mode is immediate. */
 #pragma once
 #include "ve_export.hpp"
+#include "ve_tracy.hpp"
 #include "rendering/frame_profiler.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_image.hpp"
@@ -52,7 +53,8 @@ public:
 	// When false is returned (e.g. swap chain out of date), the command buffer is not valid for use.
 	bool beginFrame();
 	void submitCompute(vk::raii::CommandBuffer& compute_command_buffer);
-	void beginDepthPrePass(vk::raii::CommandBuffer& command_buffer, bool secondary_contents = false);
+	void beginDepthPrePass(vk::raii::CommandBuffer& command_buffer,
+		bool secondary_contents = false, bool clear = true);
 	void endDepthPrePass(vk::raii::CommandBuffer& command_buffer);
 
 	void beginSceneRender(vk::raii::CommandBuffer& command_buffer,
@@ -116,6 +118,9 @@ public:
 	/// Inheritance info for secondary CBs recording inside the depth prepass.
 	vk::CommandBufferInheritanceRenderingInfo getDepthPrepassInheritanceInfo() const;
 
+	TracyVkCtx getTracyGraphicsCtx() { return m_tracy_graphics_ctx; }
+	TracyVkCtx getTracyComputeCtx() { return m_tracy_compute_ctx; }
+
 	FrameProfiler& getProfiler() { return m_profiler; }
 	const ProfileResults& getProfileResults() const { return m_profiler.getResults(); }
 	float getGpuTime() const { return m_profiler.getResults().gpu(ProfileTimer::FRAME_TOTAL); }
@@ -146,6 +151,10 @@ private:
 	vk::Extent2D m_scene_render_extent{0, 0};  // 0 = use swapchain extent
 
 	FrameProfiler m_profiler;
+
+	// Tracy GPU profiling contexts
+	TracyVkCtx m_tracy_graphics_ctx = nullptr;
+	TracyVkCtx m_tracy_compute_ctx = nullptr;
 
 	// Multi-threaded command recording
 	std::unique_ptr<VeThreadPool> m_thread_pool;
