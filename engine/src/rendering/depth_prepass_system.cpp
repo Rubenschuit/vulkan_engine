@@ -49,7 +49,7 @@ void DepthPrePassSystem::createPipeline(vk::SampleCountFlagBits sample_count) {
 	pipeline_config.dynamic_state_info.pDynamicStates = pipeline_config.dynamic_state_enables.data();
 	pipeline_config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	pipeline_config.depth_stencil_info.depthWriteEnable = VK_TRUE;
-	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLess;
+	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eGreater;
 	pipeline_config.pipeline_layout = *m_pipeline_layout;
 
 	m_ve_pipeline = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);

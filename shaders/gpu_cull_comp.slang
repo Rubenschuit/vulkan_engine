@@ -136,22 +136,22 @@ bool hizOcclusionTest(float3 center_world, float radius) {
 	float mip = floor(log2(max_dim));
 	mip = clamp(mip, 0.0, float(cull_params.hiz_mip_count - 1));
 
-	// Sample Hi-Z at corners + center (take MAX = farthest depth)
+	// Sample Hi-Z at corners + center (take MIN = farthest depth in reverse-Z)
 	float2 uv_center = (uv_min + uv_max) * 0.5;
 	float hiz_depth = hiz_pyramid.SampleLevel(hiz_sampler, uv_center, int(mip));
 	float d00 = hiz_pyramid.SampleLevel(hiz_sampler, uv_min, int(mip));
 	float d11 = hiz_pyramid.SampleLevel(hiz_sampler, uv_max, int(mip));
 	float d01 = hiz_pyramid.SampleLevel(hiz_sampler, float2(uv_min.x, uv_max.y), int(mip));
 	float d10 = hiz_pyramid.SampleLevel(hiz_sampler, float2(uv_max.x, uv_min.y), int(mip));
-	hiz_depth = max(max(d00, d11), max(max(d01, d10), hiz_depth));
+	hiz_depth = min(min(d00, d11), min(min(d01, d10), hiz_depth));
 
 	// Nearest depth of the sphere: closest point along view Z axis
 	// In view space z < 0 for objects in front; adding radius brings closer to 0
 	float z_nearest = center_view.z + radius;
-	// Project to NDC depth: clip_z = p22*z + p32, clip_w = -z (standard perspective)
+	// Project to NDC depth: clip_z = p22*z + p32, clip_w = -z
 	float nearest_ndc_z = (cull_params.p22 * z_nearest + cull_params.p32) / (-z_nearest);
 
-	return nearest_ndc_z < hiz_depth;
+	return nearest_ndc_z > hiz_depth;
 }
 
 // Select LOD level for an object based on its screen-space projected size.

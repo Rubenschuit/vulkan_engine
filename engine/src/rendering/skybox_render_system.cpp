@@ -139,7 +139,7 @@ void SkyboxRenderSystem::createPipeline(vk::Format color_format, vk::SampleCount
 	pipeline_config.color_format = color_format;
 	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eFront;
 	pipeline_config.depth_stencil_info.depthWriteEnable = VK_TRUE;
-	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLessOrEqual;
+	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eGreaterOrEqual;
 	auto attribute_descriptions = VeMesh::Vertex::getAttributeDescriptionsSimple();
 	pipeline_config.attribute_descriptions = {attribute_descriptions[0]};
 

@@ -36,7 +36,7 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	float depth = depth_texture.Load(int3(depth_coord, 0));
 
 	// Sky / far plane: fully lit
-	if (depth >= 1.0) {
+	if (depth <= 0.0) {
 		shadow_mask_out[id.xy] = 1.0;
 		return;
 	}

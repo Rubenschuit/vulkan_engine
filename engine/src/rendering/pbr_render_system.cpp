@@ -387,7 +387,7 @@ void PbrRenderSystem::renderOpaqueGpuCulled(
 		bool is_double_sided = (bucket & 1);
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
 		cmd.setDepthCompareOp(
-			(m_depth_prepass_active || is_mask) ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eLess);
+			(m_depth_prepass_active || is_mask) ? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
 		auto offset = static_cast<vk::DeviceSize>(bucket_group_offsets[bucket]) * sizeof(VkDrawIndexedIndirectCommand);
 		if (compacted_buffer && compact_count_buffer) {
 			cmd.drawIndexedIndirectCount(
@@ -438,7 +438,7 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info, const vk::raii::Desc
 		bool is_double_sided = (bucket & 1);
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
 		cmd.setDepthCompareOp(
-			(m_depth_prepass_active || is_mask) ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eLess);
+			(m_depth_prepass_active || is_mask) ? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
 		cmd.drawIndexedIndirect(
 			*m_indirect_buffers[frame_info.current_frame]->getBuffer(),
 			m_bucket_offsets[bucket] * sizeof(VkDrawIndexedIndirectCommand),
@@ -458,7 +458,7 @@ void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info, const vk::raii:
 	auto& pipeline = mask ? m_pipelines_mask[mode] : m_pipelines[mode];
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
 
-	cmd.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
+	cmd.setDepthCompareOp(vk::CompareOp::eGreaterOrEqual);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
 
 	const auto& global_set = global_set_override ? *global_set_override : frame_info.global_descriptor_set;
@@ -670,7 +670,7 @@ void PbrRenderSystem::renderTransparentWboit(
 	bindPbrResources(frame_info, bindless_set, global_set_override);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
 	cmd.setDepthWriteEnable(VK_FALSE);
-	cmd.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
+	cmd.setDepthCompareOp(vk::CompareOp::eGreaterOrEqual);
 
 	// Buckets 4-5: transparent back-face / transparent double-sided
 	for (uint32_t bucket = 4; bucket < GPU_CULL_BUCKET_COUNT; bucket++) {

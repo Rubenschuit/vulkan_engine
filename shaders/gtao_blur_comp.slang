@@ -53,7 +53,7 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	float center_depth = fetchDepthLinear(depth_coord);
 
 	// Skip sky pixels
-	if (center_depth >= 1.0) {
+	if (center_depth <= 0.0) {
 		ao_output[id.xy] = 1.0;
 		return;
 	}

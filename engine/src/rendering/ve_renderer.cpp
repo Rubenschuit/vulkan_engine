@@ -239,7 +239,7 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer,
 		.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 		.loadOp = clear ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad,
 		.storeOp = vk::AttachmentStoreOp::eStore,
-		.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
+		.clearValue = vk::ClearDepthStencilValue{.depth = 0.0f, .stencil = 0}
 	};
 
 	// When MSAA is active, resolve depth to a single-sample image at endRendering().
@@ -368,7 +368,7 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer,
 		.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 		.loadOp = load_depth ? vk::AttachmentLoadOp::eLoad : vk::AttachmentLoadOp::eClear,
 		.storeOp = vk::AttachmentStoreOp::eStore,
-		.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
+		.clearValue = vk::ClearDepthStencilValue{.depth = 0.0f, .stencil = 0}
 	};
 
 	if (m_ve_swap_chain->hasResolvedDepth() && resolve_msaa) {

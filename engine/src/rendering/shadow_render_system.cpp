@@ -669,7 +669,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 		// Transition all CSM layers to depth-attachment in a single barrier
 		vk::ImageMemoryBarrier2 csm_pre_barrier{
 			.sType = vk::StructureType::eImageMemoryBarrier2,
-			.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+			.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader
+				| vk::PipelineStageFlagBits2::eComputeShader,
 			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
 			.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
 			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
@@ -759,7 +760,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 			.sType = vk::StructureType::eImageMemoryBarrier2,
 			.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
 			.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-			.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+			.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader
+				| vk::PipelineStageFlagBits2::eComputeShader,
 			.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
 			.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 			.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
@@ -807,7 +809,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 
 			vk::ImageMemoryBarrier2 barrier{
 				.sType = vk::StructureType::eImageMemoryBarrier2,
-				.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+				.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader
+					| vk::PipelineStageFlagBits2::eComputeShader,
 				.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
 				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
 				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
@@ -845,7 +848,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 
 			barrier.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests;
 			barrier.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
-			barrier.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+			barrier.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader
+				| vk::PipelineStageFlagBits2::eComputeShader;
 			barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
 			barrier.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal;
 			barrier.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal;
@@ -994,7 +998,8 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 	if (csm_count > 0) {
 		pre_barriers.push_back({
 			.sType = vk::StructureType::eImageMemoryBarrier2,
-			.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+			.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader
+				| vk::PipelineStageFlagBits2::eComputeShader,
 			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
 			.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
 			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
@@ -1010,7 +1015,8 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		uint32_t array_layer = NUM_CSM_CASCADES + i;
 		pre_barriers.push_back({
 			.sType = vk::StructureType::eImageMemoryBarrier2,
-			.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+			.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader
+				| vk::PipelineStageFlagBits2::eComputeShader,
 			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
 			.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
 			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
@@ -1151,7 +1157,8 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 			.sType = vk::StructureType::eImageMemoryBarrier2,
 			.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
 			.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-			.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+			.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader
+				| vk::PipelineStageFlagBits2::eComputeShader,
 			.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
 			.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 			.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
@@ -1167,7 +1174,8 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 			.sType = vk::StructureType::eImageMemoryBarrier2,
 			.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
 			.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-			.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+			.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader
+				| vk::PipelineStageFlagBits2::eComputeShader,
 			.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
 			.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 			.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,

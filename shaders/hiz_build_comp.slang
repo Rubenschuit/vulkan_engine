@@ -1,7 +1,7 @@
 // Hierarchical-Z pyramid build compute shader.
 // 32x32 workgroups load source data into shared memory, then perform up to 5
-// ping-pong 2x2 MAX reductions, writing each mip level along the way.
-// Standard Z (near=0, far=1): MAX keeps the farthest depth per cell.
+// ping-pong 2x2 MIN reductions, writing each mip level along the way.
+// Reverse-Z (near=1, far=0): MIN keeps the farthest depth per cell.
 //
 // Pass 1 (write_source=1): loads depth buffer 1:1, writes mip 0 + 5 reductions = 6 mips
 // Pass 2+ (write_source=0): loads previous pass's last mip, 5 reductions = 5 mips
@@ -47,8 +47,8 @@ void compMain(uint3 tid : SV_DispatchThreadID,
 	uint lx = lid.x;
 	uint ly = lid.y;
 
-	// Load one texel from source into LDS
-	float depth = 0.0;
+	// Load one texel from source into LDS (OOB = 1.0 = near plane, won't affect MIN)
+	float depth = 1.0;
 	if (tid.x < pc.dst_size.x && tid.y < pc.dst_size.y) {
 		float2 uv = (float2(tid.xy) + 0.5) * pc.src_texel_size;
 		depth = src_image.SampleLevel(point_sampler, uv, 0);
@@ -71,8 +71,8 @@ void compMain(uint3 tid : SV_DispatchThreadID,
 	// Reduction 1: 32x32 -> 16x16 (lds_a -> lds_b)
 	if (lx < 16 && ly < 16) {
 		uint2 s = uint2(lx * 2, ly * 2);
-		float m = max(max(lds_a[s.y][s.x], lds_a[s.y][s.x + 1]),
-		              max(lds_a[s.y + 1][s.x], lds_a[s.y + 1][s.x + 1]));
+		float m = min(min(lds_a[s.y][s.x], lds_a[s.y][s.x + 1]),
+		              min(lds_a[s.y + 1][s.x], lds_a[s.y + 1][s.x + 1]));
 		lds_b[ly][lx] = m;
 
 		uint2 pos = gid.xy * 16 + uint2(lx, ly);
@@ -89,8 +89,8 @@ void compMain(uint3 tid : SV_DispatchThreadID,
 	// Reduction 2: 16x16 -> 8x8 (lds_b -> lds_a)
 	if (lx < 8 && ly < 8) {
 		uint2 s = uint2(lx * 2, ly * 2);
-		float m = max(max(lds_b[s.y][s.x], lds_b[s.y][s.x + 1]),
-		              max(lds_b[s.y + 1][s.x], lds_b[s.y + 1][s.x + 1]));
+		float m = min(min(lds_b[s.y][s.x], lds_b[s.y][s.x + 1]),
+		              min(lds_b[s.y + 1][s.x], lds_b[s.y + 1][s.x + 1]));
 		lds_a[ly][lx] = m;
 
 		uint2 pos = gid.xy * 8 + uint2(lx, ly);
@@ -107,8 +107,8 @@ void compMain(uint3 tid : SV_DispatchThreadID,
 	// Reduction 3: 8x8 -> 4x4 (lds_a -> lds_b)
 	if (lx < 4 && ly < 4) {
 		uint2 s = uint2(lx * 2, ly * 2);
-		float m = max(max(lds_a[s.y][s.x], lds_a[s.y][s.x + 1]),
-		              max(lds_a[s.y + 1][s.x], lds_a[s.y + 1][s.x + 1]));
+		float m = min(min(lds_a[s.y][s.x], lds_a[s.y][s.x + 1]),
+		              min(lds_a[s.y + 1][s.x], lds_a[s.y + 1][s.x + 1]));
 		lds_b[ly][lx] = m;
 
 		uint2 pos = gid.xy * 4 + uint2(lx, ly);
@@ -125,8 +125,8 @@ void compMain(uint3 tid : SV_DispatchThreadID,
 	// Reduction 4: 4x4 -> 2x2 (lds_b -> lds_a)
 	if (lx < 2 && ly < 2) {
 		uint2 s = uint2(lx * 2, ly * 2);
-		float m = max(max(lds_b[s.y][s.x], lds_b[s.y][s.x + 1]),
-		              max(lds_b[s.y + 1][s.x], lds_b[s.y + 1][s.x + 1]));
+		float m = min(min(lds_b[s.y][s.x], lds_b[s.y][s.x + 1]),
+		              min(lds_b[s.y + 1][s.x], lds_b[s.y + 1][s.x + 1]));
 		lds_a[ly][lx] = m;
 
 		uint2 pos = gid.xy * 2 + uint2(lx, ly);
@@ -142,8 +142,8 @@ void compMain(uint3 tid : SV_DispatchThreadID,
 
 	// Reduction 5: 2x2 -> 1x1 (lds_a)
 	if (lx == 0 && ly == 0) {
-		float m = max(max(lds_a[0][0], lds_a[0][1]),
-		              max(lds_a[1][0], lds_a[1][1]));
+		float m = min(min(lds_a[0][0], lds_a[0][1]),
+		              min(lds_a[1][0], lds_a[1][1]));
 
 		uint2 pos = gid.xy;
 		uint2 sz = max(uint2(1, 1), pc.dst_size >> 5);

@@ -102,11 +102,11 @@ void LightSystem::createPipeline(vk::Format color_format, vk::SampleCountFlagBit
 	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eNone;
 	pipeline_config	.depth_stencil_info.depthTestEnable = VK_TRUE;
 	pipeline_config.depth_stencil_info.depthWriteEnable = VK_FALSE;
-	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLessOrEqual;
+	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eGreaterOrEqual;
 	pipeline_config.rasterization_info.depthBiasEnable = VK_TRUE;
 	pipeline_config.rasterization_info.depthBiasConstantFactor = 0.0f;
 	pipeline_config.rasterization_info.depthBiasClamp = 0.0f;
-	pipeline_config.rasterization_info.depthBiasSlopeFactor = -1.0f;
+	pipeline_config.rasterization_info.depthBiasSlopeFactor = 1.0f;
 
 	//enable additve blending
 	pipeline_config.color_blend_attachment.blendEnable = VK_TRUE;

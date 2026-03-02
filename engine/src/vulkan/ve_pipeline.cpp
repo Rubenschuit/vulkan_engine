@@ -74,7 +74,7 @@ void VePipeline::defaultPipelineConfigInfo(PipelineConfigInfo& config_info, VeDe
 		.flags = {},
 		.depthTestEnable = VK_TRUE,
 		.depthWriteEnable = VK_TRUE,
-		.depthCompareOp = vk::CompareOp::eLess,
+		.depthCompareOp = vk::CompareOp::eGreater,
 		.depthBoundsTestEnable = VK_FALSE,
 		.stencilTestEnable = VK_FALSE,
 		.front = {},

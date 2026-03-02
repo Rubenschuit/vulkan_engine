@@ -125,7 +125,7 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 	if (!transform)
 		return;
 
-	// ImGuizmo setup 
+	// ImGuizmo setup
 	ImGuizmo::SetOrthographic(false);
 	ImGuizmo::SetDrawlist();
 	ImGuizmo::SetRect(img_x, img_y, img_w, img_h);
@@ -158,9 +158,10 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 	glm::mat4 model = world;
 	const glm::mat4& view = m_camera->getView();
 
-	// Undo Vulkan Y-flip, ImGuizmo expects OpenGL clip-space convention
-	glm::mat4 gizmo_proj = m_camera->getProj();
-	gizmo_proj[1][1] *= -1.0f;
+	// ImGuizmo expects a standard forward-Z projection
+	// Build one from camera parameters since our actual proj is infinite reverse-Z.
+	glm::mat4 gizmo_proj = glm::perspective(m_camera->getFovY(), m_camera->getAspect(),
+	                                         m_camera->getNear(), m_camera->getFar());
 
 	if (ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(gizmo_proj),
 	                         op, mode, glm::value_ptr(model), nullptr, snap_ptr)) {

@@ -134,8 +134,13 @@ void VeCamera::updateView() {
 }
 
 void VeCamera::updateProjection() {
-	m_proj = glm::perspective(m_fov_y, m_aspect_ratio, m_z_near, m_z_far);
-	m_proj[1][1] *= -1.0f; // Flip Y for non OpenGL coordinate system
+	// Infinite reverse-Z projection with Y-flip.
+	float f = 1.0f / std::tan(m_fov_y * 0.5f);
+	m_proj = glm::mat4(0.0f);
+	m_proj[0][0] = f / m_aspect_ratio;
+	m_proj[1][1] = -f; // Vulkan Y-flip
+	m_proj[2][3] = -1.0f;
+	m_proj[3][2] = m_z_near;
 }
 
 } // namespace ve

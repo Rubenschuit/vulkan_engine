@@ -54,7 +54,7 @@ VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID)
 	float4 world_pos = mul(inst.transform, pos);
 
 	output.pos = mul(ubo.projection_view, world_pos);
-	output.pos.z -= inst.depth_offset * output.pos.w;
+	output.pos.z += inst.depth_offset * output.pos.w;
 	output.frag_pos_world = world_pos.xyz;
 
 	// Transform normal and tangent to world space
@@ -206,10 +206,8 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	if (SHADOW_MODE_SPEC != ShadowMode::DISABLED && ubo.csm_cascade_count > 0) {
 		bool use_mask = SHADOW_MASK_SPEC != 0 && alpha_mode != 1;
 		if (use_mask) {
-			float4 prev_clip = mul(ubo.prev_projection_view, float4(in_vert.frag_pos_world, 1.0));
-			float2 prev_ndc = prev_clip.xy / prev_clip.w;
-			float2 prev_uv = prev_ndc * 0.5 + 0.5;
-			csm_shadow = shadow_mask.SampleLevel(shadow_mask_sampler, prev_uv, 0);
+			float2 mask_uv = in_vert.pos.xy / ubo.screen_size;
+			csm_shadow = shadow_mask.SampleLevel(shadow_mask_sampler, mask_uv, 0);
 			if (ubo.render_mode == RenderMode::CSM_CASCADE)
 				calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, world_normal, csm_cascade_idx, csm_blend_t);
 		} else {

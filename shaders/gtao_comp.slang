@@ -82,7 +82,7 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	int2 depth_coord = int2(uv * push.depth_size);
 
 	float depth = fetchDepth(depth_coord);
-	if (depth >= 1.0) {
+	if (depth <= 0.0) {
 		ao_out[id.xy] = 1.0;
 		return;
 	}
@@ -115,7 +115,7 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 				int2 sample_coord = depth_coord + int2(offset * (push.depth_size / push.ao_size));
 				sample_coord = clamp(sample_coord, int2(0), int2(push.depth_size) - 1);
 				float sample_depth = fetchDepth(sample_coord);
-				if (sample_depth < 1.0) {
+				if (sample_depth > 0.0) {
 					float3 sample_pos = getViewPos(sample_coord, sample_depth);
 					float3 horizon_vec = sample_pos - view_pos;
 					float len = length(horizon_vec);
@@ -134,7 +134,7 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 				int2 sample_coord = depth_coord - int2(offset * (push.depth_size / push.ao_size));
 				sample_coord = clamp(sample_coord, int2(0), int2(push.depth_size) - 1);
 				float sample_depth = fetchDepth(sample_coord);
-				if (sample_depth < 1.0) {
+				if (sample_depth > 0.0) {
 					float3 sample_pos = getViewPos(sample_coord, sample_depth);
 					float3 horizon_vec = sample_pos - view_pos;
 					float len = length(horizon_vec);

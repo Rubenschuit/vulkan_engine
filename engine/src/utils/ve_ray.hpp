@@ -138,12 +138,13 @@ inline bool raycastMesh(const Ray& ray, const VeMesh& mesh,
 
 // Generate a world-space ray from normalized viewport UV coordinates.
 // uv (0,0) is top-left, (1,1) is bottom-right.
+// Reverse-Z: near plane = NDC z=1, far plane = NDC z=0 (infinity).
 inline Ray screenToWorldRay(float uv_x, float uv_y, const glm::mat4& inverse_vp) {
 	float ndc_x = uv_x * 2.0f - 1.0f;
 	float ndc_y = uv_y * 2.0f - 1.0f;
 
-	glm::vec4 near_clip = glm::vec4(ndc_x, ndc_y, 0.0f, 1.0f);
-	glm::vec4 far_clip  = glm::vec4(ndc_x, ndc_y, 1.0f, 1.0f);
+	glm::vec4 near_clip = glm::vec4(ndc_x, ndc_y, 1.0f, 1.0f);
+	glm::vec4 far_clip  = glm::vec4(ndc_x, ndc_y, 1e-4f, 1.0f);
 
 	glm::vec4 near_world = inverse_vp * near_clip;
 	glm::vec4 far_world  = inverse_vp * far_clip;

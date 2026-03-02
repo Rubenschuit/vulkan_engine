@@ -357,11 +357,11 @@ void ParticleSystem::createPipeline(vk::Format color_format, vk::SampleCountFlag
 	// attempt to reduce z-fighting
 	config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	config.depth_stencil_info.depthWriteEnable = VK_FALSE;
-	config.depth_stencil_info.depthCompareOp = vk::CompareOp::eLessOrEqual;
+	config.depth_stencil_info.depthCompareOp = vk::CompareOp::eGreaterOrEqual;
 	config.rasterization_info.depthBiasEnable = VK_TRUE;
 	config.rasterization_info.depthBiasConstantFactor = 0.0f;
 	config.rasterization_info.depthBiasClamp = 0.0f;
-	config.rasterization_info.depthBiasSlopeFactor = -1.0f;
+	config.rasterization_info.depthBiasSlopeFactor = 1.0f;
 
 	//enable additve blending
 	config.color_blend_attachment.blendEnable = VK_TRUE;
