@@ -199,7 +199,8 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 	bool is_double_sided = (obj.material_flags & 0x4) != 0;
 	bool is_transparent = (obj.material_flags & 0x20) != 0;
 
-	if (is_transparent)
+	// Transparent objects skip shadow passes
+	if (is_transparent && cull_params.is_shadow_pass != 0)
 		return;
 
 	bool no_shadow = (obj.material_flags & 0x40) != 0;
@@ -215,7 +216,11 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 
 	// Stats tracking (main pass only)
 	if (cull_params.is_shadow_pass == 0) {
-		uint bucket = (is_mask ? 2u : 0u) + (is_double_sided ? 1u : 0u);
+		uint bucket;
+		if (is_transparent)
+			bucket = 4u + (is_double_sided ? 1u : 0u);
+		else
+			bucket = (is_mask ? 2u : 0u) + (is_double_sided ? 1u : 0u);
 		draw_counts.InterlockedAdd(bucket * 4, 1);
 		draw_counts.InterlockedAdd(GPU_CULL_BUCKET_COUNT * 4, obj.lod_index_count[lod]);
 	}

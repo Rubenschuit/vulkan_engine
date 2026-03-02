@@ -1,5 +1,5 @@
 // Screen-space shadow mask: evaluates CSM shadows once per pixel from the depth buffer.
-// Dispatched on the compute queue with one-frame latency (reads previous frame's depth).
+// Dispatched on the graphics command buffer after the depth prepass (reads current frame's depth).
 // Output is a R8_UNORM image sampled by PBR/simple shaders instead of per-fragment CSM.
 // Always reads single-sample depth (resolved from MSAA if active).
 

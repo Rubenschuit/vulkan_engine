@@ -35,6 +35,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 	m_cpu_time_sum += context.stats.cpu_time;
 	m_fence_wait_sum += context.stats.fence_wait;
+	m_acquire_wait_sum += context.stats.acquire_wait;
 	m_gpu_time_sum += context.stats.gpu_time;
 	m_compute_gpu_time_sum += context.stats.compute_gpu_time;
 	m_gpu_overlap_sum += context.stats.gpu_overlap;
@@ -63,6 +64,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		m_frame_time_ms = (m_accumulated_dt / 60.0f) * 1000.0f;
 		m_cpu_time_ms = m_cpu_time_sum / 60.0f;
 		m_fence_wait_ms = m_fence_wait_sum / 60.0f;
+		m_acquire_wait_ms = m_acquire_wait_sum / 60.0f;
 		m_gpu_time_ms = m_gpu_time_sum / 60.0f;
 		m_compute_gpu_time_ms = m_compute_gpu_time_sum / 60.0f;
 		m_gpu_overlap_ms = m_gpu_overlap_sum / 60.0f;
@@ -77,6 +79,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		m_frame_count = 0;
 		m_cpu_time_sum = 0.0f;
 		m_fence_wait_sum = 0.0f;
+		m_acquire_wait_sum = 0.0f;
 		m_gpu_time_sum = 0.0f;
 		m_compute_gpu_time_sum = 0.0f;
 		m_gpu_overlap_sum = 0.0f;
@@ -109,7 +112,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 		if (ImGui::Begin("##PerfOverlay", &context.show_performance, overlay_flags)) {
 			ImGui::Text("%.0f FPS  (%.2f ms)", m_fps, m_frame_time_ms);
-			ImGui::TextDisabled("CPU %.2f ms | Fence %.2f ms | GPU %.2f ms", m_cpu_time_ms, m_fence_wait_ms, m_gpu_time_ms);
+			ImGui::TextDisabled("CPU %.2f ms | Fence %.2f ms | Acquire %.2f ms | GPU %.2f ms", m_cpu_time_ms, m_fence_wait_ms, m_acquire_wait_ms, m_gpu_time_ms);
 			if (m_compute_gpu_time_ms > 0.01f) {
 				ImGui::SameLine();
 				ImGui::TextDisabled(" | Compute %.2f ms", m_compute_gpu_time_ms);
@@ -131,7 +134,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		return;
 	}
 
-	const float col0 = 95.0f;
+	const float col0 = 113.0f;
 	auto row = [&](const char* label, const char* value) {
 		ImGui::TextDisabled("%s", label);
 		ImGui::SameLine(col0);
@@ -149,7 +152,8 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	row("CPU", val);
 	snprintf(val, sizeof(val), "%.2f ms", m_fence_wait_ms);
 	row("Fence Wait", val);
-	ImGui::Checkbox("GPU Profiling", &context.gpu_profiling);
+	snprintf(val, sizeof(val), "%.2f ms", m_acquire_wait_ms);
+	row("Acquire Wait", val);
 	snprintf(val, sizeof(val), "%.2f ms", m_gpu_time_ms);
 	row("GPU Graphics", val);
 	if (m_compute_gpu_time_ms > 0.01f) {
@@ -197,7 +201,10 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		context.stats.cull_visible_objects, context.stats.cull_total_objects, culled);
 	row("Objects", val);
 	row("Triangles", tri_buf);
-	snprintf(val, sizeof(val), "%u", context.stats.draw_calls);
+	if (context.stats.transparent_draw_calls > 0)
+		snprintf(val, sizeof(val), "%u (+%u transparent)", context.stats.draw_calls, context.stats.transparent_draw_calls);
+	else
+		snprintf(val, sizeof(val), "%u", context.stats.draw_calls);
 	row("Draw Calls", val);
 	snprintf(val, sizeof(val), "%u point, %u dir",
 		context.stats.num_point_lights, context.stats.num_directional_lights);
@@ -224,6 +231,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 	ImGui::Spacing();
 	ImGui::Separator();
+	ImGui::Checkbox("GPU Profiling", &context.gpu_profiling);
 	ImGui::Spacing();
 
 	// --- Per-system breakdown table ---

@@ -28,6 +28,8 @@ struct PipelineConfigInfo {
 	vk::PipelineViewportStateCreateInfo viewport_info{};
 	vk::PipelineColorBlendAttachmentState color_blend_attachment{};
 	vk::PipelineColorBlendStateCreateInfo color_blend_info{};
+	std::vector<vk::PipelineColorBlendAttachmentState> color_blend_attachments{};
+	std::vector<vk::Format> color_attachment_formats{};
 	vk::PipelineLayout pipeline_layout = nullptr;
 	vk::Format color_format = vk::Format::eUndefined;
 	vk::Format depth_format = vk::Format::eUndefined;

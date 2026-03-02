@@ -46,6 +46,7 @@ struct ProfileResults {
 	std::array<float, COUNT> cpu_ms{};
 	float gpu_overlap = 0.0f;
 	float fence_wait_ms = 0.0f;
+	float acquire_wait_ms = 0.0f;
 
 	float gpu(ProfileTimer t) const { return gpu_ms[static_cast<size_t>(t)]; }
 	float cpu(ProfileTimer t) const { return cpu_ms[static_cast<size_t>(t)]; }
@@ -68,6 +69,7 @@ public:
 	void beginCpuTimer(ProfileTimer timer);
 	void endCpuTimer(ProfileTimer timer);
 	void recordFenceWait(float ms) { m_results.fence_wait_ms = ms; }
+	void recordAcquireWait(float ms) { m_results.acquire_wait_ms = ms; }
 	void resetAllQueries(vk::raii::CommandBuffer& graphics_cmd,
 						 vk::raii::CommandBuffer& compute_cmd,
 						 uint32_t frame_index);

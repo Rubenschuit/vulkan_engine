@@ -443,17 +443,13 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 	material_mgr.flushToDevice(command_buffer);
 
 	if (fi.gpu_culling_active) {
-		// GPU culling runs inline on graphics queue
+		// GPU culling runs inline on graphics queue (opaques + transparents)
 		TracyVkZone(tracy_gfx, *command_buffer, "GPU Cull");
+		profiler.beginGpuTimer(command_buffer, ProfileTimer::CULLING);
 		gpu_scene.updateDirtyTransforms(fi.current_frame,
 			m_active_scene->getRegistry(), command_buffer);
 		m_gpu_culling_system->dispatch(command_buffer, fi, gpu_scene);
-
-		// CPU-side: only prepare transparents
-		profiler.beginCpuTimer(ProfileTimer::CULLING);
-		m_pbr_render_system->prepareTransparents(fi, material_mgr,
-			gpu_scene.getTransparentEntityIndices());
-		profiler.endCpuTimer(ProfileTimer::CULLING);
+		profiler.endGpuTimer(command_buffer, ProfileTimer::CULLING);
 	} else {
 		// CPU culling fallback
 		profiler.beginCpuTimer(ProfileTimer::CULLING);
@@ -607,8 +603,8 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 			m_pbr_render_system->renderOpaque(fi, bindless_set);
 		}
 		m_skybox_render_system->render(fi);
-		m_pbr_render_system->renderTransparent(fi, bindless_set,
-			fi.gpu_culling_active ? &m_global_descriptor_sets[fi.current_frame] : nullptr);
+		if (!fi.gpu_culling_active)
+			m_pbr_render_system->renderTransparent(fi, bindless_set);
 		m_particle_system->render(fi);
 		if (m_ui.show_axes)
 			m_axes_render_system->render(fi);
@@ -619,6 +615,31 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		m_ve_renderer.endSceneRender(command_buffer);
 		profiler.endGpuTimer(command_buffer, ProfileTimer::SCENE_RENDER);
 		profiler.endCpuTimer(ProfileTimer::SCENE_RENDER);
+	}
+
+	// WBOIT transparent pass
+	if (fi.gpu_culling_active) {
+		const auto* bucket_counts = gpu_scene.getBucketGroupCounts();
+		bool has_transparents = (bucket_counts[4] > 0 || bucket_counts[5] > 0);
+		if (has_transparents) {
+			TracyVkZone(tracy_gfx, *command_buffer, "WBOIT");
+			auto* compact_buf = m_gpu_culling_system->compactionEnabled()
+				? &m_gpu_culling_system->getCompactedIndirectBuffer(fi.current_frame) : nullptr;
+			auto* compact_cnt = m_gpu_culling_system->compactionEnabled()
+				? &m_gpu_culling_system->getCompactCountBuffer(fi.current_frame) : nullptr;
+
+			m_ve_renderer.beginWboitRender(command_buffer);
+			m_pbr_render_system->renderTransparentWboit(fi, bindless_set,
+				m_gpu_culling_system->getIndirectBuffer(fi.current_frame),
+				gpu_scene.getBucketGroupOffsets(),
+				bucket_counts,
+				compact_buf, compact_cnt);
+			m_ve_renderer.endWboitRender(command_buffer);
+
+			m_ve_renderer.beginWboitComposite(command_buffer);
+			m_pbr_render_system->compositeWboit(command_buffer);
+			m_ve_renderer.endWboitComposite(command_buffer);
+		}
 	}
 
 	// Selection outline: mask + JFA
@@ -672,7 +693,9 @@ void VeApplication::collectStats(const VeFrameInfo& fi) {
 		// Readback is 1 frame cycle stale
 		m_ui.stats.cull_visible_objects = m_gpu_culling_system->readbackDrawCounts(fi.current_frame);
 		m_ui.stats.visible_triangles = m_gpu_culling_system->readbackTriangleCount(fi.current_frame);
-		m_ui.stats.draw_calls = gpu_scene.getTotalGroups();
+		m_ui.stats.draw_calls = m_gpu_culling_system->readbackDrawCounts(fi.current_frame);
+		const auto* rb = m_gpu_culling_system->getReadbackCounts(fi.current_frame);
+		m_ui.stats.transparent_draw_calls = rb[4] + rb[5];
 	} else {
 		m_ui.stats.cull_total_objects = m_culling_system->getLastTotalMeshObjects();
 		m_ui.stats.cull_visible_objects = m_culling_system->getLastVisibleCount();
@@ -690,7 +713,8 @@ void VeApplication::collectStats(const VeFrameInfo& fi) {
 
 	const auto& results = profiler.getResults();
 	m_ui.stats.fence_wait = results.fence_wait_ms;
-	m_ui.stats.cpu_time = results.cpu(ProfileTimer::FRAME_TOTAL) - results.fence_wait_ms;
+	m_ui.stats.acquire_wait = results.acquire_wait_ms;
+	m_ui.stats.cpu_time = results.cpu(ProfileTimer::FRAME_TOTAL) - results.fence_wait_ms - results.acquire_wait_ms;
 	m_ui.stats.gpu_time = results.gpu(ProfileTimer::FRAME_TOTAL);
 	m_ui.stats.compute_gpu_time = results.gpu(ProfileTimer::COMPUTE_TOTAL);
 	m_ui.stats.gpu_overlap = results.gpu_overlap;
@@ -760,6 +784,11 @@ void VeApplication::recreateResolutionDependentSystems() {
 		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage());
 	m_gpu_culling_system->createHizDescriptorSets(*m_global_pool, m_scene_resources->getGpuSceneManager(), *m_hiz_system);
 	m_gpu_culling_system->createShadowHizDescriptorSets(*m_global_pool, m_scene_resources->getGpuSceneManager(), *m_hiz_system);
+
+	m_pbr_render_system->recreateWboit(
+		m_ve_renderer.getWboitAccumImageView(),
+		m_ve_renderer.getWboitRevealageImageView(),
+		m_ve_renderer.getOffscreenImageFormat());
 
 	m_post_process_system->recreatePipeline(color_format, m_ve_renderer.getResolveTargetImageView(), m_bloom_system->getBloomTexture());
 	m_outline_system->recreate(*m_global_pool, extent, color_format);
@@ -968,6 +997,10 @@ void VeApplication::initSystems() {
 		m_ve_renderer.getSampleCount(),
 		shader("pbr_shader.spv")
 	);
+	m_pbr_render_system->initWboit(
+		m_ve_renderer.getWboitAccumImageView(),
+		m_ve_renderer.getWboitRevealageImageView(),
+		m_ve_renderer.getOffscreenImageFormat());
 
 	m_aabb_debug_render_system = std::make_unique<AabbDebugRenderSystem>(
 		m_ve_device, m_global_set_layout->getDescriptorSetLayout(),

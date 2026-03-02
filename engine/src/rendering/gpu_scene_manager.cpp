@@ -424,12 +424,14 @@ void GpuSceneManager::rebuildDrawGroups() {
 	for (auto& [entity_idx, gpu_id] : m_entity_to_gpu_id) {
 		const CpuLodData& cpu = m_cpu_lod_data[gpu_id];
 		bool is_transparent = (cpu.material_flags & 0x20) != 0;
-		if (is_transparent)
-			continue;
-
 		bool is_mask = (cpu.material_flags & 0x3) == 1;
 		bool is_double_sided = (cpu.material_flags & 0x4) != 0;
-		uint32_t bucket = (is_mask ? 2u : 0u) + (is_double_sided ? 1u : 0u);
+
+		uint32_t bucket;
+		if (is_transparent)
+			bucket = 4u + (is_double_sided ? 1u : 0u);
+		else
+			bucket = (is_mask ? 2u : 0u) + (is_double_sided ? 1u : 0u);
 		active_gpu_ids.push_back(gpu_id);
 
 		for (uint32_t l = 0; l < cpu.lod_count; l++) {
@@ -520,7 +522,7 @@ void GpuSceneManager::rebuildDrawGroups() {
 			                                        obj_offset + offset);
 	}
 
-	// Build active IDs: one entry per non-transparent object
+	// Build active IDs: one entry per object (including transparents for WBOIT)
 	for (uint32_t gpu_id : active_gpu_ids)
 		m_active_ids.push_back(ActiveIdEntry{.gpu_id = gpu_id});
 

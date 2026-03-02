@@ -132,10 +132,14 @@ bool VeRenderer::beginFrame() {
 
 	// Acquire an image from the swap chain
 	vk::Result result;
+	auto acquire_start = std::chrono::steady_clock::now();
 	{
 		ZoneScopedN("Acquire Image");
 		result = m_ve_swap_chain->acquireNextImage(&m_current_image_index);
 	}
+	auto acquire_end = std::chrono::steady_clock::now();
+	float acquire_ms = std::chrono::duration<float, std::chrono::milliseconds::period>(acquire_end - acquire_start).count();
+	m_profiler.recordAcquireWait(acquire_ms);
 	if (result == vk::Result::eErrorOutOfDateKHR) {
 		VE_LOGD("Result of acquireNextImage is eErrorOutOfDateKHR, setting flag.");
 		m_swap_chain_needs_recreation = true;
@@ -417,6 +421,203 @@ void VeRenderer::endSceneRender(vk::raii::CommandBuffer& command_buffer) {
 	);
 }
 
+void VeRenderer::beginWboitRender(vk::raii::CommandBuffer& command_buffer) {
+	assert(m_is_frame_started && "Can't begin WBOIT render while frame is not in progress");
+	auto extent = getExtent();
+
+	// Transition resolved depth to read-only, WBOIT images to color attachment
+	vk::ImageMemoryBarrier2 depth_barrier{
+		.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
+		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+		.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+		.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead,
+		.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+		.newLayout = vk::ImageLayout::eDepthReadOnlyOptimal,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = *getResolvedDepthImage(),
+		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
+	};
+	vk::ImageMemoryBarrier2 accum_barrier{
+		.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+		.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
+		.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+		.oldLayout = vk::ImageLayout::eUndefined,
+		.newLayout = vk::ImageLayout::eColorAttachmentOptimal,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = *m_wboit_accum->getImage(),
+		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+	};
+	vk::ImageMemoryBarrier2 revealage_barrier{
+		.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+		.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
+		.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+		.oldLayout = vk::ImageLayout::eUndefined,
+		.newLayout = vk::ImageLayout::eColorAttachmentOptimal,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = *m_wboit_revealage->getImage(),
+		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+	};
+	std::array barriers = {depth_barrier, accum_barrier, revealage_barrier};
+	vk::DependencyInfo dep{
+		.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size()),
+		.pImageMemoryBarriers = barriers.data()
+	};
+	command_buffer.pipelineBarrier2(dep);
+
+	// Accum: clear to 0 (additive blend accumulates weighted color)
+	vk::RenderingAttachmentInfo accum_attachment{
+		.imageView = *m_wboit_accum->getImageView(),
+		.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+		.loadOp = vk::AttachmentLoadOp::eClear,
+		.storeOp = vk::AttachmentStoreOp::eStore,
+		.clearValue = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 0.0f)
+	};
+	// Revealage: clear to 1 (multiplicative blend: product of (1-alpha) starts at 1)
+	vk::RenderingAttachmentInfo revealage_attachment{
+		.imageView = *m_wboit_revealage->getImageView(),
+		.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+		.loadOp = vk::AttachmentLoadOp::eClear,
+		.storeOp = vk::AttachmentStoreOp::eStore,
+		.clearValue = vk::ClearColorValue(1.0f, 0.0f, 0.0f, 0.0f)
+	};
+	std::array color_attachments = {accum_attachment, revealage_attachment};
+
+	// Depth: read-only (depth test without writes)
+	vk::RenderingAttachmentInfo depth_attachment{
+		.imageView = *getResolvedDepthImageView(),
+		.imageLayout = vk::ImageLayout::eDepthReadOnlyOptimal,
+		.loadOp = vk::AttachmentLoadOp::eLoad,
+		.storeOp = vk::AttachmentStoreOp::eNone,
+	};
+
+	vk::RenderingInfo rendering_info{
+		.renderArea = {.offset = {0, 0}, .extent = extent},
+		.layerCount = 1,
+		.colorAttachmentCount = static_cast<uint32_t>(color_attachments.size()),
+		.pColorAttachments = color_attachments.data(),
+		.pDepthAttachment = &depth_attachment
+	};
+	command_buffer.beginRendering(rendering_info);
+
+	command_buffer.setViewport(0, vk::Viewport{
+		.x = 0.0f, .y = 0.0f,
+		.width = static_cast<float>(extent.width),
+		.height = static_cast<float>(extent.height),
+		.minDepth = 0.0f, .maxDepth = 1.0f
+	});
+	command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = extent});
+}
+
+void VeRenderer::endWboitRender(vk::raii::CommandBuffer& command_buffer) {
+	command_buffer.endRendering();
+
+	// Transition WBOIT images to shader read for composite pass
+	vk::ImageMemoryBarrier2 accum_barrier{
+		.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+		.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+		.oldLayout = vk::ImageLayout::eColorAttachmentOptimal,
+		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = *m_wboit_accum->getImage(),
+		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+	};
+	vk::ImageMemoryBarrier2 revealage_barrier{
+		.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+		.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+		.oldLayout = vk::ImageLayout::eColorAttachmentOptimal,
+		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = *m_wboit_revealage->getImage(),
+		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+	};
+	std::array barriers = {accum_barrier, revealage_barrier};
+	vk::DependencyInfo dep{
+		.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size()),
+		.pImageMemoryBarriers = barriers.data()
+	};
+	command_buffer.pipelineBarrier2(dep);
+}
+
+void VeRenderer::beginWboitComposite(vk::raii::CommandBuffer& command_buffer) {
+	auto extent = getExtent();
+
+	// Transition resolve target back to color attachment for compositing
+	m_ve_swap_chain->transitionResolveTargetLayout(
+		command_buffer,
+		vk::ImageLayout::eShaderReadOnlyOptimal,
+		vk::ImageLayout::eColorAttachmentOptimal,
+		vk::AccessFlagBits2::eShaderRead,
+		vk::AccessFlagBits2::eColorAttachmentRead | vk::AccessFlagBits2::eColorAttachmentWrite,
+		vk::PipelineStageFlagBits2::eFragmentShader,
+		vk::PipelineStageFlagBits2::eColorAttachmentOutput
+	);
+
+	vk::RenderingAttachmentInfo color_attachment{
+		.imageView = *m_ve_swap_chain->getResolveTargetImageView(),
+		.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+		.loadOp = vk::AttachmentLoadOp::eLoad,
+		.storeOp = vk::AttachmentStoreOp::eStore,
+	};
+
+	vk::RenderingInfo rendering_info{
+		.renderArea = {.offset = {0, 0}, .extent = extent},
+		.layerCount = 1,
+		.colorAttachmentCount = 1,
+		.pColorAttachments = &color_attachment,
+	};
+	command_buffer.beginRendering(rendering_info);
+
+	command_buffer.setViewport(0, vk::Viewport{
+		.x = 0.0f, .y = 0.0f,
+		.width = static_cast<float>(extent.width),
+		.height = static_cast<float>(extent.height),
+		.minDepth = 0.0f, .maxDepth = 1.0f
+	});
+	command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = extent});
+}
+
+void VeRenderer::endWboitComposite(vk::raii::CommandBuffer& command_buffer) {
+	command_buffer.endRendering();
+
+	// Transition resolve target back to shader read for bloom/post-process
+	m_ve_swap_chain->transitionResolveTargetLayout(
+		command_buffer,
+		vk::ImageLayout::eColorAttachmentOptimal,
+		vk::ImageLayout::eShaderReadOnlyOptimal,
+		vk::AccessFlagBits2::eColorAttachmentWrite,
+		vk::AccessFlagBits2::eShaderRead,
+		vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		vk::PipelineStageFlagBits2::eFragmentShader
+	);
+
+	// Restore resolved depth to depth attachment for any subsequent passes
+	vk::ImageMemoryBarrier2 depth_barrier{
+		.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead,
+		.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
+		.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+		.oldLayout = vk::ImageLayout::eDepthReadOnlyOptimal,
+		.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = *getResolvedDepthImage(),
+		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
+	};
+	vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_barrier};
+	command_buffer.pipelineBarrier2(dep);
+}
+
 void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode) {
 	assert(m_is_frame_started && "Can't call beginPostProcessRender while frame is not in progress");
 	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin post-process on command buffer from a different frame");
@@ -553,9 +754,58 @@ void VeRenderer::beginUIRecording(bool editor_mode) {
 	}
 }
 
+void VeRenderer::recreateWboitImages() {
+	auto extent = getExtent();
+	if (extent.width == 0 || extent.height == 0)
+		return;
+
+	m_wboit_accum = std::make_unique<VeImage>(
+		m_ve_device,
+		extent.width, extent.height,
+		vk::SampleCountFlagBits::e1,
+		vk::Format::eR16G16B16A16Sfloat,
+		vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		vk::ImageAspectFlagBits::eColor,
+		false, 1
+	);
+
+	m_wboit_revealage = std::make_unique<VeImage>(
+		m_ve_device,
+		extent.width, extent.height,
+		vk::SampleCountFlagBits::e1,
+		vk::Format::eR16Sfloat,
+		vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		vk::ImageAspectFlagBits::eColor,
+		false, 1
+	);
+
+	m_wboit_accum->transitionImageLayout(
+		vk::ImageLayout::eUndefined,
+		vk::ImageLayout::eShaderReadOnlyOptimal,
+		{},
+		vk::AccessFlagBits2::eShaderRead,
+		vk::PipelineStageFlagBits2::eTopOfPipe,
+		vk::PipelineStageFlagBits2::eFragmentShader
+	);
+	m_wboit_revealage->transitionImageLayout(
+		vk::ImageLayout::eUndefined,
+		vk::ImageLayout::eShaderReadOnlyOptimal,
+		{},
+		vk::AccessFlagBits2::eShaderRead,
+		vk::PipelineStageFlagBits2::eTopOfPipe,
+		vk::PipelineStageFlagBits2::eFragmentShader
+	);
+}
+
 void VeRenderer::createViewportResources() {
 	auto extent = m_ve_swap_chain->getSwapChainExtent();
 	auto format = m_ve_swap_chain->getSwapChainImageFormat();
+
+	recreateWboitImages();
 
 	m_viewport_image = std::make_unique<VeImage>(
 		m_ve_device,
@@ -614,11 +864,13 @@ void VeRenderer::resizeSceneRender(uint32_t w, uint32_t h) {
 		return;
 	m_scene_render_extent = vk::Extent2D{w, h};
 	m_ve_swap_chain->resizeOffscreenResources({w, h});
+	recreateWboitImages();
 }
 
 void VeRenderer::resetSceneRenderExtent() {
 	m_scene_render_extent = vk::Extent2D{0, 0};
 	m_ve_swap_chain->resizeOffscreenResources(m_ve_swap_chain->getSwapChainExtent());
+	recreateWboitImages();
 }
 
 void VeRenderer::resizeViewportImage(uint32_t width, uint32_t height) {

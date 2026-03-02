@@ -4,6 +4,7 @@
 #include "rendering/material_ssbo_manager.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_pipeline.hpp"
+#include "vulkan/ve_descriptors.hpp"
 #include "scene/ve_component.hpp"
 #include "scene/ve_registry.hpp"
 #include "rendering/ve_frame_info.hpp"
@@ -491,6 +492,263 @@ void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info, const vk::raii:
 		cmd.drawIndexed(lod.index_count, 1, lod.first_index,
 			static_cast<int32_t>(entry->vertex_offset), d.ssbo_index);
 	}
+}
+
+void PbrRenderSystem::bindPbrResources(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
+                                        const vk::raii::DescriptorSet* global_set_override) const {
+	auto& cmd = frame_info.cmd();
+	auto& global_set = global_set_override ? *global_set_override : frame_info.global_descriptor_set;
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout, 0, {*global_set}, {});
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout, 1, {*bindless_set}, {});
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout, 2, {*frame_info.shadow_descriptor_set}, {});
+	if (frame_info.shadow_mask_descriptor_set)
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout, 3, {**frame_info.shadow_mask_descriptor_set}, {});
+	if (frame_info.cluster_descriptor_set)
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout, 4, {**frame_info.cluster_descriptor_set}, {});
+	if (frame_info.ao_descriptor_set)
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout, 5, {**frame_info.ao_descriptor_set}, {});
+	m_mega_buffer->bind(cmd);
+}
+
+void PbrRenderSystem::createWboitGeometryPipelines() {
+	auto wboit_shader_path = m_shader_path.parent_path() / "pbr_wboit.spv";
+
+	PipelineConfigInfo config{};
+	VePipeline::defaultPipelineConfigInfo(config, m_ve_device);
+	config.dynamic_state_enables.push_back(vk::DynamicState::eCullMode);
+	config.dynamic_state_enables.push_back(vk::DynamicState::eDepthWriteEnable);
+	config.dynamic_state_enables.push_back(vk::DynamicState::eDepthCompareOp);
+	config.dynamic_state_enables.push_back(vk::DynamicState::eDepthBias);
+	config.dynamic_state_info.dynamicStateCount = static_cast<uint32_t>(config.dynamic_state_enables.size());
+	config.dynamic_state_info.pDynamicStates = config.dynamic_state_enables.data();
+	config.rasterization_info.depthBiasEnable = VK_TRUE;
+	config.multisample_info.rasterizationSamples = vk::SampleCountFlagBits::e1;
+	config.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptions();
+	config.input_assembly_info.topology = m_topology;
+	config.pipeline_layout = *m_pipeline_layout;
+
+	// MRT: 2 color attachments (accum RGBA16F, revealage R16F)
+	config.color_attachment_formats = {vk::Format::eR16G16B16A16Sfloat, vk::Format::eR16Sfloat};
+
+	// Accum blend
+	vk::PipelineColorBlendAttachmentState accum_blend{
+		.blendEnable = VK_TRUE,
+		.srcColorBlendFactor = vk::BlendFactor::eOne,
+		.dstColorBlendFactor = vk::BlendFactor::eOne,
+		.colorBlendOp = vk::BlendOp::eAdd,
+		.srcAlphaBlendFactor = vk::BlendFactor::eOne,
+		.dstAlphaBlendFactor = vk::BlendFactor::eOne,
+		.alphaBlendOp = vk::BlendOp::eAdd,
+		.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG
+		                | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA
+	};
+	// Revealage blend
+	vk::PipelineColorBlendAttachmentState revealage_blend{
+		.blendEnable = VK_TRUE,
+		.srcColorBlendFactor = vk::BlendFactor::eZero,
+		.dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcColor,
+		.colorBlendOp = vk::BlendOp::eAdd,
+		.srcAlphaBlendFactor = vk::BlendFactor::eZero,
+		.dstAlphaBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
+		.alphaBlendOp = vk::BlendOp::eAdd,
+		.colorWriteMask = vk::ColorComponentFlagBits::eR
+	};
+	config.color_blend_attachments = {accum_blend, revealage_blend};
+
+	// Depth test on, write off (set dynamically)
+	config.depth_stencil_info.depthTestEnable = VK_TRUE;
+	config.depth_stencil_info.depthWriteEnable = VK_FALSE;
+
+	for (uint32_t mode = 0; mode < SHADOW_MODE_COUNT; mode++) {
+		config.specialization_constants = {{0, mode}, {1, m_pcf_samples}, {2, m_pcss_filter_samples}, {3, 0u}};
+		m_wboit_pipelines[mode] = std::make_unique<VePipeline>(m_ve_device, wboit_shader_path, config);
+	}
+}
+
+void PbrRenderSystem::initWboit(const vk::raii::ImageView& accum_view, const vk::raii::ImageView& revealage_view,
+                                 vk::Format resolve_format) {
+	// Create WBOIT geometry pipelines
+	createWboitGeometryPipelines();
+
+	// Create composite descriptor set layout (2 combined image samplers)
+	m_wboit_composite_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
+		.addBinding(0, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
+		.addBinding(1, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
+		.build();
+
+	m_wboit_composite_pool = VeDescriptorPool::Builder(m_ve_device)
+		.setMaxSets(1)
+		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 2)
+		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
+		.build();
+
+	// Create sampler
+	vk::SamplerCreateInfo sampler_info{
+		.magFilter = vk::Filter::eLinear,
+		.minFilter = vk::Filter::eLinear,
+		.mipmapMode = vk::SamplerMipmapMode::eLinear,
+		.addressModeU = vk::SamplerAddressMode::eClampToEdge,
+		.addressModeV = vk::SamplerAddressMode::eClampToEdge,
+		.addressModeW = vk::SamplerAddressMode::eClampToEdge,
+		.mipLodBias = 0.0f,
+		.anisotropyEnable = vk::False,
+		.maxAnisotropy = 1.0f,
+		.compareEnable = vk::False,
+		.compareOp = vk::CompareOp::eAlways,
+		.minLod = 0.0f,
+		.maxLod = 1.0f,
+		.borderColor = vk::BorderColor::eIntOpaqueBlack,
+		.unnormalizedCoordinates = vk::False
+	};
+	m_wboit_composite_sampler = std::make_unique<vk::raii::Sampler>(m_ve_device.getDevice(), sampler_info);
+
+	// Write descriptor set
+	vk::DescriptorImageInfo accum_info{
+		.sampler = **m_wboit_composite_sampler,
+		.imageView = *accum_view,
+		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
+	};
+	vk::DescriptorImageInfo revealage_info{
+		.sampler = **m_wboit_composite_sampler,
+		.imageView = *revealage_view,
+		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
+	};
+	VeDescriptorWriter(*m_wboit_composite_set_layout, *m_wboit_composite_pool)
+		.writeImage(0, &accum_info)
+		.writeImage(1, &revealage_info)
+		.build(m_wboit_composite_set);
+
+	// Composite pipeline layout
+	vk::DescriptorSetLayout layouts[1] = {m_wboit_composite_set_layout->getDescriptorSetLayout()};
+	vk::PipelineLayoutCreateInfo layout_info{
+		.setLayoutCount = 1,
+		.pSetLayouts = layouts,
+	};
+	m_wboit_composite_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), layout_info);
+
+	// Composite pipeline
+	auto composite_shader_path = m_shader_path.parent_path() / "wboit_composite.spv";
+	PipelineConfigInfo config{};
+	VePipeline::defaultPipelineConfigInfo(config, m_ve_device);
+	config.multisample_info.rasterizationSamples = vk::SampleCountFlagBits::e1;
+	config.color_format = resolve_format;
+	config.pipeline_layout = *m_wboit_composite_pipeline_layout;
+	config.attribute_descriptions.clear();
+	config.binding_descriptions.clear();
+	config.rasterization_info.cullMode = vk::CullModeFlagBits::eNone;
+	config.depth_stencil_info.depthTestEnable = vk::False;
+	config.depth_stencil_info.depthWriteEnable = vk::False;
+
+	// Alpha blending: SrcAlpha / OneMinusSrcAlpha (composite WBOIT over opaque scene)
+	config.color_blend_attachment.blendEnable = VK_TRUE;
+	config.color_blend_attachment.srcColorBlendFactor = vk::BlendFactor::eSrcAlpha;
+	config.color_blend_attachment.dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
+	config.color_blend_attachment.colorBlendOp = vk::BlendOp::eAdd;
+	config.color_blend_attachment.srcAlphaBlendFactor = vk::BlendFactor::eOne;
+	config.color_blend_attachment.dstAlphaBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
+	config.color_blend_attachment.alphaBlendOp = vk::BlendOp::eAdd;
+
+	m_wboit_composite_pipeline = std::make_unique<VePipeline>(m_ve_device, composite_shader_path, config);
+}
+
+void PbrRenderSystem::renderTransparentWboit(
+	VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
+	const VeBuffer& indirect_buffer,
+	const uint32_t* bucket_group_offsets,
+	const uint32_t* bucket_group_counts,
+	const VeBuffer* compacted_buffer,
+	const VeBuffer* compact_count_buffer,
+	const vk::raii::DescriptorSet* global_set_override) const {
+
+	if (!m_mega_buffer->isValid() || !m_wboit_pipelines[0])
+		return;
+
+	auto& cmd = frame_info.cmd();
+	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_wboit_pipelines[mode]->getPipeline());
+
+	bindPbrResources(frame_info, bindless_set, global_set_override);
+	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
+	cmd.setDepthWriteEnable(VK_FALSE);
+	cmd.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
+
+	// Buckets 4-5: transparent back-face / transparent double-sided
+	for (uint32_t bucket = 4; bucket < GPU_CULL_BUCKET_COUNT; bucket++) {
+		if (bucket_group_counts[bucket] == 0)
+			continue;
+		bool is_double_sided = (bucket & 1);
+		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
+		auto offset = static_cast<vk::DeviceSize>(bucket_group_offsets[bucket]) * sizeof(VkDrawIndexedIndirectCommand);
+		if (compacted_buffer && compact_count_buffer) {
+			cmd.drawIndexedIndirectCount(
+				*compacted_buffer->getBuffer(), offset,
+				*compact_count_buffer->getBuffer(), bucket * sizeof(uint32_t),
+				bucket_group_counts[bucket], sizeof(VkDrawIndexedIndirectCommand));
+		} else {
+			cmd.drawIndexedIndirect(
+				*indirect_buffer.getBuffer(), offset,
+				bucket_group_counts[bucket], sizeof(VkDrawIndexedIndirectCommand));
+		}
+	}
+}
+
+void PbrRenderSystem::compositeWboit(vk::raii::CommandBuffer& command_buffer) const {
+	if (!m_wboit_composite_pipeline)
+		return;
+	command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_wboit_composite_pipeline->getPipeline());
+	command_buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+		*m_wboit_composite_pipeline_layout, 0, {*m_wboit_composite_set}, {});
+	command_buffer.draw(3, 1, 0, 0);
+}
+
+void PbrRenderSystem::recreateWboit(const vk::raii::ImageView& accum_view, const vk::raii::ImageView& revealage_view,
+                                     vk::Format resolve_format) {
+	// Recreate geometry pipelines (shadow samples may have changed)
+	for (auto& p : m_wboit_pipelines)
+		p.reset();
+	createWboitGeometryPipelines();
+
+	// Recreate composite descriptor set with new image views
+	m_wboit_composite_set = nullptr;
+	if (m_wboit_composite_pool)
+		m_wboit_composite_pool->resetPool();
+
+	vk::DescriptorImageInfo accum_info{
+		.sampler = **m_wboit_composite_sampler,
+		.imageView = *accum_view,
+		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
+	};
+	vk::DescriptorImageInfo revealage_info{
+		.sampler = **m_wboit_composite_sampler,
+		.imageView = *revealage_view,
+		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
+	};
+	VeDescriptorWriter(*m_wboit_composite_set_layout, *m_wboit_composite_pool)
+		.writeImage(0, &accum_info)
+		.writeImage(1, &revealage_info)
+		.build(m_wboit_composite_set);
+
+	// Recreate composite pipeline
+	m_wboit_composite_pipeline.reset();
+	auto composite_shader_path = m_shader_path.parent_path() / "wboit_composite.spv";
+	PipelineConfigInfo config{};
+	VePipeline::defaultPipelineConfigInfo(config, m_ve_device);
+	config.multisample_info.rasterizationSamples = vk::SampleCountFlagBits::e1;
+	config.color_format = resolve_format;
+	config.pipeline_layout = *m_wboit_composite_pipeline_layout;
+	config.attribute_descriptions.clear();
+	config.binding_descriptions.clear();
+	config.rasterization_info.cullMode = vk::CullModeFlagBits::eNone;
+	config.depth_stencil_info.depthTestEnable = vk::False;
+	config.depth_stencil_info.depthWriteEnable = vk::False;
+	config.color_blend_attachment.blendEnable = VK_TRUE;
+	config.color_blend_attachment.srcColorBlendFactor = vk::BlendFactor::eSrcAlpha;
+	config.color_blend_attachment.dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
+	config.color_blend_attachment.colorBlendOp = vk::BlendOp::eAdd;
+	config.color_blend_attachment.srcAlphaBlendFactor = vk::BlendFactor::eOne;
+	config.color_blend_attachment.dstAlphaBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
+	config.color_blend_attachment.alphaBlendOp = vk::BlendOp::eAdd;
+	m_wboit_composite_pipeline = std::make_unique<VePipeline>(m_ve_device, composite_shader_path, config);
 }
 
 } // namespace ve

@@ -18,6 +18,8 @@ namespace ve {
 	class MeshComponent;
 	class BindlessTextureRegistry;
 	class MaterialSSBOManager;
+	class VeDescriptorSetLayout;
+	class VeDescriptorPool;
 }
 
 namespace ve {
@@ -57,12 +59,31 @@ public:
 	void renderTransparent(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
 	                       const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 
+	// WBOIT: GPU-driven transparent rendering
+	void initWboit(const vk::raii::ImageView& accum_view, const vk::raii::ImageView& revealage_view,
+	               vk::Format resolve_format);
+	void renderTransparentWboit(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
+	                            const VeBuffer& indirect_buffer,
+	                            const uint32_t* bucket_group_offsets,
+	                            const uint32_t* bucket_group_counts,
+	                            const VeBuffer* compacted_buffer = nullptr,
+	                            const VeBuffer* compact_count_buffer = nullptr,
+	                            const vk::raii::DescriptorSet* global_set_override = nullptr) const;
+	void compositeWboit(vk::raii::CommandBuffer& command_buffer) const;
+	void recreateWboit(const vk::raii::ImageView& accum_view, const vk::raii::ImageView& revealage_view,
+	                   vk::Format resolve_format);
+
 	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
 		for (auto& p : m_pipelines)
 			p.reset();
 		for (auto& p : m_pipelines_mask)
 			p.reset();
 		createPipelines(color_format, sample_count);
+		if (m_wboit_pipelines[0]) {
+			for (auto& p : m_wboit_pipelines)
+				p.reset();
+			createWboitGeometryPipelines();
+		}
 	}
 	void setTopology(Topology topo) {
 		m_topology = (topo == Topology::LINE_LIST)
@@ -77,6 +98,11 @@ public:
 		for (auto& p : m_pipelines_mask)
 			p.reset();
 		createPipelines(m_color_format, m_sample_count);
+		if (m_wboit_pipelines[0]) {
+			for (auto& p : m_wboit_pipelines)
+				p.reset();
+			createWboitGeometryPipelines();
+		}
 	}
 
 	uint32_t getOpaqueDrawCount() const { return m_total_indirect_count; }
@@ -102,6 +128,9 @@ private:
 		const vk::raii::DescriptorSetLayout& cluster_set_layout,
 		const vk::raii::DescriptorSetLayout& ao_set_layout);
 	void createPipelines(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
+	void createWboitGeometryPipelines();
+	void bindPbrResources(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
+	                      const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;
@@ -117,6 +146,17 @@ private:
 	std::array<std::unique_ptr<VePipeline>, SHADOW_MODE_COUNT> m_pipelines_mask;
 
 	std::unique_ptr<PbrMegaBuffer> m_mega_buffer;
+
+	// WBOIT geometry pipeline (one per shadow mode, same layout as PBR)
+	std::array<std::unique_ptr<VePipeline>, SHADOW_MODE_COUNT> m_wboit_pipelines;
+
+	// WBOIT composite pipeline (separate layout, 2 combined image samplers)
+	std::unique_ptr<VeDescriptorSetLayout> m_wboit_composite_set_layout;
+	std::unique_ptr<VeDescriptorPool> m_wboit_composite_pool;
+	vk::raii::DescriptorSet m_wboit_composite_set{nullptr};
+	std::unique_ptr<vk::raii::Sampler> m_wboit_composite_sampler;
+	vk::raii::PipelineLayout m_wboit_composite_pipeline_layout{nullptr};
+	std::unique_ptr<VePipeline> m_wboit_composite_pipeline;
 
 	// Indirect draw (opaque): 4 buckets (non-MASK back, non-MASK double, MASK back, MASK double)
 	// Depth prepass uses buckets 0-1 (non-MASK only) from the same buffer.

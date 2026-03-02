@@ -49,6 +49,7 @@ struct VENGINE_API UIContext {
 	struct Stats {
 		float cpu_time = 0.0f;
 		float fence_wait = 0.0f;
+		float acquire_wait = 0.0f;
 		float gpu_time = 0.0f;
 		float compute_gpu_time = 0.0f;
 		float gpu_overlap = 0.0f;
@@ -74,6 +75,7 @@ struct VENGINE_API UIContext {
 		uint32_t cull_visible_objects = 0;
 		uint32_t visible_triangles = 0;
 		uint32_t draw_calls = 0;
+		uint32_t transparent_draw_calls = 0;
 		uint32_t num_point_lights = 0;
 		uint32_t num_directional_lights = 0;
 	};
@@ -101,7 +103,6 @@ struct VENGINE_API UIContext {
 	bool gpu_profiling = false;
 
 	// multi-threading thresholds
-	int min_parallel_groups = static_cast<int>(ve::MIN_PARALLEL_GROUPS);
 	int min_parallel_cull_entities = static_cast<int>(ve::MIN_PARALLEL_CULL_ENTITIES);
 
 	// LOD override

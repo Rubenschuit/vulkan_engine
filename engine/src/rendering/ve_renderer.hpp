@@ -49,6 +49,10 @@ public:
 	const vk::raii::Image& getResolvedDepthImage() const { return m_ve_swap_chain->getResolvedDepthImage(); }
 	bool isSwapChainOutOfDate() const { return m_swap_chain_needs_recreation; }
 
+	// WBOIT image accessors
+	const vk::raii::ImageView& getWboitAccumImageView() const { return m_wboit_accum->getImageView(); }
+	const vk::raii::ImageView& getWboitRevealageImageView() const { return m_wboit_revealage->getImageView(); }
+
 	// Begin a new frame. Returns true if a frame was acquired and recording can start.
 	// When false is returned (e.g. swap chain out of date), the command buffer is not valid for use.
 	bool beginFrame();
@@ -60,6 +64,13 @@ public:
 	void beginSceneRender(vk::raii::CommandBuffer& command_buffer,
 		bool load_depth = false, bool secondary_contents = false, bool resolve_msaa = true);
 	void endSceneRender(vk::raii::CommandBuffer& command_buffer);
+
+	// WBOIT rendering: geometry pass writes to accum + revealage with read-only depth
+	void beginWboitRender(vk::raii::CommandBuffer& command_buffer);
+	void endWboitRender(vk::raii::CommandBuffer& command_buffer);
+	// WBOIT composite: alpha-blend result onto resolve target
+	void beginWboitComposite(vk::raii::CommandBuffer& command_buffer);
+	void endWboitComposite(vk::raii::CommandBuffer& command_buffer);
 
 	// Start rendering to the swapchain (editor_mode=false) or viewport image (editor_mode=true).
 	void beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode = false);
@@ -133,6 +144,7 @@ public:
 
 private:
 	void createViewportResources();
+	void recreateWboitImages();
 	void transitionToPresent(vk::raii::CommandBuffer& command_buffer);
 
 	VeDevice& m_ve_device;
@@ -160,6 +172,10 @@ private:
 	std::unique_ptr<VeThreadPool> m_thread_pool;
 	vk::Format m_depth_format = vk::Format::eUndefined;
 	vk::Format m_scene_color_format = vk::Format::eUndefined; // cached for inheritance info pointer stability
+
+	// WBOIT render targets (single-sample)
+	std::unique_ptr<VeImage> m_wboit_accum;      // RGBA16F
+	std::unique_ptr<VeImage> m_wboit_revealage;  // R16F
 
 	// Viewport image for editor mode (render-to-texture)
 	std::unique_ptr<VeImage> m_viewport_image;

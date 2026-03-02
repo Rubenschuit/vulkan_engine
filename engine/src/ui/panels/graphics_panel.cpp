@@ -143,60 +143,6 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UICon
 		ImGui::Unindent();
 	}
 
-	// Topology (writes to context only; engine handles pipeline recreation)
-	ImGui::Text("Topology: ");
-	ImGui::SameLine();
-	int topology_int = static_cast<int>(ctx.topology);
-	if (ImGui::RadioButton("Triangle List", &topology_int, static_cast<int>(Topology::TRIANGLE_LIST)))
-		ctx.topology = Topology::TRIANGLE_LIST;
-	ImGui::SameLine();
-	if (ImGui::RadioButton("Line List", &topology_int, static_cast<int>(Topology::LINE_LIST)))
-		ctx.topology = Topology::LINE_LIST;
-
-	ImGui::Separator();
-	ImGui::Text("Render mode (pbr): ");
-	int current_render_mode = static_cast<int>(ctx.render_mode);
-	if (ImGui::RadioButton("BRDF Microfacets", &current_render_mode, static_cast<int>(RenderMode::BRDF_MICROFACET)))
-		ctx.render_mode = RenderMode::BRDF_MICROFACET;
-	ImGui::SameLine();
-	if (ImGui::RadioButton("BRDF Smooth", &current_render_mode, static_cast<int>(RenderMode::BRDF)))
-		ctx.render_mode = RenderMode::BRDF;
-	if (ImGui::RadioButton("Normal vector", &current_render_mode, static_cast<int>(RenderMode::NORMAL_VECTOR)))
-		ctx.render_mode = RenderMode::NORMAL_VECTOR;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Visualize surface normals (RGB = XYZ)");
-	if (ImGui::RadioButton("Tangent vector", &current_render_mode, static_cast<int>(RenderMode::TANGENT_VECTOR)))
-		ctx.render_mode = RenderMode::TANGENT_VECTOR;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Visualize tangent vectors for normal mapping");
-	if (ImGui::RadioButton("Bitangent vector", &current_render_mode, static_cast<int>(RenderMode::BITANGENT_VECTOR)))
-		ctx.render_mode = RenderMode::BITANGENT_VECTOR;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Visualize bitangent vectors for normal mapping");
-	if (ImGui::RadioButton("Normal map", &current_render_mode, static_cast<int>(RenderMode::NORMAL_MAP)))
-		ctx.render_mode = RenderMode::NORMAL_MAP;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Display normal map texture data directly");
-	if (ImGui::RadioButton("CSM Cascades", &current_render_mode, static_cast<int>(RenderMode::CSM_CASCADE)))
-		ctx.render_mode = RenderMode::CSM_CASCADE;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Visualize CSM cascade regions\nRed=0, Green=1, Blue=2, Yellow=3");
-	if (ImGui::RadioButton("Cluster Heatmap", &current_render_mode, static_cast<int>(RenderMode::CLUSTER_HEATMAP)))
-		ctx.render_mode = RenderMode::CLUSTER_HEATMAP;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Visualize lights-per-cluster as a heat gradient\nBlue=few, Red=many, Dark=zero");
-	if (ImGui::RadioButton("LOD Level", &current_render_mode, static_cast<int>(RenderMode::LOD_LEVEL)))
-		ctx.render_mode = RenderMode::LOD_LEVEL;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Visualize mesh LOD levels\nGreen=0, Yellow=1, Orange=2, Red=3");
-
-	ImGui::Checkbox("Show Axes", &ctx.show_axes);
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Display XYZ coordinate axes in the scene.\nRed=X, Green=Y, Blue=Z");
-	ImGui::Checkbox("Show AABB outlines", &ctx.show_aabb_debug);
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Display wireframe bounding boxes for visible objects");
-
 	ImGui::Separator();
 	ImGui::Checkbox("Frustum culling", &ctx.enable_frustum_culling);
 	if (ImGui::IsItemHovered())
@@ -218,12 +164,9 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UICon
 
 	ImGui::Separator();
 	ImGui::Text("Multi-threading:");
-	ImGui::SliderInt("Min parallel groups", &ctx.min_parallel_groups, 0, 2048);
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Minimum opaque draw groups to enable parallel command recording.\n0 = always parallel");
 	ImGui::SliderInt("Min cull entities", &ctx.min_parallel_cull_entities, 0, 4096);
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Minimum mesh entities to enable parallel frustum culling.\n0 = always parallel");
+		ImGui::SetTooltip("Minimum mesh entities to enable parallel cpu frustum culling.\n0 = always parallel");
 
 	ImGui::Separator();
 	ImGui::Text("LOD:");
@@ -325,6 +268,59 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UICon
 	ImGui::Separator();
 	auto extent = m_renderer.getExtent();
 	ImGui::Text("Resolution: %d x %d", extent.width, extent.height);
+
+	// --- Render mode ---
+	ImGui::Separator();
+	ImGui::Text("Render mode: ");
+	int current_render_mode = static_cast<int>(ctx.render_mode);
+	if (ImGui::RadioButton("BRDF Microfacets", &current_render_mode, static_cast<int>(RenderMode::BRDF_MICROFACET)))
+		ctx.render_mode = RenderMode::BRDF_MICROFACET;
+	ImGui::SameLine();
+	if (ImGui::RadioButton("BRDF Smooth", &current_render_mode, static_cast<int>(RenderMode::BRDF)))
+		ctx.render_mode = RenderMode::BRDF;
+	if (ImGui::RadioButton("Normal vector", &current_render_mode, static_cast<int>(RenderMode::NORMAL_VECTOR)))
+		ctx.render_mode = RenderMode::NORMAL_VECTOR;
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Visualize surface normals (RGB = XYZ)");
+	if (ImGui::RadioButton("Tangent vector", &current_render_mode, static_cast<int>(RenderMode::TANGENT_VECTOR)))
+		ctx.render_mode = RenderMode::TANGENT_VECTOR;
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Visualize tangent vectors for normal mapping");
+	if (ImGui::RadioButton("Bitangent vector", &current_render_mode, static_cast<int>(RenderMode::BITANGENT_VECTOR)))
+		ctx.render_mode = RenderMode::BITANGENT_VECTOR;
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Visualize bitangent vectors for normal mapping");
+	if (ImGui::RadioButton("Normal map", &current_render_mode, static_cast<int>(RenderMode::NORMAL_MAP)))
+		ctx.render_mode = RenderMode::NORMAL_MAP;
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Display normal map texture data directly");
+	if (ImGui::RadioButton("CSM Cascades", &current_render_mode, static_cast<int>(RenderMode::CSM_CASCADE)))
+		ctx.render_mode = RenderMode::CSM_CASCADE;
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Visualize CSM cascade regions\nRed=0, Green=1, Blue=2, Yellow=3");
+	if (ImGui::RadioButton("Cluster Heatmap", &current_render_mode, static_cast<int>(RenderMode::CLUSTER_HEATMAP)))
+		ctx.render_mode = RenderMode::CLUSTER_HEATMAP;
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Visualize lights-per-cluster as a heat gradient\nBlue=few, Red=many, Dark=zero");
+	if (ImGui::RadioButton("LOD Level", &current_render_mode, static_cast<int>(RenderMode::LOD_LEVEL)))
+		ctx.render_mode = RenderMode::LOD_LEVEL;
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Visualize mesh LOD levels\nGreen=0, Yellow=1, Orange=2, Red=3");
+
+	ImGui::Checkbox("Show Axes", &ctx.show_axes);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Display XYZ coordinate axes in the scene.\nRed=X, Green=Y, Blue=Z");
+	ImGui::Checkbox("Show AABB outlines", &ctx.show_aabb_debug);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Display wireframe bounding boxes for visible objects");
+	ImGui::Text("Topology: ");
+	ImGui::SameLine();
+	int topology_int = static_cast<int>(ctx.topology);
+	if (ImGui::RadioButton("Triangle List", &topology_int, static_cast<int>(Topology::TRIANGLE_LIST)))
+		ctx.topology = Topology::TRIANGLE_LIST;
+	ImGui::SameLine();
+	if (ImGui::RadioButton("Line List", &topology_int, static_cast<int>(Topology::LINE_LIST)))
+		ctx.topology = Topology::LINE_LIST;
 
 	ImGui::End();
 }

@@ -180,13 +180,25 @@ void VePipeline::createGraphicsPipeline(
 			vk::FormatFeatureFlagBits::eDepthStencilAttachment
 		);
 	}
-	uint32_t color_attachment_count = (config_info.color_format == vk::Format::eUndefined) ? 0U : 1U;
+	// MRT path: use color_attachment_formats/color_blend_attachments vectors when non-empty
+	uint32_t color_attachment_count;
+	const vk::Format* color_format_ptr;
+	vk::PipelineColorBlendStateCreateInfo blend_state = config_info.color_blend_info;
+	if (!config_info.color_attachment_formats.empty()) {
+		color_attachment_count = static_cast<uint32_t>(config_info.color_attachment_formats.size());
+		color_format_ptr = config_info.color_attachment_formats.data();
+		blend_state.attachmentCount = static_cast<uint32_t>(config_info.color_blend_attachments.size());
+		blend_state.pAttachments = config_info.color_blend_attachments.data();
+	} else {
+		color_attachment_count = (config_info.color_format == vk::Format::eUndefined) ? 0U : 1U;
+		color_format_ptr = (color_attachment_count == 0) ? nullptr : &config_info.color_format;
+	}
 	vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo{
 		.sType = vk::StructureType::ePipelineRenderingCreateInfo,
 		.pNext = nullptr,
 		.viewMask = config_info.view_mask,
 		.colorAttachmentCount = color_attachment_count,
-		.pColorAttachmentFormats = (config_info.color_format == vk::Format::eUndefined) ? nullptr : &config_info.color_format,
+		.pColorAttachmentFormats = color_format_ptr,
 		.depthAttachmentFormat = depth_format,
 		.stencilAttachmentFormat = vk::Format::eUndefined
 	};
@@ -203,7 +215,7 @@ void VePipeline::createGraphicsPipeline(
 		.pRasterizationState = &config_info.rasterization_info,
 		.pMultisampleState = &config_info.multisample_info,
 		.pDepthStencilState = &config_info.depth_stencil_info,
-		.pColorBlendState = &config_info.color_blend_info,
+		.pColorBlendState = &blend_state,
 		.pDynamicState = &config_info.dynamic_state_info,
 		.layout = config_info.pipeline_layout,
 		.renderPass = nullptr, // Using dynamic rendering

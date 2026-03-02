@@ -18,7 +18,7 @@
 #define MAX_LOD_LEVELS           4
 #define MAX_GPU_OBJECTS          16384*4
 #define MAX_HIZ_MIPS             13
-#define GPU_CULL_BUCKET_COUNT    4
+#define GPU_CULL_BUCKET_COUNT    6
 
 // LOD screen-space thresholds (keep in sync with LOD_SCREEN_THRESHOLDS in ve_config.hpp)
 static const float LOD_SCREEN_THRESHOLDS[3] = { 0.70, 0.35, 0.15 };

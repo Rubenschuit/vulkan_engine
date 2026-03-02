@@ -27,11 +27,13 @@ private:
 	float m_frame_time_ms = 0.0f;
 	float m_cpu_time_ms = 0.0f;
 	float m_fence_wait_ms = 0.0f;
+	float m_acquire_wait_ms = 0.0f;
 	float m_gpu_time_ms = 0.0f;
 	float m_compute_gpu_time_ms = 0.0f;
 	float m_gpu_overlap_ms = 0.0f;
 	float m_cpu_time_sum = 0.0f;
 	float m_fence_wait_sum = 0.0f;
+	float m_acquire_wait_sum = 0.0f;
 	float m_gpu_time_sum = 0.0f;
 	float m_compute_gpu_time_sum = 0.0f;
 	float m_gpu_overlap_sum = 0.0f;

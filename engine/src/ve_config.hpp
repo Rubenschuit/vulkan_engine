@@ -68,7 +68,6 @@ static_assert(std::size(LOD_SCREEN_THRESHOLDS) == MAX_LOD_LEVELS - 1,
 
 // Multi-threaded command recording
 constexpr uint32_t MAX_RENDER_WORKERS = 8;
-constexpr uint32_t MIN_PARALLEL_GROUPS = 128; // below this, prefer single-threaded
 constexpr uint32_t MIN_PARALLEL_CULL_ENTITIES = 64; // below this, single-threaded culling
 
 // Bindless textures + Multi-Draw Indirect
@@ -78,7 +77,7 @@ constexpr uint32_t MAX_GPU_MATERIALS = 8192;
 // GPU-driven culling
 constexpr uint32_t MAX_GPU_OBJECTS = 16384*4; // sync with shader
 constexpr uint32_t GPU_CULL_WORKGROUP_SIZE = 256;
-constexpr uint32_t GPU_CULL_BUCKET_COUNT = 4; // non-MASK back, non-MASK double, MASK back, MASK double
+constexpr uint32_t GPU_CULL_BUCKET_COUNT = 6; // 0=opaque back, 1=opaque double, 2=mask back, 3=mask double, 4=blend back, 5=blend double
 constexpr uint32_t MAX_DRAW_GROUPS = 8192;         // up to MAX_LOD_LEVELS draw groups per unique mesh+material combo
 constexpr uint32_t MAX_LOD_INSTANCE_SLOTS = MAX_GPU_OBJECTS * MAX_LOD_LEVELS; // worst-case instance buffer size
 
