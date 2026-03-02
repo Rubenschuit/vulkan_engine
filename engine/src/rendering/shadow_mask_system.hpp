@@ -12,7 +12,6 @@
 namespace ve {
 	class VeDevice;
 	class VeImage;
-	class VeBuffer;
 	class VeDescriptorPool;
 	class VeDescriptorSetLayout;
 }
@@ -37,15 +36,8 @@ public:
 	ShadowMaskSystem(const ShadowMaskSystem&) = delete;
 	ShadowMaskSystem& operator=(const ShadowMaskSystem&) = delete;
 
-	/// Save the current frame's UBO data. Must be called every frame (even when
-	/// the shadow mask is inactive) so that the previous frame's data is available
-	/// when the mask is dispatched.  The data is written to the per-frame compute
-	/// UBO one frame later so that the compute shader reads matrices consistent
-	/// with the previous frame's depth buffer and shadow maps.
-	void savePrevFrameUBO(const UniformBufferObject& ubo, uint32_t current_frame);
-
-	/// Record compute dispatch on the compute command buffer.
-	/// savePrevFrameUBO() must have been called at least once before the first dispatch.
+	/// Record compute dispatch on the graphics command buffer.
+	/// Depth must already be in eDepthStencilReadOnlyOptimal (caller handles).
 	void dispatch(VeFrameInfo& frame_info);
 
 	/// Recreate shadow mask image for swapchain resize or resolution change
@@ -81,9 +73,6 @@ private:
 	void createPipelines();
 	void createDescriptorSets(VeDescriptorPool& descriptor_pool,
 		const vk::raii::DescriptorSetLayout& global_set_layout);
-	void createComputeUBOs(VeDescriptorPool& descriptor_pool,
-		const vk::raii::DescriptorSetLayout& global_set_layout);
-
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;
 	vk::Extent2D m_extent{};       // shadow mask resolution (may be half-res)
@@ -118,16 +107,7 @@ private:
 
 	vk::raii::DescriptorSet m_dummy_output_descriptor_set{nullptr}; // for when shadow mask is disabled
 
-	// Per-frame compute UBO: stores previous frame's matrices so the compute
-	// shader reads data consistent with the previous frame's depth and shadow maps.
-	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_compute_ubos;
-	std::unique_ptr<VeBuffer> m_dummy_instance_buffer; // binding 1 (unused by compute)
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_compute_global_descriptor_sets =
-		makeNullArray<vk::raii::DescriptorSet>();
-	UniformBufferObject m_prev_ubo_data{};
-	bool m_has_prev_data = false;
-
-	// Cached depth image (single-sample resolved depth) for barriers + descriptor
+	// Cached depth image (single-sample resolved depth) for descriptor
 	vk::Image m_depth_image{};
 	vk::ImageView m_depth_image_view{};
 

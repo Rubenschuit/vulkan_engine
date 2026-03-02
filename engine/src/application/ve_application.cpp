@@ -43,7 +43,7 @@
 namespace ve {
 
 static vk::Extent2D halveExtent(vk::Extent2D e, bool half) {
-	if (!half) 
+	if (!half)
 		return e;
 	return {std::max(1u, e.width / 2), std::max(1u, e.height / 2)};
 }
@@ -394,9 +394,8 @@ void VeApplication::populateUBO(VeFrameInfo& fi) {
 	ubo.screen_size = glm::vec2(static_cast<float>(extent.width), static_cast<float>(extent.height));
 
 	updateUniformBuffer(current_frame, ubo);
-	m_shadow_mask_system->savePrevFrameUBO(ubo, current_frame);
 
-	// Store shadow mask active flag for compute and render
+	// Store shadow mask active flag for render
 	fi.shadow_mask_active = shadow_mask_active;
 }
 
@@ -414,13 +413,11 @@ void VeApplication::dispatchCompute(VeFrameInfo& fi) {
 	// Record compute start timestamp
 	m_ve_renderer.getProfiler().beginGpuTimer(fi.compute_command_buffer, ProfileTimer::COMPUTE_TOTAL);
 
-	// Record compute commands
+	// Record compute queue commands
 	{
 		TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Compute");
 		m_fireworks_system->recordComputeCommands(fi);
 		m_particle_system->recordComputeCommands(fi);
-		if (fi.shadow_mask_active)
-			m_shadow_mask_system->dispatch(fi);
 		if (m_cluster_light_system->isEnabled())
 			m_cluster_light_system->dispatch(fi, m_camera, extent);
 	}
@@ -428,18 +425,7 @@ void VeApplication::dispatchCompute(VeFrameInfo& fi) {
 	m_ve_renderer.submitCompute(fi.compute_command_buffer);
 
 	// Set descriptor sets for downstream render passes
-	if (fi.shadow_mask_active)
-		fi.shadow_mask_descriptor_set = &m_shadow_mask_system->getOutputDescriptorSet(current_frame);
-	else
-		fi.shadow_mask_descriptor_set = &m_shadow_mask_system->getDummyOutputDescriptorSet();
-
 	fi.cluster_descriptor_set = &m_cluster_light_system->getOutputDescriptorSet(current_frame);
-
-	bool gtao_active = m_ui.gtao_enabled && m_ui.depth_prepass_enabled;
-	if (gtao_active)
-		fi.ao_descriptor_set = &m_gtao_system->getOutputDescriptorSet(current_frame);
-	else
-		fi.ao_descriptor_set = &m_gtao_system->getDummyOutputDescriptorSet();
 }
 
 // ─── Render Frame ────────────────────────────────────────────────────────────
@@ -484,6 +470,40 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 
 	bool editor_mode = m_editor->isEditorMode();
 
+	bool hiz_active = fi.gpu_culling_active && m_gpu_culling_system->isHizEnabled()
+		&& m_ui.depth_prepass_enabled;
+	bool gtao_active = m_ui.gtao_enabled && m_ui.depth_prepass_enabled;
+
+	// Depth prepass (enables depth consumers below)
+	if (m_ui.depth_prepass_enabled) {
+		ZoneScopedN("Depth Prepass");
+		TracyVkZone(tracy_gfx, *command_buffer, "Depth Prepass");
+		profiler.beginCpuTimer(ProfileTimer::DEPTH_PREPASS);
+		profiler.beginGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
+		m_ve_renderer.beginDepthPrePass(command_buffer);
+		if (fi.gpu_culling_active) {
+			auto* compact_buf = m_gpu_culling_system->compactionEnabled()
+				? &m_gpu_culling_system->getCompactedIndirectBuffer(fi.current_frame) : nullptr;
+			auto* compact_cnt = m_gpu_culling_system->compactionEnabled()
+				? &m_gpu_culling_system->getCompactCountBuffer(fi.current_frame) : nullptr;
+			m_depth_prepass_system->renderGpuCulled(fi,
+				m_pbr_render_system->getMegaBuffer(),
+				m_gpu_culling_system->getIndirectBuffer(fi.current_frame),
+				gpu_scene.getBucketGroupOffsets(),
+				gpu_scene.getBucketGroupCounts(), 2,
+				compact_buf, compact_cnt);
+		} else {
+			m_depth_prepass_system->render(fi,
+				m_pbr_render_system->getMegaBuffer(),
+				m_pbr_render_system->getIndirectBuffer(fi.current_frame),
+				m_pbr_render_system->getDepthBucketOffsets(),
+				m_pbr_render_system->getDepthBucketCounts(), 2);
+		}
+		m_ve_renderer.endDepthPrePass(command_buffer);
+		profiler.endGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
+		profiler.endCpuTimer(ProfileTimer::DEPTH_PREPASS);
+	}
+
 	// Shadow pass
 	if (m_ui.shadow_mode != ShadowMode::DISABLED) {
 		ZoneScopedN("Shadow Maps");
@@ -499,79 +519,34 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		profiler.endCpuTimer(ProfileTimer::SHADOW_MAPS);
 	}
 
-	bool hiz_active = fi.gpu_culling_active && m_gpu_culling_system->isHizEnabled()
-		&& m_ui.depth_prepass_enabled;
+	// Depth read-only consumers: Hi-Z, Shadow Mask, GTAO
+	bool any_depth_consumer = m_ui.depth_prepass_enabled
+		&& (hiz_active || fi.shadow_mask_active || gtao_active);
 
-	// Depth prepass
-	if (m_ui.depth_prepass_enabled) {
-		{
-			ZoneScopedN("Depth Prepass");
-			TracyVkZone(tracy_gfx, *command_buffer, "Depth Prepass");
-			profiler.beginCpuTimer(ProfileTimer::DEPTH_PREPASS);
-			profiler.beginGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
-			m_ve_renderer.beginDepthPrePass(command_buffer);
-			if (fi.gpu_culling_active) {
-				auto* compact_buf = m_gpu_culling_system->compactionEnabled()
-					? &m_gpu_culling_system->getCompactedIndirectBuffer(fi.current_frame) : nullptr;
-				auto* compact_cnt = m_gpu_culling_system->compactionEnabled()
-					? &m_gpu_culling_system->getCompactCountBuffer(fi.current_frame) : nullptr;
-				m_depth_prepass_system->renderGpuCulled(fi,
-					m_pbr_render_system->getMegaBuffer(),
-					m_gpu_culling_system->getIndirectBuffer(fi.current_frame),
-					gpu_scene.getBucketGroupOffsets(),
-					gpu_scene.getBucketGroupCounts(), 2,
-					compact_buf, compact_cnt);
-			} else {
-				m_depth_prepass_system->render(fi,
-					m_pbr_render_system->getMegaBuffer(),
-					m_pbr_render_system->getIndirectBuffer(fi.current_frame),
-					m_pbr_render_system->getDepthBucketOffsets(),
-					m_pbr_render_system->getDepthBucketCounts(), 2);
-			}
-			m_ve_renderer.endDepthPrePass(command_buffer);
+	if (any_depth_consumer) {
+		// Single barrier: depth attachment -> read-only
+		vk::ImageMemoryBarrier2 depth_to_read{
+			.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
+			.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+			.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+			.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = *m_ve_renderer.getResolvedDepthImage(),
+			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
+		};
+		vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_read};
+		command_buffer.pipelineBarrier2(dep);
+
+		if (fi.shadow_mask_active) {
+			TracyVkZone(tracy_gfx, *command_buffer, "Shadow Mask");
+			m_shadow_mask_system->dispatch(fi);
+			fi.shadow_mask_descriptor_set = &m_shadow_mask_system->getOutputDescriptorSet(fi.current_frame);
 		}
 
-		// Build Hi-Z mip chain for next frame's occlusion culling
-		if (hiz_active) {
-			TracyVkZone(tracy_gfx, *command_buffer, "Hi-Z Build");
-			vk::ImageMemoryBarrier2 depth_to_read{
-				.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
-				.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-				.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-				.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
-				.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-				.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.image = *m_ve_renderer.getResolvedDepthImage(),
-				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
-			};
-			vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_read};
-			command_buffer.pipelineBarrier2(dep);
-
-			m_hiz_system->generate(command_buffer, fi.current_frame);
-
-			vk::ImageMemoryBarrier2 depth_to_attach{
-				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-				.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
-				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
-					| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-				.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-				.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.image = *m_ve_renderer.getResolvedDepthImage(),
-				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
-			};
-			vk::DependencyInfo dep2{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_attach};
-			command_buffer.pipelineBarrier2(dep2);
-		}
-
-		profiler.endGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
-		profiler.endCpuTimer(ProfileTimer::DEPTH_PREPASS);
-
-		if (m_ui.gtao_enabled) {
+		if (gtao_active) {
 			ZoneScopedN("GTAO");
 			TracyVkZone(tracy_gfx, *command_buffer, "GTAO");
 			profiler.beginCpuTimer(ProfileTimer::GTAO);
@@ -579,8 +554,37 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 			m_gtao_system->dispatch(fi);
 			profiler.endGpuTimer(command_buffer, ProfileTimer::GTAO);
 			profiler.endCpuTimer(ProfileTimer::GTAO);
+			fi.ao_descriptor_set = &m_gtao_system->getOutputDescriptorSet(fi.current_frame);
 		}
+
+		if (hiz_active) {
+			TracyVkZone(tracy_gfx, *command_buffer, "Hi-Z Build");
+			m_hiz_system->generate(command_buffer, fi.current_frame);
+		}
+
+		// Single barrier: depth read-only -> attachment
+		vk::ImageMemoryBarrier2 depth_to_attach{
+			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
+			.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
+				| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+			.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+			.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = *m_ve_renderer.getResolvedDepthImage(),
+			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
+		};
+		vk::DependencyInfo dep2{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_attach};
+		command_buffer.pipelineBarrier2(dep2);
 	}
+
+	// Set default descriptor sets for inactive passes
+	if (!fi.shadow_mask_active)
+		fi.shadow_mask_descriptor_set = &m_shadow_mask_system->getDummyOutputDescriptorSet();
+	if (!gtao_active)
+		fi.ao_descriptor_set = &m_gtao_system->getDummyOutputDescriptorSet();
 
 	// Scene render
 	{
@@ -665,7 +669,7 @@ void VeApplication::collectStats(const VeFrameInfo& fi) {
 	if (fi.gpu_culling_active) {
 		auto& gpu_scene = m_scene_resources->getGpuSceneManager();
 		m_ui.stats.cull_total_objects = gpu_scene.getTotalRegisteredCount();
-		// Readback is 1 frame cycle stale (written during previous use of this frame slot)
+		// Readback is 1 frame cycle stale
 		m_ui.stats.cull_visible_objects = m_gpu_culling_system->readbackDrawCounts(fi.current_frame);
 		m_ui.stats.visible_triangles = m_gpu_culling_system->readbackTriangleCount(fi.current_frame);
 		m_ui.stats.draw_calls = gpu_scene.getTotalGroups();
@@ -673,8 +677,11 @@ void VeApplication::collectStats(const VeFrameInfo& fi) {
 		m_ui.stats.cull_total_objects = m_culling_system->getLastTotalMeshObjects();
 		m_ui.stats.cull_visible_objects = m_culling_system->getLastVisibleCount();
 		uint32_t tri_count = 0;
-		for (auto& vo : m_culling_system->getVisibleObjectsRef())
-			tri_count += vo.mesh->getMesh()->getLodIndexCount(vo.lod_level) / 3;
+		for (auto& vo : m_culling_system->getVisibleObjectsRef()) {
+			auto* mesh = registry.getComponent<MeshComponent>(vo.entity);
+			if (mesh)
+				tri_count += mesh->getMesh()->getLodIndexCount(vo.lod_level) / 3;
+		}
 		m_ui.stats.visible_triangles = tri_count;
 		m_ui.stats.draw_calls = m_pbr_render_system->getOpaqueDrawCount();
 	}

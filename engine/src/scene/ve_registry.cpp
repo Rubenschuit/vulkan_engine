@@ -431,6 +431,71 @@ void Registry::invalidateMeshWorldAABBs(Entity e) {
 	}
 }
 
+// ── Cloning ─────────────────────────────────────────────────────────────────
+
+Entity Registry::cloneEntity(Entity source) {
+	assert(isAlive(source) && "Cannot clone dead entity");
+	uint32_t src_idx = source.index();
+
+	Entity clone = createEntity(m_meta[src_idx].name + " (Copy)");
+
+	// Copy metadata
+	m_meta[clone.index()].light_source = m_meta[src_idx].light_source;
+
+	// Copy all components via their copy constructors.
+	// When adding a new component type, add one line here.
+	cloneComponentIfPresent<TransformComponent>(source, clone);
+	cloneComponentIfPresent<MeshComponent>(source, clone);
+	cloneComponentIfPresent<PointLightComponent>(source, clone);
+	cloneComponentIfPresent<DirectionalLightComponent>(source, clone);
+	cloneComponentIfPresent<SpotLightComponent>(source, clone);
+
+	// Match active state
+	if (!m_meta[src_idx].active)
+		setActive(clone, false);
+
+	// Parent to same parent as source
+	Entity parent = m_hierarchy[src_idx].parent;
+	if (!parent.isNull() && isAlive(parent))
+		setParent(clone, parent);
+
+	return clone;
+}
+
+Entity Registry::cloneEntityRecursive(Entity source) {
+	assert(isAlive(source) && "Cannot clone dead entity");
+
+	// BFS over source subtree, cloning each entity with correct parent links
+	struct CloneEntry {
+		Entity source;
+		Entity clone_parent;
+	};
+	std::vector<CloneEntry> queue;
+	queue.push_back({source, m_hierarchy[source.index()].parent});
+
+	Entity root_clone = Entity::null();
+
+	for (size_t i = 0; i < queue.size(); ++i) {
+		auto [src, clone_parent] = queue[i];
+		Entity clone = cloneEntity(src);
+
+		if (i == 0) {
+			root_clone = clone;
+		} else {
+			setParent(clone, clone_parent);
+		}
+
+		// Enqueue children
+		Entity child = firstChild(src);
+		while (!child.isNull()) {
+			queue.push_back({child, clone});
+			child = nextSibling(child);
+		}
+	}
+
+	return root_clone;
+}
+
 // ── Convenience factories ───────────────────────────────────────────────────
 
 Entity Registry::createGameObject(const std::string& name) {

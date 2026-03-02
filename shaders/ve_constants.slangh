@@ -16,7 +16,7 @@
 
 // GPU-driven culling (keep in sync with ve_config.hpp)
 #define MAX_LOD_LEVELS           4
-#define MAX_GPU_OBJECTS          16384
+#define MAX_GPU_OBJECTS          16384*4
 #define MAX_HIZ_MIPS             13
 #define GPU_CULL_BUCKET_COUNT    4
 

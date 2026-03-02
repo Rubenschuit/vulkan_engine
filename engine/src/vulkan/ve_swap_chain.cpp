@@ -56,21 +56,20 @@ void VeSwapChain::submitComputeWork(vk::CommandBuffer command_buffer) {
 	const vk::TimelineSemaphoreSubmitInfo timeline_info{
 		.sType = vk::StructureType::eTimelineSemaphoreSubmitInfo,
 		.pNext = nullptr,
-		.waitSemaphoreValueCount = 1,
-		.pWaitSemaphoreValues = &m_compute_wait_value,
+		.waitSemaphoreValueCount = 0,
+		.pWaitSemaphoreValues = nullptr,
 		.signalSemaphoreValueCount = 1,
-		.pSignalSemaphoreValues = &m_compute_signal_value
+		.pSignalSemaphoreValues = &m_compute_signal_value,
 	};
-	vk::PipelineStageFlags wait_stages[] = {vk::PipelineStageFlagBits::eComputeShader};
 	vk::SubmitInfo submit_info{
 		.pNext = &timeline_info,
-		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = &*m_compute_timeline,
-		.pWaitDstStageMask = wait_stages,
+		.waitSemaphoreCount = 0,
+		.pWaitSemaphores = nullptr,
+		.pWaitDstStageMask = nullptr,
 		.commandBufferCount = 1,
 		.pCommandBuffers = &command_buffer,
 		.signalSemaphoreCount = 1,
-		.pSignalSemaphores = &*m_compute_timeline
+		.pSignalSemaphores = &*m_compute_timeline,
 	};
 
 	m_ve_device.getComputeQueue().submit(submit_info, nullptr);
@@ -78,31 +77,25 @@ void VeSwapChain::submitComputeWork(vk::CommandBuffer command_buffer) {
 
 // Returns result of queue.presentKHR()
 vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* image_index) {
-	// Wait on image-available (binary) and compute timeline before starting graphics work.
 	vk::PipelineStageFlags wait_stages[2] = {
-		vk::PipelineStageFlagBits::eColorAttachmentOutput, // swapchain image usage
-		vk::PipelineStageFlagBits::eVertexInput | vk::PipelineStageFlagBits::eDrawIndirect | vk::PipelineStageFlagBits::eEarlyFragmentTests // compute -> graphics sync
+		vk::PipelineStageFlagBits::eColorAttachmentOutput,
+		vk::PipelineStageFlagBits::eFragmentShader,
 	};
 
-	// Wait values: 0 (ignored) for binary image_available, compute timeline value for compute sync
 	std::array<uint64_t, 2> wait_values{ uint64_t{0}, m_graphics_wait_value };
-	// Signal: render_finished (binary, for present) + compute_timeline (for next frame's compute depth readback)
-	std::array<uint64_t, 2> signal_values{ uint64_t{0}, m_graphics_signal_value };
+	uint64_t signal_value{0};
 
 	vk::TimelineSemaphoreSubmitInfo timeline_info{
 		.sType = vk::StructureType::eTimelineSemaphoreSubmitInfo,
 		.pNext = nullptr,
 		.waitSemaphoreValueCount = static_cast<uint32_t>(wait_values.size()),
 		.pWaitSemaphoreValues = wait_values.data(),
-		.signalSemaphoreValueCount = static_cast<uint32_t>(signal_values.size()),
-		.pSignalSemaphoreValues = signal_values.data()
+		.signalSemaphoreValueCount = 1,
+		.pSignalSemaphoreValues = &signal_value,
 	};
 
-	// Wait on image-available (binary) and the compute timeline semaphore
 	std::array<vk::Semaphore, 2> wait_sems{ *m_image_available_semaphores[m_current_frame], *m_compute_timeline };
-	// Signal: render-finished (binary, for present) + compute_timeline (graphics signal for next frame's compute)
 	vk::Semaphore render_finished = *m_render_finished_semaphores[*image_index];
-	std::array<vk::Semaphore, 2> signal_sems{ render_finished, *m_compute_timeline };
 	std::array<vk::CommandBuffer, 2> cbs = {scene_cb, ui_cb};
 	vk::SubmitInfo submit_info{
 		.pNext = &timeline_info,
@@ -111,8 +104,8 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer scene_cb, vk::Command
 		.pWaitDstStageMask = wait_stages,
 		.commandBufferCount = static_cast<uint32_t>(cbs.size()),
 		.pCommandBuffers = cbs.data(),
-		.signalSemaphoreCount = static_cast<uint32_t>(signal_sems.size()),
-		.pSignalSemaphores = signal_sems.data()
+		.signalSemaphoreCount = 1,
+		.pSignalSemaphores = &render_finished,
 	};
 
 	// Submit the command buffer to the graphics queue and signal the per-frame fence to ensure safe CB reuse
@@ -456,12 +449,8 @@ void VeSwapChain::advanceFrame() {
 }
 
 void VeSwapChain::updateTimelineValues() {
-	// Two increments per frame: compute signals once, graphics signals once.
-	// Compute waits for prev graphics (depth committed), graphics waits for current compute (shadow mask ready).
-	m_compute_wait_value    = m_compute_timeline_value;       // prev frame's graphics signal
-	m_compute_signal_value  = ++m_compute_timeline_value;     // this compute (particles + shadow mask)
-	m_graphics_wait_value   = m_compute_signal_value;         // graphics waits for current compute
-	m_graphics_signal_value = ++m_compute_timeline_value;     // this graphics (depth committed)
+	m_compute_signal_value = ++m_compute_timeline_value;
+	m_graphics_wait_value  = m_compute_signal_value;
 }
 
 // Transition the image layout of the given swap chain image using

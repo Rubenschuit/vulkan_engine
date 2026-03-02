@@ -130,6 +130,14 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 		m_pending_delete = Entity::null();
 	}
 
+	// Duplicate entity (recursive)
+	if (!m_pending_duplicate.isNull() && registry) {
+		Entity cloned = registry->cloneEntityRecursive(m_pending_duplicate);
+		state.selected_entity = cloned;
+		state.selection_changed = true;
+		m_pending_duplicate = Entity::null();
+	}
+
 	ImGui::End();
 }
 
@@ -183,6 +191,8 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 	// Capture TreeNode click state and context menu before badge widgets shift the "last item"
 	bool tree_clicked = ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen();
 	if (ImGui::BeginPopupContextItem()) {
+		if (ImGui::MenuItem("Duplicate"))
+			m_pending_duplicate = entity;
 		if (ImGui::MenuItem("Delete"))
 			m_pending_delete = entity;
 		ImGui::EndPopup();
@@ -256,6 +266,8 @@ void HierarchyPanel::renderSelectableLight(Registry& registry, Entity entity, Ed
 	ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<uintptr_t>(entity.id())), flags, "%s", label);
 
 	if (ImGui::BeginPopupContextItem()) {
+		if (ImGui::MenuItem("Duplicate"))
+			m_pending_duplicate = entity;
 		if (ImGui::MenuItem("Delete"))
 			m_pending_delete = entity;
 		ImGui::EndPopup();

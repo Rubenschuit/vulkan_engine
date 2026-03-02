@@ -76,7 +76,7 @@ constexpr uint32_t MAX_BINDLESS_TEXTURES = 16384;
 constexpr uint32_t MAX_GPU_MATERIALS = 8192;
 
 // GPU-driven culling
-constexpr uint32_t MAX_GPU_OBJECTS = 16384;
+constexpr uint32_t MAX_GPU_OBJECTS = 16384*4; // sync with shader
 constexpr uint32_t GPU_CULL_WORKGROUP_SIZE = 256;
 constexpr uint32_t GPU_CULL_BUCKET_COUNT = 4; // non-MASK back, non-MASK double, MASK back, MASK double
 constexpr uint32_t MAX_DRAW_GROUPS = 8192;         // up to MAX_LOD_LEVELS draw groups per unique mesh+material combo

@@ -208,7 +208,6 @@ void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Regist
 		vk::DeviceSize offset = static_cast<vk::DeviceSize>(gpu_id) * sizeof(TransformGPU);
 		copy_regions.push_back({offset, offset, sizeof(TransformGPU)});
 	}
-
 	if (!copy_regions.empty()) {
 		cmd.copyBuffer(*m_transform_staging[current_frame]->getBuffer(),
 		               *m_transform_buffers[current_frame]->getBuffer(),
@@ -378,6 +377,8 @@ uint32_t GpuSceneManager::allocateGpuId() {
 		m_free_list.pop_back();
 		return id;
 	}
+	if (m_next_id >= MAX_GPU_OBJECTS)
+		VE_LOGE("GPU object limit reached");
 	assert(m_next_id < MAX_GPU_OBJECTS && "GPU object limit reached");
 	return m_next_id++;
 }

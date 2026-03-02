@@ -284,20 +284,8 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 	auto& cmd = frame_info.cmd();
 	uint32_t frame = frame_info.current_frame;
 
-	// ===== Pre-GTAO barriers =====
-	// Depth: eDepthAttachmentOptimal -> eDepthStencilReadOnlyOptimal
-	vk::ImageMemoryBarrier2 depth_to_read{
-		.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
-		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-		.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_depth_image,
-		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
-	};
+	// ===== Pre-GTAO barrier =====
+	// Depth is already in eDepthStencilReadOnlyOptimal (caller handles batched transition)
 	// AO raw: eShaderReadOnlyOptimal -> eGeneral for storage write
 	vk::ImageMemoryBarrier2 ao_raw_to_general{
 		.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
@@ -312,10 +300,9 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	{
-		std::array barriers = {depth_to_read, ao_raw_to_general};
 		vk::DependencyInfo dep{
-			.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size()),
-			.pImageMemoryBarriers = barriers.data(),
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &ao_raw_to_general,
 		};
 		cmd.pipelineBarrier2(dep);
 	}
@@ -465,6 +452,7 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 
 	// ===== Post-blur barriers =====
 	// ao_raw: eGeneral -> eShaderReadOnlyOptimal (fragment reads final blurred AO)
+	// Depth restoration is handled by the caller (batched transition)
 	vk::ImageMemoryBarrier2 ao_final_to_read{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
@@ -477,24 +465,10 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 		.image = *m_ao_raw_images[frame]->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
-	// Restore depth to eDepthAttachmentOptimal so downstream consumers
-	vk::ImageMemoryBarrier2 depth_to_attachment{
-		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
-		.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-		.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-		.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_depth_image,
-		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
-	};
 	{
-		std::array barriers = {ao_final_to_read, depth_to_attachment};
 		vk::DependencyInfo dep{
-			.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size()),
-			.pImageMemoryBarriers = barriers.data(),
+			.imageMemoryBarrierCount = 1,
+			.pImageMemoryBarriers = &ao_final_to_read,
 		};
 		cmd.pipelineBarrier2(dep);
 	}

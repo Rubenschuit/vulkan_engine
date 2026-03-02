@@ -50,6 +50,7 @@ private:
 	std::unordered_map<std::string, LightGroupState> m_group_states;
 	Registry* m_last_registry = nullptr;
 	Entity m_pending_delete = Entity::null();
+	Entity m_pending_duplicate = Entity::null();
 
 	// Auto-expand and scroll-to for selection changes
 	std::unordered_set<uint32_t> m_force_open_entities;

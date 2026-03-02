@@ -136,6 +136,10 @@ public:
 	const glm::mat3& getWorldNormal(Entity e) const;
 	void invalidateWorldTransform(Entity e);
 
+	// Cloning
+	Entity cloneEntity(Entity source);
+	Entity cloneEntityRecursive(Entity source);
+
 	// Convenience factories
 	Entity createGameObject(const std::string& name = "");
 	Entity createPointLight(float intensity = 1.0f, float radius = 1.0f,
@@ -169,6 +173,14 @@ private:
 	void ensureSlotSize(uint32_t index);
 	void invalidateMeshWorldAABBs(Entity e);
 	void processPendingComponentRemovals();
+
+	template <typename T>
+	void cloneComponentIfPresent(Entity source, Entity clone) {
+		if (auto* comp = getComponent<T>(source)) {
+			T copy = *comp;  // copy before addComponent may reallocate the pool
+			addComponent<T>(clone, std::move(copy));
+		}
+	}
 
 	// Entity management
 	std::vector<EntityMeta> m_meta;

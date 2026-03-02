@@ -112,16 +112,11 @@ private:
 	vk::SampleCountFlagBits m_desired_num_samples;
 	bool m_hdr_enabled;
 
-	// Synchronization primitives
-	// Shared timeline: both compute and graphics signal, enabling async compute with depth readback.
-	// Per frame: compute signals once (particles + shadow mask), graphics signals once (depth committed).
-	// Compute waits for prev graphics signal (depth safe to read), graphics waits for current compute.
+	// Timeline semaphore: only compute signals, graphics waits.
 	vk::raii::Semaphore m_compute_timeline{nullptr};
 	uint64_t m_compute_timeline_value = 0;
-	uint64_t m_compute_wait_value;     // prev frame's graphics signal (depth ready)
-	uint64_t m_compute_signal_value;   // this frame's compute signal
-	uint64_t m_graphics_wait_value;    // = m_compute_signal_value (graphics waits for current compute)
-	uint64_t m_graphics_signal_value;  // this frame's graphics signal (depth committed for next frame)
+	uint64_t m_compute_signal_value;
+	uint64_t m_graphics_wait_value;
 	std::vector<vk::raii::Fence> m_in_flight_fences;
 	// Per-swapchain-image binary semaphores signaled by graphics submit and waited by present
 	std::vector<vk::raii::Semaphore> m_render_finished_semaphores;

@@ -2,7 +2,6 @@
 #include "rendering/shadow_mask_system.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_image.hpp"
-#include "vulkan/ve_buffer.hpp"
 #include "vulkan/ve_descriptors.hpp"
 #include "platform/ve_file_system.hpp"
 #include "utils/ve_log.hpp"
@@ -39,7 +38,6 @@ ShadowMaskSystem::ShadowMaskSystem(
 	createSampler();
 	createPipelineLayout(global_set_layout, shadow_set_layout);
 	createPipelines();
-	createComputeUBOs(descriptor_pool, global_set_layout);
 	createDescriptorSets(descriptor_pool, global_set_layout);
 }
 
@@ -171,63 +169,6 @@ void ShadowMaskSystem::createPipelines() {
 	}
 }
 
-void ShadowMaskSystem::createComputeUBOs(VeDescriptorPool& descriptor_pool,
-	const vk::raii::DescriptorSetLayout& global_set_layout) {
-
-	// Per-frame compute UBO buffers (same layout as global UBO, filled with prev-frame data)
-	vk::DeviceSize ubo_size = sizeof(UniformBufferObject);
-	for (uint32_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
-		m_compute_ubos[frame] = std::make_unique<VeBuffer>(
-			m_ve_device,
-			ubo_size,
-			1,
-			vk::BufferUsageFlagBits::eUniformBuffer,
-			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-			m_ve_device.getDeviceProperties().limits.minUniformBufferOffsetAlignment
-		);
-		m_compute_ubos[frame]->map();
-	}
-
-	// Dummy instance buffer for binding 1 of the global set layout (unused by compute shader)
-	m_dummy_instance_buffer = std::make_unique<VeBuffer>(
-		m_ve_device,
-		sizeof(InstanceData),
-		1,
-		vk::BufferUsageFlagBits::eStorageBuffer,
-		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
-	);
-
-	// Create per-frame compute global descriptor sets using the same global_set_layout.
-	// Allocate via VeDescriptorPool, then manually write the two bindings.
-	auto dummy_instance_info = m_dummy_instance_buffer->getDescriptorInfo();
-	for (uint32_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
-		auto ubo_info = m_compute_ubos[frame]->getDescriptorInfo();
-
-		descriptor_pool.allocateDescriptor(global_set_layout, m_compute_global_descriptor_sets[frame]);
-
-		// Write UBO (binding 0) and dummy SSBO (binding 1)
-		std::array<vk::WriteDescriptorSet, 2> writes{
-			vk::WriteDescriptorSet{
-				.dstSet = *m_compute_global_descriptor_sets[frame],
-				.dstBinding = 0,
-				.dstArrayElement = 0,
-				.descriptorCount = 1,
-				.descriptorType = vk::DescriptorType::eUniformBuffer,
-				.pBufferInfo = &ubo_info,
-			},
-			vk::WriteDescriptorSet{
-				.dstSet = *m_compute_global_descriptor_sets[frame],
-				.dstBinding = 1,
-				.dstArrayElement = 0,
-				.descriptorCount = 1,
-				.descriptorType = vk::DescriptorType::eStorageBuffer,
-				.pBufferInfo = &dummy_instance_info,
-			},
-		};
-		m_ve_device.getDevice().updateDescriptorSets(writes, {});
-	}
-}
-
 void ShadowMaskSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool,
 	const vk::raii::DescriptorSetLayout& /*global_set_layout*/) {
 	// Shadow mask image info (for both compute storage and fragment sampled reads)
@@ -276,46 +217,16 @@ void ShadowMaskSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool,
 		.build(m_dummy_output_descriptor_set);
 }
 
-void ShadowMaskSystem::savePrevFrameUBO(const UniformBufferObject& ubo, uint32_t current_frame) {
-	// On first call, use the current data so the first dispatch has reasonable matrices.
-	if (!m_has_prev_data) {
-		m_prev_ubo_data = ubo;
-		m_has_prev_data = true;
-	}
-	// Write previous frame's UBO data to the CURRENT frame's compute buffer only.
-	// The other frame's buffer may still be read by an in-flight compute dispatch.
-	// The fence for current_frame guarantees its previous GPU work is complete.
-	m_compute_ubos[current_frame]->writeToBuffer(&m_prev_ubo_data);
-	// Save current frame data for use by next frame's dispatch
-	m_prev_ubo_data = ubo;
-}
-
-// Can use dedicated compute queue
 void ShadowMaskSystem::dispatch(VeFrameInfo& frame_info) {
-	auto& cmd = frame_info.compute_command_buffer;
+	auto& cmd = frame_info.cmd();
 	uint32_t frame = frame_info.current_frame;
 	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
 
-	// Barrier 1: depth buffer eDepthAttachmentOptimal -> eDepthStencilReadOnlyOptimal
-	// no src dependency needed because of timeline semaphore
-	vk::ImageMemoryBarrier2 depth_to_read{
-		.srcStageMask = vk::PipelineStageFlagBits2::eNone,
-		.srcAccessMask = vk::AccessFlagBits2::eNone,
-		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-		.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_depth_image,
-		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
-	};
-
-	// Barrier 2: shadow mask eShaderReadOnlyOptimal -> eGeneral for storage write
-	// Cross-queue: previous graphics read dependency handled by timeline semaphore.
+	// Pre-barrier: shadow mask eShaderReadOnlyOptimal -> eGeneral for storage write
+	// Previous frame's PBR read is the src dependency.
 	vk::ImageMemoryBarrier2 mask_to_general{
-		.srcStageMask = vk::PipelineStageFlagBits2::eNone,
-		.srcAccessMask = vk::AccessFlagBits2::eNone,
+		.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+		.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
 		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
 		.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
@@ -325,19 +236,17 @@ void ShadowMaskSystem::dispatch(VeFrameInfo& frame_info) {
 		.image = *m_shadow_mask_image->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
-
-	std::array<vk::ImageMemoryBarrier2, 2> pre_barriers = {depth_to_read, mask_to_general};
 	vk::DependencyInfo pre_dep{
-		.imageMemoryBarrierCount = static_cast<uint32_t>(pre_barriers.size()),
-		.pImageMemoryBarriers = pre_barriers.data(),
+		.imageMemoryBarrierCount = 1,
+		.pImageMemoryBarriers = &mask_to_general,
 	};
 	cmd.pipelineBarrier2(pre_dep);
 
-	// Bind pipeline and descriptor sets (using prev-frame compute UBO for Set 0)
+	// Bind pipeline and descriptor sets (current-frame global UBO for Set 0)
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, *m_pipelines[mode]);
 
 	std::array<vk::DescriptorSet, 3> sets{
-		*m_compute_global_descriptor_sets[frame],
+		*frame_info.global_descriptor_set,
 		*m_compute_descriptor_sets[frame],
 		*frame_info.shadow_descriptor_set,
 	};
@@ -359,11 +268,11 @@ void ShadowMaskSystem::dispatch(VeFrameInfo& frame_info) {
 	uint32_t groups_y = (m_extent.height + 15) / 16;
 	cmd.dispatch(groups_x, groups_y, 1);
 
-	// Post-dispatch barriers: shadow mask to read-only + depth back to attachment.
+	// Post-barrier: shadow mask to read-only for fragment shader consumption
 	vk::ImageMemoryBarrier2 mask_to_read{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+		.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
 		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
 		.oldLayout = vk::ImageLayout::eGeneral,
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
@@ -372,24 +281,9 @@ void ShadowMaskSystem::dispatch(VeFrameInfo& frame_info) {
 		.image = *m_shadow_mask_image->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
-
-	vk::ImageMemoryBarrier2 depth_to_attachment{
-		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.dstStageMask = vk::PipelineStageFlagBits2::eNone,
-		.dstAccessMask = vk::AccessFlagBits2::eNone,  // graphics queue picks up via timeline semaphore
-		.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-		.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_depth_image,
-		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
-	};
-
-	std::array<vk::ImageMemoryBarrier2, 2> post_barriers = {mask_to_read, depth_to_attachment};
 	vk::DependencyInfo post_dep{
-		.imageMemoryBarrierCount = static_cast<uint32_t>(post_barriers.size()),
-		.pImageMemoryBarriers = post_barriers.data(),
+		.imageMemoryBarrierCount = 1,
+		.pImageMemoryBarriers = &mask_to_read,
 	};
 	cmd.pipelineBarrier2(post_dep);
 }
@@ -405,7 +299,6 @@ void ShadowMaskSystem::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D 
 	m_depth_image_view = *depth_image_view;
 	createShadowMaskImage(mask_extent);
 	// Re-create compute I/O and output descriptor sets (they reference the new shadow mask image)
-	// but NOT the compute global descriptor sets (they only reference the UBO + dummy SSBO, which are unchanged)
 	vk::DescriptorImageInfo mask_storage_info{
 		.imageView = *m_shadow_mask_image->getImageView(),
 		.imageLayout = vk::ImageLayout::eGeneral,

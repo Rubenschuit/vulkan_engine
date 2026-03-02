@@ -2,8 +2,7 @@
 ![PBR Rendering](screenshots/bistro_1.png)
 ![PBR Rendering](screenshots/sponza.png)
 
-Small modern cross-platform C++20 Vulkan 1.3+ clustered forward renderer using GLFW and Slang. Produces a shared library (`VEngineLib`) and an app (`VeApp`). The goal of this project is for me to have fun and to learn more about graphics programming!
-
+Small modern cross-platform C++20 Vulkan 1.3+ clustered forward game engine using GLFW and Slang. Produces a shared library (`VEngineLib`) and an app (`VeApp`). The goal of this project is for me to have fun and to learn more about graphics programming!
 
 ## Table of Contents
 
@@ -26,22 +25,41 @@ Small modern cross-platform C++20 Vulkan 1.3+ clustered forward renderer using G
 ![Fireworks](screenshots/fireworks.png)
 
 ## Features
-- Modern Vulkan: dynamic rendering, Vulkan-Hpp RAII
-- Cross-platform builds: Windows (MSVC or MinGW), macOS, and Linux
-- PBR for .gltf models like Sponza and Bistro
-- Particle system with compute shaders
-- Fireworks using the particle system
+
+#### Rendering
+- Modern Vulkan 1.3: dynamic rendering, Vulkan-Hpp RAII
+- PBR (physically based rendering) for .gltf models like Sponza and Bistro
 - Clustered forward rendering with depth pre-pass
-- Point lights, Directional lights
-- Shadows: CSM, Screen Space Shadows with compute, PCF, PCSS
-- GTAO
-- Post-processing effects like Bloom and Blur
-- Basic HDR, several tone mapping options
-- Dear ImGui docked UI
+- Bindless textures
+- GPU-driven rendering: frustum + Hi-Z occlusion culling, multi-draw indirect, draw compaction
+- Automatic LOD selection based on screen coverage
+- Multi-threaded command buffer recording with secondary command buffers
+- Shaders written in Slang, compiled to SPIR-V at build time
+
+#### Lighting & Shadows
+- Point lights, directional lights, spot lights
+- Cascaded Shadow Maps
+- Screen-space shadow mask (compute), PCF, PCSS
+- GTAO (Ground Truth Ambient Occlusion)
+
+#### Post-processing & Effects
+- Bloom
+- HDR with several tone mapping options
+- Particle system with compute shaders, dispatched and executed asynchronously on dedicated compute queue if available
+- Fireworks using the particle system
 - Skybox
-- FPS-style camera
 - MSAA
-- Frustum culling
+
+#### Architecture
+- Custom ECS with typed component pools, parent/child hierarchy, and lazy world-transform caching
+
+#### Editor & Tools
+- Dear ImGui docked UI with hierarchy, inspector, viewport, graphics settings, performance, and environment panels
+- ImGuizmo 3D transform gizmos
+- Outline rendering for selected entities
+- Tracy profiler integration (optional)
+- Cross-platform builds: Windows (MSVC or MinGW), macOS, and Linux
+- FPS-style camera (WASD + mouse)
 
 
 ## Requirements
@@ -90,7 +108,7 @@ cd vulkan_engine
 ```
 
 - ##### Windows (cmd or PowerShell):
-Optional arguments include [release|debug|test|clean] and [vs2022|vs2026]. Default is release vs2026.
+Optional arguments include [release|debug|tracy|test|clean] and [vs2022|vs2026]. Default is release vs2026.
 ```cmd
 cd vulkan_engine
 .\windowsBuild.bat
