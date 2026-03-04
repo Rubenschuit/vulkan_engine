@@ -101,7 +101,7 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 			m_shadow_meshlet_draw_counts[i][slot] = std::make_unique<VeBuffer>(m_ve_device,
 				sizeof(uint32_t), BUCKET_COUNT,
 				vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eIndirectBuffer
-					| vk::BufferUsageFlagBits::eTransferDst,
+					| vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc,
 				vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 			m_shadow_instance_buffers[i][slot] = std::make_unique<VeBuffer>(m_ve_device,
@@ -115,6 +115,14 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
 				m_ve_device.getDeviceProperties().limits.minUniformBufferOffsetAlignment);
 			m_shadow_cull_param_ubos[i][slot]->map();
+
+			if (!m_ve_device.supportsDrawIndirectCount()) {
+				m_shadow_readback_staging[i][slot] = std::make_unique<VeBuffer>(m_ve_device,
+					sizeof(uint32_t), MESHLET_SHADOW_BUCKET_COUNT,
+					vk::BufferUsageFlagBits::eTransferDst,
+					vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+				m_shadow_readback_staging[i][slot]->map();
+			}
 		}
 	}
 
@@ -658,6 +666,18 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 
 	uint32_t groups1 = (object_count + MESHLET_CULL_WORKGROUP_SIZE - 1) / MESHLET_CULL_WORKGROUP_SIZE;
 
+	// Async readback: read shadow draw counts written 2 frames ago from mapped staging
+	for (uint32_t r = 0; r < count; r++) {
+		uint32_t slot = requests[r].slot;
+		if (m_shadow_readback_staging[frame_index][slot]) {
+			auto* ptr = static_cast<const uint32_t*>(
+				m_shadow_readback_staging[frame_index][slot]->getMappedMemory());
+			if (ptr && m_shadow_has_readback[slot])
+				std::memcpy(m_shadow_readback_counts[slot].data(), ptr,
+					MESHLET_SHADOW_BUCKET_COUNT * sizeof(uint32_t));
+		}
+	}
+
 	// Write UBOs, clear counters, and init dispatch_indirect for all requests
 	for (uint32_t r = 0; r < count; r++) {
 		auto& req = requests[r];
@@ -699,9 +719,18 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 			0, static_cast<vk::DeviceSize>(MESHLET_SHADOW_BUCKET_COUNT) * sizeof(uint32_t), 0);
 		cmd.fillBuffer(*m_shadow_dispatch_indirect[frame_index][slot]->getBuffer(), 0, 4, 0u);
 		cmd.fillBuffer(*m_shadow_dispatch_indirect[frame_index][slot]->getBuffer(), 4, 8, 1u);
-		if (!m_ve_device.supportsDrawIndirectCount())
-			cmd.fillBuffer(*m_shadow_meshlet_indirect[frame_index][slot]->getBuffer(),
-				0, static_cast<vk::DeviceSize>(MAX_MESHLET_SHADOW_DRAWS) * sizeof(VkDrawIndexedIndirectCommand), 0);
+		if (!m_ve_device.supportsDrawIndirectCount()) {
+			constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
+			constexpr vk::DeviceSize CMD_SIZE = sizeof(VkDrawIndexedIndirectCommand);
+			for (uint32_t b = 0; b < MESHLET_SHADOW_BUCKET_COUNT; b++) {
+				uint32_t fill_count = m_shadow_has_readback[slot]
+					? std::min(m_shadow_readback_counts[slot][b] * 2 + 1024, SHADOW_MAX_PER_BUCKET)
+					: SHADOW_MAX_PER_BUCKET;
+				auto offset = static_cast<vk::DeviceSize>(b) * SHADOW_MAX_PER_BUCKET * CMD_SIZE;
+				cmd.fillBuffer(*m_shadow_meshlet_indirect[frame_index][slot]->getBuffer(), offset,
+					static_cast<vk::DeviceSize>(fill_count) * CMD_SIZE, 0);
+			}
+		}
 	}
 
 	// Transfer -> Compute
@@ -755,15 +784,29 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 		cmd.dispatchIndirect(*m_shadow_dispatch_indirect[frame_index][slot]->getBuffer(), 0);
 	}
 
-	// Final barrier: Compute -> DrawIndirect + VertexShader
+	// Final barrier: Compute -> DrawIndirect + VertexShader + Transfer (for staging copy)
 	vk::MemoryBarrier2 draw_barrier{
 		.srcStageMask  = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderWrite,
-		.dstStageMask  = vk::PipelineStageFlagBits2::eDrawIndirect | vk::PipelineStageFlagBits2::eVertexShader,
-		.dstAccessMask = vk::AccessFlagBits2::eIndirectCommandRead | vk::AccessFlagBits2::eShaderStorageRead,
+		.dstStageMask  = vk::PipelineStageFlagBits2::eDrawIndirect | vk::PipelineStageFlagBits2::eVertexShader
+		               | vk::PipelineStageFlagBits2::eTransfer,
+		.dstAccessMask = vk::AccessFlagBits2::eIndirectCommandRead | vk::AccessFlagBits2::eShaderStorageRead
+		               | vk::AccessFlagBits2::eTransferRead,
 	};
 	vk::DependencyInfo draw_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &draw_barrier};
 	cmd.pipelineBarrier2(draw_dep);
+
+	// Copy shadow draw counts to staging for CPU readback next time this frame index is used
+	if (!m_ve_device.supportsDrawIndirectCount()) {
+		for (uint32_t r = 0; r < count; r++) {
+			uint32_t slot = requests[r].slot;
+			vk::BufferCopy region{0, 0,
+				static_cast<vk::DeviceSize>(MESHLET_SHADOW_BUCKET_COUNT) * sizeof(uint32_t)};
+			cmd.copyBuffer(*m_shadow_meshlet_draw_counts[frame_index][slot]->getBuffer(),
+				*m_shadow_readback_staging[frame_index][slot]->getBuffer(), region);
+			m_shadow_has_readback[slot] = true;
+		}
+	}
 }
 
 } // namespace ve

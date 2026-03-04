@@ -76,6 +76,7 @@ vk::raii::DescriptorSet& MeshletCullingBackend::getGlobalDescriptorSet(uint32_t 
 }
 
 void MeshletCullingBackend::collectStats(uint32_t frame, UIContext& ui, Registry&) const {
+	(void)frame; //unused
 	const uint32_t* rb = m_meshlet.getCpuDrawCounts();
 	if (rb) {
 		uint32_t total_draws = 0;

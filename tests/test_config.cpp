@@ -30,7 +30,7 @@ TEST_CASE("ve_config lighting and shadow constants", "[config]") {
     REQUIRE(ve::MAX_LIGHTS >= 1);
     REQUIRE(ve::MAX_SHADOW_LIGHTS >= 1);
 
-    REQUIRE(ve::SHADOW_MAP_RESOLUTION >= 256);
+    REQUIRE(ve::CSM_CASCADE_RESOLUTIONS[0] >= 256);
     REQUIRE(ve::SHADOW_BIAS >= 0.0f);
     REQUIRE(ve::SHADOW_BIAS < 0.01f);
 

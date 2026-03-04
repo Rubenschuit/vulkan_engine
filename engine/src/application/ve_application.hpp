@@ -155,7 +155,7 @@ private:
 	// --- Buffers ---
 	std::vector<std::unique_ptr<VeBuffer>> m_uniform_buffers{};
 	std::vector<std::unique_ptr<VeBuffer>> m_instance_buffers{};
-	static constexpr uint32_t INITIAL_INSTANCE_CAPACITY = 16384;
+	static constexpr uint32_t INITIAL_INSTANCE_CAPACITY = 16384*2;
 
 	// --- Descriptors ---
 	std::shared_ptr<VeDescriptorPool> m_global_pool{};

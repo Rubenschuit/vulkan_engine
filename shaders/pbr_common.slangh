@@ -265,6 +265,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 			float distance_sq = dot(light_dir, light_dir);
 			float attenuation = calculateAttenuation(distance_sq, light.position.w);
 
+			// if spot light
 			if (light_idx >= cluster_params.num_point_lights) {
 				uint spot_idx = light_idx - cluster_params.num_point_lights;
 				float cos_outer = ubo.spot_lights[spot_idx].direction.w;

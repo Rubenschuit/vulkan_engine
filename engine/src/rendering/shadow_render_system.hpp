@@ -33,8 +33,7 @@ public:
 		VeDevice& device,
 		VeDescriptorPool& descriptor_pool,
 		const vk::raii::DescriptorSetLayout& material_set_layout,
-		std::filesystem::path shader_path,
-		std::filesystem::path csm_shader_path);
+		std::filesystem::path shader_path);
 	~ShadowRenderSystem();
 
 	ShadowRenderSystem(const ShadowRenderSystem&) = delete;
@@ -69,6 +68,11 @@ public:
 		return m_shadow_set_layout->getDescriptorSetLayout();
 	}
 
+	// Atlas layout accessors (needed by LightSystem for bias matrix computation)
+	const std::array<FrameAtlasRegion, MAX_SHADOW_LAYERS>& getAtlasRegions() const { return m_atlas_regions; }
+	uint32_t getAtlasWidth() const { return m_atlas_width; }
+	uint32_t getAtlasHeight() const { return m_atlas_height; }
+
 	// Invalidate cached shadow drawables (e.g. after scene switch); next render will rebuild.
 	void invalidateShadowDrawables();
 
@@ -93,11 +97,10 @@ private:
 	void createPipelineLayout(
 		const vk::raii::DescriptorSetLayout& material_set_layout);
 	void createPipeline(vk::Format depth_format);
-	void createCsmPipeline(vk::Format depth_format);
+	void computeAtlasLayout();
 	void createShadowUBOs();
 	void createShadowInstanceBuffers();
 	void createShadowPassDescriptorSets(VeDescriptorPool& descriptor_pool);
-	void createCsmDescriptorSets(VeDescriptorPool& descriptor_pool);
 	void createShadowTextureDescriptorSets(VeDescriptorPool& descriptor_pool);
 	void renderShadowMap(VeFrameInfo& frame_info, uint32_t light_index,
 		const std::vector<ShadowInstanceGroup>& instance_groups) const;
@@ -108,31 +111,26 @@ private:
 	VeDescriptorPool& m_descriptor_pool;
 
 	std::filesystem::path m_shader_path;
-	std::filesystem::path m_csm_shader_path;
 
 	// Shadow global descriptor set layout (for shadow pass UBO + instance SSBO)
 	std::unique_ptr<VeDescriptorSetLayout> m_shadow_global_set_layout;
 
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
-	std::unique_ptr<VePipeline> m_ve_pipeline;          // point light shadows
-	std::unique_ptr<VePipeline> m_csm_pipeline;         // multiview CSM
+	std::unique_ptr<VePipeline> m_ve_pipeline;
 
 	// Point light shadow UBOs (per-frame, per-point-light)
 	std::vector<std::vector<std::unique_ptr<VeBuffer>>> m_shadow_ubos;  // [frame][point_light]
 	std::vector<std::vector<vk::raii::DescriptorSet>> m_shadow_global_descriptor_sets;  // [frame][point_light]
 
-	// CSM multiview UBOs and descriptor sets (per-frame, single buffer for all cascades)
-	std::vector<std::unique_ptr<VeBuffer>> m_csm_ubos;  // [frame]
-	std::vector<vk::raii::DescriptorSet> m_csm_descriptor_sets;  // [frame]
-	vk::raii::ImageView m_csm_multiview_image_view{nullptr};  // layers 0..NUM_CSM_CASCADES-1 as 2DArray
-
 	// Cached light views and projections per active layer (per-frame)
 	std::vector<std::vector<glm::mat4>> m_light_views;  // [frame][layer]
 	std::vector<std::vector<glm::mat4>> m_light_projs;  // [frame][layer]
 
-	// Shadow mapping resources
-	std::unique_ptr<VeImage> m_shadow_map_array;  // single 2D array texture with MAX_SHADOW_LAYERS layers
-	std::vector<vk::raii::ImageView> m_shadow_map_layer_views;  // individual layer views for rendering
+	// Shadow atlas
+	std::array<FrameAtlasRegion, MAX_SHADOW_LAYERS> m_atlas_regions{};
+	uint32_t m_atlas_width = 0;
+	uint32_t m_atlas_height = 0;
+	std::unique_ptr<VeImage> m_shadow_atlas;  // single 2D depth image
 	vk::raii::Sampler m_shadow_sampler{nullptr};      // comparison sampler (SampleCmpLevelZero)
 	vk::raii::Sampler m_shadow_raw_sampler{nullptr};   // regular sampler for raw depth reads (PCSS)
 	std::unique_ptr<VeDescriptorSetLayout> m_shadow_set_layout;
@@ -162,22 +160,21 @@ private:
 		uint32_t index_count;
 	};
 	struct MeshMegaEntry {
-		uint32_t vertex_offset;  // first vertex in mega-VBO
-		std::vector<LodMegaEntry> lod_entries; // [0]=LOD 0, [1]=LOD 1, ...
+		uint32_t vertex_offset;
+		std::vector<LodMegaEntry> lod_entries;
 	};
 	std::unordered_map<VeMesh*, MeshMegaEntry> m_mega_entries;
 
-	// GPU-culled CSM: per-cascade single-view descriptor sets
-	std::vector<std::vector<vk::raii::DescriptorSet>> m_gpu_cascade_descriptor_sets; // [frame][cascade]
-	std::vector<std::vector<std::unique_ptr<VeBuffer>>> m_csm_cascade_ubos;          // [frame][cascade], ShadowPassUBO
+	// GPU-culled CSM
+	std::vector<std::vector<vk::raii::DescriptorSet>> m_gpu_cascade_descriptor_sets;
+	std::vector<std::vector<std::unique_ptr<VeBuffer>>> m_csm_cascade_ubos;
 
 	// GPU-culled point/spot lights
-	std::vector<std::vector<vk::raii::DescriptorSet>> m_gpu_shadow_descriptor_sets; // [frame][light_index]
+	std::vector<std::vector<vk::raii::DescriptorSet>> m_gpu_shadow_descriptor_sets;
 
-	// Meshlet-culled CSM: per-cascade single-view descriptor sets
-	std::vector<std::vector<vk::raii::DescriptorSet>> m_meshlet_cascade_descriptor_sets; // [frame][cascade]
-	// Meshlet-culled point/spot lights
-	std::vector<std::vector<vk::raii::DescriptorSet>> m_meshlet_shadow_descriptor_sets; // [frame][light_index]
+	// Meshlet-culled CSM
+	std::vector<std::vector<vk::raii::DescriptorSet>> m_meshlet_cascade_descriptor_sets;
+	std::vector<std::vector<vk::raii::DescriptorSet>> m_meshlet_shadow_descriptor_sets;
 };
 
 }

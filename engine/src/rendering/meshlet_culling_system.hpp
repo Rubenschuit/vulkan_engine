@@ -105,6 +105,11 @@ public:
 	// Returns nullptr when drawIndirectCount is supported (readback not needed).
 	const uint32_t* getCpuDrawCounts() const { return m_has_readback ? m_readback_counts.data() : nullptr; }
 
+	// Per-slot shadow readback counts (same 2-frame-delay pattern as main view).
+	const uint32_t* getShadowCpuDrawCounts(uint32_t slot) const {
+		return m_shadow_has_readback[slot] ? m_shadow_readback_counts[slot].data() : nullptr;
+	}
+
 	bool isHizEnabled() const { return m_hiz_enabled; }
 	void setHizEnabled(bool enabled) { m_hiz_enabled = enabled; }
 
@@ -170,6 +175,11 @@ private:
 
 	// Shadow culling: per-shadow-layer buffers [frame][slot]
 	using ShadowBufSet = std::array<std::unique_ptr<VeBuffer>, SHADOW_BUFFER_COUNT>;
+
+	// Shadow async readback (fallback when drawIndirectCount unavailable)
+	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_readback_staging;
+	std::array<std::array<uint32_t, MESHLET_SHADOW_BUCKET_COUNT>, SHADOW_BUFFER_COUNT> m_shadow_readback_counts{};
+	std::array<bool, SHADOW_BUFFER_COUNT> m_shadow_has_readback{};
 
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_visible_objects;
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_meshlet_object_map;

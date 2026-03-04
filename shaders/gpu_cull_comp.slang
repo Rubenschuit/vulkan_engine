@@ -61,7 +61,7 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 	if (cull_params.is_shadow_pass != 0 && no_shadow)
 		return;
 
-	if (cull_params.hiz_enabled != 0)
+	if (cull_params.hiz_enabled != 0 && cull_params.is_shadow_pass == 0)
 		if (!hizOcclusionTest(cull_params, hiz_pyramid, hiz_sampler, center_world, radius))
 			return;
 

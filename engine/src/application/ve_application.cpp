@@ -360,6 +360,9 @@ VeFrameInfo VeApplication::buildFrameInfo() {
 		.instance_capacity = INITIAL_INSTANCE_CAPACITY,
 		.shadow_mode = m_ui.shadow_mode,
 		.csm_data = {},
+		.shadow_atlas_regions = m_shadow_render_system->getAtlasRegions().data(),
+		.shadow_atlas_width = m_shadow_render_system->getAtlasWidth(),
+		.shadow_atlas_height = m_shadow_render_system->getAtlasHeight(),
 		.gpu_culling_active = gpu_culling_active,
 		.meshlet_culling_active = meshlet_active,
 		.selected_entity = m_editor->getState().selected_entity,
@@ -932,7 +935,7 @@ void VeApplication::initSystems() {
 	m_shadow_render_system = std::make_unique<ShadowRenderSystem>(
 		m_ve_device, *m_global_pool,
 		m_material_set_layout->getDescriptorSetLayout(),
-		shader("shadow_shader.spv"), shader("shadow_csm_shader.spv")
+		shader("shadow_shader.spv")
 	);
 
 	m_depth_prepass_system = std::make_unique<DepthPrePassSystem>(

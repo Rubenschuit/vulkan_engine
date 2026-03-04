@@ -308,8 +308,9 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 				for (const auto& c : corners)
 					radius = std::max(radius, glm::length(c - center));
 
-				// Round radius up to texel boundary for stable sizing
-				float texels_per_unit = static_cast<float>(CSM_SHADOW_MAP_RESOLUTION) / (2.0f * radius);
+				// Round radius up to texel boundary for stable sizing (per-cascade resolution)
+				float cascade_res = static_cast<float>(CSM_CASCADE_RESOLUTIONS[cascade]);
+				float texels_per_unit = cascade_res / (2.0f * radius);
 				radius = std::ceil(radius * texels_per_unit) / texels_per_unit;
 
 				// Light view: position light behind the sphere along light direction
@@ -320,11 +321,29 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 					-radius, radius, -radius, radius,
 					0.0f, 2.0f * radius + z_margin);
 
-				// Texel snapping: eliminates sub-texel jitter → no more flickering
-				applyTexelSnapping(light_proj, light_view, CSM_SHADOW_MAP_RESOLUTION);
+				// Texel snapping: eliminates sub-texel jitter
+				applyTexelSnapping(light_proj, light_view, CSM_CASCADE_RESOLUTIONS[cascade]);
 
-				// Store in UBO (bias * proj * view for shader sampling)
-				ubo.csm_shadow_matrices[cascade] = s_bias_matrix * light_proj * light_view;
+				// Atlas bias matrix: maps clip [-1,1] to this cascade's UV region in the atlas
+				glm::mat4 atlas_bias = s_bias_matrix;
+				if (frame_info.shadow_atlas_regions && frame_info.shadow_atlas_width > 0) {
+					auto& r = frame_info.shadow_atlas_regions[cascade];
+					float aw = static_cast<float>(frame_info.shadow_atlas_width);
+					float ah = static_cast<float>(frame_info.shadow_atlas_height);
+					float sx = static_cast<float>(r.resolution) / aw;
+					float sy = static_cast<float>(r.resolution) / ah;
+					float ox = static_cast<float>(r.x) / aw;
+					float oy = static_cast<float>(r.y) / ah;
+					// Scale from [0,1] to region UV, then offset
+					atlas_bias = glm::mat4(
+						sx * 0.5f, 0.0f,      0.0f, 0.0f,
+						0.0f,      sy * 0.5f,  0.0f, 0.0f,
+						0.0f,      0.0f,       1.0f, 0.0f,
+						ox + sx * 0.5f, oy + sy * 0.5f, 0.0f, 1.0f
+					);
+				}
+
+				ubo.csm_shadow_matrices[cascade] = atlas_bias * light_proj * light_view;
 				ubo.csm_split_distances[static_cast<int>(cascade)] = far_split;
 
 				// Store raw view/proj for shadow render pass
@@ -333,7 +352,7 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 			}
 			ubo.csm_cascade_count = NUM_CSM_CASCADES;
 			ubo.csm_base_layer = 0;
-			ubo.csm_shadow_map_size = static_cast<float>(CSM_SHADOW_MAP_RESOLUTION);
+			ubo.csm_shadow_map_size = static_cast<float>(frame_info.shadow_atlas_width);
 			ubo.csm_dir_light_index = num_dir_lights;
 			frame_info.csm_data.active_cascade_count = NUM_CSM_CASCADES;
 			csm_assigned = true;
@@ -375,11 +394,40 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 
 			ubo.shadow_lights[num_shadow_lights].light_view = light_view;
 			ubo.shadow_lights[num_shadow_lights].light_proj = light_proj;
-			ubo.shadow_lights[num_shadow_lights].shadow_matrix = s_bias_matrix * light_proj * light_view;
+			// Atlas bias matrix for this shadow light's region
+			glm::mat4 spot_atlas_bias = s_bias_matrix;
+			if (frame_info.shadow_atlas_regions && frame_info.shadow_atlas_width > 0) {
+				uint32_t slot = NUM_CSM_CASCADES + num_shadow_lights;
+				auto& r = frame_info.shadow_atlas_regions[slot];
+				float aw = static_cast<float>(frame_info.shadow_atlas_width);
+				float ah = static_cast<float>(frame_info.shadow_atlas_height);
+				float sx = static_cast<float>(r.resolution) / aw;
+				float sy = static_cast<float>(r.resolution) / ah;
+				float ox = static_cast<float>(r.x) / aw;
+				float oy = static_cast<float>(r.y) / ah;
+				spot_atlas_bias = glm::mat4(
+					sx * 0.5f, 0.0f,      0.0f, 0.0f,
+					0.0f,      sy * 0.5f,  0.0f, 0.0f,
+					0.0f,      0.0f,       1.0f, 0.0f,
+					ox + sx * 0.5f, oy + sy * 0.5f, 0.0f, 1.0f
+				);
+			}
+			ubo.shadow_lights[num_shadow_lights].shadow_matrix = spot_atlas_bias * light_proj * light_view;
 			ubo.shadow_lights[num_shadow_lights].light_index_padding = glm::vec4(
 				static_cast<float>(MAX_LIGHTS + num_spot_lights), 2.0f,  // type 2 = spot
 				static_cast<float>(NUM_CSM_CASCADES + num_shadow_lights),
 				0.0f);
+			// Atlas bounds for XY clamping
+			if (frame_info.shadow_atlas_regions && frame_info.shadow_atlas_width > 0) {
+				uint32_t slot = NUM_CSM_CASCADES + num_shadow_lights;
+				auto& r = frame_info.shadow_atlas_regions[slot];
+				float aw = static_cast<float>(frame_info.shadow_atlas_width);
+				float ah = static_cast<float>(frame_info.shadow_atlas_height);
+				ubo.shadow_lights[num_shadow_lights].atlas_bounds = glm::vec4(
+					static_cast<float>(r.x) / aw, static_cast<float>(r.y) / ah,
+					static_cast<float>(r.x + r.resolution) / aw,
+					static_cast<float>(r.y + r.resolution) / ah);
+			}
 			num_shadow_lights++;
 		}
 

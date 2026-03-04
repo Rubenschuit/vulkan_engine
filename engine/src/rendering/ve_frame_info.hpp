@@ -58,6 +58,7 @@ struct ShadowLight {
 	alignas(16) glm::mat4 light_proj;
 	alignas(16) glm::mat4 shadow_matrix;        // pre-computed bias * light_proj * light_view
 	alignas(16) glm::vec4 light_index_padding;  // x = light_index, y = type (0=point, 1=directional, 2=spot), zw = padding
+	alignas(16) glm::vec4 atlas_bounds;          // xy = min UV, zw = max UV (atlas region bounds for XY clamping)
 };
 
 enum class RenderMode : uint32_t {
@@ -139,8 +140,8 @@ struct UniformBufferObject {
 	alignas(16) glm::mat4 csm_shadow_matrices[ve::NUM_CSM_CASCADES]; // bias * proj * view per cascade
 	alignas(16) glm::vec4 csm_split_distances{};  // view-space far-Z for cascades
 	alignas(4)  uint32_t csm_cascade_count = 0;
-	alignas(4)  uint32_t csm_base_layer = 0;
-	alignas(4)  float csm_shadow_map_size = static_cast<float>(ve::CSM_SHADOW_MAP_RESOLUTION);
+	alignas(4)  uint32_t csm_base_layer = 0; // unused
+	alignas(4)  float csm_shadow_map_size = 4096.0f; // atlas width (set by LightSystem)
 	alignas(4)  uint32_t csm_dir_light_index = 0xFFFFFFFF; // which dir_lights[] index has CSM (0xFFFFFFFF = none)
 	alignas(4)  float pcss_light_size = 0.04f;  // world-space light radius for PCSS penumbra
 	alignas(4)  uint32_t csm_blend_dithered = 0; // 0 = off, 1 = linear, 2 = dithered
@@ -168,15 +169,6 @@ struct ShadowPassUBO {
 };
 static_assert(sizeof(ShadowPassUBO) == 192, "ShadowPassUBO must be 192 bytes");
 
-// Multiview CSM UBO: all cascade view/proj matrices in a single buffer for multiview rendering
-struct CsmMultiviewUBO {
-	alignas(16) glm::mat4 view[NUM_CSM_CASCADES];
-	alignas(16) glm::mat4 proj[NUM_CSM_CASCADES];
-	alignas(16) glm::mat4 projection_view[NUM_CSM_CASCADES];
-};
-static_assert(sizeof(CsmMultiviewUBO) == 192 * NUM_CSM_CASCADES,
-	"CsmMultiviewUBO must be 192 bytes per cascade");
-
 // Cluster shading parameters — uploaded to GPU as a UBO each frame.
 // Must match the ClusterParams struct in ve_cluster.slangh.
 struct ClusterParams {
@@ -193,6 +185,13 @@ struct ClusterParams {
 	alignas(4)  uint32_t max_lights_per_cluster = ve::MAX_LIGHTS_PER_CLUSTER;
 	alignas(4)  uint32_t num_point_lights = 0;    // how many of num_lights are point lights (rest are spot)
 	alignas(4)  uint32_t _pad1 = 0;
+};
+
+// Shadow atlas region (matching ShadowAtlasRegion in shadow_render_system.hpp)
+struct FrameAtlasRegion {
+	uint32_t x = 0;
+	uint32_t y = 0;
+	uint32_t resolution = 0;
 };
 
 // CPU-side cascade data passed from LightSystem to ShadowRenderSystem
@@ -234,6 +233,11 @@ struct VeFrameInfo {
 
 	// Filled by LightSystem, consumed by ShadowRenderSystem
 	CsmCascadeData csm_data;
+
+	// Shadow atlas layout (set by VeApplication from ShadowRenderSystem)
+	const FrameAtlasRegion* shadow_atlas_regions = nullptr; // MAX_SHADOW_LAYERS entries
+	uint32_t shadow_atlas_width = 0;
+	uint32_t shadow_atlas_height = 0;
 
 	// Screen-space shadow mask descriptor set (Set 3, null when mask unavailable)
 	vk::raii::DescriptorSet* shadow_mask_descriptor_set = nullptr;
