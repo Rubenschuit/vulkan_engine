@@ -70,6 +70,7 @@ enum class RenderMode : uint32_t {
 	CSM_CASCADE = 6,
 	CLUSTER_HEATMAP = 7,
 	LOD_LEVEL = 8,
+	MESHLET_ID = 9,
 };
 
 enum class ShadowMode : uint32_t {
@@ -245,6 +246,7 @@ struct VeFrameInfo {
 	vk::raii::DescriptorSet* cluster_descriptor_set = nullptr;
 
 	bool gpu_culling_active = false;
+	bool meshlet_culling_active = false;
 	Entity selected_entity = Entity::null();
 	vk::raii::DescriptorSet* cpu_global_descriptor_set = nullptr;
 };

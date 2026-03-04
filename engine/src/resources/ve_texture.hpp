@@ -44,6 +44,11 @@ public:
 	const vk::raii::ImageView& getImageView() const { return m_texture_image->getImageView(); };
 	vk::DescriptorImageInfo getDescriptorInfo() const;
 
+	uint32_t getWidth() const { return m_width; }
+	uint32_t getHeight() const { return m_height; }
+	uint32_t getMipLevels() const { return m_texture_image ? m_texture_image->getMipLevels() : 0; }
+	vk::Format getFormat() const { return m_texture_image ? m_texture_image->getFormat() : vk::Format::eUndefined; }
+
 	// Create a depth comparison sampler for shadow maps
 	static vk::raii::Sampler createDepthCompareSampler(VeDevice& device);
 	// Create a regular (non-comparison) sampler for raw depth reads (PCSS blocker search)

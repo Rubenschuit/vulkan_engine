@@ -54,9 +54,14 @@ class PostProcessSystem;
 class OutlineSystem;
 class SceneResourceManager;
 class GpuCullingSystem;
+class MeshletCullingSystem;
 class HizSystem;
 class Editor;
 class VeScene;
+class CullingBackend;
+class CpuCullingBackend;
+class GpuCullingBackend;
+class MeshletCullingBackend;
 
 class VENGINE_API VeApplication {
 public:
@@ -126,8 +131,9 @@ private:
 	void initSystems();
 	void initEditor();
 
-	// --- Main loop internals ---
-	VeFrameInfo buildFrameInfo(bool gpu_culling_active);
+	// --- Main loop ---
+	VeFrameInfo buildFrameInfo();
+	void selectBackend();
 	void applySettingChanges();
 	void populateUBO(VeFrameInfo& fi);
 	void dispatchCompute(VeFrameInfo& fi);
@@ -203,7 +209,14 @@ private:
 	std::unique_ptr<OutlineSystem> m_outline_system;
 	std::unique_ptr<SceneResourceManager> m_scene_resources;
 	std::unique_ptr<GpuCullingSystem> m_gpu_culling_system;
+	std::unique_ptr<MeshletCullingSystem> m_meshlet_culling_system;
 	std::unique_ptr<HizSystem> m_hiz_system;
+
+	// --- Culling backends ---
+	std::unique_ptr<CpuCullingBackend> m_cpu_backend;
+	std::unique_ptr<GpuCullingBackend> m_gpu_backend;
+	std::unique_ptr<MeshletCullingBackend> m_meshlet_backend;
+	CullingBackend* m_active_backend = nullptr;
 
 	// --- Camera state ---
 	glm::mat4 m_prev_projection_view{1.0f};

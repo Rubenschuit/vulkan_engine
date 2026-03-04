@@ -44,7 +44,8 @@ VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID,
 	VertexOutput output;
 
 	float4 pos = float4(input.in_pos, 1.0);
-	float4 world_pos = mul(instances[instance_id + push_constants.instance_offset].transform, pos);
+	uint gpu_id = (instance_id & 0xFFFFu) + push_constants.instance_offset;
+	float4 world_pos = mul(instances[gpu_id].transform, pos);
 
 	output.pos = mul(ubo.projection_view[view_id], world_pos);
 

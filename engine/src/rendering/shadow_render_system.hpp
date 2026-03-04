@@ -20,6 +20,7 @@ namespace ve {
 	class VeImage;
 	class Registry;
 	class GpuCullingSystem;
+	class MeshletCullingSystem;
 	class PbrMegaBuffer;
 	class GpuSceneManager;
 }
@@ -51,6 +52,12 @@ public:
 	                               GpuSceneManager& scene_mgr);
 
 	void createGpuShadowDescriptorSets(GpuCullingSystem& gpu_cull);
+
+	void createMeshletShadowDescriptorSets(MeshletCullingSystem& meshlet_cull);
+	void renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_info,
+	                                       MeshletCullingSystem& meshlet_cull,
+	                                       PbrMegaBuffer& mega_buffer,
+	                                       GpuSceneManager& scene_mgr);
 
 	// Get shadow descriptor set for a specific frame
 	vk::raii::DescriptorSet& getShadowDescriptorSet(uint32_t frame_index) {
@@ -166,6 +173,11 @@ private:
 
 	// GPU-culled point/spot lights
 	std::vector<std::vector<vk::raii::DescriptorSet>> m_gpu_shadow_descriptor_sets; // [frame][light_index]
+
+	// Meshlet-culled CSM: per-cascade single-view descriptor sets
+	std::vector<std::vector<vk::raii::DescriptorSet>> m_meshlet_cascade_descriptor_sets; // [frame][cascade]
+	// Meshlet-culled point/spot lights
+	std::vector<std::vector<vk::raii::DescriptorSet>> m_meshlet_shadow_descriptor_sets; // [frame][light_index]
 };
 
 }

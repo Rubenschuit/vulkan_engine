@@ -32,7 +32,11 @@
 #include "rendering/material_ssbo_manager.hpp"
 #include "rendering/gpu_scene_manager.hpp"
 #include "rendering/gpu_culling_system.hpp"
+#include "rendering/meshlet_culling_system.hpp"
 #include "rendering/hiz_system.hpp"
+#include "rendering/cpu_culling_backend.hpp"
+#include "rendering/gpu_culling_backend.hpp"
+#include "rendering/meshlet_culling_backend.hpp"
 #include "ve_tracy.hpp"
 
 #include <GLFW/glfw3.h>
@@ -143,11 +147,12 @@ void VeApplication::run() {
 		applySettingChanges();
 		if (m_editor->beginFrame())
 			recreateResolutionDependentSystems(); // extent changed
+		selectBackend();
 		bool gpu_culling = m_ui.gpu_culling_enabled
 			&& m_scene_resources->getGpuSceneManager().hasRegisteredObjects();
-		m_gpu_culling_system->setHizEnabled(
-			m_ui.hiz_occlusion_enabled && m_ui.depth_prepass_enabled && gpu_culling);
-		VeFrameInfo fi = buildFrameInfo(gpu_culling);
+		bool hiz_on = m_ui.hiz_occlusion_enabled && m_ui.depth_prepass_enabled && gpu_culling;
+		m_active_backend->setHizEnabled(hiz_on);
+		VeFrameInfo fi = buildFrameInfo();
 		{
 			ZoneScopedN("Populate UBO");
 			populateUBO(fi);
@@ -190,6 +195,19 @@ void VeApplication::setActiveScene(std::unique_ptr<VeScene> scene) {
 		m_ui.ambient_light_intensity = ambient.w;
 
 		m_scene_resources->loadScene(m_active_scene->getRegistry(), *m_pbr_render_system);
+
+		// Recreate meshlet culling descriptors (mega buffer was destroyed/rebuilt)
+		if (m_meshlet_culling_system) {
+			auto& gpu_scene = m_scene_resources->getGpuSceneManager();
+			m_meshlet_culling_system->createDescriptorSets(*m_global_pool,
+				gpu_scene, m_pbr_render_system->getMegaBuffer());
+			m_meshlet_culling_system->createHizDescriptorSets(*m_global_pool,
+				gpu_scene, m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
+			m_meshlet_culling_system->createShadowDescriptorSets(*m_global_pool,
+				gpu_scene, m_pbr_render_system->getMegaBuffer());
+			m_meshlet_culling_system->createShadowHizDescriptorSets(*m_global_pool,
+				gpu_scene, m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
+		}
 	}
 }
 
@@ -256,6 +274,18 @@ void VeApplication::processSceneLoadRequest() {
 				m_active_scene->addModel(m_pending_load.gltf_path);
 				m_scene_resources->rebuildForModelAdd(
 					m_active_scene->getRegistry(), *m_pbr_render_system);
+				// Recreate meshlet culling descriptors (mega buffer was rebuilt)
+				if (m_meshlet_culling_system) {
+					auto& gpu_scene = m_scene_resources->getGpuSceneManager();
+					m_meshlet_culling_system->createDescriptorSets(*m_global_pool,
+						gpu_scene, m_pbr_render_system->getMegaBuffer());
+					m_meshlet_culling_system->createHizDescriptorSets(*m_global_pool,
+						gpu_scene, m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
+					m_meshlet_culling_system->createShadowDescriptorSets(*m_global_pool,
+						gpu_scene, m_pbr_render_system->getMegaBuffer());
+					m_meshlet_culling_system->createShadowHizDescriptorSets(*m_global_pool,
+						gpu_scene, m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
+				}
 			}
 			break;
 		}
@@ -267,7 +297,23 @@ void VeApplication::processSceneLoadRequest() {
 
 // ─── Frame Info Construction ─────────────────────────────────────────────────
 
-VeFrameInfo VeApplication::buildFrameInfo(bool gpu_culling_active) {
+void VeApplication::selectBackend() {
+	auto& gpu_scene = m_scene_resources->getGpuSceneManager();
+	bool gpu_ok = m_ui.gpu_culling_enabled && gpu_scene.hasRegisteredObjects();
+	if (gpu_ok && m_ui.meshlet_culling_enabled
+		&& m_meshlet_culling_system
+		&& m_pbr_render_system->getMegaBuffer().hasMeshletData())
+		m_active_backend = m_meshlet_backend.get();
+	else if (gpu_ok)
+		m_active_backend = m_gpu_backend.get();
+	else
+		m_active_backend = m_cpu_backend.get();
+
+	if (m_meshlet_backend)
+		m_meshlet_backend->setGpuShadowFallback(m_ui.meshlet_gpu_shadow_fallback);
+}
+
+VeFrameInfo VeApplication::buildFrameInfo() {
 	auto& command_buffer = m_ve_renderer.getCurrentCommandBuffer();
 	auto& compute_command_buffer = m_ve_renderer.getCurrentComputeCommandBuffer();
 	auto current_frame = m_ve_renderer.getCurrentFrame();
@@ -280,12 +326,11 @@ VeFrameInfo VeApplication::buildFrameInfo(bool gpu_culling_active) {
 	auto extent = m_ve_renderer.getExtent();
 	glm::vec2 texel_size = {1.0f / static_cast<float>(extent.width), 1.0f / static_cast<float>(extent.height)};
 
-	vk::raii::DescriptorSet& global_set = gpu_culling_active
-		? m_gpu_culling_system->getGlobalDescriptorSet(current_frame)
-		: m_global_descriptor_sets[current_frame];
+	bool gpu_culling_active = (m_active_backend != m_cpu_backend.get());
+	bool meshlet_active = (m_active_backend == m_meshlet_backend.get());
 
 	VeFrameInfo fi = {
-		.global_descriptor_set = global_set,
+		.global_descriptor_set = m_active_backend->getGlobalDescriptorSet(current_frame),
 		.texture_descriptor_set = m_particle_descriptor_set,
 		.material_descriptor_set = material_descriptor_set,
 		.active_scene = m_active_scene.get(),
@@ -316,6 +361,7 @@ VeFrameInfo VeApplication::buildFrameInfo(bool gpu_culling_active) {
 		.shadow_mode = m_ui.shadow_mode,
 		.csm_data = {},
 		.gpu_culling_active = gpu_culling_active,
+		.meshlet_culling_active = meshlet_active,
 		.selected_entity = m_editor->getState().selected_entity,
 		.cpu_global_descriptor_set = &m_global_descriptor_sets[current_frame],
 	};
@@ -442,31 +488,22 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 	m_pbr_render_system->setDepthPrePassActive(m_ui.depth_prepass_enabled);
 	material_mgr.flushToDevice(command_buffer);
 
-	if (fi.gpu_culling_active) {
-		// GPU culling runs inline on graphics queue (opaques + transparents)
-		TracyVkZone(tracy_gfx, *command_buffer, "GPU Cull");
-		profiler.beginGpuTimer(command_buffer, ProfileTimer::CULLING);
-		gpu_scene.updateDirtyTransforms(fi.current_frame,
-			m_active_scene->getRegistry(), command_buffer);
-		m_gpu_culling_system->dispatch(command_buffer, fi, gpu_scene);
-		profiler.endGpuTimer(command_buffer, ProfileTimer::CULLING);
-	} else {
-		// CPU culling fallback
-		profiler.beginCpuTimer(ProfileTimer::CULLING);
-		m_culling_system->setCullingEnabled(m_ui.enable_frustum_culling);
-		m_culling_system->setForceLodLevel(m_ui.lod_force_level);
-		m_culling_system->setLodThresholds(m_ui.lod_screen_thresholds);
-		m_culling_system->setLodHysteresis(m_ui.lod_hysteresis);
-		m_culling_system->setMinParallelEntities(static_cast<uint32_t>(m_ui.min_parallel_cull_entities));
-		m_culling_system->cullObjects(fi, &m_ve_renderer.getThreadPool());
-		profiler.endCpuTimer(ProfileTimer::CULLING);
-
-		m_pbr_render_system->prepareFrame(fi, material_mgr);
+	{
+		TracyVkZone(tracy_gfx, *command_buffer, "Culling");
+		if (fi.gpu_culling_active)
+			profiler.beginGpuTimer(command_buffer, ProfileTimer::CULLING);
+		else
+			profiler.beginCpuTimer(ProfileTimer::CULLING);
+		m_active_backend->cull(fi, gpu_scene);
+		if (fi.gpu_culling_active)
+			profiler.endGpuTimer(command_buffer, ProfileTimer::CULLING);
+		else
+			profiler.endCpuTimer(ProfileTimer::CULLING);
 	}
 
 	bool editor_mode = m_editor->isEditorMode();
 
-	bool hiz_active = fi.gpu_culling_active && m_gpu_culling_system->isHizEnabled()
+	bool hiz_active = fi.gpu_culling_active && m_active_backend->isHizEnabled()
 		&& m_ui.depth_prepass_enabled;
 	bool gtao_active = m_ui.gtao_enabled && m_ui.depth_prepass_enabled;
 
@@ -477,24 +514,8 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		profiler.beginCpuTimer(ProfileTimer::DEPTH_PREPASS);
 		profiler.beginGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
 		m_ve_renderer.beginDepthPrePass(command_buffer);
-		if (fi.gpu_culling_active) {
-			auto* compact_buf = m_gpu_culling_system->compactionEnabled()
-				? &m_gpu_culling_system->getCompactedIndirectBuffer(fi.current_frame) : nullptr;
-			auto* compact_cnt = m_gpu_culling_system->compactionEnabled()
-				? &m_gpu_culling_system->getCompactCountBuffer(fi.current_frame) : nullptr;
-			m_depth_prepass_system->renderGpuCulled(fi,
-				m_pbr_render_system->getMegaBuffer(),
-				m_gpu_culling_system->getIndirectBuffer(fi.current_frame),
-				gpu_scene.getBucketGroupOffsets(),
-				gpu_scene.getBucketGroupCounts(), 2,
-				compact_buf, compact_cnt);
-		} else {
-			m_depth_prepass_system->render(fi,
-				m_pbr_render_system->getMegaBuffer(),
-				m_pbr_render_system->getIndirectBuffer(fi.current_frame),
-				m_pbr_render_system->getDepthBucketOffsets(),
-				m_pbr_render_system->getDepthBucketCounts(), 2);
-		}
+		m_active_backend->renderDepthPrePass(fi, m_pbr_render_system->getMegaBuffer(),
+			*m_depth_prepass_system);
 		m_ve_renderer.endDepthPrePass(command_buffer);
 		profiler.endGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
 		profiler.endCpuTimer(ProfileTimer::DEPTH_PREPASS);
@@ -506,11 +527,8 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		TracyVkZone(tracy_gfx, *command_buffer, "Shadow Maps");
 		profiler.beginCpuTimer(ProfileTimer::SHADOW_MAPS);
 		profiler.beginGpuTimer(command_buffer, ProfileTimer::SHADOW_MAPS);
-		if (fi.gpu_culling_active)
-			m_shadow_render_system->renderShadowMapsGpuCulled(
-				fi, *m_gpu_culling_system, m_pbr_render_system->getMegaBuffer(), gpu_scene);
-		else
-			m_shadow_render_system->renderShadowMaps(fi);
+		m_active_backend->renderShadows(fi, *m_shadow_render_system,
+			m_pbr_render_system->getMegaBuffer(), gpu_scene);
 		profiler.endGpuTimer(command_buffer, ProfileTimer::SHADOW_MAPS);
 		profiler.endCpuTimer(ProfileTimer::SHADOW_MAPS);
 	}
@@ -589,19 +607,7 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		profiler.beginCpuTimer(ProfileTimer::SCENE_RENDER);
 		profiler.beginGpuTimer(command_buffer, ProfileTimer::SCENE_RENDER);
 		m_ve_renderer.beginSceneRender(command_buffer, m_ui.depth_prepass_enabled);
-		if (fi.gpu_culling_active) {
-			auto* compact_buf = m_gpu_culling_system->compactionEnabled()
-				? &m_gpu_culling_system->getCompactedIndirectBuffer(fi.current_frame) : nullptr;
-			auto* compact_cnt = m_gpu_culling_system->compactionEnabled()
-				? &m_gpu_culling_system->getCompactCountBuffer(fi.current_frame) : nullptr;
-			m_pbr_render_system->renderOpaqueGpuCulled(fi, bindless_set,
-				m_gpu_culling_system->getIndirectBuffer(fi.current_frame),
-				gpu_scene.getBucketGroupOffsets(),
-				gpu_scene.getBucketGroupCounts(),
-				compact_buf, compact_cnt);
-		} else {
-			m_pbr_render_system->renderOpaque(fi, bindless_set);
-		}
+		m_active_backend->renderOpaque(fi, *m_pbr_render_system, bindless_set);
 		m_skybox_render_system->render(fi);
 		if (!fi.gpu_culling_active)
 			m_pbr_render_system->renderTransparent(fi, bindless_set);
@@ -617,30 +623,9 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		profiler.endCpuTimer(ProfileTimer::SCENE_RENDER);
 	}
 
-	// WBOIT transparent pass
-	if (fi.gpu_culling_active) {
-		const auto* bucket_counts = gpu_scene.getBucketGroupCounts();
-		bool has_transparents = (bucket_counts[4] > 0 || bucket_counts[5] > 0);
-		if (has_transparents) {
-			TracyVkZone(tracy_gfx, *command_buffer, "WBOIT");
-			auto* compact_buf = m_gpu_culling_system->compactionEnabled()
-				? &m_gpu_culling_system->getCompactedIndirectBuffer(fi.current_frame) : nullptr;
-			auto* compact_cnt = m_gpu_culling_system->compactionEnabled()
-				? &m_gpu_culling_system->getCompactCountBuffer(fi.current_frame) : nullptr;
-
-			m_ve_renderer.beginWboitRender(command_buffer);
-			m_pbr_render_system->renderTransparentWboit(fi, bindless_set,
-				m_gpu_culling_system->getIndirectBuffer(fi.current_frame),
-				gpu_scene.getBucketGroupOffsets(),
-				bucket_counts,
-				compact_buf, compact_cnt);
-			m_ve_renderer.endWboitRender(command_buffer);
-
-			m_ve_renderer.beginWboitComposite(command_buffer);
-			m_pbr_render_system->compositeWboit(command_buffer);
-			m_ve_renderer.endWboitComposite(command_buffer);
-		}
-	}
+	// Transparency (CPU sort, WBOIT, or no-op depending on backend)
+	m_active_backend->renderTransparency(fi, *m_pbr_render_system, bindless_set,
+		gpu_scene, m_ve_renderer);
 
 	// Selection outline: mask + JFA
 	auto& editor_state = m_editor->getState();
@@ -687,27 +672,7 @@ void VeApplication::collectStats(const VeFrameInfo& fi) {
 
 	// Scene stats
 	auto& registry = m_active_scene->getRegistry();
-	if (fi.gpu_culling_active) {
-		auto& gpu_scene = m_scene_resources->getGpuSceneManager();
-		m_ui.stats.cull_total_objects = gpu_scene.getTotalRegisteredCount();
-		// Readback is 1 frame cycle stale
-		m_ui.stats.cull_visible_objects = m_gpu_culling_system->readbackDrawCounts(fi.current_frame);
-		m_ui.stats.visible_triangles = m_gpu_culling_system->readbackTriangleCount(fi.current_frame);
-		m_ui.stats.draw_calls = m_gpu_culling_system->readbackDrawCounts(fi.current_frame);
-		const auto* rb = m_gpu_culling_system->getReadbackCounts(fi.current_frame);
-		m_ui.stats.transparent_draw_calls = rb[4] + rb[5];
-	} else {
-		m_ui.stats.cull_total_objects = m_culling_system->getLastTotalMeshObjects();
-		m_ui.stats.cull_visible_objects = m_culling_system->getLastVisibleCount();
-		uint32_t tri_count = 0;
-		for (auto& vo : m_culling_system->getVisibleObjectsRef()) {
-			auto* mesh = registry.getComponent<MeshComponent>(vo.entity);
-			if (mesh)
-				tri_count += mesh->getMesh()->getLodIndexCount(vo.lod_level) / 3;
-		}
-		m_ui.stats.visible_triangles = tri_count;
-		m_ui.stats.draw_calls = m_pbr_render_system->getOpaqueDrawCount();
-	}
+	m_active_backend->collectStats(fi.current_frame, m_ui, registry);
 	m_ui.stats.num_point_lights = registry.activePointLightCount();
 	m_ui.stats.num_directional_lights = registry.activeDirectionalLightCount();
 
@@ -784,6 +749,12 @@ void VeApplication::recreateResolutionDependentSystems() {
 		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage());
 	m_gpu_culling_system->createHizDescriptorSets(*m_global_pool, m_scene_resources->getGpuSceneManager(), *m_hiz_system);
 	m_gpu_culling_system->createShadowHizDescriptorSets(*m_global_pool, m_scene_resources->getGpuSceneManager(), *m_hiz_system);
+	if (m_meshlet_culling_system) {
+		m_meshlet_culling_system->createHizDescriptorSets(*m_global_pool,
+			m_scene_resources->getGpuSceneManager(), m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
+		m_meshlet_culling_system->createShadowHizDescriptorSets(*m_global_pool,
+			m_scene_resources->getGpuSceneManager(), m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
+	}
 
 	m_pbr_render_system->recreateWboit(
 		m_ve_renderer.getWboitAccumImageView(),
@@ -849,6 +820,7 @@ void VeApplication::createDescriptors() {
 	constexpr uint32_t F = MAX_FRAMES_IN_FLIGHT;
 	constexpr uint32_t S = MAX_SHADOW_LAYERS;
 	constexpr uint32_t MAX_MATERIAL_SETS = 4096;
+	constexpr uint32_t MSH = MeshletCullingSystem::SHADOW_BUFFER_COUNT; // 7 shadow layers for meshlet culling
 	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
 		.setMaxSets(
 			4*F            // global + skybox + bloom + post-process
@@ -860,17 +832,25 @@ void VeApplication::createDescriptors() {
 			+ 4*F          // particle
 			+ 10           // headroom
 			+ 5*F          // outline (JFA init + 2 step dirs + 2 composite)
-			+ 3*F)         // GPU culling (compute sets + global sets)
+			+ 3*F          // GPU culling (compute sets + global sets)
+			+ 5*MSH*F      // meshlet shadow 
+			+ (NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS)*F) // meshlet shadow global sets (SRS)
 		.addPoolSize(vk::DescriptorType::eUniformBuffer,
-			4*F + S*F + MAX_MATERIAL_SETS + 1 + 4*F + 2*F)
+			4*F + S*F + MAX_MATERIAL_SETS + 1 + 4*F + 2*F
+			+ 3*MSH*F     
+			+ (NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS)*F)
 		.addPoolSize(vk::DescriptorType::eCombinedImageSampler,
 			3*3 + MAX_MATERIAL_SETS*5 + 4*F)
 		.addPoolSize(vk::DescriptorType::eSampler,
-			2*F + F + F + 10)
+			2*F + F + F + 10
+			+ 4*MSH*F)     
 		.addPoolSize(vk::DescriptorType::eSampledImage,
-			F + 4*F + 8*F + 10 + 3*F)
+			F + 4*F + 8*F + 10 + 3*F
+			+ 4*MSH*F)     
 		.addPoolSize(vk::DescriptorType::eStorageBuffer,
-			22*F + F + S*F + 14*F + 9*F)
+			22*F + F + S*F + 14*F + 9*F
+			+ 25*MSH*F     
+			+ (NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS)*F) 
 		.addPoolSize(vk::DescriptorType::eStorageImage,
 			F + 3*F + 3*F)
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
@@ -1087,6 +1067,31 @@ void VeApplication::initSystems() {
 		m_config.shaders_dir);
 	m_gpu_culling_system->createHizDescriptorSets(*m_global_pool, gpu_scene, *m_hiz_system);
 	m_gpu_culling_system->createShadowHizDescriptorSets(*m_global_pool, gpu_scene, *m_hiz_system);
+
+	// Meshlet culling
+	m_meshlet_culling_system = std::make_unique<MeshletCullingSystem>(m_ve_device, m_config.shaders_dir);
+	m_meshlet_culling_system->createDescriptorSets(*m_global_pool,
+		gpu_scene, m_pbr_render_system->getMegaBuffer());
+	m_meshlet_culling_system->createHizDescriptorSets(*m_global_pool,
+		gpu_scene, m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
+	m_meshlet_culling_system->createGlobalDescriptorSets(*m_global_pool, *m_global_set_layout,
+		m_uniform_buffers, m_scene_resources->getMaterialManager().getBuffer());
+	m_meshlet_culling_system->createShadowDescriptorSets(*m_global_pool,
+		gpu_scene, m_pbr_render_system->getMegaBuffer());
+	m_meshlet_culling_system->createShadowHizDescriptorSets(*m_global_pool,
+		gpu_scene, m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
+	m_shadow_render_system->createMeshletShadowDescriptorSets(*m_meshlet_culling_system);
+
+	// Culling backends
+	m_cpu_backend = std::make_unique<CpuCullingBackend>(
+		*m_culling_system, *m_pbr_render_system,
+		m_scene_resources->getMaterialManager(), m_ui,
+		m_global_descriptor_sets, m_ve_renderer.getThreadPool());
+	m_gpu_backend = std::make_unique<GpuCullingBackend>(
+		*m_gpu_culling_system, gpu_scene);
+	m_meshlet_backend = std::make_unique<MeshletCullingBackend>(
+		*m_meshlet_culling_system, *m_gpu_culling_system);
+	m_active_backend = m_cpu_backend.get();
 }
 
 void VeApplication::initEditor() {

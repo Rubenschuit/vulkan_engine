@@ -1,6 +1,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "ve_config.hpp"
+#include "rendering/meshlet_data.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "scene/ve_entity.hpp"
 #include "scene/ve_event.hpp"
@@ -121,6 +122,7 @@ public:
 	VeBuffer& getActiveIdBuffer(uint32_t frame) { return *m_active_id_buffers[frame]; }
 	VeBuffer& getDrawGroupBuffer(uint32_t frame) { return *m_draw_group_buffers[frame]; }
 	VeBuffer& getIndirectTemplateBuffer(uint32_t frame) { return *m_indirect_template[frame]; }
+	VeBuffer& getMeshletObjectInfoBuffer(uint32_t frame) { return *m_meshlet_object_info_buffers[frame]; }
 
 	const std::vector<uint32_t>& getTransparentEntityIndices() const { return m_transparent_entity_indices; }
 
@@ -171,14 +173,16 @@ private:
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_transform_buffers;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_active_id_buffers;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_draw_group_buffers;
+	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_meshlet_object_info_buffers;
 
-	// Staging buffers (host-visible, for CPU→GPU copies)
+	// Staging buffers (host-visible, for CPU->GPU copies)
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_object_data_staging;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_transform_staging;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_active_id_staging;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_draw_group_staging;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_indirect_staging;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_indirect_template;
+	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_meshlet_object_info_staging;
 
 	// Active object entries (contiguous, rebuilt on register/unregister)
 	std::vector<ActiveIdEntry> m_active_ids;
@@ -192,6 +196,8 @@ private:
 	std::vector<std::array<uint32_t, MAX_LOD_LEVELS>> m_object_lod_group_ids;
 	// CPU-side LOD geometry cache; filled by writeObjectData() for use in rebuildDrawGroups()
 	std::vector<CpuLodData> m_cpu_lod_data;
+	// CPU-side meshlet object info; filled by writeObjectData(), uploaded each frame when dirty
+	std::vector<MeshletObjectInfo> m_meshlet_object_info_cpu;
 
 	// Per GPU object: frame number when transform was last dirtied
 	std::vector<uint32_t> m_dirty_frame; // indexed by gpu_id

@@ -155,7 +155,17 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UICon
 		ImGui::Indent();
 		ImGui::Checkbox("Hi-Z Occlusion Culling", &ctx.hiz_occlusion_enabled);
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Prev-frame Hi-Z occlusion culling.\nSkips objects occluded by previous frame's depth.\nRequires depth pre-pass enabled.");
+			ImGui::SetTooltip("Skips objects occluded by depth buffer.\nRequires depth pre-pass enabled.");
+		ImGui::Checkbox("Meshlet Culling", &ctx.meshlet_culling_enabled);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Sub-object meshlet culling (frustum + backface cone + Hi-Z).\nReduces triangle count for partially-visible large meshes.");
+		if (ctx.meshlet_culling_enabled) {
+			ImGui::Indent();
+			ImGui::Checkbox("Object Culled Shadows", &ctx.meshlet_gpu_shadow_fallback);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Use object-level GPU culling for shadows instead of meshlet culling.");
+			ImGui::Unindent();
+		}
 		ImGui::Unindent();
 	}
 	ImGui::Checkbox("Clustered Lighting", &ctx.cluster_enabled);
@@ -306,6 +316,10 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UICon
 		ctx.render_mode = RenderMode::LOD_LEVEL;
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Visualize mesh LOD levels\nGreen=0, Yellow=1, Orange=2, Red=3");
+	if (ImGui::RadioButton("Meshlet ID", &current_render_mode, static_cast<int>(RenderMode::MESHLET_ID)))
+		ctx.render_mode = RenderMode::MESHLET_ID;
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Visualize meshlet boundaries (hash-colored per draw command).\nMost useful with meshlet culling enabled.");
 
 	ImGui::Checkbox("Show Axes", &ctx.show_axes);
 	if (ImGui::IsItemHovered())

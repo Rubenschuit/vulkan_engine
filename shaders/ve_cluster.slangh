@@ -55,18 +55,16 @@ void getClusterAABB(uint3 cluster_id, ClusterParams params,
 	float slice_near = z_near * pow(z_far / z_near, float(cluster_id.z) / float(params.grid_dims.z));
 	float slice_far  = z_near * pow(z_far / z_near, float(cluster_id.z + 1) / float(params.grid_dims.z));
 
-	// Unproject 4 corners of the tile at near depth to get view-space XY bounds
-	// Using inv_proj to go from clip to view space
-	// At a given view-space depth z, the clip-space position is (x_clip, y_clip, z_ndc, 1)
-	// We only need the XY extents, which scale linearly with depth in a perspective projection.
-	// Shortcut: unproject at z=1, then scale by actual depth.
-	float4 corner00 = mul(params.inv_proj, float4(tile_min_clip.x, tile_min_clip.y, 0.0, 1.0));
-	float4 corner11 = mul(params.inv_proj, float4(tile_max_clip.x, tile_max_clip.y, 0.0, 1.0));
+	// Unproject 4 corners of the tile at near depth to get view-space XY bounds.
+	// We only need XY extents, which scale linearly with depth in a perspective projection.
+	// Shortcut: unproject at the near plane, then scale by actual depth.
+	float4 corner00 = mul(params.inv_proj, float4(tile_min_clip.x, tile_min_clip.y, 1.0, 1.0));
+	float4 corner11 = mul(params.inv_proj, float4(tile_max_clip.x, tile_max_clip.y, 1.0, 1.0));
 	float3 view_min_near = corner00.xyz / corner00.w;
 	float3 view_max_near = corner11.xyz / corner11.w;
 
 	// Normalize XY to per-unit-depth directions.
-	// Unprojecting at z_ndc=0 gives view-space points on the near plane (z = -z_near).
+	// Unprojecting at z_ndc=1 (reverse-Z near plane) gives view-space points at z = -z_near.
 	// Divide XY by abs(z) to get direction-per-unit-depth, then scale by actual slice depth.
 	float2 dir_min = view_min_near.xy / -view_min_near.z;
 	float2 dir_max = view_max_near.xy / -view_max_near.z;

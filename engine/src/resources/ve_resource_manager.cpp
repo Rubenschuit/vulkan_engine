@@ -2,6 +2,7 @@
 #include "resources/ve_mesh.hpp"
 #include "resources/ve_material.hpp"
 #include "resources/ve_texture.hpp"
+#include "rendering/meshlet_data.hpp"
 #include "vulkan/ve_descriptors.hpp"
 
 namespace ve {
@@ -194,6 +195,7 @@ ResourceHandle<VeMesh> VeResourceManager::createMesh(const std::string& resource
 
 	// Create new resource.
 	auto resource = std::make_shared<VeMesh>(m_device, resource_id, vertices, indices);
+	resource->setMeshletData(VeMesh::buildMeshletData(vertices, indices));
 	type_resources[resource_id] = std::move(resource);
 	m_ref_counts[type_idx][resource_id] = 1;
 	return ResourceHandle<VeMesh>(resource_id, this);
@@ -213,6 +215,7 @@ ResourceHandle<VeMesh> VeResourceManager::createMesh(const std::string& resource
 	}
 
 	auto resource = std::make_shared<VeMesh>(m_device, resource_id, vertices, indices, lod_indices);
+	resource->setMeshletData(VeMesh::buildMeshletData(vertices, indices, lod_indices));
 	type_resources[resource_id] = std::move(resource);
 	m_ref_counts[type_idx][resource_id] = 1;
 	return ResourceHandle<VeMesh>(resource_id, this);

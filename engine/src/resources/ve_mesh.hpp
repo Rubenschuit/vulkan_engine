@@ -19,6 +19,8 @@
 
 namespace ve {
 
+struct CpuMeshletData;
+
 class VENGINE_API VeMesh : public Resource {
 public:
 	struct AABB {
@@ -86,6 +88,15 @@ public:
 	const std::vector<uint32_t>& getCpuIndices() const { return m_cpu_indices; }
 	bool hasCpuGeometry() const { return !m_cpu_positions.empty(); }
 
+	void setMeshletData(std::unique_ptr<CpuMeshletData> data);
+	const CpuMeshletData* getMeshletData() const { return m_meshlet_data.get(); }
+
+	// Build meshlet data from vertex/index arrays using meshoptimizer.
+	static std::unique_ptr<CpuMeshletData> buildMeshletData(
+		const std::vector<Vertex>& vertices,
+		const std::vector<uint32_t>& base_indices,
+		const std::vector<std::vector<uint32_t>>& lod_indices = {});
+
 protected:
 	bool doLoad() override;
 	void doUnload() override;
@@ -107,6 +118,7 @@ private:
 	AABB m_local_aabb{};
 	std::vector<glm::vec3> m_cpu_positions;
 	std::vector<uint32_t> m_cpu_indices;
+	std::unique_ptr<CpuMeshletData> m_meshlet_data;
 };
 
 // Transform AABB by model matrix (transform 8 corners, take min/max of result).

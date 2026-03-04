@@ -127,4 +127,46 @@ void DepthPrePassSystem::renderGpuCulled(
 	}
 }
 
+void DepthPrePassSystem::renderGpuCulledMeshlets(
+	VeFrameInfo& frame_info,
+	PbrMegaBuffer& mega_buffer,
+	const VeBuffer& meshlet_indirect, const VeBuffer& draw_counts,
+	const uint32_t* cpu_draw_counts,
+	const vk::raii::DescriptorSet* global_set_override) const {
+
+	if (!mega_buffer.hasMeshletData())
+		return;
+
+	auto& cmd = frame_info.cmd();
+	auto& global_set = global_set_override ? *global_set_override : frame_info.global_descriptor_set;
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		0, {*global_set}, {});
+
+	mega_buffer.bindShadowMeshletIbo(cmd);
+
+	// Depth prepass only draws non-mask buckets (0 = opaque-back, 1 = opaque-double-sided)
+	constexpr uint32_t MAX_PER_BUCKET = MAX_MESHLET_DRAWS / MESHLET_BUCKET_COUNT;
+
+	for (uint32_t bucket = 0; bucket < 2; bucket++) {
+		bool is_double_sided = (bucket & 1) != 0;
+		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
+
+		auto buf_offset = static_cast<vk::DeviceSize>(bucket) * MAX_PER_BUCKET
+		                  * sizeof(VkDrawIndexedIndirectCommand);
+		if (cpu_draw_counts) {
+			uint32_t count = std::min(cpu_draw_counts[bucket] * 2 + 1024, MAX_PER_BUCKET);
+			cmd.drawIndexedIndirect(
+				*meshlet_indirect.getBuffer(), buf_offset,
+				count, sizeof(VkDrawIndexedIndirectCommand));
+		} else {
+			auto count_offset = static_cast<vk::DeviceSize>(bucket) * sizeof(uint32_t);
+			cmd.drawIndexedIndirectCount(
+				*meshlet_indirect.getBuffer(), buf_offset,
+				*draw_counts.getBuffer(), count_offset,
+				MAX_PER_BUCKET, sizeof(VkDrawIndexedIndirectCommand));
+		}
+	}
+}
+
 } // namespace ve

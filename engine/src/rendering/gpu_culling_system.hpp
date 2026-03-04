@@ -23,6 +23,7 @@ struct CullParams {
 	alignas(16) glm::vec4 frustum_planes[6];
 	alignas(16) glm::mat4 view_proj;
 	alignas(16) glm::mat4 view;
+	alignas(16) glm::mat4 prev_view{1.0f};  // previous frame's view matrix for Hi-Z reprojection
 	alignas(4) float p00;              // projection[0][0] (horizontal focal length)
 	alignas(4) float p11;              // projection[1][1] (vertical focal length)
 	alignas(4) float p22;              // projection[2][2] (depth mapping)
@@ -33,7 +34,9 @@ struct CullParams {
 	alignas(4) uint32_t hiz_mip_count;
 	alignas(8) glm::vec2 hiz_size;     // mip 0 resolution
 	alignas(4) int32_t  lod_bias;      // 0 for main pass; cascade_index for shadow passes
-	alignas(4) uint32_t _pad{};
+	alignas(4) uint32_t max_meshlet_draws{MAX_MESHLET_DRAWS}; // meshlet pass-2 per-bucket capacity
+	alignas(16) glm::vec4 camera_pos;  // xyz = world-space camera position (for cone cull)
+	alignas(4) uint32_t bucket_count{MESHLET_BUCKET_COUNT};   // meshlet pass-2 bucket count
 };
 
 class VENGINE_API GpuCullingSystem {
@@ -130,6 +133,9 @@ private:
 	bool m_compaction_enabled = false;
 	glm::vec2 m_hiz_size{0.0f};
 	uint32_t m_hiz_mip_count = 0;
+
+	// Per-frame camera view matrices for Hi-Z reprojection.
+	std::array<glm::mat4, MAX_FRAMES_IN_FLIGHT> m_frame_views{glm::mat4{1.0f}, glm::mat4{1.0f}};
 
 	// Compute pipeline
 	std::unique_ptr<VeDescriptorSetLayout> m_compute_set_layout;

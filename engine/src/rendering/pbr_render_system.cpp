@@ -402,6 +402,70 @@ void PbrRenderSystem::renderOpaqueGpuCulled(
 	}
 }
 
+void PbrRenderSystem::renderOpaqueGpuCulledMeshlets(
+	VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
+	const VeBuffer& meshlet_indirect, const VeBuffer& draw_counts,
+	const uint32_t* cpu_draw_counts,
+	const vk::raii::DescriptorSet* global_set_override) const {
+
+	if (!m_mega_buffer->hasMeshletData())
+		return;
+
+	auto& cmd = frame_info.cmd();
+	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
+	bool mask = frame_info.shadow_mask_active;
+	auto& pipeline = mask ? m_pipelines_mask[mode] : m_pipelines[mode];
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
+
+	auto& global_set = global_set_override ? *global_set_override : frame_info.global_descriptor_set;
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		0, {*global_set}, {});
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		1, {*bindless_set}, {});
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		2, {*frame_info.shadow_descriptor_set}, {});
+	if (frame_info.shadow_mask_descriptor_set)
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+			3, {**frame_info.shadow_mask_descriptor_set}, {});
+	if (frame_info.cluster_descriptor_set)
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+			4, {**frame_info.cluster_descriptor_set}, {});
+	if (frame_info.ao_descriptor_set)
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+			5, {**frame_info.ao_descriptor_set}, {});
+
+	m_mega_buffer->bindMeshletIbo(cmd);
+	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
+	cmd.setDepthWriteEnable(VK_TRUE);
+
+	constexpr uint32_t MAX_PER_BUCKET = MAX_MESHLET_DRAWS / MESHLET_BUCKET_COUNT;
+
+	constexpr uint32_t OPAQUE_MASK_BUCKETS = 4; // buckets 0..3 only; transparent buckets 4-5 handled by WBOIT
+	for (uint32_t bucket = 0; bucket < OPAQUE_MASK_BUCKETS; bucket++) {
+		bool is_mask_bucket  = (bucket >= 2);
+		bool is_double_sided = (bucket & 1) != 0;
+		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
+		cmd.setDepthCompareOp(
+			(m_depth_prepass_active || is_mask_bucket)
+				? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
+
+		auto buf_offset   = static_cast<vk::DeviceSize>(bucket) * MAX_PER_BUCKET
+		                    * sizeof(VkDrawIndexedIndirectCommand);
+		if (cpu_draw_counts) {
+			uint32_t count = std::min(cpu_draw_counts[bucket] * 2 + 1024, MAX_PER_BUCKET);
+			cmd.drawIndexedIndirect(
+				*meshlet_indirect.getBuffer(), buf_offset,
+				count, sizeof(VkDrawIndexedIndirectCommand));
+		} else {
+			auto count_offset = static_cast<vk::DeviceSize>(bucket) * sizeof(uint32_t);
+			cmd.drawIndexedIndirectCount(
+				*meshlet_indirect.getBuffer(), buf_offset,
+				*draw_counts.getBuffer(), count_offset,
+				MAX_PER_BUCKET, sizeof(VkDrawIndexedIndirectCommand));
+		}
+	}
+}
+
 void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set) const {
 	if (m_total_indirect_count == 0 || !m_mega_buffer->isValid())
 		return;
@@ -688,6 +752,50 @@ void PbrRenderSystem::renderTransparentWboit(
 			cmd.drawIndexedIndirect(
 				*indirect_buffer.getBuffer(), offset,
 				bucket_group_counts[bucket], sizeof(VkDrawIndexedIndirectCommand));
+		}
+	}
+}
+
+void PbrRenderSystem::renderTransparentWboitMeshlets(
+	VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
+	const VeBuffer& meshlet_indirect, const VeBuffer& draw_counts,
+	const uint32_t* cpu_draw_counts,
+	const vk::raii::DescriptorSet* global_set_override) const {
+
+	if (!m_mega_buffer->hasMeshletData() || !m_wboit_pipelines[0])
+		return;
+
+	auto& cmd = frame_info.cmd();
+	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_wboit_pipelines[mode]->getPipeline());
+
+	bindPbrResources(frame_info, bindless_set, global_set_override);
+	m_mega_buffer->bindMeshletIbo(cmd);
+	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
+	cmd.setDepthWriteEnable(VK_FALSE);
+	cmd.setDepthCompareOp(vk::CompareOp::eGreaterOrEqual);
+
+	constexpr uint32_t MAX_PER_BUCKET = MAX_MESHLET_DRAWS / MESHLET_BUCKET_COUNT;
+
+	// Buckets 4-5: transparent back-face / transparent double-sided
+	for (uint32_t bucket = 4; bucket < MESHLET_BUCKET_COUNT; bucket++) {
+		bool is_double_sided = (bucket & 1) != 0;
+		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
+
+		auto buf_offset = static_cast<vk::DeviceSize>(bucket) * MAX_PER_BUCKET
+		                  * sizeof(VkDrawIndexedIndirectCommand);
+		if (cpu_draw_counts) {
+			uint32_t count = std::min(cpu_draw_counts[bucket] * 2 + 1024, MAX_PER_BUCKET);
+			if (count == 0) continue;
+			cmd.drawIndexedIndirect(
+				*meshlet_indirect.getBuffer(), buf_offset,
+				count, sizeof(VkDrawIndexedIndirectCommand));
+		} else {
+			auto count_offset = static_cast<vk::DeviceSize>(bucket) * sizeof(uint32_t);
+			cmd.drawIndexedIndirectCount(
+				*meshlet_indirect.getBuffer(), buf_offset,
+				*draw_counts.getBuffer(), count_offset,
+				MAX_PER_BUCKET, sizeof(VkDrawIndexedIndirectCommand));
 		}
 	}
 }

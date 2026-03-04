@@ -20,7 +20,7 @@ auto makeNullArray() {
 
 // lights
 constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.04f); // w indicates light intensity
-constexpr uint32_t MAX_LIGHTS = 160; // requirded for UBO alignment
+constexpr uint32_t MAX_LIGHTS = 320; // requirded for UBO alignment
 constexpr uint32_t MAX_POINT_SHADOW_LIGHTS = 2; // Max point lights that can cast shadows
 constexpr uint32_t MAX_SPOT_LIGHTS = 32;
 constexpr uint32_t MAX_SPOT_SHADOW_LIGHTS = 2;
@@ -83,6 +83,18 @@ constexpr uint32_t MAX_LOD_INSTANCE_SLOTS = MAX_GPU_OBJECTS * MAX_LOD_LEVELS; //
 
 // Hi-Z occlusion culling
 constexpr uint32_t MAX_HIZ_MIPS = 13;
+
+// Meshlet culling (keep in sync with ve_constants.slangh)
+constexpr uint32_t MESHLET_MAX_VERTICES        = 64;
+constexpr uint32_t MESHLET_MAX_TRIANGLES       = 124;
+constexpr uint32_t MAX_MESHLET_DRAWS           = 262144*4;   // total indirect commands across all buckets
+constexpr uint32_t MESHLET_CULL_WORKGROUP_SIZE = 256;
+constexpr uint32_t MESHLET_BUCKET_COUNT        = 6;        // 0=opaque-back, 1=opaque-double, 2=mask-back, 3=mask-double, 4=blend-back, 5=blend-double
+constexpr uint32_t MESHLET_SHADOW_BUCKET_COUNT = 4;        // shadows skip transparent buckets 4-5
+constexpr uint32_t MAX_MESHLET_SHADOW_DRAWS    = 262144*4;   // total indirect commands across all shadow buckets per layer
+// gpu_id and local meshlet index are packed into VkDrawIndexedIndirectCommand::firstInstance as two 16-bit fields.
+static_assert(MAX_GPU_OBJECTS <= 65536,
+	"MAX_GPU_OBJECTS exceeds 16-bit range; meshlet firstInstance packing would corrupt gpu_id");
 
 constexpr bool MSAA_ENABLED = true;
 #ifdef __APPLE__

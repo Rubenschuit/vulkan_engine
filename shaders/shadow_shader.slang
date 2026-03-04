@@ -42,7 +42,10 @@ VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID)
 	VertexOutput output;
 
 	float4 pos = float4(input.in_pos, 1.0); // homogeneous coordinates
-	float4 world_pos = mul(instances[instance_id + push_constants.instance_offset].transform, pos);
+	// Meshlet path packs gpu_id (low 16) + meshlet_idx (high 16) into firstInstance;
+	// GPU-cull path writes gpu_id directly. Masking is a no-op when gpu_id < 65536.
+	uint gpu_id = (instance_id & 0xFFFFu) + push_constants.instance_offset;
+	float4 world_pos = mul(instances[gpu_id].transform, pos);
 
 	output.pos = mul(ubo.projection_view, world_pos); // pre-computed projection and view
 

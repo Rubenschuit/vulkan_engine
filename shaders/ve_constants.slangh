@@ -2,7 +2,7 @@
 #define VE_CONSTANTS_SLANGH
 
 // Keep in sync with engine/src/ve_config.hpp
-#define MAX_LIGHTS          160
+#define MAX_LIGHTS          320
 #define MAX_SHADOW_LIGHTS   4
 #define MAX_DIR_LIGHTS      4
 #define MAX_SPOT_LIGHTS     32
@@ -14,11 +14,21 @@
 #define MAX_LIGHTS_PER_CLUSTER   64
 #define MAX_CLUSTER_LIGHTS       1024
 
+#define multi 4
 // GPU-driven culling (keep in sync with ve_config.hpp)
 #define MAX_LOD_LEVELS           4
 #define MAX_GPU_OBJECTS          16384*4
 #define MAX_HIZ_MIPS             13
 #define GPU_CULL_BUCKET_COUNT    6
+
+// Meshlet culling (keep in sync with ve_config.hpp)
+#define MAX_MESHLET_DRAWS           262144*multi
+#define MESHLET_CULL_WORKGROUP_SIZE 256
+#define MESHLET_MAX_VERTICES        64
+#define MESHLET_MAX_TRIANGLES       124
+#define MESHLET_BUCKET_COUNT        6
+#define MESHLET_SHADOW_BUCKET_COUNT 4
+#define MAX_MESHLET_SHADOW_DRAWS    262144*multi
 
 // LOD screen-space thresholds (keep in sync with LOD_SCREEN_THRESHOLDS in ve_config.hpp)
 static const float LOD_SCREEN_THRESHOLDS[3] = { 0.70, 0.35, 0.15 };

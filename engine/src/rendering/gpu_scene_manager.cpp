@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "rendering/gpu_scene_manager.hpp"
 #include "rendering/pbr_mega_buffer.hpp"
+#include "rendering/meshlet_data.hpp"
 #include "rendering/material_ssbo_manager.hpp"
 #include "scene/ve_registry.hpp"
 #include "scene/ve_component.hpp"
@@ -71,11 +72,23 @@ GpuSceneManager::GpuSceneManager(VeDevice& device) : m_ve_device(device) {
 			sizeof(VkDrawIndexedIndirectCommand), MAX_DRAW_GROUPS,
 			vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst,
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+		m_meshlet_object_info_buffers[i] = std::make_unique<VeBuffer>(m_ve_device,
+			sizeof(MeshletObjectInfo), MAX_GPU_OBJECTS,
+			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+		m_meshlet_object_info_staging[i] = std::make_unique<VeBuffer>(m_ve_device,
+			sizeof(MeshletObjectInfo), MAX_GPU_OBJECTS,
+			vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		m_meshlet_object_info_staging[i]->map();
 	}
 
 	m_dirty_frame.resize(MAX_GPU_OBJECTS, 0);
 	m_object_lod_group_ids.resize(MAX_GPU_OBJECTS);
 	m_cpu_lod_data.resize(MAX_GPU_OBJECTS);
+	m_meshlet_object_info_cpu.resize(MAX_GPU_OBJECTS);
 	m_is_transparent_by_gpu_id.resize(MAX_GPU_OBJECTS, false);
 }
 
@@ -158,11 +171,17 @@ void GpuSceneManager::unregisterObject(Entity entity) {
 	m_entity_to_gpu_id.erase(it);
 	m_active_count--;
 
-	// Zero out the slot in staging so GPU culling skips it
+	// Zero out the slots in staging so GPU culling skips them
 	ObjectDataGPU zero{};
 	vk::DeviceSize offset = static_cast<vk::DeviceSize>(gpu_id) * sizeof(ObjectDataGPU);
 	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++)
 		m_object_data_staging[f]->writeToBuffer(&zero, sizeof(ObjectDataGPU), offset);
+
+	MeshletObjectInfo moi_zero{};
+	m_meshlet_object_info_cpu[gpu_id] = moi_zero;
+	vk::DeviceSize moi_offset = static_cast<vk::DeviceSize>(gpu_id) * sizeof(MeshletObjectInfo);
+	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++)
+		m_meshlet_object_info_staging[f]->writeToBuffer(&moi_zero, sizeof(MeshletObjectInfo), moi_offset);
 	m_object_data_dirty.fill(true);
 	m_template_needs_copy.fill(true);
 	m_draw_groups_dirty = true;
@@ -224,6 +243,14 @@ void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Regist
 			               *m_object_data_buffers[current_frame]->getBuffer(),
 			               full_copy);
 			did_object_copy = true;
+		}
+
+		// Upload meshlet object info in lockstep with object data
+		vk::DeviceSize moi_size = static_cast<vk::DeviceSize>(m_next_id) * sizeof(MeshletObjectInfo);
+		if (moi_size > 0) {
+			cmd.copyBuffer(*m_meshlet_object_info_staging[current_frame]->getBuffer(),
+			               *m_meshlet_object_info_buffers[current_frame]->getBuffer(),
+			               vk::BufferCopy{0, 0, moi_size});
 		}
 
 		// Rebuild draw groups and active IDs
@@ -600,6 +627,22 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 	vk::DeviceSize offset = static_cast<vk::DeviceSize>(gpu_id) * sizeof(ObjectDataGPU);
 	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++)
 		m_object_data_staging[f]->writeToBuffer(&obj, sizeof(ObjectDataGPU), offset);
+
+	// Populate MeshletObjectInfo for this gpu_id
+	MeshletObjectInfo& moi = m_meshlet_object_info_cpu[gpu_id];
+	moi = {};
+	const auto* meshlet_entry = mega_buffer.getMeshletEntry(mesh.getMesh());
+	if (meshlet_entry) {
+		for (uint32_t l = 0; l < MAX_LOD_LEVELS; l++) {
+			if (l < meshlet_entry->lod_entries.size()) {
+				moi.meshlet_offset[l] = meshlet_entry->lod_entries[l].meshlet_offset;
+				moi.meshlet_count[l]  = meshlet_entry->lod_entries[l].meshlet_count;
+			}
+		}
+	}
+	vk::DeviceSize moi_offset = static_cast<vk::DeviceSize>(gpu_id) * sizeof(MeshletObjectInfo);
+	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++)
+		m_meshlet_object_info_staging[f]->writeToBuffer(&moi, sizeof(MeshletObjectInfo), moi_offset);
 }
 
 void GpuSceneManager::writeTransform(uint32_t gpu_id, uint32_t frame,

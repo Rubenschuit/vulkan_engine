@@ -8,7 +8,7 @@
 
 // ============================================================================
 // Bindless textures (set 1): sampler at binding 0, texture array at binding 1
-// ============================================================================
+// ============================================================================3
 
 [vk::binding(0, 1)]
 SamplerState bindless_sampler;
@@ -36,6 +36,7 @@ struct VertexOutput {
 	float4 shadow_coord[MAX_SHADOW_LIGHTS];
 	nointerpolation uint material_index;
 	nointerpolation uint lod_level;
+	nointerpolation uint meshlet_id;
 };
 
 // ============================================================================
@@ -46,9 +47,15 @@ struct VertexOutput {
 VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID) {
     VertexOutput output;
 
-	InstanceData inst = instances[instance_id];
+	// Meshlet path packs (gpu_id | meshlet_local << 16) into firstInstance.
+	// Non-meshlet path uses firstInstance < 65536, so upper bits are zero.
+	uint gpu_id = instance_id & 0xFFFFu;
+	uint meshlet_local_id = instance_id >> 16u;
+
+	InstanceData inst = instances[gpu_id];
 	output.material_index = inst.material_index;
 	output.lod_level = inst.lod_level;
+	output.meshlet_id = meshlet_local_id;
 
 	float4 pos = float4(input.in_pos, 1.0);
 	float4 world_pos = mul(inst.transform, pos);
@@ -160,6 +167,8 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		return float4(0.5 * B + 0.5, 1.0f);
 	else if (ubo.render_mode == RenderMode::LOD_LEVEL)
 		return float4(lodDebugColor(albedo.rgb, in_vert.lod_level), albedo.a);
+	else if (ubo.render_mode == RenderMode::MESHLET_ID)
+		return float4(meshletDebugColor(albedo.rgb, in_vert.meshlet_id), albedo.a);
 
 	float4 mr = bindless_textures[NonUniformResourceIndex(mat.metallic_roughness_index)]
 		.Sample(bindless_sampler, tex_coord);
@@ -182,7 +191,9 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	} else {
 		metallic = mr.b * mat.params.x;
 		roughness = mr.g * mat.params.y;
-		F0 = lerp(mat.extra.xyz, albedo.rgb, metallic);
+		float ior = mat.extra.w;
+		float f0_dielectric = ((ior - 1.0) / (ior + 1.0)) * ((ior - 1.0) / (ior + 1.0));
+		F0 = lerp(float3(f0_dielectric), albedo.rgb, metallic);
 	}
 	roughness = max(roughness, 0.045);
 	float transmission = mat.params.w;

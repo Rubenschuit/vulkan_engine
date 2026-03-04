@@ -15,6 +15,32 @@
 
 namespace ve {
 
+static const char* textureFormatName(vk::Format fmt) {
+	switch (fmt) {
+		case vk::Format::eR8G8B8A8Srgb:       return "RGBA8 sRGB";
+		case vk::Format::eR8G8B8A8Unorm:       return "RGBA8";
+		case vk::Format::eR8G8B8Srgb:          return "RGB8 sRGB";
+		case vk::Format::eR8G8B8Unorm:         return "RGB8";
+		case vk::Format::eBc1RgbSrgbBlock:     return "BC1 sRGB";
+		case vk::Format::eBc1RgbUnormBlock:    return "BC1";
+		case vk::Format::eBc1RgbaSrgbBlock:    return "BC1a sRGB";
+		case vk::Format::eBc1RgbaUnormBlock:   return "BC1a";
+		case vk::Format::eBc3SrgbBlock:        return "BC3 sRGB";
+		case vk::Format::eBc3UnormBlock:       return "BC3";
+		case vk::Format::eBc4UnormBlock:       return "BC4";
+		case vk::Format::eBc5UnormBlock:       return "BC5";
+		case vk::Format::eBc7SrgbBlock:        return "BC7 sRGB";
+		case vk::Format::eBc7UnormBlock:       return "BC7";
+		case vk::Format::eAstc4x4SrgbBlock:   return "ASTC 4x4 sRGB";
+		case vk::Format::eAstc4x4UnormBlock:  return "ASTC 4x4";
+		case vk::Format::eAstc6x6SrgbBlock:   return "ASTC 6x6 sRGB";
+		case vk::Format::eAstc6x6UnormBlock:  return "ASTC 6x6";
+		case vk::Format::eAstc8x8SrgbBlock:   return "ASTC 8x8 sRGB";
+		case vk::Format::eAstc8x8UnormBlock:  return "ASTC 8x8";
+		default:                                return "Other";
+	}
+}
+
 InspectorPanel::~InspectorPanel() {
 	clearTextureCache();
 }
@@ -66,13 +92,26 @@ void InspectorPanel::renderTextureSlot(const char* label, const std::string& id,
 	ImGui::TableNextColumn();
 	if (texture) {
 		VkDescriptorSet ds = getOrCreateTextureDescriptor(id, texture);
-		if (ds != VK_NULL_HANDLE)
+		if (ds != VK_NULL_HANDLE) {
 			ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(ds)),
 			             ImVec2(thumb_size, thumb_size));
-		else
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("%s", id.c_str());
+		} else {
 			ImGui::TextDisabled("[failed]");
+		}
+		ImGui::TableNextColumn();
+		uint32_t w = texture->getWidth();
+		uint32_t h = texture->getHeight();
+		uint32_t mips = texture->getMipLevels();
+		if (w > 0 && h > 0) {
+			ImGui::Text("%ux%u", w, h);
+			ImGui::Text("%u %s", mips, mips == 1 ? "mip" : "mips");
+			ImGui::TextDisabled("%s", textureFormatName(texture->getFormat()));
+		}
 	} else {
 		ImGui::TextDisabled("[none]");
+		ImGui::TableNextColumn();
 	}
 }
 
@@ -483,6 +522,7 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 	// Mesh info (read-only)
 	VeMesh* m = mesh.getMesh();
 	if (m) {
+		ImGui::TextDisabled("%s", m->getId().c_str());
 		ImGui::Text("Vertices: %u  Indices: %u  LODs: %u",
 			m->getVertexCount(), m->getIndexCount(), m->getLodCount());
 	} else {
@@ -503,6 +543,8 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 
 	if (!ImGui::TreeNode("Material"))
 		return;
+
+	ImGui::TextDisabled("%s", mat->getId().c_str());
 
 	constexpr float mat_label_w = 85.0f;
 
@@ -588,9 +630,10 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 
 	// Texture thumbnails
 	if (ImGui::TreeNode("Textures")) {
-		if (ImGui::BeginTable("##TexTable", 2, ImGuiTableFlags_SizingFixedFit)) {
-			ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+		if (ImGui::BeginTable("##TexTable", 3, ImGuiTableFlags_SizingFixedFit)) {
+			ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 70.0f);
 			ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthFixed, 52.0f);
+			ImGui::TableSetupColumn("Info", ImGuiTableColumnFlags_WidthStretch);
 			renderTextureSlot("Albedo",    mat->getAlbedoTexture().getId(), mat->getAlbedoTexture().get());
 			renderTextureSlot("Normal",    mat->getNormalTexture().getId(), mat->getNormalTexture().get());
 			renderTextureSlot("Metal/Rgh", mat->getMetallicRoughnessTexture().getId(), mat->getMetallicRoughnessTexture().get());

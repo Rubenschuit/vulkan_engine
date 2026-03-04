@@ -56,6 +56,10 @@ public:
 	                           const VeBuffer* compacted_buffer = nullptr,
 	                           const VeBuffer* compact_count_buffer = nullptr,
 	                           const vk::raii::DescriptorSet* global_set_override = nullptr) const;
+	void renderOpaqueGpuCulledMeshlets(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
+	                                   const VeBuffer& meshlet_indirect, const VeBuffer& draw_counts,
+	                                   const uint32_t* cpu_draw_counts = nullptr,
+	                                   const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 	void renderTransparent(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
 	                       const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 
@@ -69,6 +73,10 @@ public:
 	                            const VeBuffer* compacted_buffer = nullptr,
 	                            const VeBuffer* compact_count_buffer = nullptr,
 	                            const vk::raii::DescriptorSet* global_set_override = nullptr) const;
+	void renderTransparentWboitMeshlets(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
+	                                    const VeBuffer& meshlet_indirect, const VeBuffer& draw_counts,
+	                                    const uint32_t* cpu_draw_counts = nullptr,
+	                                    const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 	void compositeWboit(vk::raii::CommandBuffer& command_buffer) const;
 	void recreateWboit(const vk::raii::ImageView& accum_view, const vk::raii::ImageView& revealage_view,
 	                   vk::Format resolve_format);

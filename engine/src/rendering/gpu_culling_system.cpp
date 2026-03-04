@@ -426,6 +426,7 @@ void GpuCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame
 		params.frustum_planes[i] = cpu_planes[i].plane;
 	params.view_proj = vp;
 	params.view = frame_info.camera.getView();
+	params.prev_view = m_frame_views[(frame + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT];
 	params.p00 = proj[0][0];
 	params.p11 = proj[1][1];
 	params.p22 = proj[2][2];
@@ -438,6 +439,7 @@ void GpuCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame
 		params.hiz_mip_count = m_hiz_mip_count;
 	}
 	m_cull_param_ubos[frame]->writeToBuffer(&params);
+	m_frame_views[frame] = params.view;
 
 	// Copy pre-filled indirect commands from staging (resets instanceCount to 0)
 	copyIndirectStaging(cmd, scene_mgr, frame, *m_indirect_buffers[frame]);
@@ -593,6 +595,7 @@ void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
 	if (camera != nullptr && m_hiz_enabled) {
 		params.hiz_enabled = 1;
 		params.view = camera->getView();
+		params.prev_view = m_frame_views[(frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT];
 		const glm::mat4& proj = camera->getProj();
 		params.p00 = proj[0][0];
 		params.p11 = proj[1][1];

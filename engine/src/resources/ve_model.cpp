@@ -9,6 +9,7 @@
 
 #include <mikktspace.h>
 #include <meshoptimizer.h>
+#include "rendering/meshlet_data.hpp"
 
 #include <algorithm>
 #include <numeric>
@@ -648,8 +649,8 @@ static std::string geometryKey(const tinygltf::Primitive& primitive, size_t mate
 	return key;
 }
 
-// Create a VeMesh for a gltf primitive. Converts glTF Y-up to engine Z-up via (x,-z,y) to preserve handedness.
-// Requires POSITION and NORMAL. If primitive.indices < 0, generates sequential indices.
+// Meshlet data generation is now in VeMesh::buildMeshletData().
+
 // When TANGENT is missing, MikkTSpace generates tangents before vertex deduplication.
 // If out_center_extent is non-null, writes (center, diagonal extent) from deduplicated vertices.
 static ResourceHandle<VeMesh> createPrimitiveMesh(
@@ -904,9 +905,15 @@ static ResourceHandle<VeMesh> createPrimitiveMesh(
 		lod_indices.push_back(std::move(simplified));
 	}
 
+	ResourceHandle<VeMesh> handle;
 	if (lod_indices.empty())
-		return resource_manager.createMesh(mesh_id, out_vertices, out_indices);
-	return resource_manager.createMesh(mesh_id, out_vertices, out_indices, lod_indices);
+		handle = resource_manager.createMesh(mesh_id, out_vertices, out_indices);
+	else
+		handle = resource_manager.createMesh(mesh_id, out_vertices, out_indices, lod_indices);
+
+	if (handle)
+		handle.get()->setMeshletData(VeMesh::buildMeshletData(out_vertices, out_indices, lod_indices));
+	return handle;
 }
 
 // Load a glTF/GLB file via tinygltf. Returns true on success.

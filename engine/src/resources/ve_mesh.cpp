@@ -1,7 +1,10 @@
 #include "pch.hpp"
 #include "resources/ve_mesh.hpp"
+#include "rendering/meshlet_data.hpp"
+#include "ve_config.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <meshoptimizer.h>
 
 namespace ve {
 
@@ -55,6 +58,72 @@ VeMesh::VeMesh(VeDevice& device, const std::string& resource_id,
 
 VeMesh::~VeMesh() {
 	unload();
+}
+
+void VeMesh::setMeshletData(std::unique_ptr<CpuMeshletData> data) {
+	m_meshlet_data = std::move(data);
+}
+
+std::unique_ptr<CpuMeshletData> VeMesh::buildMeshletData(
+	const std::vector<Vertex>& vertices,
+	const std::vector<uint32_t>& base_indices,
+	const std::vector<std::vector<uint32_t>>& lod_indices) {
+
+	if (vertices.empty() || base_indices.empty())
+		return nullptr;
+
+	auto data = std::make_unique<CpuMeshletData>();
+	const float* positions = &vertices[0].pos.x;
+	size_t vertex_count = vertices.size();
+
+	std::vector<const std::vector<uint32_t>*> all_lods;
+	all_lods.push_back(&base_indices);
+	for (auto& li : lod_indices)
+		all_lods.push_back(&li);
+
+	for (auto* idx_buf : all_lods) {
+		CpuMeshletLod lod_data;
+		size_t index_count = idx_buf->size();
+		size_t max_m = meshopt_buildMeshletsBound(index_count, MESHLET_MAX_VERTICES, MESHLET_MAX_TRIANGLES);
+		std::vector<meshopt_Meshlet> meshlets(max_m);
+		std::vector<unsigned int> m_verts(max_m * MESHLET_MAX_VERTICES);
+		std::vector<unsigned char> m_tris(max_m * MESHLET_MAX_TRIANGLES * 3);
+
+		size_t m_count = meshopt_buildMeshlets(
+			meshlets.data(), m_verts.data(), m_tris.data(),
+			idx_buf->data(), index_count,
+			positions, vertex_count, sizeof(Vertex),
+			MESHLET_MAX_VERTICES, MESHLET_MAX_TRIANGLES, 0.5f);
+		meshlets.resize(m_count);
+
+		uint32_t local_index_offset = 0;
+		for (size_t mi = 0; mi < m_count; mi++) {
+			const auto& m = meshlets[mi];
+			meshopt_Bounds b = meshopt_computeMeshletBounds(
+				m_verts.data() + m.vertex_offset,
+				m_tris.data() + m.triangle_offset,
+				m.triangle_count,
+				positions, vertex_count, sizeof(Vertex));
+
+			uint32_t tri_index_count = m.triangle_count * 3;
+			lod_data.meshlets.push_back({
+				.bounding_sphere  = glm::vec4(b.center[0], b.center[1], b.center[2], b.radius),
+				.cone_apex        = glm::vec4(b.cone_apex[0], b.cone_apex[1], b.cone_apex[2], 0.0f),
+				.cone_axis_cutoff = glm::vec4(b.cone_axis[0], b.cone_axis[1], b.cone_axis[2], b.cone_cutoff),
+				.index_offset     = local_index_offset,
+				.index_count      = tri_index_count,
+				.vertex_offset    = 0,
+				._pad             = 0,
+			});
+
+			for (uint32_t ti = 0; ti < m.triangle_count; ti++)
+				for (uint32_t j = 0; j < 3; j++)
+					lod_data.indices.push_back(m_verts[m.vertex_offset + m_tris[m.triangle_offset + ti * 3 + j]]);
+			local_index_offset += tri_index_count;
+		}
+		data->lods.push_back(std::move(lod_data));
+	}
+	return data;
 }
 
 bool VeMesh::doLoad() {

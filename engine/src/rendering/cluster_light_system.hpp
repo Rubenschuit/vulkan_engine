@@ -30,21 +30,20 @@ public:
 	ClusterLightSystem(const ClusterLightSystem&) = delete;
 	ClusterLightSystem& operator=(const ClusterLightSystem&) = delete;
 
-	/// Upload point light data from the ECS registry into the light SSBO.
-	/// Must be called after LightSystem::updateUniformBuffer() so light order matches.
-	/// Returns the number of lights uploaded.
+	// Upload point light data from the ECS registry into the light SSBO.
+	// Must be called after LightSystem::updateUniformBuffer() so light order matches.
+	// Returns the number of lights uploaded.
+	// TODO: decouple this
 	uint32_t uploadLightData(VeFrameInfo& frame_info);
 
-	/// Record the cluster assignment compute dispatch on the compute command buffer.
+	// Record the cluster assignment compute dispatch on the compute command buffer.
 	void dispatch(VeFrameInfo& frame_info, const VeCamera& camera, vk::Extent2D screen_extent);
 
-	/// Recreate buffers when screen resolution changes.
 	void recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D screen_extent);
 
 	void setEnabled(bool enabled) { m_enabled = enabled; }
 	bool isEnabled() const { return m_enabled; }
 
-	/// Descriptor set layout for Set 4 (cluster data for PBR/simple fragment shaders)
 	const vk::raii::DescriptorSetLayout& getOutputSetLayout() const {
 		return m_output_set_layout->getDescriptorSetLayout();
 	}
@@ -68,21 +67,21 @@ private:
 	uint32_t m_last_light_count = 0;       // total (point + spot), set by uploadLightData()
 	uint32_t m_last_point_light_count = 0; // point lights only, for cluster_params.num_point_lights
 
-	// Grid dimensions (recomputed on resize)
+	// Grid dimensions
 	uint32_t m_tiles_x = 0;
 	uint32_t m_tiles_y = 0;
 	uint32_t m_total_clusters = 0;
 
 	// Per-frame SSBOs
-	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_light_ssbos;           // PointLight[]
-	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_cluster_count_ssbos;    // uvec2[] (offset, count)
-	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_light_index_ssbos;      // uint[] (packed indices)
-	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_atomic_counter_ssbos;   // uint (global index counter)
-	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_cluster_param_ubos;     // ClusterParams
+	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_light_ssbos;
+	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_cluster_count_ssbos;
+	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_light_index_ssbos;
+	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_atomic_counter_ssbos;
+	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_cluster_param_ubos;
 
 	// Descriptor set layouts
-	std::unique_ptr<VeDescriptorSetLayout> m_compute_set_layout;  // Set 1 in compute pipeline
-	std::unique_ptr<VeDescriptorSetLayout> m_output_set_layout;   // Set 4 in graphics pipeline
+	std::unique_ptr<VeDescriptorSetLayout> m_compute_set_layout;
+	std::unique_ptr<VeDescriptorSetLayout> m_output_set_layout;
 
 	// Pipeline
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};

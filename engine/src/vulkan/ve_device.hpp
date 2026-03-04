@@ -103,7 +103,7 @@ public:
 	bool hasHdrColorSpaceExtension() const { return m_has_hdr_instance_extension; }
 	bool supportsBC() const { return m_supports_bc; }
 	bool supportsASTC() const { return m_supports_astc; }
-	bool supportsDrawIndirectCount() const { return m_supports_draw_indirect_count; }
+	bool supportsDrawIndirectCount() const {return m_supports_draw_indirect_count; }
 	bool supportsCalibratedTimestamps() const { return m_supports_calibrated_timestamps; }
 	// Single-time command buffer helpers (select queue/pool)
 	std::unique_ptr<vk::raii::CommandBuffer> beginSingleTimeCommands(QueueKind kind = QueueKind::Graphics);
@@ -147,7 +147,7 @@ private:
 
 	// MSAA samples
 	vk::SampleCountFlagBits m_max_msaa_samples = vk::SampleCountFlagBits::e1; // set in pickPhysicalDevice
-	
+
 	bool m_has_hdr_instance_extension = false;
 	bool m_supports_bc = false;
 	bool m_supports_astc = false;

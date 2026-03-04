@@ -45,6 +45,11 @@ public:
 	                     const VeBuffer* compacted_buffer = nullptr,
 	                     const VeBuffer* compact_count_buffer = nullptr,
 	                     const vk::raii::DescriptorSet* global_set_override = nullptr) const;
+	void renderGpuCulledMeshlets(VeFrameInfo& frame_info,
+	                              PbrMegaBuffer& mega_buffer,
+	                              const VeBuffer& meshlet_indirect, const VeBuffer& draw_counts,
+	                              const uint32_t* cpu_draw_counts = nullptr,
+	                              const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 
 	void recreatePipeline(vk::SampleCountFlagBits sample_count) {
 		m_ve_pipeline.reset();

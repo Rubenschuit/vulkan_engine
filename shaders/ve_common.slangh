@@ -45,6 +45,7 @@ enum RenderMode {
 	CSM_CASCADE = 6,
 	CLUSTER_HEATMAP = 7,
 	LOD_LEVEL = 8,
+	MESHLET_ID = 9,
 };
 
 // ============================================================================
@@ -491,6 +492,18 @@ float3 lodDebugColor(float3 albedo, uint lod_level) {
 		float3(1.0, 0.2, 0.2),  // red    = LOD 3 (lowest detail)
 	};
 	return albedo * LOD_COLORS[min(lod_level, 3u)];
+}
+
+// Meshlet debug visualization: hash-based coloring per draw command
+float3 meshletDebugColor(float3 albedo, uint meshlet_id) {
+	uint h = meshlet_id;
+	h = ((h >> 16) ^ h) * 0x45d9f3bu;
+	h = ((h >> 16) ^ h) * 0x45d9f3bu;
+	h = (h >> 16) ^ h;
+	float r = float((h >> 0) & 0xFF) / 255.0;
+	float g = float((h >> 8) & 0xFF) / 255.0;
+	float b = float((h >> 16) & 0xFF) / 255.0;
+	return max(float3(r, g, b), 0.15);
 }
 
 #endif
