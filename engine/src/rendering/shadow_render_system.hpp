@@ -165,6 +165,16 @@ private:
 	};
 	std::unordered_map<VeMesh*, MeshMegaEntry> m_mega_entries;
 
+	// Per-cascade dirty tracking
+	struct CascadeScrollState {
+		glm::mat4 prev_view{0.0f};
+		glm::mat4 prev_proj{0.0f};
+		bool valid = false;
+		bool dirty = true;
+	};
+	std::array<CascadeScrollState, NUM_CSM_CASCADES> m_cascade_state;
+	bool m_force_full_rerender = true; // set on scene load / drawable invalidation
+
 	// GPU-culled CSM
 	std::vector<std::vector<vk::raii::DescriptorSet>> m_gpu_cascade_descriptor_sets;
 	std::vector<std::vector<std::unique_ptr<VeBuffer>>> m_csm_cascade_ubos;

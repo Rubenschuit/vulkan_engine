@@ -356,7 +356,7 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBuffer
 		);
 	};
 
-	// CSM cascades: write per-cascade ShadowPassUBOs
+	// CSM cascades: write per-cascade ShadowPassUBOs + dirty tracking
 	if (csm_data.active_cascade_count > 0) {
 		for (uint32_t cascade = 0; cascade < csm_data.active_cascade_count; cascade++) {
 			m_light_views[frame_index][cascade] = csm_data.light_view[cascade];
@@ -367,6 +367,19 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBuffer
 			cascade_ubo.proj = csm_data.light_proj[cascade];
 			cascade_ubo.projection_view = cascade_ubo.proj * cascade_ubo.view;
 
+			// Dirty tracking: skip cascades whose matrices haven't changed
+			auto& state = m_cascade_state[cascade];
+			if (!m_force_full_rerender && state.valid
+				&& state.prev_view == cascade_ubo.view
+				&& state.prev_proj == cascade_ubo.proj) {
+				state.dirty = false;
+			} else {
+				state.dirty = true;
+				state.prev_view = cascade_ubo.view;
+				state.prev_proj = cascade_ubo.proj;
+				state.valid = true;
+			}
+
 			// Per-layer UBO (used by CPU shadow path descriptor sets)
 			m_shadow_ubos[frame_index][cascade]->writeToBuffer(&cascade_ubo);
 
@@ -374,6 +387,7 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBuffer
 			if (!m_csm_cascade_ubos.empty() && cascade < m_csm_cascade_ubos[frame_index].size())
 				m_csm_cascade_ubos[frame_index][cascade]->writeToBuffer(&cascade_ubo);
 		}
+		m_force_full_rerender = false;
 	}
 
 	// non cascade shadow lights
@@ -406,6 +420,7 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBuffer
 
 void ShadowRenderSystem::invalidateShadowDrawables() {
 	m_shadow_drawables_dirty = true;
+	m_force_full_rerender = true;
 	m_cached_unique_meshes.clear();
 }
 
@@ -691,9 +706,12 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 		command_buffer.bindIndexBuffer(*m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
 	}
 
-	// Render CSM cascades (per-cascade with atlas region viewport)
+	// Render CSM cascades
 	if (csm_count > 0 && !m_csm_instance_groups.empty()) {
 		for (uint32_t c = 0; c < csm_count; c++) {
+			if (c < NUM_CSM_CASCADES && !m_cascade_state[c].dirty)
+				continue;
+
 			auto& region = m_atlas_regions[c];
 			vk::Extent2D extent{region.resolution, region.resolution};
 
@@ -723,7 +741,6 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 				.offset = {static_cast<int32_t>(region.x), static_cast<int32_t>(region.y)},
 				.extent = extent
 			});
-
 			renderShadowMap(frame_info, c, m_csm_instance_groups);
 			command_buffer.endRendering();
 		}
@@ -911,8 +928,10 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 
 	const VeCamera* cam_for_hiz = gpu_cull_system.isHizEnabled() ? &frame_info.camera : nullptr;
 
-	// Dispatch ALL shadow culls back-to-back.
+	// Dispatch shadow culls
 	for (uint32_t c = 0; c < csm_count; c++) {
+		if (c < NUM_CSM_CASCADES && !m_cascade_state[c].dirty)
+			continue;
 		glm::mat4 cascade_vp = m_light_projs[frame][c] * m_light_views[frame][c];
 		gpu_cull_system.dispatchShadowCull(cmd, cascade_vp, scene_mgr, frame, c,
 		                            static_cast<int32_t>(c) + 1, cam_for_hiz);
@@ -955,8 +974,11 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 	cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
 		vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
 
-	// Render all CSM cascades
+	// Render CSM cascades (skip clean cascades)
 	for (uint32_t c = 0; c < csm_count; c++) {
+		if (c < NUM_CSM_CASCADES && !m_cascade_state[c].dirty)
+			continue;
+
 		auto& region = m_atlas_regions[c];
 		vk::Extent2D extent{region.resolution, region.resolution};
 
@@ -1163,6 +1185,8 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 	std::vector<MeshletCullingSystem::ShadowCullRequest> requests;
 	requests.reserve(csm_count + num_shadow_lights);
 	for (uint32_t c = 0; c < csm_count; c++) {
+		if (c < NUM_CSM_CASCADES && !m_cascade_state[c].dirty)
+			continue;
 		const glm::mat4& lv = m_light_views[frame][c];
 		glm::vec3 light_dir = -glm::vec3(lv[0][2], lv[1][2], lv[2][2]);
 		requests.push_back({
@@ -1216,8 +1240,11 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 	cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
 		vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
 
-	// Render all CSM cascades
+	// Render CSM cascades (skip clean cascades)
 	for (uint32_t c = 0; c < csm_count; c++) {
+		if (c < NUM_CSM_CASCADES && !m_cascade_state[c].dirty)
+			continue;
+
 		auto& region = m_atlas_regions[c];
 		vk::Extent2D extent{region.resolution, region.resolution};
 
