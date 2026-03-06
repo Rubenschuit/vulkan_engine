@@ -71,9 +71,24 @@ void SkyboxRenderSystem::discoverSkyboxes() {
 		if (ext != ".ktx" && ext != ".ktx2")
 			continue;
 		auto path = it->path().lexically_normal();
-		// Display name: use stem (e.g. "clouds" from "clouds.ktx2", "nebula" from "nebula.ktx")
-		std::string display_name = path.stem().generic_string();
-		m_available_skyboxes.push_back({path, display_name});
+		std::string stem = path.stem().generic_string();
+
+		// Skip IBL companion files (cmgen output: <name>_ibl.ktx)
+		if (stem.size() > 4 && stem.compare(stem.size() - 4, 4, "_ibl") == 0)
+			continue;
+
+		// Display name: strip _skybox suffix for cmgen skybox files
+		std::string display_name = stem;
+		if (display_name.size() > 7 && display_name.compare(display_name.size() - 7, 7, "_skybox") == 0)
+			display_name = display_name.substr(0, display_name.size() - 7);
+
+		// Check for IBL companion files (sh.txt + _ibl.ktx in same directory)
+		auto parent = path.parent_path();
+		std::string base_name = display_name;
+		bool has_ibl = std::filesystem::exists(parent / (base_name + "_ibl.ktx"))
+			&& std::filesystem::exists(parent / "sh.txt");
+
+		m_available_skyboxes.push_back({path, display_name, has_ibl});
 	}
 	std::sort(m_available_skyboxes.begin(), m_available_skyboxes.end(),
 		[](const SkyboxEntry& a, const SkyboxEntry& b) { return a.display_name < b.display_name; });

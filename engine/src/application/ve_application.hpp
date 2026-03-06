@@ -49,6 +49,7 @@ class LightSystem;
 class ParticleSystem;
 class FireworksSystem;
 class SkyboxRenderSystem;
+class IblSystem;
 class BloomSystem;
 class PostProcessSystem;
 class OutlineSystem;
@@ -204,6 +205,7 @@ private:
 	std::unique_ptr<ParticleSystem> m_particle_system;
 	std::unique_ptr<FireworksSystem> m_fireworks_system;
 	std::unique_ptr<SkyboxRenderSystem> m_skybox_render_system;
+	std::unique_ptr<IblSystem> m_ibl_system;
 	std::unique_ptr<BloomSystem> m_bloom_system;
 	std::unique_ptr<PostProcessSystem> m_post_process_system;
 	std::unique_ptr<OutlineSystem> m_outline_system;
@@ -237,6 +239,7 @@ private:
 	int m_pcf_samples = 8;
 	int m_pcss_filter_samples = 16;
 	Topology m_last_topology = Topology::TRIANGLE_LIST;
+	size_t m_last_skybox_index = SIZE_MAX;
 
 	void setWindowTitle();
 };

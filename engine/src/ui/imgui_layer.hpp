@@ -26,7 +26,7 @@ struct VENGINE_API UIContext {
 	bool show_aabb_debug = false;
 
 	// graphics settings
-	float fov = 80.0f;
+	float fov = 75.0f;
 	ShadowMode shadow_mode = ShadowMode::PCF;
 	float pcss_light_size = 0.04f;
 	int pcf_samples = 8; // multiples of 4 between 4 and 64, or 0 to disable PCF
@@ -44,6 +44,8 @@ struct VENGINE_API UIContext {
 	glm::vec3 ambient_light_color = glm::vec3(1.0f);
 	float ambient_light_intensity = 0.006f;
 	bool cluster_enabled = true;
+	bool ibl_enabled = true;
+	float ibl_intensity = 0.4f;
 
 	// read-only stats (engine writes, UI reads)
 	struct Stats {
@@ -91,8 +93,8 @@ struct VENGINE_API UIContext {
 	// GTAO (screen-space ambient occlusion)
 	bool gtao_enabled = true;
 	bool gtao_half_res = true;
-	float gtao_radius = 0.5f;
-	float gtao_intensity = 1.5f;
+	float gtao_radius = 0.25f;
+	float gtao_intensity = 0.5f;
 
 	// culling
 	bool enable_frustum_culling = true;
@@ -116,7 +118,7 @@ struct VENGINE_API UIContext {
 	int blur_radius = 0;
 	float blur_strength = 1.0f;
 	float exposure = 1.0f;
-	int tone_map_mode = TONEMAP_NONE;
+	int tone_map_mode = TONEMAP_GT;
 	float hdr_peak_white = 4.0f;
 	bool bloom_enabled = true;
 	float bloom_strength = 0.01f;

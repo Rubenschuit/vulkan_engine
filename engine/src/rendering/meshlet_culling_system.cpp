@@ -386,10 +386,13 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 	m_frame_views[frame] = params.view;
 
 	// Async readback: read draw counts written 2 frames ago from the mapped staging buffer
+	m_current_readback_valid = false;
 	if (m_readback_staging[frame]) {
 		auto* staging_ptr = static_cast<const uint32_t*>(m_readback_staging[frame]->getMappedMemory());
-		if (staging_ptr && m_has_readback)
+		if (staging_ptr && m_has_readback[frame]) {
 			std::memcpy(m_readback_counts.data(), staging_ptr, BUCKET_COUNT * sizeof(uint32_t));
+			m_current_readback_valid = true;
+		}
 	}
 
 	// Clear per-frame counters and init dispatch_indirect to (0, 1, 1)
@@ -405,7 +408,7 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 		constexpr uint32_t MAX_PER_BUCKET = MAX_MESHLET_DRAWS / BUCKET_COUNT;
 		constexpr vk::DeviceSize CMD_SIZE = sizeof(VkDrawIndexedIndirectCommand);
 		for (uint32_t b = 0; b < BUCKET_COUNT; b++) {
-			uint32_t count = m_has_readback
+			uint32_t count = m_current_readback_valid
 				? std::min(m_readback_counts[b] * 2 + 1024, MAX_PER_BUCKET)
 				: MAX_PER_BUCKET;
 			auto offset = static_cast<vk::DeviceSize>(b) * MAX_PER_BUCKET * CMD_SIZE;
@@ -451,12 +454,14 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 		0, {*pass2_set}, {});
 	cmd.dispatchIndirect(*m_dispatch_indirect[frame]->getBuffer(), 0);
 
-	// Compute -> DrawIndirect + VertexShader barrier
+	// Compute -> DrawIndirect + VertexShader + Transfer barrier (for cpu readback)
 	vk::MemoryBarrier2 draw_barrier{
 		.srcStageMask  = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderWrite,
-		.dstStageMask  = vk::PipelineStageFlagBits2::eDrawIndirect | vk::PipelineStageFlagBits2::eVertexShader,
-		.dstAccessMask = vk::AccessFlagBits2::eIndirectCommandRead | vk::AccessFlagBits2::eShaderStorageRead,
+		.dstStageMask  = vk::PipelineStageFlagBits2::eDrawIndirect | vk::PipelineStageFlagBits2::eVertexShader
+		               | vk::PipelineStageFlagBits2::eTransfer,
+		.dstAccessMask = vk::AccessFlagBits2::eIndirectCommandRead | vk::AccessFlagBits2::eShaderStorageRead
+		               | vk::AccessFlagBits2::eTransferRead,
 	};
 	vk::DependencyInfo draw_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &draw_barrier};
 	cmd.pipelineBarrier2(draw_dep);
@@ -466,7 +471,7 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 		vk::BufferCopy region{0, 0, static_cast<vk::DeviceSize>(BUCKET_COUNT) * sizeof(uint32_t)};
 		cmd.copyBuffer(*m_meshlet_draw_counts[frame]->getBuffer(),
 			*m_readback_staging[frame]->getBuffer(), region);
-		m_has_readback = true;
+		m_has_readback[frame] = true;
 	}
 }
 

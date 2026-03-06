@@ -55,7 +55,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 
 	// floor (grid texture, slightly glossy dielectric, tiled ~1m intervals)
 	{
-		constexpr float half = 800.0f;
+		constexpr float half = 100.0f;
 		constexpr float tile_uv = half * 2.0f;  // UV range so texture repeats every 1 world unit
 		glm::vec3 n{0.0f, 0.0f, 1.0f};
 		glm::vec4 t{1.0f, 0.0f, 0.0f, 1.0f};

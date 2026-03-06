@@ -24,6 +24,7 @@
 #include "rendering/particle_system.hpp"
 #include "rendering/fireworks_system.hpp"
 #include "rendering/skybox_render_system.hpp"
+#include "rendering/ibl_system.hpp"
 #include "rendering/bloom_system.hpp"
 #include "rendering/post_process_system.hpp"
 #include "rendering/outline_system.hpp"
@@ -152,6 +153,15 @@ void VeApplication::run() {
 			&& m_scene_resources->getGpuSceneManager().hasRegisteredObjects();
 		bool hiz_on = m_ui.hiz_occlusion_enabled && m_ui.depth_prepass_enabled && gpu_culling;
 		m_active_backend->setHizEnabled(hiz_on);
+		// Reload IBL when skybox changes (before frame recording begins)
+		size_t skybox_idx = m_skybox_render_system->getCurrentSkyboxIndex();
+		if (skybox_idx != m_last_skybox_index) {
+			m_last_skybox_index = skybox_idx;
+			auto& skyboxes = m_skybox_render_system->getAvailableSkyboxes();
+			if (skybox_idx < skyboxes.size())
+				m_ibl_system->loadForSkybox(skyboxes[skybox_idx].path);
+		}
+
 		VeFrameInfo fi = buildFrameInfo();
 		{
 			ZoneScopedN("Populate UBO");
@@ -369,6 +379,8 @@ VeFrameInfo VeApplication::buildFrameInfo() {
 		.cpu_global_descriptor_set = &m_global_descriptor_sets[current_frame],
 	};
 
+	fi.ibl_descriptor_set = &m_ibl_system->getOutputDescriptorSet(current_frame);
+
 	return fi;
 }
 
@@ -433,6 +445,10 @@ void VeApplication::populateUBO(VeFrameInfo& fi) {
 	ubo.csm_normal_bias = m_ui.csm_normal_bias;
 	ubo.csm_blend_dithered = static_cast<uint32_t>(m_ui.csm_blend_mode);
 	ubo.ambient_light_color = glm::vec4(m_ui.ambient_light_color, m_ui.ambient_light_intensity);
+	ubo.ibl_intensity = (m_ui.ibl_enabled && m_ibl_system->isAvailable()) ? m_ui.ibl_intensity : 0.0f;
+	ubo.prefiltered_mip_levels = m_ibl_system->getPrefilteredMipLevels();
+	auto& sh = m_ibl_system->getSHCoefficients();
+	std::copy(sh.begin(), sh.end(), ubo.sh_coefficients);
 
 	m_light_system->updateUniformBuffer(fi, ubo);
 	m_shadow_render_system->updateUniformBuffer(current_frame, ubo, fi.csm_data);
@@ -836,14 +852,15 @@ void VeApplication::createDescriptors() {
 			+ 10           // headroom
 			+ 5*F          // outline (JFA init + 2 step dirs + 2 composite)
 			+ 3*F          // GPU culling (compute sets + global sets)
-			+ 5*MSH*F      // meshlet shadow 
-			+ (NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS)*F) // meshlet shadow global sets (SRS)
+			+ 5*MSH*F      // meshlet shadow
+			+ (NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS)*F // meshlet shadow global sets (SRS)
+			+ 2)           // IBL (active + dummy)
 		.addPoolSize(vk::DescriptorType::eUniformBuffer,
 			4*F + S*F + MAX_MATERIAL_SETS + 1 + 4*F + 2*F
-			+ 3*MSH*F     
+			+ 3*MSH*F
 			+ (NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS)*F)
 		.addPoolSize(vk::DescriptorType::eCombinedImageSampler,
-			3*3 + MAX_MATERIAL_SETS*5 + 4*F)
+			3*3 + MAX_MATERIAL_SETS*5 + 4*F + 4) // +4 for IBL (2 per set * 2 sets)
 		.addPoolSize(vk::DescriptorType::eSampler,
 			2*F + F + F + 10
 			+ 4*MSH*F)     
@@ -968,6 +985,11 @@ void VeApplication::initSystems() {
 		shader("cluster_assign_comp.spv"), m_ve_renderer.getExtent()
 	);
 
+	m_ibl_system = std::make_unique<IblSystem>(
+		m_ve_device, *m_global_pool, *m_resource_manager,
+		m_config.skybox_dir / "brdf_lut.ktx"
+	);
+
 	m_pbr_render_system = std::make_unique<PbrRenderSystem>(
 		m_ve_device,
 		m_global_set_layout->getDescriptorSetLayout(),
@@ -976,6 +998,7 @@ void VeApplication::initSystems() {
 		m_shadow_mask_system->getShadowMaskSetLayout(),
 		m_cluster_light_system->getOutputSetLayout(),
 		m_gtao_system->getAoSetLayout(),
+		m_ibl_system->getIblSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
 		shader("pbr_shader.spv")
@@ -1029,6 +1052,12 @@ void VeApplication::initSystems() {
 		m_config.skybox_dir, shader("skybox_shader.spv"), m_config.cube_model,
 		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount()
 	);
+
+	// Load IBL for the initial skybox
+	if (!m_skybox_render_system->getAvailableSkyboxes().empty()) {
+		m_ibl_system->loadForSkybox(m_skybox_render_system->getAvailableSkyboxes()[0].path);
+		m_last_skybox_index = 0;
+	}
 
 	m_bloom_system = std::make_unique<BloomSystem>(
 		m_ve_device, m_ve_renderer.getExtent(),

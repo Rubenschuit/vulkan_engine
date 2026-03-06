@@ -95,6 +95,13 @@ struct UniformBuffer {
 	float    _pad_spot_1;
 	float    _pad_spot_2;
 	SpotLight spot_lights[MAX_SPOT_LIGHTS];
+
+	// IBL parameters
+	float    ibl_intensity;
+	uint32_t prefiltered_mip_levels;
+	float    _pad_ibl_0;
+	float    _pad_ibl_1;
+	float4   sh_coefficients[9];
 };
 [vk::binding(0, 0)]
 ConstantBuffer<UniformBuffer> ubo;
@@ -175,8 +182,39 @@ Texture2D<float> ao_texture;
 SamplerState ao_sampler;
 
 // ============================================================================
+// IBL bindings (set 6)
+// ============================================================================
+
+[vk::binding(0, 6)]
+SamplerCube ibl_prefiltered;
+[vk::binding(1, 6)]
+Sampler2D<float2> ibl_brdf_lut;
+
+// ============================================================================
 // Utilities
 // ============================================================================
+
+float3 fresnelSchlickRoughness(float cos_theta, float3 F0, float roughness) {
+	float t = clamp(1.0 - cos_theta, 0.0, 1.0);
+	float t2 = t * t;
+	return F0 + (max(float3(1.0 - roughness), F0) - F0) * (t2 * t2 * t);
+}
+
+// Evaluate L2 spherical harmonics irradiance from 9 pre-scaled coefficients (cmgen format)
+float3 evaluateSH(float3 n, float4 sh[9]) {
+	return max(sh[0].xyz
+		+ sh[1].xyz * n.y + sh[2].xyz * n.z + sh[3].xyz * n.x
+		+ sh[4].xyz * (n.y * n.x) + sh[5].xyz * (n.y * n.z)
+		+ sh[6].xyz * (3.0 * n.z * n.z - 1.0)
+		+ sh[7].xyz * (n.z * n.x)
+		+ sh[8].xyz * (n.x * n.x - n.y * n.y), 0.0);
+}
+
+// Specular occlusion from diffuse AO
+// Rough surfaces lose reflections faster in occluded areas; smooth surfaces retain them.
+float specularAO(float NdotV, float ao, float roughness) {
+	return clamp(pow(NdotV + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao, 0.0, 1.0);
+}
 
 // KHR_lights_punctual attenuation: smooth windowed falloff within range, 1/d² when range=0
 float calculateAttenuation(float distance_sq, float range) {

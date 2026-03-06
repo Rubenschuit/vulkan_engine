@@ -44,13 +44,33 @@ void EnvironmentPanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 	ImGui::Spacing();
 
+	// --- IBL ---
+	ImGui::Text("Image-Based Lighting");
+	ImGui::Separator();
+	ImGui::Checkbox("Enabled##ibl", &ctx.ibl_enabled);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Use skybox environment for ambient lighting (requires IBL data).");
+	if (ctx.ibl_enabled) {
+		ImGui::SliderFloat("Intensity##ibl", &ctx.ibl_intensity, 0.0f, 5.0f, "%.2f");
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("IBL contribution strength.");
+		if (m_skybox) {
+			const auto& available = m_skybox->getAvailableSkyboxes();
+			size_t idx = m_skybox->getCurrentSkyboxIndex();
+			if (idx < available.size() && !available[idx].has_ibl)
+				ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "No IBL data for this skybox");
+		}
+	}
+
+	ImGui::Spacing();
+
 	// --- Ambient Light ---
 	ImGui::Text("Ambient Light");
 	ImGui::Separator();
 	ImGui::ColorEdit3("Color##ambient", &ctx.ambient_light_color.r);
 	ImGui::SliderFloat("Intensity##ambient", &ctx.ambient_light_intensity, 0.0f, 0.5f, "%.4f");
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Global ambient light intensity applied to all surfaces.");
+		ImGui::SetTooltip("Flat ambient (used when IBL is off or unavailable).");
 
 	ImGui::End();
 }

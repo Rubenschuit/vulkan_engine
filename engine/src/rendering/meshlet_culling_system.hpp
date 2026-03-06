@@ -103,7 +103,7 @@ public:
 
 	// CPU-side draw counts read back from 2 frames ago. Valid after the first dispatch cycle.
 	// Returns nullptr when drawIndirectCount is supported (readback not needed).
-	const uint32_t* getCpuDrawCounts() const { return m_has_readback ? m_readback_counts.data() : nullptr; }
+	const uint32_t* getCpuDrawCounts() const { return m_current_readback_valid ? m_readback_counts.data() : nullptr; }
 
 	// Per-slot shadow readback counts (same 2-frame-delay pattern as main view).
 	const uint32_t* getShadowCpuDrawCounts(uint32_t slot) const {
@@ -171,7 +171,8 @@ private:
 	// Async readback of per-bucket draw counts (fallback when drawIndirectCount unavailable)
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_readback_staging;
 	std::array<uint32_t, MESHLET_BUCKET_COUNT> m_readback_counts{};
-	bool m_has_readback = false;
+	std::array<bool, MAX_FRAMES_IN_FLIGHT> m_has_readback{};
+	bool m_current_readback_valid = false;
 
 	// Shadow culling: per-shadow-layer buffers [frame][slot]
 	using ShadowBufSet = std::array<std::unique_ptr<VeBuffer>, SHADOW_BUFFER_COUNT>;

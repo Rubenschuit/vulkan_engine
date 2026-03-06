@@ -155,9 +155,18 @@ struct UniformBufferObject {
 	// Spot lights
 	alignas(16) uint32_t num_spot_lights = 0;              // 16-byte aligned (12 bytes implicit padding)
 	alignas(16) SpotLight spot_lights[ve::MAX_SPOT_LIGHTS];
+
+	// IBL parameters
+	alignas(4) float ibl_intensity = 0.0f;
+	alignas(4) uint32_t prefiltered_mip_levels = 1;
+	alignas(4) float _pad_ibl_0 = 0.0f;
+	alignas(4) float _pad_ibl_1 = 0.0f;
+	alignas(16) glm::vec4 sh_coefficients[9]{};
 };
 static_assert(offsetof(UniformBufferObject, dir_lights) % 16 == 0,
 	"dir_lights must be 16-byte aligned for GPU UBO layout");
+static_assert(offsetof(UniformBufferObject, sh_coefficients) % 16 == 0,
+	"sh_coefficients must be 16-byte aligned for GPU UBO layout");
 static_assert(sizeof(PostProcessPushConstant) == 40,
 	"PostProcessPushConstant size must match shader push constant layout");
 
@@ -248,6 +257,9 @@ struct VeFrameInfo {
 
 	// Clustered forward shading descriptor set (Set 4, null when clustering disabled)
 	vk::raii::DescriptorSet* cluster_descriptor_set = nullptr;
+
+	// IBL descriptor set (Set 6, dummy black when IBL unavailable)
+	vk::raii::DescriptorSet* ibl_descriptor_set = nullptr;
 
 	bool gpu_culling_active = false;
 	bool meshlet_culling_active = false;

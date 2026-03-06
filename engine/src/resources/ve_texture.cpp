@@ -291,12 +291,9 @@ bool VeTexture::uploadKtxTexture(void* k_texture_ptr, vk::Format format_hint) {
 		texture_format = want_srgb ? toSrgbBC(texture_format) : toUnormBC(texture_format);
 	}
 
-	// Compute total size and copy regions. For cubemaps with mipmaps we use single-level path.
-	// Cubemap mipmap copy is not implemented, only level 0 is copied, so force num_levels=1 to avoid
-	// sampling uninitialized mip levels (which causes pink).
 	const uint32_t array_layers = is_cubemap ? 6 : 1;
-	const uint32_t effective_levels = (is_cubemap && num_levels > 1) ? 1u : num_levels;
-	const bool use_mipmap_copy = (effective_levels > 1 && !is_cubemap);
+	const uint32_t effective_levels = num_levels;
+	const bool use_mipmap_copy = (effective_levels > 1);
 
 	ktx_size_t total_size = 0;
 	std::vector<vk::DeviceSize> buffer_offsets;
@@ -306,11 +303,11 @@ bool VeTexture::uploadKtxTexture(void* k_texture_ptr, vk::Format format_hint) {
 			ktx_size_t offset = 0;
 			ktxTexture_GetImageOffset(k_texture, level, 0, 0, &offset);
 			buffer_offsets.push_back(offset);
-			total_size += ktxTexture_GetImageSize(k_texture, level);
 			uint32_t w = std::max(1u, m_width >> level);
 			uint32_t h = std::max(1u, m_height >> level);
 			extents.push_back({ w, h, 1 });
 		}
+		total_size = ktxTexture_GetDataSize(k_texture);
 	} else {
 		ktx_size_t image_size = ktxTexture_GetImageSize(k_texture, 0);
 		total_size = image_size * array_layers;

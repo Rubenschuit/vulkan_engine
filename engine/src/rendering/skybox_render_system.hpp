@@ -31,6 +31,7 @@ namespace ve {
 struct SkyboxEntry {
 	std::filesystem::path path;
 	std::string display_name;
+	bool has_ibl = false;
 };
 
 /** Settings exposed for UI. All mutable by app. */

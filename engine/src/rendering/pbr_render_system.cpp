@@ -31,6 +31,7 @@ PbrRenderSystem::PbrRenderSystem(
 	const vk::raii::DescriptorSetLayout& shadow_mask_set_layout,
 	const vk::raii::DescriptorSetLayout& cluster_set_layout,
 	const vk::raii::DescriptorSetLayout& ao_set_layout,
+	const vk::raii::DescriptorSetLayout& ibl_set_layout,
 	vk::Format color_format,
 	vk::SampleCountFlagBits sample_count,
 	std::filesystem::path shader_path)
@@ -46,7 +47,7 @@ PbrRenderSystem::PbrRenderSystem(
 		m_indirect_buffers[i]->map();
 	}
 
-	createPipelineLayout(global_set_layout, bindless_set_layout, shadow_set_layout, shadow_mask_set_layout, cluster_set_layout, ao_set_layout);
+	createPipelineLayout(global_set_layout, bindless_set_layout, shadow_set_layout, shadow_mask_set_layout, cluster_set_layout, ao_set_layout, ibl_set_layout);
 	createPipelines(m_color_format, m_sample_count);
 }
 
@@ -58,14 +59,16 @@ void PbrRenderSystem::createPipelineLayout(
 	const vk::raii::DescriptorSetLayout& shadow_set_layout,
 	const vk::raii::DescriptorSetLayout& shadow_mask_set_layout,
 	const vk::raii::DescriptorSetLayout& cluster_set_layout,
-	const vk::raii::DescriptorSetLayout& ao_set_layout) {
+	const vk::raii::DescriptorSetLayout& ao_set_layout,
+	const vk::raii::DescriptorSetLayout& ibl_set_layout) {
 
-	vk::DescriptorSetLayout layouts[6] = {
+	vk::DescriptorSetLayout layouts[7] = {
 		*global_set_layout, *bindless_set_layout, *shadow_set_layout,
-		*shadow_mask_set_layout, *cluster_set_layout, *ao_set_layout};
+		*shadow_mask_set_layout, *cluster_set_layout, *ao_set_layout,
+		*ibl_set_layout};
 	vk::PipelineLayoutCreateInfo pipeline_layout_info{
 		.sType = vk::StructureType::ePipelineLayoutCreateInfo,
-		.setLayoutCount = 6,
+		.setLayoutCount = 7,
 		.pSetLayouts = layouts,
 		.pushConstantRangeCount = 0,
 		.pPushConstantRanges = nullptr
@@ -375,6 +378,9 @@ void PbrRenderSystem::renderOpaqueGpuCulled(
 	if (frame_info.ao_descriptor_set)
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			5, {**frame_info.ao_descriptor_set}, {});
+	if (frame_info.ibl_descriptor_set)
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+			6, {**frame_info.ibl_descriptor_set}, {});
 
 	m_mega_buffer->bind(cmd);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
@@ -433,6 +439,9 @@ void PbrRenderSystem::renderOpaqueGpuCulledMeshlets(
 	if (frame_info.ao_descriptor_set)
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			5, {**frame_info.ao_descriptor_set}, {});
+	if (frame_info.ibl_descriptor_set)
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+			6, {**frame_info.ibl_descriptor_set}, {});
 
 	m_mega_buffer->bindMeshletIbo(cmd);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
@@ -491,6 +500,9 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info, const vk::raii::Desc
 	if (frame_info.ao_descriptor_set)
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			5, {**frame_info.ao_descriptor_set}, {});
+	if (frame_info.ibl_descriptor_set)
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+			6, {**frame_info.ibl_descriptor_set}, {});
 
 	m_mega_buffer->bind(cmd);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
@@ -541,6 +553,9 @@ void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info, const vk::raii:
 	if (frame_info.ao_descriptor_set)
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			5, {**frame_info.ao_descriptor_set}, {});
+	if (frame_info.ibl_descriptor_set)
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+			6, {**frame_info.ibl_descriptor_set}, {});
 
 	m_mega_buffer->bind(cmd);
 
@@ -571,6 +586,8 @@ void PbrRenderSystem::bindPbrResources(VeFrameInfo& frame_info, const vk::raii::
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout, 4, {**frame_info.cluster_descriptor_set}, {});
 	if (frame_info.ao_descriptor_set)
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout, 5, {**frame_info.ao_descriptor_set}, {});
+	if (frame_info.ibl_descriptor_set)
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout, 6, {**frame_info.ibl_descriptor_set}, {});
 	m_mega_buffer->bind(cmd);
 }
 
