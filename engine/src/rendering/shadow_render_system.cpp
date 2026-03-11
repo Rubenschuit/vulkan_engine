@@ -1178,9 +1178,6 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 	uint32_t csm_count = frame_info.csm_data.active_cascade_count;
 	uint32_t num_shadow_lights = static_cast<uint32_t>(light_views.size()) - csm_count;
 
-	// Camera Hi-Z is invalid for shadow maps
-	const VeCamera* cam_for_hiz = nullptr;
-
 	// Build batched shadow cull requests
 	std::vector<MeshletCullingSystem::ShadowCullRequest> requests;
 	requests.reserve(csm_count + num_shadow_lights);
@@ -1207,7 +1204,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 	}
 
 	meshlet_cull.dispatchShadowCulls(cmd, requests.data(),
-		static_cast<uint32_t>(requests.size()), scene_mgr, frame, cam_for_hiz);
+		static_cast<uint32_t>(requests.size()), scene_mgr, frame);
 
 	// Single pre-barrier: transition entire atlas to depth-attachment
 	vk::ImageMemoryBarrier2 pre_barrier{
@@ -1275,12 +1272,12 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		auto& shadow_indirect = meshlet_cull.getShadowMeshletIndirectBuffer(frame, c);
 		auto& shadow_draw_counts = meshlet_cull.getShadowMeshletDrawCounts(frame, c);
 		const uint32_t* cpu_counts = m_ve_device.supportsDrawIndirectCount()
-			? nullptr : meshlet_cull.getShadowCpuDrawCounts(c);
+			? nullptr : meshlet_cull.getShadowCpuDrawCounts(frame, c);
 		for (uint32_t bucket = 0; bucket < MESHLET_SHADOW_BUCKET_COUNT; bucket++) {
 			auto buf_offset   = static_cast<vk::DeviceSize>(bucket) * SHADOW_MAX_PER_BUCKET
 			                    * sizeof(VkDrawIndexedIndirectCommand);
 			if (cpu_counts) {
-				uint32_t count = std::min(cpu_counts[bucket] * 2 + 1024, SHADOW_MAX_PER_BUCKET);
+				uint32_t count = std::min(cpu_counts[bucket], SHADOW_MAX_PER_BUCKET);
 				cmd.drawIndexedIndirect(*shadow_indirect.getBuffer(), buf_offset,
 					count, sizeof(VkDrawIndexedIndirectCommand));
 			} else {
@@ -1327,12 +1324,12 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		auto& shadow_indirect = meshlet_cull.getShadowMeshletIndirectBuffer(frame, slot);
 		auto& shadow_draw_counts = meshlet_cull.getShadowMeshletDrawCounts(frame, slot);
 		const uint32_t* cpu_counts = m_ve_device.supportsDrawIndirectCount()
-			? nullptr : meshlet_cull.getShadowCpuDrawCounts(slot);
+			? nullptr : meshlet_cull.getShadowCpuDrawCounts(frame, slot);
 		for (uint32_t bucket = 0; bucket < MESHLET_SHADOW_BUCKET_COUNT; bucket++) {
 			auto buf_offset   = static_cast<vk::DeviceSize>(bucket) * SHADOW_MAX_PER_BUCKET
 			                    * sizeof(VkDrawIndexedIndirectCommand);
 			if (cpu_counts) {
-				uint32_t count = std::min(cpu_counts[bucket] * 2 + 1024, SHADOW_MAX_PER_BUCKET);
+				uint32_t count = std::min(cpu_counts[bucket], SHADOW_MAX_PER_BUCKET);
 				cmd.drawIndexedIndirect(*shadow_indirect.getBuffer(), buf_offset,
 					count, sizeof(VkDrawIndexedIndirectCommand));
 			} else {

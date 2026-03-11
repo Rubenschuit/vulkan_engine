@@ -215,8 +215,6 @@ void VeApplication::setActiveScene(std::unique_ptr<VeScene> scene) {
 				gpu_scene, m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
 			m_meshlet_culling_system->createShadowDescriptorSets(*m_global_pool,
 				gpu_scene, m_pbr_render_system->getMegaBuffer());
-			m_meshlet_culling_system->createShadowHizDescriptorSets(*m_global_pool,
-				gpu_scene, m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
 		}
 	}
 }
@@ -293,8 +291,6 @@ void VeApplication::processSceneLoadRequest() {
 						gpu_scene, m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
 					m_meshlet_culling_system->createShadowDescriptorSets(*m_global_pool,
 						gpu_scene, m_pbr_render_system->getMegaBuffer());
-					m_meshlet_culling_system->createShadowHizDescriptorSets(*m_global_pool,
-						gpu_scene, m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
 				}
 			}
 			break;
@@ -771,8 +767,6 @@ void VeApplication::recreateResolutionDependentSystems() {
 	if (m_meshlet_culling_system) {
 		m_meshlet_culling_system->createHizDescriptorSets(*m_global_pool,
 			m_scene_resources->getGpuSceneManager(), m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
-		m_meshlet_culling_system->createShadowHizDescriptorSets(*m_global_pool,
-			m_scene_resources->getGpuSceneManager(), m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
 	}
 
 	m_pbr_render_system->recreateWboit(
@@ -852,21 +846,21 @@ void VeApplication::createDescriptors() {
 			+ 10           // headroom
 			+ 5*F          // outline (JFA init + 2 step dirs + 2 composite)
 			+ 3*F          // GPU culling (compute sets + global sets)
-			+ 5*MSH*F      // meshlet shadow
+			+ 3*MSH*F      // meshlet shadow (pass1 + pass2 + cull_param)
 			+ (NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS)*F // meshlet shadow global sets (SRS)
 			+ 2)           // IBL (active + dummy)
 		.addPoolSize(vk::DescriptorType::eUniformBuffer,
 			4*F + S*F + MAX_MATERIAL_SETS + 1 + 4*F + 2*F
-			+ 3*MSH*F
+			+ MSH*F
 			+ (NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS)*F)
 		.addPoolSize(vk::DescriptorType::eCombinedImageSampler,
 			3*3 + MAX_MATERIAL_SETS*5 + 4*F + 4) // +4 for IBL (2 per set * 2 sets)
 		.addPoolSize(vk::DescriptorType::eSampler,
 			2*F + F + F + 10
-			+ 4*MSH*F)     
+			+ 2*MSH*F)
 		.addPoolSize(vk::DescriptorType::eSampledImage,
 			F + 4*F + 8*F + 10 + 3*F
-			+ 4*MSH*F)     
+			+ 2*MSH*F)     
 		.addPoolSize(vk::DescriptorType::eStorageBuffer,
 			22*F + F + S*F + 14*F + 9*F
 			+ 25*MSH*F     
@@ -1110,8 +1104,6 @@ void VeApplication::initSystems() {
 		m_uniform_buffers, m_scene_resources->getMaterialManager().getBuffer());
 	m_meshlet_culling_system->createShadowDescriptorSets(*m_global_pool,
 		gpu_scene, m_pbr_render_system->getMegaBuffer());
-	m_meshlet_culling_system->createShadowHizDescriptorSets(*m_global_pool,
-		gpu_scene, m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
 	m_shadow_render_system->createMeshletShadowDescriptorSets(*m_meshlet_culling_system);
 
 	// Culling backends

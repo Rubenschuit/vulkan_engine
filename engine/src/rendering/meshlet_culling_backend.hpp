@@ -32,7 +32,7 @@ public:
 	void setGpuShadowFallback(bool enabled) { m_gpu_shadow_fallback = enabled; }
 
 private:
-	MeshletCullingSystem& m_meshlet;
+	MeshletCullingSystem& m_meshlet_cull_system;
 	GpuCullingSystem& m_gpu_cull;
 	bool m_gpu_shadow_fallback = false;
 };

@@ -461,7 +461,7 @@ void PbrRenderSystem::renderOpaqueGpuCulledMeshlets(
 		auto buf_offset   = static_cast<vk::DeviceSize>(bucket) * MAX_PER_BUCKET
 		                    * sizeof(VkDrawIndexedIndirectCommand);
 		if (cpu_draw_counts) {
-			uint32_t count = std::min(cpu_draw_counts[bucket] * 2 + 1024, MAX_PER_BUCKET);
+			uint32_t count = std::min(cpu_draw_counts[bucket], MAX_PER_BUCKET);
 			cmd.drawIndexedIndirect(
 				*meshlet_indirect.getBuffer(), buf_offset,
 				count, sizeof(VkDrawIndexedIndirectCommand));
@@ -802,7 +802,7 @@ void PbrRenderSystem::renderTransparentWboitMeshlets(
 		auto buf_offset = static_cast<vk::DeviceSize>(bucket) * MAX_PER_BUCKET
 		                  * sizeof(VkDrawIndexedIndirectCommand);
 		if (cpu_draw_counts) {
-			uint32_t count = std::min(cpu_draw_counts[bucket] * 2 + 1024, MAX_PER_BUCKET);
+			uint32_t count = std::min(cpu_draw_counts[bucket], MAX_PER_BUCKET);
 			if (count == 0) continue;
 			cmd.drawIndexedIndirect(
 				*meshlet_indirect.getBuffer(), buf_offset,

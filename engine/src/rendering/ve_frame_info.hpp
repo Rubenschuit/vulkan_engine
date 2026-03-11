@@ -106,7 +106,7 @@ struct PostProcessPushConstant {
 	float exposure = 1.0f;
 	int color_space = 0; // 0: SRGB, 1: Extended Linear, 2: HDR10 ST2084
 	float bloom_strength = 0.01f;
-	int tone_map_mode = TONEMAP_NONE;
+	int tone_map_mode = TONEMAP_GT;
 	float hdr_peak_white = 4.0f; // GT tonemap peak brightness in scene-linear units (HDR only)
 	float padding;
 	glm::vec2 texel_size;

@@ -61,13 +61,11 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 		m_cull_param_ubos[i]->map();
 
 		// Staging buffer for async readback of per-bucket draw counts
-		if (!m_ve_device.supportsDrawIndirectCount()) {
-			m_readback_staging[i] = std::make_unique<VeBuffer>(m_ve_device,
-				sizeof(uint32_t), BUCKET_COUNT,
-				vk::BufferUsageFlagBits::eTransferDst,
-				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-			m_readback_staging[i]->map();
-		}
+		m_readback_staging[i] = std::make_unique<VeBuffer>(m_ve_device,
+			sizeof(uint32_t), BUCKET_COUNT,
+			vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		m_readback_staging[i]->map();
 
 		// Shadow culling buffers: one set per shadow layer
 		for (uint32_t slot = 0; slot < SHADOW_BUFFER_COUNT; slot++) {
@@ -116,13 +114,11 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 				m_ve_device.getDeviceProperties().limits.minUniformBufferOffsetAlignment);
 			m_shadow_cull_param_ubos[i][slot]->map();
 
-			if (!m_ve_device.supportsDrawIndirectCount()) {
-				m_shadow_readback_staging[i][slot] = std::make_unique<VeBuffer>(m_ve_device,
-					sizeof(uint32_t), MESHLET_SHADOW_BUCKET_COUNT,
-					vk::BufferUsageFlagBits::eTransferDst,
-					vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-				m_shadow_readback_staging[i][slot]->map();
-			}
+			m_shadow_readback_staging[i][slot] = std::make_unique<VeBuffer>(m_ve_device,
+				sizeof(uint32_t), MESHLET_SHADOW_BUCKET_COUNT,
+				vk::BufferUsageFlagBits::eTransferDst,
+				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+			m_shadow_readback_staging[i][slot]->map();
 		}
 	}
 
@@ -209,61 +205,74 @@ void MeshletCullingSystem::createPipelineLayouts() {
 	m_pass2_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), pass2_info);
 }
 
+void MeshletCullingSystem::writeCullDescriptorSets(
+		VeDescriptorPool& pool, GpuSceneManager& scene_mgr, const PbrMegaBuffer& mega_buffer,
+		uint32_t frame,
+		vk::DescriptorImageInfo& hiz_img, vk::DescriptorImageInfo& hiz_smp_info,
+		VeBuffer& cull_params, VeBuffer& visible_objects, VeBuffer& counts,
+		VeBuffer& instance_buf, VeBuffer& meshlet_object_map, VeBuffer& dispatch_indirect,
+		VeBuffer& meshlet_indirect, VeBuffer& meshlet_draw_counts,
+		vk::raii::DescriptorSet& out_pass1, vk::raii::DescriptorSet& out_pass2) {
+	auto obj_info    = scene_mgr.getObjectDataBuffer(frame).getDescriptorInfo();
+	auto xfm_info    = scene_mgr.getTransformBuffer(frame).getDescriptorInfo();
+	auto params_info = cull_params.getDescriptorInfo();
+	auto ids_info    = scene_mgr.getActiveIdBuffer(frame).getDescriptorInfo();
+	auto moi_info    = scene_mgr.getMeshletObjectInfoBuffer(frame).getDescriptorInfo();
+	auto vis_info    = visible_objects.getDescriptorInfo();
+	auto cnt_info    = counts.getDescriptorInfo();
+	auto inst_info   = instance_buf.getDescriptorInfo();
+	auto map_info    = meshlet_object_map.getDescriptorInfo();
+	auto disp_info   = dispatch_indirect.getDescriptorInfo();
+
+	VeDescriptorWriter(*m_pass1_layout, pool)
+		.writeBuffer(0,  &obj_info)
+		.writeBuffer(1,  &xfm_info)
+		.writeBuffer(2,  &params_info)
+		.writeBuffer(3,  &ids_info)
+		.writeBuffer(4,  &moi_info)
+		.writeBuffer(5,  &vis_info)
+		.writeBuffer(6,  &cnt_info)
+		.writeBuffer(7,  &inst_info)
+		.writeImage(8,   &hiz_img)
+		.writeImage(9,   &hiz_smp_info)
+		.writeBuffer(10, &map_info)
+		.writeBuffer(11, &disp_info)
+		.build(out_pass1);
+
+	if (mega_buffer.hasMeshletData()) {
+		auto msbo_info = mega_buffer.getMeshletSsbo()->getDescriptorInfo();
+		auto ind_info  = meshlet_indirect.getDescriptorInfo();
+		auto dc_info   = meshlet_draw_counts.getDescriptorInfo();
+
+		VeDescriptorWriter(*m_pass2_layout, pool)
+			.writeBuffer(0,  &vis_info)
+			.writeBuffer(1,  &map_info)
+			.writeBuffer(2,  &cnt_info)
+			.writeBuffer(3,  &msbo_info)
+			.writeBuffer(4,  &obj_info)
+			.writeBuffer(5,  &xfm_info)
+			.writeBuffer(6,  &params_info)
+			.writeImage(7,   &hiz_img)
+			.writeImage(8,   &hiz_smp_info)
+			.writeBuffer(9,  &ind_info)
+			.writeBuffer(10, &dc_info)
+			.build(out_pass2);
+	}
+}
+
 void MeshletCullingSystem::createDescriptorSets(VeDescriptorPool& pool,
                                                 GpuSceneManager& scene_mgr,
                                                 const PbrMegaBuffer& mega_buffer) {
-	vk::ImageView dummy_view = *m_dummy_image->getImageView();
-	vk::Sampler   dummy_smp  = *m_dummy_sampler;
+	vk::DescriptorImageInfo dummy_img{.imageView = *m_dummy_image->getImageView(), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
+	vk::DescriptorImageInfo dummy_smp_info{.sampler = *m_dummy_sampler};
 
-	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-		auto obj_info    = scene_mgr.getObjectDataBuffer(i).getDescriptorInfo();
-		auto xfm_info    = scene_mgr.getTransformBuffer(i).getDescriptorInfo();
-		auto params_info = m_cull_param_ubos[i]->getDescriptorInfo();
-		auto ids_info    = scene_mgr.getActiveIdBuffer(i).getDescriptorInfo();
-		auto moi_info    = scene_mgr.getMeshletObjectInfoBuffer(i).getDescriptorInfo();
-		auto vis_info    = m_visible_objects[i]->getDescriptorInfo();
-		auto cnt_info    = m_counts[i]->getDescriptorInfo();
-		auto inst_info   = m_instance_buffers[i]->getDescriptorInfo();
-		auto map_info    = m_meshlet_object_map[i]->getDescriptorInfo();
-		auto disp_info   = m_dispatch_indirect[i]->getDescriptorInfo();
-		vk::DescriptorImageInfo dummy_img{.imageView = dummy_view, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
-		vk::DescriptorImageInfo dummy_smp_info{.sampler = dummy_smp};
-
-		VeDescriptorWriter(*m_pass1_layout, pool)
-			.writeBuffer(0,  &obj_info)
-			.writeBuffer(1,  &xfm_info)
-			.writeBuffer(2,  &params_info)
-			.writeBuffer(3,  &ids_info)
-			.writeBuffer(4,  &moi_info)
-			.writeBuffer(5,  &vis_info)
-			.writeBuffer(6,  &cnt_info)
-			.writeBuffer(7,  &inst_info)
-			.writeImage(8,   &dummy_img)
-			.writeImage(9,   &dummy_smp_info)
-			.writeBuffer(10, &map_info)
-			.writeBuffer(11, &disp_info)
-			.build(m_pass1_sets[i]);
-
-		if (mega_buffer.hasMeshletData()) {
-			auto msbo_info = mega_buffer.getMeshletSsbo()->getDescriptorInfo();
-			auto ind_info  = m_meshlet_indirect[i]->getDescriptorInfo();
-			auto dc_info   = m_meshlet_draw_counts[i]->getDescriptorInfo();
-
-			VeDescriptorWriter(*m_pass2_layout, pool)
-				.writeBuffer(0,  &vis_info)
-				.writeBuffer(1,  &map_info)
-				.writeBuffer(2,  &cnt_info)
-				.writeBuffer(3,  &msbo_info)
-				.writeBuffer(4,  &obj_info)
-				.writeBuffer(5,  &xfm_info)
-				.writeBuffer(6,  &params_info)
-				.writeImage(7,   &dummy_img)
-				.writeImage(8,   &dummy_smp_info)
-				.writeBuffer(9,  &ind_info)
-				.writeBuffer(10, &dc_info)
-				.build(m_pass2_sets[i]);
-		}
-	}
+	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+		writeCullDescriptorSets(pool, scene_mgr, mega_buffer, i,
+			dummy_img, dummy_smp_info,
+			*m_cull_param_ubos[i], *m_visible_objects[i], *m_counts[i],
+			*m_instance_buffers[i], *m_meshlet_object_map[i], *m_dispatch_indirect[i],
+			*m_meshlet_indirect[i], *m_meshlet_draw_counts[i],
+			m_pass1_sets[i], m_pass2_sets[i]);
 }
 
 void MeshletCullingSystem::createHizDescriptorSets(VeDescriptorPool& pool,
@@ -272,60 +281,18 @@ void MeshletCullingSystem::createHizDescriptorSets(VeDescriptorPool& pool,
                                                    HizSystem& hiz) {
 	m_hiz_size      = glm::vec2(static_cast<float>(hiz.getWidth()), static_cast<float>(hiz.getHeight()));
 	m_hiz_mip_count = hiz.getMipLevels();
-	vk::Sampler hiz_smp = *hiz.getSampler();
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-		// Each frame i reads the previous frame's Hi-Z pyramid
 		uint32_t prev_frame = (i + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
-		vk::ImageView prev_view = *hiz.getHizImageView(prev_frame);
-		vk::DescriptorImageInfo hiz_img{.imageView = prev_view, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
-		vk::DescriptorImageInfo hiz_smp_info{.sampler = hiz_smp};
+		vk::DescriptorImageInfo hiz_img{.imageView = *hiz.getHizImageView(prev_frame), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
+		vk::DescriptorImageInfo hiz_smp_info{.sampler = *hiz.getSampler()};
 
-		auto obj_info    = scene_mgr.getObjectDataBuffer(i).getDescriptorInfo();
-		auto xfm_info    = scene_mgr.getTransformBuffer(i).getDescriptorInfo();
-		auto params_info = m_cull_param_ubos[i]->getDescriptorInfo();
-		auto ids_info    = scene_mgr.getActiveIdBuffer(i).getDescriptorInfo();
-		auto moi_info    = scene_mgr.getMeshletObjectInfoBuffer(i).getDescriptorInfo();
-		auto vis_info    = m_visible_objects[i]->getDescriptorInfo();
-		auto cnt_info    = m_counts[i]->getDescriptorInfo();
-		auto inst_info   = m_instance_buffers[i]->getDescriptorInfo();
-		auto map_info    = m_meshlet_object_map[i]->getDescriptorInfo();
-		auto disp_info   = m_dispatch_indirect[i]->getDescriptorInfo();
-
-		VeDescriptorWriter(*m_pass1_layout, pool)
-			.writeBuffer(0,  &obj_info)
-			.writeBuffer(1,  &xfm_info)
-			.writeBuffer(2,  &params_info)
-			.writeBuffer(3,  &ids_info)
-			.writeBuffer(4,  &moi_info)
-			.writeBuffer(5,  &vis_info)
-			.writeBuffer(6,  &cnt_info)
-			.writeBuffer(7,  &inst_info)
-			.writeImage(8,   &hiz_img)
-			.writeImage(9,   &hiz_smp_info)
-			.writeBuffer(10, &map_info)
-			.writeBuffer(11, &disp_info)
-			.build(m_pass1_hiz_sets[i]);
-
-		if (mega_buffer.hasMeshletData()) {
-			auto msbo_info = mega_buffer.getMeshletSsbo()->getDescriptorInfo();
-			auto ind_info  = m_meshlet_indirect[i]->getDescriptorInfo();
-			auto dc_info   = m_meshlet_draw_counts[i]->getDescriptorInfo();
-
-			VeDescriptorWriter(*m_pass2_layout, pool)
-				.writeBuffer(0,  &vis_info)
-				.writeBuffer(1,  &map_info)
-				.writeBuffer(2,  &cnt_info)
-				.writeBuffer(3,  &msbo_info)
-				.writeBuffer(4,  &obj_info)
-				.writeBuffer(5,  &xfm_info)
-				.writeBuffer(6,  &params_info)
-				.writeImage(7,   &hiz_img)
-				.writeImage(8,   &hiz_smp_info)
-				.writeBuffer(9,  &ind_info)
-				.writeBuffer(10, &dc_info)
-				.build(m_pass2_hiz_sets[i]);
-		}
+		writeCullDescriptorSets(pool, scene_mgr, mega_buffer, i,
+			hiz_img, hiz_smp_info,
+			*m_cull_param_ubos[i], *m_visible_objects[i], *m_counts[i],
+			*m_instance_buffers[i], *m_meshlet_object_map[i], *m_dispatch_indirect[i],
+			*m_meshlet_indirect[i], *m_meshlet_draw_counts[i],
+			m_pass1_hiz_sets[i], m_pass2_hiz_sets[i]);
 	}
 }
 
@@ -387,12 +354,17 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 
 	// Async readback: read draw counts written 2 frames ago from the mapped staging buffer
 	m_current_readback_valid = false;
-	if (m_readback_staging[frame]) {
-		auto* staging_ptr = static_cast<const uint32_t*>(m_readback_staging[frame]->getMappedMemory());
-		if (staging_ptr && m_has_readback[frame]) {
-			std::memcpy(m_readback_counts.data(), staging_ptr, BUCKET_COUNT * sizeof(uint32_t));
-			m_current_readback_valid = true;
-		}
+	auto* staging_ptr = static_cast<const uint32_t*>(m_readback_staging[frame]->getMappedMemory());
+	if (staging_ptr && m_has_readback[frame]) {
+		std::memcpy(m_readback_counts.data(), staging_ptr, BUCKET_COUNT * sizeof(uint32_t));
+		m_current_readback_valid = true;
+
+		// Update high-water marks: grow fast (2x + headroom), decay slowly (3/4)
+		constexpr uint32_t MAX_PER_BUCKET = MAX_MESHLET_DRAWS / BUCKET_COUNT;
+		for (uint32_t b = 0; b < BUCKET_COUNT; b++)
+			m_readback_high_water[b] = std::min(
+				std::max(m_readback_counts[b] * 2 + 1024, m_readback_high_water[b] * 3 / 4),
+				MAX_PER_BUCKET);
 	}
 
 	// Clear per-frame counters and init dispatch_indirect to (0, 1, 1)
@@ -402,15 +374,12 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 	cmd.fillBuffer(*m_dispatch_indirect[frame]->getBuffer(), 0, 4, 0u);  // groups_x = 0
 	cmd.fillBuffer(*m_dispatch_indirect[frame]->getBuffer(), 4, 8, 1u);  // Y = 1, Z = 1
 
-	// Without drawIndirectCount, zero-fill only the indirect buffer region we'll actually draw.
-	// Slots beyond the draw count are never read. Uses readback counts + headroom.
-	if (m_readback_staging[frame]) {
+	// Without drawIndirectCount, zero-fill the indirect buffer region using high-water marks
+	if (!m_ve_device.supportsDrawIndirectCount()) {
 		constexpr uint32_t MAX_PER_BUCKET = MAX_MESHLET_DRAWS / BUCKET_COUNT;
 		constexpr vk::DeviceSize CMD_SIZE = sizeof(VkDrawIndexedIndirectCommand);
 		for (uint32_t b = 0; b < BUCKET_COUNT; b++) {
-			uint32_t count = m_current_readback_valid
-				? std::min(m_readback_counts[b] * 2 + 1024, MAX_PER_BUCKET)
-				: MAX_PER_BUCKET;
+			uint32_t count = m_current_readback_valid ? m_readback_high_water[b] : MAX_PER_BUCKET;
 			auto offset = static_cast<vk::DeviceSize>(b) * MAX_PER_BUCKET * CMD_SIZE;
 			cmd.fillBuffer(*m_meshlet_indirect[frame]->getBuffer(), offset,
 				static_cast<vk::DeviceSize>(count) * CMD_SIZE, 0);
@@ -467,156 +436,38 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 	cmd.pipelineBarrier2(draw_dep);
 
 	// Copy draw counts to staging for CPU readback next time this frame index is used
-	if (m_readback_staging[frame]) {
-		vk::BufferCopy region{0, 0, static_cast<vk::DeviceSize>(BUCKET_COUNT) * sizeof(uint32_t)};
-		cmd.copyBuffer(*m_meshlet_draw_counts[frame]->getBuffer(),
-			*m_readback_staging[frame]->getBuffer(), region);
-		m_has_readback[frame] = true;
-	}
+	vk::BufferCopy region{0, 0, static_cast<vk::DeviceSize>(BUCKET_COUNT) * sizeof(uint32_t)};
+	cmd.copyBuffer(*m_meshlet_draw_counts[frame]->getBuffer(),
+		*m_readback_staging[frame]->getBuffer(), region);
+	m_has_readback[frame] = true;
 }
 
 void MeshletCullingSystem::createShadowDescriptorSets(VeDescriptorPool& pool,
                                                        GpuSceneManager& scene_mgr,
                                                        const PbrMegaBuffer& mega_buffer) {
-	vk::ImageView dummy_view = *m_dummy_image->getImageView();
-	vk::Sampler   dummy_smp  = *m_dummy_sampler;
-	vk::DescriptorImageInfo dummy_img{.imageView = dummy_view, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
-	vk::DescriptorImageInfo dummy_smp_info{.sampler = dummy_smp};
+	vk::DescriptorImageInfo dummy_img{.imageView = *m_dummy_image->getImageView(), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
+	vk::DescriptorImageInfo dummy_smp_info{.sampler = *m_dummy_sampler};
 
 	m_shadow_pass1_sets.resize(MAX_FRAMES_IN_FLIGHT);
 	m_shadow_pass2_sets.resize(MAX_FRAMES_IN_FLIGHT);
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-		auto obj_info = scene_mgr.getObjectDataBuffer(i).getDescriptorInfo();
-		auto xfm_info = scene_mgr.getTransformBuffer(i).getDescriptorInfo();
-		auto ids_info = scene_mgr.getActiveIdBuffer(i).getDescriptorInfo();
-		auto moi_info = scene_mgr.getMeshletObjectInfoBuffer(i).getDescriptorInfo();
-
 		m_shadow_pass1_sets[i].clear();
 		m_shadow_pass2_sets[i].clear();
 
 		for (uint32_t slot = 0; slot < SHADOW_BUFFER_COUNT; slot++) {
-			auto params_info = m_shadow_cull_param_ubos[i][slot]->getDescriptorInfo();
-			auto vis_info    = m_shadow_visible_objects[i][slot]->getDescriptorInfo();
-			auto cnt_info    = m_shadow_counts[i][slot]->getDescriptorInfo();
-			auto inst_info   = m_shadow_instance_buffers[i][slot]->getDescriptorInfo();
-			auto map_info    = m_shadow_meshlet_object_map[i][slot]->getDescriptorInfo();
-			auto disp_info   = m_shadow_dispatch_indirect[i][slot]->getDescriptorInfo();
-
 			vk::raii::DescriptorSet ds1{nullptr};
-			VeDescriptorWriter(*m_pass1_layout, pool)
-				.writeBuffer(0,  &obj_info)
-				.writeBuffer(1,  &xfm_info)
-				.writeBuffer(2,  &params_info)
-				.writeBuffer(3,  &ids_info)
-				.writeBuffer(4,  &moi_info)
-				.writeBuffer(5,  &vis_info)
-				.writeBuffer(6,  &cnt_info)
-				.writeBuffer(7,  &inst_info)
-				.writeImage(8,   &dummy_img)
-				.writeImage(9,   &dummy_smp_info)
-				.writeBuffer(10, &map_info)
-				.writeBuffer(11, &disp_info)
-				.build(ds1);
+			vk::raii::DescriptorSet ds2{nullptr};
+			writeCullDescriptorSets(pool, scene_mgr, mega_buffer, i,
+				dummy_img, dummy_smp_info,
+				*m_shadow_cull_param_ubos[i][slot], *m_shadow_visible_objects[i][slot],
+				*m_shadow_counts[i][slot], *m_shadow_instance_buffers[i][slot],
+				*m_shadow_meshlet_object_map[i][slot], *m_shadow_dispatch_indirect[i][slot],
+				*m_shadow_meshlet_indirect[i][slot], *m_shadow_meshlet_draw_counts[i][slot],
+				ds1, ds2);
 			m_shadow_pass1_sets[i].push_back(std::move(ds1));
-
-			if (mega_buffer.hasMeshletData()) {
-				auto msbo_info = mega_buffer.getMeshletSsbo()->getDescriptorInfo();
-				auto ind_info  = m_shadow_meshlet_indirect[i][slot]->getDescriptorInfo();
-				auto dc_info   = m_shadow_meshlet_draw_counts[i][slot]->getDescriptorInfo();
-
-				vk::raii::DescriptorSet ds2{nullptr};
-				VeDescriptorWriter(*m_pass2_layout, pool)
-					.writeBuffer(0,  &vis_info)
-					.writeBuffer(1,  &map_info)
-					.writeBuffer(2,  &cnt_info)
-					.writeBuffer(3,  &msbo_info)
-					.writeBuffer(4,  &obj_info)
-					.writeBuffer(5,  &xfm_info)
-					.writeBuffer(6,  &params_info)
-					.writeImage(7,   &dummy_img)
-					.writeImage(8,   &dummy_smp_info)
-					.writeBuffer(9,  &ind_info)
-					.writeBuffer(10, &dc_info)
-					.build(ds2);
+			if (mega_buffer.hasMeshletData())
 				m_shadow_pass2_sets[i].push_back(std::move(ds2));
-			}
-		}
-	}
-}
-
-void MeshletCullingSystem::createShadowHizDescriptorSets(VeDescriptorPool& pool,
-                                                          GpuSceneManager& scene_mgr,
-                                                          const PbrMegaBuffer& mega_buffer,
-                                                          HizSystem& hiz) {
-	m_hiz_size      = glm::vec2(static_cast<float>(hiz.getWidth()), static_cast<float>(hiz.getHeight()));
-	m_hiz_mip_count = hiz.getMipLevels();
-
-	m_shadow_pass1_hiz_sets.resize(MAX_FRAMES_IN_FLIGHT);
-	m_shadow_pass2_hiz_sets.resize(MAX_FRAMES_IN_FLIGHT);
-
-	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-		uint32_t prev_frame = (i + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
-		vk::DescriptorImageInfo hiz_img{
-			.imageView   = *hiz.getHizImageView(prev_frame),
-			.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-		};
-		vk::DescriptorImageInfo hiz_smp_info{.sampler = *hiz.getSampler()};
-
-		auto obj_info = scene_mgr.getObjectDataBuffer(i).getDescriptorInfo();
-		auto xfm_info = scene_mgr.getTransformBuffer(i).getDescriptorInfo();
-		auto ids_info = scene_mgr.getActiveIdBuffer(i).getDescriptorInfo();
-		auto moi_info = scene_mgr.getMeshletObjectInfoBuffer(i).getDescriptorInfo();
-
-		m_shadow_pass1_hiz_sets[i].clear();
-		m_shadow_pass2_hiz_sets[i].clear();
-
-		for (uint32_t slot = 0; slot < SHADOW_BUFFER_COUNT; slot++) {
-			auto params_info = m_shadow_cull_param_ubos[i][slot]->getDescriptorInfo();
-			auto vis_info    = m_shadow_visible_objects[i][slot]->getDescriptorInfo();
-			auto cnt_info    = m_shadow_counts[i][slot]->getDescriptorInfo();
-			auto inst_info   = m_shadow_instance_buffers[i][slot]->getDescriptorInfo();
-			auto map_info    = m_shadow_meshlet_object_map[i][slot]->getDescriptorInfo();
-			auto disp_info   = m_shadow_dispatch_indirect[i][slot]->getDescriptorInfo();
-
-			vk::raii::DescriptorSet ds1{nullptr};
-			VeDescriptorWriter(*m_pass1_layout, pool)
-				.writeBuffer(0,  &obj_info)
-				.writeBuffer(1,  &xfm_info)
-				.writeBuffer(2,  &params_info)
-				.writeBuffer(3,  &ids_info)
-				.writeBuffer(4,  &moi_info)
-				.writeBuffer(5,  &vis_info)
-				.writeBuffer(6,  &cnt_info)
-				.writeBuffer(7,  &inst_info)
-				.writeImage(8,   &hiz_img)
-				.writeImage(9,   &hiz_smp_info)
-				.writeBuffer(10, &map_info)
-				.writeBuffer(11, &disp_info)
-				.build(ds1);
-			m_shadow_pass1_hiz_sets[i].push_back(std::move(ds1));
-
-			if (mega_buffer.hasMeshletData()) {
-				auto msbo_info = mega_buffer.getMeshletSsbo()->getDescriptorInfo();
-				auto ind_info  = m_shadow_meshlet_indirect[i][slot]->getDescriptorInfo();
-				auto dc_info   = m_shadow_meshlet_draw_counts[i][slot]->getDescriptorInfo();
-
-				vk::raii::DescriptorSet ds2{nullptr};
-				VeDescriptorWriter(*m_pass2_layout, pool)
-					.writeBuffer(0,  &vis_info)
-					.writeBuffer(1,  &map_info)
-					.writeBuffer(2,  &cnt_info)
-					.writeBuffer(3,  &msbo_info)
-					.writeBuffer(4,  &obj_info)
-					.writeBuffer(5,  &xfm_info)
-					.writeBuffer(6,  &params_info)
-					.writeImage(7,   &hiz_img)
-					.writeImage(8,   &hiz_smp_info)
-					.writeBuffer(9,  &ind_info)
-					.writeBuffer(10, &dc_info)
-					.build(ds2);
-				m_shadow_pass2_hiz_sets[i].push_back(std::move(ds2));
-			}
 		}
 	}
 }
@@ -663,8 +514,7 @@ void MeshletCullingSystem::createShadowGlobalDescriptorSets(
 void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
                                                 const ShadowCullRequest* requests, uint32_t count,
                                                 GpuSceneManager& scene_mgr,
-                                                uint32_t frame_index,
-                                                const VeCamera* camera) {
+                                                uint32_t frame_index) {
 	uint32_t object_count = scene_mgr.getObjectCount();
 	if (object_count == 0 || count == 0)
 		return;
@@ -677,9 +527,18 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 		if (m_shadow_readback_staging[frame_index][slot]) {
 			auto* ptr = static_cast<const uint32_t*>(
 				m_shadow_readback_staging[frame_index][slot]->getMappedMemory());
-			if (ptr && m_shadow_has_readback[slot])
+			if (ptr && m_shadow_has_readback[frame_index][slot]) {
 				std::memcpy(m_shadow_readback_counts[slot].data(), ptr,
 					MESHLET_SHADOW_BUCKET_COUNT * sizeof(uint32_t));
+
+				// Update high-water marks
+				constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
+				for (uint32_t b = 0; b < MESHLET_SHADOW_BUCKET_COUNT; b++)
+					m_shadow_readback_high_water[slot][b] = std::min(
+						std::max(m_shadow_readback_counts[slot][b] * 2 + 1024,
+						         m_shadow_readback_high_water[slot][b] * 3 / 4),
+						SHADOW_MAX_PER_BUCKET);
+			}
 		}
 	}
 
@@ -701,21 +560,7 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 		params.max_meshlet_draws = MAX_MESHLET_SHADOW_DRAWS;
 		params.bucket_count      = MESHLET_SHADOW_BUCKET_COUNT;
 		params.camera_pos        = glm::vec4(req.light_pos, 0.0f);
-
-		if (camera != nullptr && m_hiz_enabled) {
-			params.hiz_enabled = 1;
-			params.view = camera->getView();
-			params.prev_view = m_frame_views[(frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT];
-			const glm::mat4& proj = camera->getProj();
-			params.p00 = proj[0][0];
-			params.p11 = proj[1][1];
-			params.p22 = proj[2][2];
-			params.p32 = proj[3][2];
-			params.hiz_size      = m_hiz_size;
-			params.hiz_mip_count = m_hiz_mip_count;
-		} else {
-			params.hiz_enabled = 0;
-		}
+		params.hiz_enabled       = 0;
 		m_shadow_cull_param_ubos[frame_index][slot]->writeToBuffer(&params);
 
 		cmd.fillBuffer(*m_shadow_counts[frame_index][slot]->getBuffer(),
@@ -728,9 +573,8 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 			constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
 			constexpr vk::DeviceSize CMD_SIZE = sizeof(VkDrawIndexedIndirectCommand);
 			for (uint32_t b = 0; b < MESHLET_SHADOW_BUCKET_COUNT; b++) {
-				uint32_t fill_count = m_shadow_has_readback[slot]
-					? std::min(m_shadow_readback_counts[slot][b] * 2 + 1024, SHADOW_MAX_PER_BUCKET)
-					: SHADOW_MAX_PER_BUCKET;
+				uint32_t fill_count = m_shadow_has_readback[frame_index][slot]
+					? m_shadow_readback_high_water[slot][b] : SHADOW_MAX_PER_BUCKET;
 				auto offset = static_cast<vk::DeviceSize>(b) * SHADOW_MAX_PER_BUCKET * CMD_SIZE;
 				cmd.fillBuffer(*m_shadow_meshlet_indirect[frame_index][slot]->getBuffer(), offset,
 					static_cast<vk::DeviceSize>(fill_count) * CMD_SIZE, 0);
@@ -752,14 +596,8 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_pass1_pipeline->getPipeline());
 	for (uint32_t r = 0; r < count; r++) {
 		uint32_t slot = requests[r].slot;
-		bool use_hiz = m_hiz_enabled && !m_shadow_pass1_hiz_sets.empty()
-			&& slot < m_shadow_pass1_hiz_sets[frame_index].size()
-			&& *m_shadow_pass1_hiz_sets[frame_index][slot];
-		auto& pass1_set = use_hiz
-			? m_shadow_pass1_hiz_sets[frame_index][slot]
-			: m_shadow_pass1_sets[frame_index][slot];
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pass1_pipeline_layout,
-			0, {*pass1_set}, {});
+			0, {*m_shadow_pass1_sets[frame_index][slot]}, {});
 		cmd.dispatch(groups1, 1, 1);
 	}
 
@@ -778,14 +616,8 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_pass2_pipeline->getPipeline());
 	for (uint32_t r = 0; r < count; r++) {
 		uint32_t slot = requests[r].slot;
-		bool use_hiz2 = m_hiz_enabled && !m_shadow_pass2_hiz_sets.empty()
-			&& slot < m_shadow_pass2_hiz_sets[frame_index].size()
-			&& *m_shadow_pass2_hiz_sets[frame_index][slot];
-		auto& pass2_set = use_hiz2
-			? m_shadow_pass2_hiz_sets[frame_index][slot]
-			: m_shadow_pass2_sets[frame_index][slot];
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pass2_pipeline_layout,
-			0, {*pass2_set}, {});
+			0, {*m_shadow_pass2_sets[frame_index][slot]}, {});
 		cmd.dispatchIndirect(*m_shadow_dispatch_indirect[frame_index][slot]->getBuffer(), 0);
 	}
 
@@ -802,15 +634,13 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 	cmd.pipelineBarrier2(draw_dep);
 
 	// Copy shadow draw counts to staging for CPU readback next time this frame index is used
-	if (!m_ve_device.supportsDrawIndirectCount()) {
-		for (uint32_t r = 0; r < count; r++) {
-			uint32_t slot = requests[r].slot;
-			vk::BufferCopy region{0, 0,
-				static_cast<vk::DeviceSize>(MESHLET_SHADOW_BUCKET_COUNT) * sizeof(uint32_t)};
-			cmd.copyBuffer(*m_shadow_meshlet_draw_counts[frame_index][slot]->getBuffer(),
-				*m_shadow_readback_staging[frame_index][slot]->getBuffer(), region);
-			m_shadow_has_readback[slot] = true;
-		}
+	for (uint32_t r = 0; r < count; r++) {
+		uint32_t slot = requests[r].slot;
+		vk::BufferCopy region{0, 0,
+			static_cast<vk::DeviceSize>(MESHLET_SHADOW_BUCKET_COUNT) * sizeof(uint32_t)};
+		cmd.copyBuffer(*m_shadow_meshlet_draw_counts[frame_index][slot]->getBuffer(),
+			*m_shadow_readback_staging[frame_index][slot]->getBuffer(), region);
+		m_shadow_has_readback[frame_index][slot] = true;
 	}
 }
 

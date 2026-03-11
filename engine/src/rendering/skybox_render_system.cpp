@@ -47,8 +47,15 @@ SkyboxRenderSystem::SkyboxRenderSystem(
 	loadCubeModel(resource_manager, cube_model_path);
 
 	if (!m_available_skyboxes.empty()) {
-		loadSkyboxTexture(m_available_skyboxes[0].path);
-		m_current_index = 0;
+		size_t default_index = 0;
+		for (size_t i = 0; i < m_available_skyboxes.size(); ++i) {
+			if (m_available_skyboxes[i].display_name == "clouds") {
+				default_index = i;
+				break;
+			}
+		}
+		loadSkyboxTexture(m_available_skyboxes[default_index].path);
+		m_current_index = default_index;
 	} else {
 		VE_LOGW("No skybox textures found in " << m_skybox_base_path.generic_string());
 	}
@@ -73,8 +80,8 @@ void SkyboxRenderSystem::discoverSkyboxes() {
 		auto path = it->path().lexically_normal();
 		std::string stem = path.stem().generic_string();
 
-		// Skip IBL companion files (cmgen output: <name>_ibl.ktx)
-		if (stem.size() > 4 && stem.compare(stem.size() - 4, 4, "_ibl") == 0)
+		// Only include skybox cubemap files (must end with _skybox)
+		if (stem.size() <= 7 || stem.compare(stem.size() - 7, 7, "_skybox") != 0)
 			continue;
 
 		// Display name: strip _skybox suffix for cmgen skybox files

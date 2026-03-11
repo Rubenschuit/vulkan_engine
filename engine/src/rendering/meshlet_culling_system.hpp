@@ -8,13 +8,13 @@
 
 #include <glm/glm.hpp>
 #include <array>
+#include <cassert>
 #include <filesystem>
 #include <memory>
 
 namespace ve {
 
 class VeDevice;
-class VeCamera;
 class VeImage;
 class GpuSceneManager;
 class PbrMegaBuffer;
@@ -57,12 +57,6 @@ public:
 	                                GpuSceneManager& scene_mgr,
 	                                const PbrMegaBuffer& mega_buffer);
 
-	// Recreate shadow descriptor sets with real Hi-Z bound (call after HizSystem init and on resize).
-	void createShadowHizDescriptorSets(VeDescriptorPool& pool,
-	                                   GpuSceneManager& scene_mgr,
-	                                   const PbrMegaBuffer& mega_buffer,
-	                                   HizSystem& hiz);
-
 	// Create shadow global descriptor sets (set 0 for shadow vertex shaders).
 	void createShadowGlobalDescriptorSets(VeDescriptorPool& pool,
 	                                      VeDescriptorSetLayout& layout,
@@ -80,34 +74,44 @@ public:
 	void dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 	                         const ShadowCullRequest* requests, uint32_t count,
 	                         GpuSceneManager& scene_mgr,
-	                         uint32_t frame_index,
-	                         const VeCamera* camera = nullptr);
+	                         uint32_t frame_index);
 
 	VeBuffer& getShadowMeshletIndirectBuffer(uint32_t frame, uint32_t slot) {
+		assert(frame < MAX_FRAMES_IN_FLIGHT && slot < SHADOW_BUFFER_COUNT);
 		return *m_shadow_meshlet_indirect[frame][slot];
 	}
 	VeBuffer& getShadowMeshletDrawCounts(uint32_t frame, uint32_t slot) {
+		assert(frame < MAX_FRAMES_IN_FLIGHT && slot < SHADOW_BUFFER_COUNT);
 		return *m_shadow_meshlet_draw_counts[frame][slot];
 	}
 	VeBuffer& getShadowInstanceBuffer(uint32_t frame, uint32_t slot) {
+		assert(frame < MAX_FRAMES_IN_FLIGHT && slot < SHADOW_BUFFER_COUNT);
 		return *m_shadow_instance_buffers[frame][slot];
 	}
 	vk::raii::DescriptorSet& getShadowGlobalDescriptorSet(uint32_t frame, uint32_t slot) {
+		assert(frame < MAX_FRAMES_IN_FLIGHT && slot < SHADOW_BUFFER_COUNT);
 		return m_shadow_global_sets[frame][slot];
 	}
 
-	VeBuffer& getInstanceBuffer(uint32_t frame) { return *m_instance_buffers[frame]; }
-	VeBuffer& getMeshletIndirectBuffer(uint32_t frame) { return *m_meshlet_indirect[frame]; }
-	VeBuffer& getMeshletDrawCounts(uint32_t frame) { return *m_meshlet_draw_counts[frame]; }
-	vk::raii::DescriptorSet& getGlobalDescriptorSet(uint32_t frame) { return m_global_descriptor_sets[frame]; }
+	VeBuffer& getInstanceBuffer(uint32_t frame) { assert(frame < MAX_FRAMES_IN_FLIGHT); return *m_instance_buffers[frame]; }
+	VeBuffer& getMeshletIndirectBuffer(uint32_t frame) { assert(frame < MAX_FRAMES_IN_FLIGHT); return *m_meshlet_indirect[frame]; }
+	VeBuffer& getMeshletDrawCounts(uint32_t frame) { assert(frame < MAX_FRAMES_IN_FLIGHT); return *m_meshlet_draw_counts[frame]; }
+	vk::raii::DescriptorSet& getGlobalDescriptorSet(uint32_t frame) { assert(frame < MAX_FRAMES_IN_FLIGHT); return m_global_descriptor_sets[frame]; }
 
 	// CPU-side draw counts read back from 2 frames ago. Valid after the first dispatch cycle.
-	// Returns nullptr when drawIndirectCount is supported (readback not needed).
-	const uint32_t* getCpuDrawCounts() const { return m_current_readback_valid ? m_readback_counts.data() : nullptr; }
+	// Returns nullptr until first readback completes (first few frames).
+	// High-water draw counts for drawIndexedIndirect fallback (only when drawIndirectCount unavailable).
+	const uint32_t* getCpuDrawCounts() const {
+		return (m_current_readback_valid && !m_ve_device.supportsDrawIndirectCount())
+			? m_readback_high_water.data() : nullptr;
+	}
+	// Raw readback counts for stats display (actual draw counts from 2 frames ago).
+	const uint32_t* getRawDrawCounts() const { return m_current_readback_valid ? m_readback_counts.data() : nullptr; }
 
 	// Per-slot shadow readback counts (same 2-frame-delay pattern as main view).
-	const uint32_t* getShadowCpuDrawCounts(uint32_t slot) const {
-		return m_shadow_has_readback[slot] ? m_shadow_readback_counts[slot].data() : nullptr;
+	const uint32_t* getShadowCpuDrawCounts(uint32_t frame, uint32_t slot) const {
+		assert(frame < MAX_FRAMES_IN_FLIGHT && slot < SHADOW_BUFFER_COUNT);
+		return m_shadow_has_readback[frame][slot] ? m_shadow_readback_high_water[slot].data() : nullptr;
 	}
 
 	bool isHizEnabled() const { return m_hiz_enabled; }
@@ -117,6 +121,15 @@ public:
 
 private:
 	void createPipelineLayouts();
+
+	void writeCullDescriptorSets(
+		VeDescriptorPool& pool, GpuSceneManager& scene_mgr, const PbrMegaBuffer& mega_buffer,
+		uint32_t frame,
+		vk::DescriptorImageInfo& hiz_img, vk::DescriptorImageInfo& hiz_smp_info,
+		VeBuffer& cull_params, VeBuffer& visible_objects, VeBuffer& counts,
+		VeBuffer& instance_buf, VeBuffer& meshlet_object_map, VeBuffer& dispatch_indirect,
+		VeBuffer& meshlet_indirect, VeBuffer& meshlet_draw_counts,
+		vk::raii::DescriptorSet& out_pass1, vk::raii::DescriptorSet& out_pass2);
 
 	VeDevice& m_ve_device;
 	bool m_hiz_enabled = false;
@@ -168,9 +181,10 @@ private:
 	std::unique_ptr<VeImage> m_dummy_image;
 	vk::raii::Sampler m_dummy_sampler{nullptr};
 
-	// Async readback of per-bucket draw counts (fallback when drawIndirectCount unavailable)
+	// Async readback of per-bucket draw counts
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_readback_staging;
 	std::array<uint32_t, MESHLET_BUCKET_COUNT> m_readback_counts{};
+	std::array<uint32_t, MESHLET_BUCKET_COUNT> m_readback_high_water{};
 	std::array<bool, MAX_FRAMES_IN_FLIGHT> m_has_readback{};
 	bool m_current_readback_valid = false;
 
@@ -180,7 +194,8 @@ private:
 	// Shadow async readback (fallback when drawIndirectCount unavailable)
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_readback_staging;
 	std::array<std::array<uint32_t, MESHLET_SHADOW_BUCKET_COUNT>, SHADOW_BUFFER_COUNT> m_shadow_readback_counts{};
-	std::array<bool, SHADOW_BUFFER_COUNT> m_shadow_has_readback{};
+	std::array<std::array<uint32_t, MESHLET_SHADOW_BUCKET_COUNT>, SHADOW_BUFFER_COUNT> m_shadow_readback_high_water{};
+	std::array<std::array<bool, SHADOW_BUFFER_COUNT>, MAX_FRAMES_IN_FLIGHT> m_shadow_has_readback{};
 
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_visible_objects;
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_meshlet_object_map;
@@ -194,8 +209,6 @@ private:
 	// Shadow compute descriptor sets: [frame][slot]
 	std::vector<std::vector<vk::raii::DescriptorSet>> m_shadow_pass1_sets;
 	std::vector<std::vector<vk::raii::DescriptorSet>> m_shadow_pass2_sets;
-	std::vector<std::vector<vk::raii::DescriptorSet>> m_shadow_pass1_hiz_sets;
-	std::vector<std::vector<vk::raii::DescriptorSet>> m_shadow_pass2_hiz_sets;
 
 	// Shadow global descriptor sets for vertex shader: [frame][slot]
 	std::vector<std::vector<vk::raii::DescriptorSet>> m_shadow_global_sets;
