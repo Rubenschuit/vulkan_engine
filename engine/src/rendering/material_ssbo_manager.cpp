@@ -51,7 +51,7 @@ void MaterialSSBOManager::flushToDevice(const vk::raii::CommandBuffer& cmd) {
 		return;
 
 	vk::DeviceSize size = static_cast<vk::DeviceSize>(m_next_index) * sizeof(MaterialGPU);
-	cmd.copyBuffer(*m_staging_buffer->getBuffer(), *m_buffer->getBuffer(),
+	cmd.copyBuffer(m_staging_buffer->getBuffer(), m_buffer->getBuffer(),
 		vk::BufferCopy{0, 0, size});
 
 	vk::BufferMemoryBarrier2 barrier{
@@ -63,7 +63,7 @@ void MaterialSSBOManager::flushToDevice(const vk::raii::CommandBuffer& cmd) {
 		.dstAccessMask = vk::AccessFlagBits2::eShaderStorageRead,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.buffer = *m_buffer->getBuffer(),
+		.buffer = m_buffer->getBuffer(),
 		.offset = 0,
 		.size = size,
 	};

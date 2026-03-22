@@ -172,7 +172,7 @@ bool IblSystem::parseSHFile(const std::filesystem::path& sh_path) {
 
 	// Parse 9 lines of format: ( x, y, z); // comment
 	std::string line;
-	int idx = 0;
+	size_t idx = 0;
 	while (std::getline(file, line) && idx < 9) {
 		// Find the parenthesized triple
 		auto open = line.find('(');

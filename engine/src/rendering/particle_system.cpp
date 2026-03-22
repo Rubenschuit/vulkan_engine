@@ -468,7 +468,7 @@ void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 		.dstAccessMask = vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.buffer = *m_indirect_buffers[frame_info.current_frame]->getBuffer(),
+		.buffer = m_indirect_buffers[frame_info.current_frame]->getBuffer(),
 		.offset = 0,
 		.size = VK_WHOLE_SIZE
 	};
@@ -541,12 +541,12 @@ void ParticleSystem::render(VeFrameInfo& frame_info) const {
 	);
 	vk::DeviceSize offsets[] = { 0 };
 	// Use Render Buffer (compacted) instead of simulation buffer
-	vk::Buffer buffers[] = { *m_render_buffers[frame_info.current_frame]->getBuffer() };
+	vk::Buffer buffers[] = { m_render_buffers[frame_info.current_frame]->getBuffer() };
 	frame_info.cmd().bindVertexBuffers(0, buffers, offsets);
 
 	// Indirect Draw
 	frame_info.cmd().drawIndirect(
-		*m_indirect_buffers[frame_info.current_frame]->getBuffer(),
+		m_indirect_buffers[frame_info.current_frame]->getBuffer(),
 		0,
 		1,
 		sizeof(VkDrawIndirectCommand)

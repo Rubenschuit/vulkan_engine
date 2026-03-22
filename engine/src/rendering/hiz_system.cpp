@@ -25,11 +25,11 @@ HizSystem::HizSystem(
 	VeDescriptorPool& descriptor_pool,
 	vk::Extent2D extent,
 	const vk::raii::ImageView& depth_image_view,
-	const vk::raii::Image& depth_image,
+	vk::Image depth_image,
 	const std::filesystem::path& shaders_dir)
 	: m_ve_device(device) {
 
-	m_depth_image = *depth_image;
+	m_depth_image = depth_image;
 	m_depth_image_view = *depth_image_view;
 
 	createHizImages(extent);
@@ -91,7 +91,7 @@ void HizSystem::createMipViews() {
 
 		for (uint32_t mip = 0; mip < m_mip_levels; mip++) {
 			vk::ImageViewCreateInfo view_info{
-				.image = *m_hiz_images[f]->getImage(),
+				.image = m_hiz_images[f]->getImage(),
 				.viewType = vk::ImageViewType::e2D,
 				.format = vk::Format::eR32Sfloat,
 				.subresourceRange = {
@@ -238,7 +238,7 @@ void HizSystem::createDescriptorSets(VeDescriptorPool& pool) {
 }
 
 void HizSystem::generate(vk::raii::CommandBuffer& cmd, uint32_t frame_index) {
-	vk::Image hiz_image = *m_hiz_images[frame_index]->getImage();
+	vk::Image hiz_image = m_hiz_images[frame_index]->getImage();
 
 	// Transition all Hi-Z mips to eGeneral for storage writes
 	{
@@ -343,9 +343,9 @@ void HizSystem::generate(vk::raii::CommandBuffer& cmd, uint32_t frame_index) {
 
 void HizSystem::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D extent,
                           const vk::raii::ImageView& depth_image_view,
-                          const vk::raii::Image& depth_image) {
+                          vk::Image depth_image) {
 	m_ve_device.assertDeviceIdle();
-	m_depth_image = *depth_image;
+	m_depth_image = depth_image;
 	m_depth_image_view = *depth_image_view;
 	createHizImages(extent);
 	createMipViews();
@@ -357,7 +357,7 @@ const vk::raii::ImageView& HizSystem::getHizImageView(uint32_t frame) const {
 }
 
 vk::Image HizSystem::getHizImage(uint32_t frame) const {
-	return *m_hiz_images[frame]->getImage();
+	return m_hiz_images[frame]->getImage();
 }
 
 } // namespace ve

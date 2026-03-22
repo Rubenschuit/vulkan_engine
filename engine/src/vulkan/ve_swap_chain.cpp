@@ -510,7 +510,7 @@ void VeSwapChain::transitionResolveTargetLayout(
 		.newLayout = new_layout,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_resolve_target_image->getImage(),
+		.image = m_resolve_target_image->getImage(),
 		.subresourceRange = {
 			.aspectMask = vk::ImageAspectFlagBits::eColor,
 			.baseMipLevel = 0,

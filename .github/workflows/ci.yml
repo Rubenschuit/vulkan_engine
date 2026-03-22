@@ -180,7 +180,7 @@ jobs:
         shell: msys2 {0}
         run: |
           source ~/.bash_profile
-          cmake --build build --config ${{ matrix.build_type }} --parallel
+          cmake --build build --config ${{ matrix.build_type }} --parallel 2
 
       # ── Test ───────────────────────────────────────────────────────
 

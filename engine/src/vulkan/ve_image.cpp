@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "vulkan/ve_image.hpp"
+#include <vk_mem_alloc.h>
 
 namespace ve {
 
@@ -35,57 +36,57 @@ VeImage::VeImage(
 	createImageView();
 }
 
-VeImage::~VeImage() {}
+VeImage::~VeImage() {
+	m_image_view = vk::raii::ImageView{nullptr};
+	if (m_allocation)
+		vmaDestroyImage(m_ve_device.getAllocator(), static_cast<VkImage>(m_image), m_allocation);
+}
 
-// Hardcoded: imageType=2D, extent.z=1, initlayout
 void VeImage::createImage() {
 	assert(m_width > 0 && m_height > 0 && "Image width and height must be greater than zero");
 	assert(m_usage != static_cast<vk::ImageUsageFlags>(0) && "Image usage flags must not be empty");
 
-	// Use concurrent sharing when queue families differ, exclusive otherwise
 	auto unique_families = m_ve_device.getQueueFamilyIndices().uniqueFamilies();
 	bool use_concurrent = !m_ve_device.getQueueFamilyIndices().allSameFamily() && unique_families.size() > 1;
 
-	vk::ImageCreateInfo image_info {
-		.sType = vk::StructureType::eImageCreateInfo,
+	VkImageCreateInfo image_info {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 		.pNext = nullptr,
-		.flags = m_image_create_flags,
-		.imageType = vk::ImageType::e2D,
-		.format = m_format,
-		.extent = vk::Extent3D{ m_width, m_height, 1 },
+		.flags = static_cast<VkImageCreateFlags>(m_image_create_flags),
+		.imageType = VK_IMAGE_TYPE_2D,
+		.format = static_cast<VkFormat>(m_format),
+		.extent = VkExtent3D{ m_width, m_height, 1 },
 		.mipLevels = m_mip_levels,
 		.arrayLayers = m_array_layers,
-		.samples = m_num_samples,
-		.tiling = m_tiling,
-		.usage = m_usage,
-		.sharingMode = use_concurrent ? vk::SharingMode::eConcurrent : vk::SharingMode::eExclusive,
+		.samples = static_cast<VkSampleCountFlagBits>(m_num_samples),
+		.tiling = static_cast<VkImageTiling>(m_tiling),
+		.usage = static_cast<VkImageUsageFlags>(m_usage),
+		.sharingMode = use_concurrent ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
 		.queueFamilyIndexCount = use_concurrent ? static_cast<uint32_t>(unique_families.size()) : 0u,
 		.pQueueFamilyIndices = use_concurrent ? unique_families.data() : nullptr,
-		.initialLayout = vk::ImageLayout::eUndefined
+		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 	};
-	m_image = vk::raii::Image(m_ve_device.getDevice(), image_info);
-	assert(*m_image != VK_NULL_HANDLE && "Failed to create image");
 
-	// Allocate and bind memory to image
-	vk::MemoryRequirements mem_requirements = m_image.getMemoryRequirements();
-	vk::MemoryAllocateInfo alloc_info {
-		.sType = vk::StructureType::eMemoryAllocateInfo,
-		.pNext = nullptr,
-		.allocationSize = mem_requirements.size,
-		.memoryTypeIndex = m_ve_device.findMemoryType(mem_requirements.memoryTypeBits, m_properties)
+	VmaAllocationCreateInfo alloc_info {
+		.usage = VMA_MEMORY_USAGE_AUTO,
 	};
-	m_image_memory = vk::raii::DeviceMemory(m_ve_device.getDevice(), alloc_info);
-	assert(*m_image_memory != VK_NULL_HANDLE && "Failed to allocate image memory");
-	m_image.bindMemory(*m_image_memory, 0); // offset 0
+
+	VkImage vk_image;
+	if (vmaCreateImage(m_ve_device.getAllocator(), &image_info, &alloc_info,
+	                   &vk_image, &m_allocation, nullptr) != VK_SUCCESS)
+		throw std::runtime_error("VMA: failed to create image");
+
+	m_image = vk::Image(vk_image);
+	assert(m_image && "Failed to create image");
 }
 
 void VeImage::createImageView() {
-	assert(*m_image != VK_NULL_HANDLE && "Image must be valid when creating image view");
+	assert(m_image && "Image must be valid when creating image view");
 	vk::ImageViewCreateInfo view_info {
 		.sType = vk::StructureType::eImageViewCreateInfo,
 		.pNext = nullptr,
 		.flags = {},
-		.image = *m_image,
+		.image = m_image,
 		.viewType = m_image_view_type,
 		.format = m_format,
 		.components = {},
@@ -102,14 +103,14 @@ void VeImage::createImageView() {
 }
 
 vk::raii::ImageView VeImage::createLayerImageView(uint32_t layer) const {
-	assert(*m_image != VK_NULL_HANDLE && "Image must be valid when creating layer image view");
+	assert(m_image && "Image must be valid when creating layer image view");
 	assert(layer < m_array_layers && "Layer index out of bounds");
 	vk::ImageViewCreateInfo view_info {
 		.sType = vk::StructureType::eImageViewCreateInfo,
 		.pNext = nullptr,
 		.flags = {},
-		.image = *m_image,
-		.viewType = vk::ImageViewType::e2D,  // Single layer view
+		.image = m_image,
+		.viewType = vk::ImageViewType::e2D,
 		.format = m_format,
 		.components = {},
 		.subresourceRange = vk::ImageSubresourceRange {
@@ -124,14 +125,14 @@ vk::raii::ImageView VeImage::createLayerImageView(uint32_t layer) const {
 }
 
 vk::raii::ImageView VeImage::createMultiLayerImageView(uint32_t base_layer, uint32_t layer_count) const {
-	assert(*m_image != VK_NULL_HANDLE && "Image must be valid when creating multi-layer image view");
+	assert(m_image && "Image must be valid when creating multi-layer image view");
 	assert(base_layer + layer_count <= m_array_layers && "Layer range out of bounds");
 	assert(layer_count > 1 && "Use createLayerImageView for single layers");
 	vk::ImageViewCreateInfo view_info {
 		.sType = vk::StructureType::eImageViewCreateInfo,
 		.pNext = nullptr,
 		.flags = {},
-		.image = *m_image,
+		.image = m_image,
 		.viewType = vk::ImageViewType::e2DArray,
 		.format = m_format,
 		.components = {},
@@ -146,7 +147,6 @@ vk::raii::ImageView VeImage::createMultiLayerImageView(uint32_t base_layer, uint
 	return vk::raii::ImageView(m_ve_device.getDevice(), view_info);
 }
 
-// Hardcoded: src and dst queue family indices to ignored, mip levels = 1
 void VeImage::transitionImageLayout(
 	vk::ImageLayout old_layout,
 	vk::ImageLayout new_layout,
@@ -155,10 +155,8 @@ void VeImage::transitionImageLayout(
 	vk::PipelineStageFlags2 src_stage,
 	vk::PipelineStageFlags2 dst_stage) {
 
-	assert(*m_image != VK_NULL_HANDLE && "Image must be valid when transitioning image layout");
+	assert(m_image && "Image must be valid when transitioning image layout");
 
-	// Only use the transfer queue when both stages are transfer-compatible.
-	// Stages like eFragmentShader are not valid on a dedicated transfer queue family.
 	constexpr auto kTransferStages =
 		vk::PipelineStageFlagBits2::eTransfer |
 		vk::PipelineStageFlagBits2::eAllTransfer |
@@ -185,7 +183,7 @@ void VeImage::transitionImageLayout(
 	vk::PipelineStageFlags2 src_stage,
 	vk::PipelineStageFlags2 dst_stage) {
 
-	assert(*m_image != VK_NULL_HANDLE && "Image must be valid when transitioning image layout");
+	assert(m_image && "Image must be valid when transitioning image layout");
 	vk::ImageMemoryBarrier2 barrier = {
 		.sType = vk::StructureType::eImageMemoryBarrier2,
 		.pNext = nullptr,
@@ -197,7 +195,7 @@ void VeImage::transitionImageLayout(
 		.newLayout = new_layout,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_image,
+		.image = m_image,
 		.subresourceRange = {
 			.aspectMask = m_aspect_flags,
 			.baseMipLevel = 0,

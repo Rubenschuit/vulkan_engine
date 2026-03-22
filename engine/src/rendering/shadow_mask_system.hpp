@@ -30,7 +30,7 @@ public:
 		vk::Extent2D mask_extent,
 		vk::Extent2D depth_extent,
 		const vk::raii::ImageView& depth_image_view,
-		const vk::raii::Image& depth_image);
+		vk::Image depth_image);
 	~ShadowMaskSystem();
 
 	ShadowMaskSystem(const ShadowMaskSystem&) = delete;
@@ -43,7 +43,7 @@ public:
 	/// Recreate shadow mask image for swapchain resize or resolution change
 	void recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D mask_extent,
 		vk::Extent2D depth_extent,
-		const vk::raii::ImageView& depth_image_view, const vk::raii::Image& depth_image);
+		const vk::raii::ImageView& depth_image_view, vk::Image depth_image);
 
 	/// Descriptor set layout for Set 3 (shadow mask output for PBR/simple)
 	const vk::raii::DescriptorSetLayout& getShadowMaskSetLayout() const {

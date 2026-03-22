@@ -40,11 +40,11 @@ GtaoSystem::GtaoSystem(
 	vk::Extent2D ao_extent,
 	vk::Extent2D depth_extent,
 	const vk::raii::ImageView& depth_image_view,
-	const vk::raii::Image& depth_image)
+	vk::Image depth_image)
 	: m_ve_device(device), m_shader_path(std::move(shader_path)),
 	  m_extent(ao_extent), m_depth_extent(depth_extent) {
 
-	m_depth_image = *depth_image;
+	m_depth_image = depth_image;
 	m_depth_image_view = *depth_image_view;
 	m_default_ao_texture = resource_manager.load<VeTexture>("default_albedo");
 	createAoImages(m_extent);
@@ -296,7 +296,7 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 		.newLayout = vk::ImageLayout::eGeneral,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_ao_raw_images[frame]->getImage(),
+		.image = m_ao_raw_images[frame]->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	{
@@ -350,7 +350,7 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_ao_raw_images[frame]->getImage(),
+		.image = m_ao_raw_images[frame]->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	// ao_blur: -> eGeneral for storage write
@@ -363,7 +363,7 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 		.newLayout = vk::ImageLayout::eGeneral,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_ao_blur_images[frame]->getImage(),
+		.image = m_ao_blur_images[frame]->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	{
@@ -406,7 +406,7 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_ao_blur_images[frame]->getImage(),
+		.image = m_ao_blur_images[frame]->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	// ao_raw: -> eGeneral for storage write (blur V output)
@@ -419,7 +419,7 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 		.newLayout = vk::ImageLayout::eGeneral,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_ao_raw_images[frame]->getImage(),
+		.image = m_ao_raw_images[frame]->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	{
@@ -462,7 +462,7 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_ao_raw_images[frame]->getImage(),
+		.image = m_ao_raw_images[frame]->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	{
@@ -476,12 +476,12 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 
 void GtaoSystem::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D ao_extent,
 	vk::Extent2D depth_extent,
-	const vk::raii::ImageView& depth_image_view, const vk::raii::Image& depth_image) {
+	const vk::raii::ImageView& depth_image_view, vk::Image depth_image) {
 	// Precondition: device must be idle
 	m_ve_device.assertDeviceIdle();
 	m_extent = ao_extent;
 	m_depth_extent = depth_extent;
-	m_depth_image = *depth_image;
+	m_depth_image = depth_image;
 	m_depth_image_view = *depth_image_view;
 	createAoImages(ao_extent);
 	createDescriptorSets(descriptor_pool);

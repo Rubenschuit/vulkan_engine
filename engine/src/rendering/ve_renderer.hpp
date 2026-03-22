@@ -43,10 +43,10 @@ public:
 	const vk::raii::ImageView& getSwapChainImageView(size_t index) const { return m_ve_swap_chain->getSwapChainImageViews()[index]; }
 	const vk::raii::ImageView& getResolveTargetImageView() const { return m_ve_swap_chain->getResolveTargetImageView(); }
 	const vk::raii::ImageView& getDepthImageView() const { return m_ve_swap_chain->getDepthImageView(); }
-	const vk::raii::Image& getDepthImage() const { return m_ve_swap_chain->getDepthImage(); }
+	vk::Image getDepthImage() const { return m_ve_swap_chain->getDepthImage(); }
 	/// Single-sample depth: resolved from MSAA prepass when MSAA active, otherwise same as depth
 	const vk::raii::ImageView& getResolvedDepthImageView() const { return m_ve_swap_chain->getResolvedDepthImageView(); }
-	const vk::raii::Image& getResolvedDepthImage() const { return m_ve_swap_chain->getResolvedDepthImage(); }
+	vk::Image getResolvedDepthImage() const { return m_ve_swap_chain->getResolvedDepthImage(); }
 	bool isSwapChainOutOfDate() const { return m_swap_chain_needs_recreation; }
 
 	// WBOIT image accessors

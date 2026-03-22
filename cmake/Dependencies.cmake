@@ -238,6 +238,13 @@ else()
 	endif()
 endif()
 
+# VMA (Vulkan Memory Allocator), header-only, vendored
+set(VMA_DIR "${CMAKE_SOURCE_DIR}/external/vma")
+if(NOT EXISTS "${VMA_DIR}/vk_mem_alloc.h")
+	message(FATAL_ERROR "VMA not found at ${VMA_DIR}. Place vk_mem_alloc.h there.")
+endif()
+message(STATUS "Using VMA at: ${VMA_DIR}")
+
 # Dear ImGui: vendored source under external/imgui
 set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/external/imgui")
 if (NOT EXISTS "${IMGUI_DIR}/imgui.h")

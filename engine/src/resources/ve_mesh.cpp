@@ -283,7 +283,7 @@ VeBuffer& VeMesh::getLodIndexBuffer(uint32_t lod) const {
 }
 
 void VeMesh::bindLodIndexBuffer(vk::raii::CommandBuffer& command_buffer, uint32_t lod) const {
-	command_buffer.bindIndexBuffer(*getLodIndexBuffer(lod).getBuffer(), 0, vk::IndexType::eUint32);
+	command_buffer.bindIndexBuffer(getLodIndexBuffer(lod).getBuffer(), 0, vk::IndexType::eUint32);
 }
 
 void VeMesh::drawIndexedLod(vk::raii::CommandBuffer& command_buffer, uint32_t lod,
@@ -292,19 +292,19 @@ void VeMesh::drawIndexedLod(vk::raii::CommandBuffer& command_buffer, uint32_t lo
 }
 
 void VeMesh::bindVertexBuffer(vk::raii::CommandBuffer& command_buffer) const {
-	vk::Buffer buffers[] = {*m_vertex_buffer->getBuffer()};
+	vk::Buffer buffers[] = {m_vertex_buffer->getBuffer()};
 	vk::DeviceSize offsets[] = {0};
 	command_buffer.bindVertexBuffers(0, buffers, offsets);
 }
 
 void VeMesh::bindShadowVertexBuffer(vk::raii::CommandBuffer& command_buffer) const {
-	vk::Buffer buffers[] = {*m_shadow_vertex_buffer->getBuffer()};
+	vk::Buffer buffers[] = {m_shadow_vertex_buffer->getBuffer()};
 	vk::DeviceSize offsets[] = {0};
 	command_buffer.bindVertexBuffers(0, buffers, offsets);
 }
 
 void VeMesh::bindIndexBuffer(vk::raii::CommandBuffer& command_buffer) const {
-	command_buffer.bindIndexBuffer(*m_index_buffer->getBuffer(), 0, vk::IndexType::eUint32);
+	command_buffer.bindIndexBuffer(m_index_buffer->getBuffer(), 0, vk::IndexType::eUint32);
 }
 
 void VeMesh::draw(vk::raii::CommandBuffer& command_buffer) const {

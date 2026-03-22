@@ -40,12 +40,12 @@ public:
 	const vk::raii::ImageView& getColorImageView() const { return m_color_image->getImageView(); }
 	const vk::raii::ImageView& getResolveTargetImageView() const { return m_resolve_target_image->getImageView(); }
 	const vk::raii::ImageView& getDepthImageView() const { return m_depth_image->getImageView(); }
-	const vk::raii::Image& getDepthImage() const { return m_depth_image->getImage(); }
+	vk::Image getDepthImage() const { return m_depth_image->getImage(); }
 	/// Single-sample depth (resolved from MSAA prepass, or same as depth when no MSAA)
 	const vk::raii::ImageView& getResolvedDepthImageView() const {
 		return m_resolved_depth_image ? m_resolved_depth_image->getImageView() : m_depth_image->getImageView();
 	}
-	const vk::raii::Image& getResolvedDepthImage() const {
+	vk::Image getResolvedDepthImage() const {
 		return m_resolved_depth_image ? m_resolved_depth_image->getImage() : m_depth_image->getImage();
 	}
 	bool hasResolvedDepth() const { return m_resolved_depth_image != nullptr; }

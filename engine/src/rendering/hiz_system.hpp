@@ -23,7 +23,7 @@ public:
 		VeDescriptorPool& descriptor_pool,
 		vk::Extent2D extent,
 		const vk::raii::ImageView& depth_image_view,
-		const vk::raii::Image& depth_image,
+		vk::Image depth_image,
 		const std::filesystem::path& shaders_dir);
 	~HizSystem();
 
@@ -39,7 +39,7 @@ public:
 	// Recreate images on swapchain resize.
 	void recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D extent,
 	              const vk::raii::ImageView& depth_image_view,
-	              const vk::raii::Image& depth_image);
+	              vk::Image depth_image);
 
 	const vk::raii::ImageView& getHizImageView(uint32_t frame) const;
 	vk::Image getHizImage(uint32_t frame) const;

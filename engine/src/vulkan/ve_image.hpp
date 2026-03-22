@@ -1,11 +1,11 @@
-/* VeImage is an encapsulation of a Vulkan image and its associated resources. */
 #pragma once
 #include "ve_export.hpp"
 #include "vulkan/ve_device.hpp"
 #include "utils/ve_log.hpp"
 
-// Hardcoded:
-// imageType, extent depth, mip, arraylayers, initlayout, sharingmode, samples, flags
+struct VmaAllocation_T;
+using VmaAllocation = VmaAllocation_T*;
+
 namespace ve {
 
 class VENGINE_API VeImage {
@@ -29,9 +29,8 @@ public:
 	VeImage(const VeImage&) = delete;
 	VeImage& operator=(const VeImage&) = delete;
 
-	const vk::raii::Image& getImage() const { return m_image; }
+	vk::Image getImage() const { return m_image; }
 	const vk::raii::ImageView& getImageView() const { return m_image_view; }
-	const vk::raii::DeviceMemory& getImageMemory() const { return m_image_memory; }
 	vk::Format getFormat() const { return m_format; }
 	uint32_t getWidth() const { return m_width; }
 	uint32_t getHeight() const { return m_height; }
@@ -39,13 +38,9 @@ public:
 	vk::ImageAspectFlags getAspectFlags() const { return m_aspect_flags; }
 	vk::Extent2D getExtent2D() const { return vk::Extent2D{ m_width, m_height }; }
 
-	// Create an image view for a specific layer (for rendering to array layers)
 	vk::raii::ImageView createLayerImageView(uint32_t layer) const;
-
-	// Create a 2DArray image view spanning multiple contiguous layers (for multiview rendering)
 	vk::raii::ImageView createMultiLayerImageView(uint32_t base_layer, uint32_t layer_count) const;
 
-	//debug
 	void printDebugInfo() const {
 		if (m_image_view_type == vk::ImageViewType::e2D)
 			VE_LOGD("Image view type: 2D");
@@ -56,7 +51,6 @@ public:
 		else
 			VE_LOGD("Image view type: Unknown");
 	}
-
 
 	void transitionImageLayout(
 		vk::ImageLayout old_layout,
@@ -95,10 +89,8 @@ private:
 	vk::ImageCreateFlags m_image_create_flags{};
 	vk::ImageViewType m_image_view_type{vk::ImageViewType::e2D};
 
-	vk::raii::Image m_image{nullptr};
-	vk::raii::DeviceMemory m_image_memory{nullptr};
+	vk::Image m_image{};
+	VmaAllocation m_allocation = nullptr;
 	vk::raii::ImageView m_image_view{nullptr};
-
-
 };
 } // namespace ve

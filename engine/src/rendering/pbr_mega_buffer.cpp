@@ -62,16 +62,16 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 			.dstOffset = static_cast<vk::DeviceSize>(vertex_offset) * sizeof(VeMesh::Vertex),
 			.size = static_cast<vk::DeviceSize>(vc) * sizeof(VeMesh::Vertex)
 		};
-		cmd.copyBuffer(*mesh->getVertexBuffer().getBuffer(),
-			*m_mega_vbo->getBuffer(), vbo_copy);
+		cmd.copyBuffer(mesh->getVertexBuffer().getBuffer(),
+			m_mega_vbo->getBuffer(), vbo_copy);
 
 		vk::BufferCopy shadow_vbo_copy{
 			.srcOffset = 0,
 			.dstOffset = static_cast<vk::DeviceSize>(vertex_offset) * sizeof(glm::vec3),
 			.size = static_cast<vk::DeviceSize>(vc) * sizeof(glm::vec3)
 		};
-		cmd.copyBuffer(*mesh->getShadowVertexBuffer().getBuffer(),
-			*m_mega_shadow_vbo->getBuffer(), shadow_vbo_copy);
+		cmd.copyBuffer(mesh->getShadowVertexBuffer().getBuffer(),
+			m_mega_shadow_vbo->getBuffer(), shadow_vbo_copy);
 
 		MeshEntry entry;
 		entry.vertex_offset = vertex_offset;
@@ -84,8 +84,8 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 				.dstOffset = static_cast<vk::DeviceSize>(index_offset) * sizeof(uint32_t),
 				.size = static_cast<vk::DeviceSize>(ic) * sizeof(uint32_t)
 			};
-			cmd.copyBuffer(*mesh->getLodIndexBuffer(lod).getBuffer(),
-				*m_mega_ibo->getBuffer(), ibo_copy);
+			cmd.copyBuffer(mesh->getLodIndexBuffer(lod).getBuffer(),
+				m_mega_ibo->getBuffer(), ibo_copy);
 
 			entry.lod_entries.push_back({index_offset, ic});
 			index_offset += ic;
@@ -173,9 +173,9 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 		vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst,
 		vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-	cmd.copyBuffer(*m_meshlet_ssbo_staging->getBuffer(), *m_meshlet_ssbo->getBuffer(),
+	cmd.copyBuffer(m_meshlet_ssbo_staging->getBuffer(), m_meshlet_ssbo->getBuffer(),
 		vk::BufferCopy{0, 0, sizeof(MeshletGPU) * total_meshlet_count});
-	cmd.copyBuffer(*m_meshlet_ibo_staging->getBuffer(), *m_meshlet_ibo->getBuffer(),
+	cmd.copyBuffer(m_meshlet_ibo_staging->getBuffer(), m_meshlet_ibo->getBuffer(),
 		vk::BufferCopy{0, 0, sizeof(uint32_t) * total_meshlet_indices});
 
 	VE_LOGI("PBR mega-buffer meshlets: " << total_meshlet_count << " meshlets, "
@@ -207,37 +207,37 @@ const PbrMegaBuffer::MeshletMeshEntry* PbrMegaBuffer::getMeshletEntry(VeMesh* me
 void PbrMegaBuffer::bind(vk::raii::CommandBuffer& cmd) const {
 	if (!m_mega_vbo || !m_mega_ibo)
 		return;
-	vk::Buffer buffers[] = {*m_mega_vbo->getBuffer()};
+	vk::Buffer buffers[] = {m_mega_vbo->getBuffer()};
 	vk::DeviceSize offsets[] = {0};
 	cmd.bindVertexBuffers(0, buffers, offsets);
-	cmd.bindIndexBuffer(*m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
+	cmd.bindIndexBuffer(m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
 }
 
 void PbrMegaBuffer::bindShadow(vk::raii::CommandBuffer& cmd) const {
 	if (!m_mega_shadow_vbo || !m_mega_ibo)
 		return;
-	vk::Buffer buffers[] = {*m_mega_shadow_vbo->getBuffer()};
+	vk::Buffer buffers[] = {m_mega_shadow_vbo->getBuffer()};
 	vk::DeviceSize offsets[] = {0};
 	cmd.bindVertexBuffers(0, buffers, offsets);
-	cmd.bindIndexBuffer(*m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
+	cmd.bindIndexBuffer(m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
 }
 
 void PbrMegaBuffer::bindMeshletIbo(vk::raii::CommandBuffer& cmd) const {
 	if (!m_mega_vbo || !m_meshlet_ibo)
 		return;
-	vk::Buffer buffers[] = {*m_mega_vbo->getBuffer()};
+	vk::Buffer buffers[] = {m_mega_vbo->getBuffer()};
 	vk::DeviceSize offsets[] = {0};
 	cmd.bindVertexBuffers(0, buffers, offsets);
-	cmd.bindIndexBuffer(*m_meshlet_ibo->getBuffer(), 0, vk::IndexType::eUint32);
+	cmd.bindIndexBuffer(m_meshlet_ibo->getBuffer(), 0, vk::IndexType::eUint32);
 }
 
 void PbrMegaBuffer::bindShadowMeshletIbo(vk::raii::CommandBuffer& cmd) const {
 	if (!m_mega_shadow_vbo || !m_meshlet_ibo)
 		return;
-	vk::Buffer buffers[] = {*m_mega_shadow_vbo->getBuffer()};
+	vk::Buffer buffers[] = {m_mega_shadow_vbo->getBuffer()};
 	vk::DeviceSize offsets[] = {0};
 	cmd.bindVertexBuffers(0, buffers, offsets);
-	cmd.bindIndexBuffer(*m_meshlet_ibo->getBuffer(), 0, vk::IndexType::eUint32);
+	cmd.bindIndexBuffer(m_meshlet_ibo->getBuffer(), 0, vk::IndexType::eUint32);
 }
 
 } // namespace ve

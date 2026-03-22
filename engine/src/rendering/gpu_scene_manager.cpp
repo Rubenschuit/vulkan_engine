@@ -228,8 +228,8 @@ void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Regist
 		copy_regions.push_back({offset, offset, sizeof(TransformGPU)});
 	}
 	if (!copy_regions.empty()) {
-		cmd.copyBuffer(*m_transform_staging[current_frame]->getBuffer(),
-		               *m_transform_buffers[current_frame]->getBuffer(),
+		cmd.copyBuffer(m_transform_staging[current_frame]->getBuffer(),
+		               m_transform_buffers[current_frame]->getBuffer(),
 		               copy_regions);
 	}
 
@@ -239,8 +239,8 @@ void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Regist
 		vk::DeviceSize size = static_cast<vk::DeviceSize>(m_next_id) * sizeof(ObjectDataGPU);
 		if (size > 0) {
 			vk::BufferCopy full_copy{0, 0, size};
-			cmd.copyBuffer(*m_object_data_staging[current_frame]->getBuffer(),
-			               *m_object_data_buffers[current_frame]->getBuffer(),
+			cmd.copyBuffer(m_object_data_staging[current_frame]->getBuffer(),
+			               m_object_data_buffers[current_frame]->getBuffer(),
 			               full_copy);
 			did_object_copy = true;
 		}
@@ -248,8 +248,8 @@ void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Regist
 		// Upload meshlet object info in lockstep with object data
 		vk::DeviceSize moi_size = static_cast<vk::DeviceSize>(m_next_id) * sizeof(MeshletObjectInfo);
 		if (moi_size > 0) {
-			cmd.copyBuffer(*m_meshlet_object_info_staging[current_frame]->getBuffer(),
-			               *m_meshlet_object_info_buffers[current_frame]->getBuffer(),
+			cmd.copyBuffer(m_meshlet_object_info_staging[current_frame]->getBuffer(),
+			               m_meshlet_object_info_buffers[current_frame]->getBuffer(),
 			               vk::BufferCopy{0, 0, moi_size});
 		}
 
@@ -265,8 +265,8 @@ void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Regist
 			m_active_id_staging[current_frame]->writeToBuffer(
 				m_active_ids.data(), id_size, 0);
 			vk::BufferCopy id_copy{0, 0, id_size};
-			cmd.copyBuffer(*m_active_id_staging[current_frame]->getBuffer(),
-			               *m_active_id_buffers[current_frame]->getBuffer(),
+			cmd.copyBuffer(m_active_id_staging[current_frame]->getBuffer(),
+			               m_active_id_buffers[current_frame]->getBuffer(),
 			               id_copy);
 			did_object_copy = true;
 		}
@@ -283,8 +283,8 @@ void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Regist
 			m_draw_group_staging[current_frame]->writeToBuffer(
 				gpu_groups.data(), group_size, 0);
 			vk::BufferCopy group_copy{0, 0, group_size};
-			cmd.copyBuffer(*m_draw_group_staging[current_frame]->getBuffer(),
-			               *m_draw_group_buffers[current_frame]->getBuffer(),
+			cmd.copyBuffer(m_draw_group_staging[current_frame]->getBuffer(),
+			               m_draw_group_buffers[current_frame]->getBuffer(),
 			               group_copy);
 
 			// Pre-filled indirect commands (instanceCount=0, rest from draw group)
@@ -310,8 +310,8 @@ void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Regist
 	if (m_template_needs_copy[current_frame] && m_total_groups > 0) {
 		vk::DeviceSize tmpl_size = static_cast<vk::DeviceSize>(m_total_groups) * sizeof(VkDrawIndexedIndirectCommand);
 		vk::BufferCopy tmpl_copy{0, 0, tmpl_size};
-		cmd.copyBuffer(*m_indirect_staging[current_frame]->getBuffer(),
-		               *m_indirect_template[current_frame]->getBuffer(), tmpl_copy);
+		cmd.copyBuffer(m_indirect_staging[current_frame]->getBuffer(),
+		               m_indirect_template[current_frame]->getBuffer(), tmpl_copy);
 		m_template_needs_copy[current_frame] = false;
 		wrote_template = true;
 	}

@@ -1,6 +1,11 @@
 #include "pch.hpp"
 #include "vulkan/ve_device.hpp"
 
+#define VMA_STATIC_VULKAN_FUNCTIONS 1
+#define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
+#define VMA_IMPLEMENTATION
+#include <vk_mem_alloc.h>
+
 
 namespace ve {
 
@@ -76,9 +81,12 @@ VeDevice::VeDevice(VeWindow &window) : m_window(window) {
 	pickPhysicalDevice();
 	createLogicalDevice();
 	createCommandPools();
+	createAllocator();
 }
 
 VeDevice::~VeDevice() {
+	if (m_allocator)
+		vmaDestroyAllocator(m_allocator);
 	// command pool, ve_device, surface, debug messenger and instance are RAII objects and will be cleaned up automatically
 }
 
@@ -508,17 +516,16 @@ vk::SampleCountFlagBits VeDevice::queryMaxUsableSampleCount() const {
     return vk::SampleCountFlagBits::e1;
 }
 
-// find a memory type index available that satisfies the requested properties
-uint32_t VeDevice::findMemoryType(uint32_t type_filter, vk::MemoryPropertyFlags properties) {
-	vk::PhysicalDeviceMemoryProperties mem_properties = m_physical_device.getMemoryProperties();
-	for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++) {
-		// check if i'th bit of type_filter is set, this is equivalent to the i'th memory type being
-		// suitable. We also require this memory type to support all the properties.
-		if ((type_filter & (1 << i)) && (mem_properties.memoryTypes[i].propertyFlags & properties) == properties) {
-			return i;
-		}
-	}
-	throw std::runtime_error("failed to find suitable memory type!");
+void VeDevice::createAllocator() {
+	VmaAllocatorCreateInfo alloc_info {
+		.physicalDevice   = *m_physical_device,
+		.device           = *m_device,
+		.instance         = *m_instance,
+		.vulkanApiVersion = VK_API_VERSION_1_3,
+	};
+
+	if (vmaCreateAllocator(&alloc_info, &m_allocator) != VK_SUCCESS)
+		throw std::runtime_error("Failed to create VMA allocator");
 }
 
 // Finds a physical device supported format from a list of candidates
@@ -543,56 +550,19 @@ vk::Format VeDevice::findDepthFormat() {
 	);
 }
 
-void VeDevice::createBuffer(
-		vk::DeviceSize size,
-		vk::BufferUsageFlags usage,
-		vk::MemoryPropertyFlags req_properties,
-		vk::raii::Buffer& buffer,
-		vk::raii::DeviceMemory& buffer_memory) {
-
+void VeDevice::copyBuffer(vk::Buffer src_buffer, vk::Buffer dst_buffer, vk::DeviceSize size) {
 	assert(size > 0 && "Buffer size must be greater than zero");
-	assert(usage != static_cast<vk::BufferUsageFlags>(0) && "Buffer usage flags must not be empty");
-
-	// Use concurrent sharing when queue families differ, exclusive otherwise
-	auto unique_families = m_queue_family_indices.uniqueFamilies();
-	bool use_concurrent = !m_queue_family_indices.allSameFamily() && unique_families.size() > 1;
-
-	vk::BufferCreateInfo buffer_create_info {
-		.sType = vk::StructureType::eBufferCreateInfo,
-		.size = size,
-		.usage = usage,
-		.sharingMode = use_concurrent ? vk::SharingMode::eConcurrent : vk::SharingMode::eExclusive,
-		.queueFamilyIndexCount = use_concurrent ? static_cast<uint32_t>(unique_families.size()) : 0u,
-		.pQueueFamilyIndices = use_concurrent ? unique_families.data() : nullptr
-	};
-	buffer = vk::raii::Buffer(m_device, buffer_create_info);
-
-	// Allocate and bind memory to buffer
-	vk::MemoryRequirements mem_requirements = buffer.getMemoryRequirements();
-	vk::MemoryAllocateInfo alloc_info {
-		.sType = vk::StructureType::eMemoryAllocateInfo,
-		.allocationSize = mem_requirements.size,
-		.memoryTypeIndex = findMemoryType(mem_requirements.memoryTypeBits, req_properties)
-	};
-	buffer_memory = vk::raii::DeviceMemory(m_device, alloc_info);
-	buffer.bindMemory(*buffer_memory, 0); // offset 0
-}
-
-void VeDevice::copyBuffer(vk::raii::Buffer& src_buffer, vk::raii::Buffer& dst_buffer, vk::DeviceSize size) {
-	assert(size > 0 && "Buffer size must be greater than zero");
-	assert(*src_buffer != VK_NULL_HANDLE && "Source buffer must be valid");
-	assert(*dst_buffer != VK_NULL_HANDLE && "Destination buffer must be valid");
+	assert(src_buffer && "Source buffer must be valid");
+	assert(dst_buffer && "Destination buffer must be valid");
 	auto cmd = beginSingleTimeCommands(QueueKind::Transfer);
-	cmd->copyBuffer(*src_buffer, *dst_buffer, vk::BufferCopy{ 0, 0, size });
+	cmd->copyBuffer(src_buffer, dst_buffer, vk::BufferCopy{ 0, 0, size });
 	endSingleTimeCommands(*cmd, QueueKind::Transfer);
 }
 
-// Assumes the image is already in eTransferDstOptimal layout
-void VeDevice::copyBufferToImage(vk::raii::Buffer& src_buffer, const vk::raii::Image& dst_image, uint32_t width, uint32_t height, uint32_t array_layers) {
+void VeDevice::copyBufferToImage(vk::Buffer src_buffer, vk::Image dst_image, uint32_t width, uint32_t height, uint32_t array_layers) {
 	assert(width > 0 && height > 0 && "Image width and height must be greater than zero");
-	assert(*src_buffer != VK_NULL_HANDLE && "Source buffer must be valid");
-	assert(*dst_image  != VK_NULL_HANDLE && "Destination image must be valid");
-	//VE_LOGD("Copying buffer to image, width: " << width << ", height: " << height << ", array layers: " << array_layers);
+	assert(src_buffer && "Source buffer must be valid");
+	assert(dst_image && "Destination image must be valid");
 	auto cmd = beginSingleTimeCommands(QueueKind::Transfer);
 	vk::BufferImageCopy copy_region{
 		.bufferOffset = 0,
@@ -602,11 +572,11 @@ void VeDevice::copyBufferToImage(vk::raii::Buffer& src_buffer, const vk::raii::I
 		.imageOffset = { 0, 0, 0 },
 		.imageExtent = { width, height, 1 }
 	};
-	cmd->copyBufferToImage(*src_buffer, *dst_image, vk::ImageLayout::eTransferDstOptimal, copy_region);
+	cmd->copyBufferToImage(src_buffer, dst_image, vk::ImageLayout::eTransferDstOptimal, copy_region);
 	endSingleTimeCommands(*cmd, QueueKind::Transfer);
 }
 
-void VeDevice::copyBufferToImageWithMipmaps(vk::raii::Buffer& src_buffer, const vk::raii::Image& dst_image,
+void VeDevice::copyBufferToImageWithMipmaps(vk::Buffer src_buffer, vk::Image dst_image,
 	uint32_t array_layers, uint32_t mip_levels,
 	const std::vector<vk::DeviceSize>& buffer_offsets,
 	const std::vector<vk::Extent3D>& extents) {
@@ -624,7 +594,7 @@ void VeDevice::copyBufferToImageWithMipmaps(vk::raii::Buffer& src_buffer, const 
 			.imageExtent = extents[level]
 		});
 	}
-	cmd->copyBufferToImage(*src_buffer, *dst_image, vk::ImageLayout::eTransferDstOptimal, copy_regions);
+	cmd->copyBufferToImage(src_buffer, dst_image, vk::ImageLayout::eTransferDstOptimal, copy_regions);
 	endSingleTimeCommands(*cmd, QueueKind::Transfer);
 }
 

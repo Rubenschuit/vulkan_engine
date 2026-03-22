@@ -79,7 +79,7 @@ void DepthPrePassSystem::render(
 		bool is_double_sided = (bucket & 1);
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
 		cmd.drawIndexedIndirect(
-			*indirect_buffer.getBuffer(),
+			indirect_buffer.getBuffer(),
 			bucket_offsets[bucket] * sizeof(VkDrawIndexedIndirectCommand),
 			bucket_counts[bucket],
 			sizeof(VkDrawIndexedIndirectCommand));
@@ -116,12 +116,12 @@ void DepthPrePassSystem::renderGpuCulled(
 		auto offset = static_cast<vk::DeviceSize>(bucket_group_offsets[bucket]) * sizeof(VkDrawIndexedIndirectCommand);
 		if (compacted_buffer && compact_count_buffer) {
 			cmd.drawIndexedIndirectCount(
-				*compacted_buffer->getBuffer(), offset,
-				*compact_count_buffer->getBuffer(), bucket * sizeof(uint32_t),
+				compacted_buffer->getBuffer(), offset,
+				compact_count_buffer->getBuffer(), bucket * sizeof(uint32_t),
 				bucket_group_counts[bucket], sizeof(VkDrawIndexedIndirectCommand));
 		} else {
 			cmd.drawIndexedIndirect(
-				*indirect_buffer.getBuffer(), offset,
+				indirect_buffer.getBuffer(), offset,
 				bucket_group_counts[bucket], sizeof(VkDrawIndexedIndirectCommand));
 		}
 	}
@@ -157,13 +157,13 @@ void DepthPrePassSystem::renderGpuCulledMeshlets(
 		if (cpu_draw_counts) {
 			uint32_t count = std::min(cpu_draw_counts[bucket], MAX_PER_BUCKET);
 			cmd.drawIndexedIndirect(
-				*meshlet_indirect.getBuffer(), buf_offset,
+				meshlet_indirect.getBuffer(), buf_offset,
 				count, sizeof(VkDrawIndexedIndirectCommand));
 		} else {
 			auto count_offset = static_cast<vk::DeviceSize>(bucket) * sizeof(uint32_t);
 			cmd.drawIndexedIndirectCount(
-				*meshlet_indirect.getBuffer(), buf_offset,
-				*draw_counts.getBuffer(), count_offset,
+				meshlet_indirect.getBuffer(), buf_offset,
+				draw_counts.getBuffer(), count_offset,
 				MAX_PER_BUCKET, sizeof(VkDrawIndexedIndirectCommand));
 		}
 	}

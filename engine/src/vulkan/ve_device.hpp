@@ -15,6 +15,10 @@ There are also methods for submitting single time command buffers to a queue. */
 #include <vector>
 #include <algorithm>
 
+// Forward-declare VMA types
+struct VmaAllocator_T;
+using VmaAllocator = VmaAllocator_T*;
+
 namespace ve {
 
 enum class QueueKind { Graphics, Compute, Transfer };
@@ -73,25 +77,18 @@ public:
 	const QueueFamilyIndices& getQueueFamilyIndices() const { return m_queue_family_indices; }
 
 	SwapChainSupportDetails getSwapChainSupport() { return querySwapChainSupport(m_physical_device); }
-	uint32_t findMemoryType(uint32_t type_filter, vk::MemoryPropertyFlags properties);
+	VmaAllocator getAllocator() const { return m_allocator; }
+
 	vk::Format findSupportedFormat(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features);
 	vk::Format findDepthFormat();
 
-	void createBuffer(
-		vk::DeviceSize size,
-		vk::BufferUsageFlags usage,
-		vk::MemoryPropertyFlags req_properties,
-		vk::raii::Buffer& buffer,
-		vk::raii::DeviceMemory& buffer_memory);
-	void copyBuffer(vk::raii::Buffer& src_buffer, vk::raii::Buffer& dst_buffer, vk::DeviceSize size);
-	void copyBufferToImage(vk::raii::Buffer& src_buffer, const vk::raii::Image& dst_image, uint32_t width, uint32_t height, uint32_t array_layers = 1);
-	// Copy buffer to image with multiple mip levels. buffer_offsets and extents must have mip_levels entries.
-	void copyBufferToImageWithMipmaps(vk::raii::Buffer& src_buffer, const vk::raii::Image& dst_image,
+	void copyBuffer(vk::Buffer src_buffer, vk::Buffer dst_buffer, vk::DeviceSize size);
+	void copyBufferToImage(vk::Buffer src_buffer, vk::Image dst_image, uint32_t width, uint32_t height, uint32_t array_layers = 1);
+	void copyBufferToImageWithMipmaps(vk::Buffer src_buffer, vk::Image dst_image,
 		uint32_t array_layers, uint32_t mip_levels,
 		const std::vector<vk::DeviceSize>& buffer_offsets,
 		const std::vector<vk::Extent3D>& extents);
 
-	// no-op if already idle
 #ifndef NDEBUG
 	void assertDeviceIdle() { m_device.waitIdle(); }
 #else
@@ -116,6 +113,7 @@ private:
 	void pickPhysicalDevice();
 	void createLogicalDevice();
 	void createCommandPools();
+	void createAllocator();
 
 	bool isDeviceSuitable (const vk::raii::PhysicalDevice& device) const;
 	std::vector<const char *> getRequiredInstanceExtensions();
@@ -153,6 +151,8 @@ private:
 	bool m_supports_astc = false;
 	bool m_supports_draw_indirect_count = false;
 	bool m_supports_calibrated_timestamps = false;
+
+	VmaAllocator m_allocator = nullptr;
 
 	const std::vector<const char *> m_validation_layers = ve::VALIDATION_LAYERS;
 	std::vector<const char*> m_required_device_extensions = ve::REQUIRED_DEVICE_EXTENSIONS;

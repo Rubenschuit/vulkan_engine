@@ -403,8 +403,8 @@ void GpuCullingSystem::copyIndirectStaging(vk::raii::CommandBuffer& cmd, GpuScen
 		return;
 	vk::DeviceSize copy_size = static_cast<vk::DeviceSize>(total_groups) * sizeof(VkDrawIndexedIndirectCommand);
 	vk::BufferCopy copy{0, 0, copy_size};
-	cmd.copyBuffer(*scene_mgr.getIndirectTemplateBuffer(frame).getBuffer(),
-	               *dst_indirect.getBuffer(), copy);
+	cmd.copyBuffer(scene_mgr.getIndirectTemplateBuffer(frame).getBuffer(),
+	               dst_indirect.getBuffer(), copy);
 }
 
 void GpuCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame_info, GpuSceneManager& scene_mgr) {
@@ -445,12 +445,12 @@ void GpuCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame
 	copyIndirectStaging(cmd, scene_mgr, frame, *m_indirect_buffers[frame]);
 
 	// Clear draw count buffer (bucket counts + total index count)
-	cmd.fillBuffer(*m_draw_count_buffers[frame]->getBuffer(), 0,
+	cmd.fillBuffer(m_draw_count_buffers[frame]->getBuffer(), 0,
 		static_cast<vk::DeviceSize>(BUCKET_COUNT + 1) * sizeof(uint32_t), 0);
 
 	// Clear compaction count buffer
 	if (m_compaction_enabled)
-		cmd.fillBuffer(*m_compact_count_buffers[frame]->getBuffer(), 0,
+		cmd.fillBuffer(m_compact_count_buffers[frame]->getBuffer(), 0,
 			static_cast<vk::DeviceSize>(BUCKET_COUNT) * sizeof(uint32_t), 0);
 
 	// Barrier: transfer clear/copy -> compute read/write
@@ -495,8 +495,8 @@ void GpuCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame
 
 	// Copy draw counts + triangle count to host-visible staging for async stats readback
 	vk::BufferCopy count_copy{0, 0, static_cast<vk::DeviceSize>(BUCKET_COUNT + 1) * sizeof(uint32_t)};
-	cmd.copyBuffer(*m_draw_count_buffers[frame]->getBuffer(),
-		*m_readback_buffers[frame]->getBuffer(), count_copy);
+	cmd.copyBuffer(m_draw_count_buffers[frame]->getBuffer(),
+		m_readback_buffers[frame]->getBuffer(), count_copy);
 }
 
 void GpuCullingSystem::dispatchCompaction(vk::raii::CommandBuffer& cmd, GpuSceneManager& scene_mgr,
@@ -539,7 +539,7 @@ void GpuCullingSystem::dispatchShadowCompaction(vk::raii::CommandBuffer& cmd, Gp
 		return;
 
 	// Clear shadow compact count buffer
-	cmd.fillBuffer(*m_shadow_compact_count_buffers[frame][slot]->getBuffer(), 0,
+	cmd.fillBuffer(m_shadow_compact_count_buffers[frame][slot]->getBuffer(), 0,
 		static_cast<vk::DeviceSize>(BUCKET_COUNT) * sizeof(uint32_t), 0);
 
 	// Barrier: fill -> compute

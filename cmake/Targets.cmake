@@ -28,12 +28,15 @@ if(TINYGLTF_PATH)
 	target_include_directories(VEngineLib SYSTEM PUBLIC ${TINYGLTF_PATH})
 endif()
 
+# VMA
+target_include_directories(VEngineLib SYSTEM PUBLIC ${VMA_DIR})
+
 # Add KTX include directories
 if(KTX_INCLUDE_DIRS)
 	target_include_directories(VEngineLib SYSTEM PUBLIC ${KTX_INCLUDE_DIRS})
 endif()
 
-# Link dependencies
+# Link GLFW and Vulkan
 target_link_libraries(VEngineLib PUBLIC ${GLFW_LIB} ${Vulkan_LIBRARIES})
 
 # Link KTX library

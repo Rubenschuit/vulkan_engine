@@ -37,7 +37,7 @@ public:
 		vk::Extent2D ao_extent,
 		vk::Extent2D depth_extent,
 		const vk::raii::ImageView& depth_image_view,
-		const vk::raii::Image& depth_image);
+		vk::Image depth_image);
 	~GtaoSystem();
 
 	GtaoSystem(const GtaoSystem&) = delete;
@@ -50,7 +50,7 @@ public:
 	// Recreate AO images when swapchain resizes or resolution toggle changes.
 	void recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D ao_extent,
 		vk::Extent2D depth_extent,
-		const vk::raii::ImageView& depth_image_view, const vk::raii::Image& depth_image);
+		const vk::raii::ImageView& depth_image_view, vk::Image depth_image);
 
 	// Descriptor set layout for Set 5 (AO output for PBR/simple shaders)
 	const vk::raii::DescriptorSetLayout& getAoSetLayout() const {

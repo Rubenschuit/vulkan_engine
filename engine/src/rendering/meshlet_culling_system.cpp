@@ -122,6 +122,15 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 		}
 	}
 
+	// Initialize high-water marks to max capacity so drawIndexedIndirect fallback works before first readback
+	if (!m_ve_device.supportsDrawIndirectCount()) {
+		constexpr uint32_t MAX_PER_BUCKET = MAX_MESHLET_DRAWS / BUCKET_COUNT;
+		m_readback_high_water.fill(MAX_PER_BUCKET);
+		constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
+		for (auto& hw : m_shadow_readback_high_water)
+			hw.fill(SHADOW_MAX_PER_BUCKET);
+	}
+
 	// Pass 1 layout: objects, transforms, cull_params, active_ids, meshlet_obj_info,
 	//                visible_objects(RW), counts(RW), instance_data(RW), hiz_image, hiz_sampler,
 	//                meshlet_object_map(RW), dispatch_indirect(RW)
@@ -368,11 +377,11 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 	}
 
 	// Clear per-frame counters and init dispatch_indirect to (0, 1, 1)
-	cmd.fillBuffer(*m_counts[frame]->getBuffer(), 0, 2 * sizeof(uint32_t), 0);
-	cmd.fillBuffer(*m_meshlet_draw_counts[frame]->getBuffer(), 0,
+	cmd.fillBuffer(m_counts[frame]->getBuffer(), 0, 2 * sizeof(uint32_t), 0);
+	cmd.fillBuffer(m_meshlet_draw_counts[frame]->getBuffer(), 0,
 		static_cast<vk::DeviceSize>(BUCKET_COUNT) * sizeof(uint32_t), 0);
-	cmd.fillBuffer(*m_dispatch_indirect[frame]->getBuffer(), 0, 4, 0u);  // groups_x = 0
-	cmd.fillBuffer(*m_dispatch_indirect[frame]->getBuffer(), 4, 8, 1u);  // Y = 1, Z = 1
+	cmd.fillBuffer(m_dispatch_indirect[frame]->getBuffer(), 0, 4, 0u);  // groups_x = 0
+	cmd.fillBuffer(m_dispatch_indirect[frame]->getBuffer(), 4, 8, 1u);  // Y = 1, Z = 1
 
 	// Without drawIndirectCount, zero-fill the indirect buffer region using high-water marks
 	if (!m_ve_device.supportsDrawIndirectCount()) {
@@ -381,7 +390,7 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 		for (uint32_t b = 0; b < BUCKET_COUNT; b++) {
 			uint32_t count = m_current_readback_valid ? m_readback_high_water[b] : MAX_PER_BUCKET;
 			auto offset = static_cast<vk::DeviceSize>(b) * MAX_PER_BUCKET * CMD_SIZE;
-			cmd.fillBuffer(*m_meshlet_indirect[frame]->getBuffer(), offset,
+			cmd.fillBuffer(m_meshlet_indirect[frame]->getBuffer(), offset,
 				static_cast<vk::DeviceSize>(count) * CMD_SIZE, 0);
 		}
 	}
@@ -421,7 +430,7 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_pass2_pipeline->getPipeline());
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pass2_pipeline_layout,
 		0, {*pass2_set}, {});
-	cmd.dispatchIndirect(*m_dispatch_indirect[frame]->getBuffer(), 0);
+	cmd.dispatchIndirect(m_dispatch_indirect[frame]->getBuffer(), 0);
 
 	// Compute -> DrawIndirect + VertexShader + Transfer barrier (for cpu readback)
 	vk::MemoryBarrier2 draw_barrier{
@@ -437,8 +446,8 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 
 	// Copy draw counts to staging for CPU readback next time this frame index is used
 	vk::BufferCopy region{0, 0, static_cast<vk::DeviceSize>(BUCKET_COUNT) * sizeof(uint32_t)};
-	cmd.copyBuffer(*m_meshlet_draw_counts[frame]->getBuffer(),
-		*m_readback_staging[frame]->getBuffer(), region);
+	cmd.copyBuffer(m_meshlet_draw_counts[frame]->getBuffer(),
+		m_readback_staging[frame]->getBuffer(), region);
 	m_has_readback[frame] = true;
 }
 
@@ -563,12 +572,12 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 		params.hiz_enabled       = 0;
 		m_shadow_cull_param_ubos[frame_index][slot]->writeToBuffer(&params);
 
-		cmd.fillBuffer(*m_shadow_counts[frame_index][slot]->getBuffer(),
+		cmd.fillBuffer(m_shadow_counts[frame_index][slot]->getBuffer(),
 			0, 2 * sizeof(uint32_t), 0);
-		cmd.fillBuffer(*m_shadow_meshlet_draw_counts[frame_index][slot]->getBuffer(),
+		cmd.fillBuffer(m_shadow_meshlet_draw_counts[frame_index][slot]->getBuffer(),
 			0, static_cast<vk::DeviceSize>(MESHLET_SHADOW_BUCKET_COUNT) * sizeof(uint32_t), 0);
-		cmd.fillBuffer(*m_shadow_dispatch_indirect[frame_index][slot]->getBuffer(), 0, 4, 0u);
-		cmd.fillBuffer(*m_shadow_dispatch_indirect[frame_index][slot]->getBuffer(), 4, 8, 1u);
+		cmd.fillBuffer(m_shadow_dispatch_indirect[frame_index][slot]->getBuffer(), 0, 4, 0u);
+		cmd.fillBuffer(m_shadow_dispatch_indirect[frame_index][slot]->getBuffer(), 4, 8, 1u);
 		if (!m_ve_device.supportsDrawIndirectCount()) {
 			constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
 			constexpr vk::DeviceSize CMD_SIZE = sizeof(VkDrawIndexedIndirectCommand);
@@ -576,7 +585,7 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 				uint32_t fill_count = m_shadow_has_readback[frame_index][slot]
 					? m_shadow_readback_high_water[slot][b] : SHADOW_MAX_PER_BUCKET;
 				auto offset = static_cast<vk::DeviceSize>(b) * SHADOW_MAX_PER_BUCKET * CMD_SIZE;
-				cmd.fillBuffer(*m_shadow_meshlet_indirect[frame_index][slot]->getBuffer(), offset,
+				cmd.fillBuffer(m_shadow_meshlet_indirect[frame_index][slot]->getBuffer(), offset,
 					static_cast<vk::DeviceSize>(fill_count) * CMD_SIZE, 0);
 			}
 		}
@@ -618,7 +627,7 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 		uint32_t slot = requests[r].slot;
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pass2_pipeline_layout,
 			0, {*m_shadow_pass2_sets[frame_index][slot]}, {});
-		cmd.dispatchIndirect(*m_shadow_dispatch_indirect[frame_index][slot]->getBuffer(), 0);
+		cmd.dispatchIndirect(m_shadow_dispatch_indirect[frame_index][slot]->getBuffer(), 0);
 	}
 
 	// Final barrier: Compute -> DrawIndirect + VertexShader + Transfer (for staging copy)
@@ -638,8 +647,8 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 		uint32_t slot = requests[r].slot;
 		vk::BufferCopy region{0, 0,
 			static_cast<vk::DeviceSize>(MESHLET_SHADOW_BUCKET_COUNT) * sizeof(uint32_t)};
-		cmd.copyBuffer(*m_shadow_meshlet_draw_counts[frame_index][slot]->getBuffer(),
-			*m_shadow_readback_staging[frame_index][slot]->getBuffer(), region);
+		cmd.copyBuffer(m_shadow_meshlet_draw_counts[frame_index][slot]->getBuffer(),
+			m_shadow_readback_staging[frame_index][slot]->getBuffer(), region);
 		m_shadow_has_readback[frame_index][slot] = true;
 	}
 }

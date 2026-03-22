@@ -129,7 +129,7 @@ void AabbDebugRenderSystem::render(VeFrameInfo& frame_info) const {
 		{}
 	);
 
-	vk::Buffer buffers[] = {*m_vertex_buffer->getBuffer()};
+	vk::Buffer buffers[] = {m_vertex_buffer->getBuffer()};
 	vk::DeviceSize offsets[] = {0};
 	frame_info.cmd().bindVertexBuffers(0, buffers, offsets);
 	frame_info.cmd().draw(static_cast<uint32_t>(vertices.size()), 1, 0, 0);

@@ -98,20 +98,22 @@ public:
 	VeBuffer& getMeshletDrawCounts(uint32_t frame) { assert(frame < MAX_FRAMES_IN_FLIGHT); return *m_meshlet_draw_counts[frame]; }
 	vk::raii::DescriptorSet& getGlobalDescriptorSet(uint32_t frame) { assert(frame < MAX_FRAMES_IN_FLIGHT); return m_global_descriptor_sets[frame]; }
 
-	// CPU-side draw counts read back from 2 frames ago. Valid after the first dispatch cycle.
-	// Returns nullptr until first readback completes (first few frames).
-	// High-water draw counts for drawIndexedIndirect fallback (only when drawIndirectCount unavailable).
+	// CPU-side draw counts for drawIndexedIndirect fallback (only when drawIndirectCount unavailable).
+	// Returns high-water marks when readback is available, or MAX_PER_BUCKET before first readback.
 	const uint32_t* getCpuDrawCounts() const {
-		return (m_current_readback_valid && !m_ve_device.supportsDrawIndirectCount())
-			? m_readback_high_water.data() : nullptr;
+		if (m_ve_device.supportsDrawIndirectCount())
+			return nullptr;
+		return m_readback_high_water.data();
 	}
 	// Raw readback counts for stats display (actual draw counts from 2 frames ago).
 	const uint32_t* getRawDrawCounts() const { return m_current_readback_valid ? m_readback_counts.data() : nullptr; }
 
-	// Per-slot shadow readback counts (same 2-frame-delay pattern as main view).
+	// Per-slot shadow readback counts for drawIndexedIndirect fallback (only when drawIndirectCount unavailable).
 	const uint32_t* getShadowCpuDrawCounts(uint32_t frame, uint32_t slot) const {
 		assert(frame < MAX_FRAMES_IN_FLIGHT && slot < SHADOW_BUFFER_COUNT);
-		return m_shadow_has_readback[frame][slot] ? m_shadow_readback_high_water[slot].data() : nullptr;
+		if (m_ve_device.supportsDrawIndirectCount())
+			return nullptr;
+		return m_shadow_readback_high_water[slot].data();
 	}
 
 	bool isHizEnabled() const { return m_hiz_enabled; }

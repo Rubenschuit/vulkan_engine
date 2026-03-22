@@ -168,7 +168,7 @@ void ShadowRenderSystem::createShadowPassDescriptorSets(
 
 		for (size_t layer = 0; layer < MAX_SHADOW_LAYERS; layer++) {
 			vk::DescriptorBufferInfo buffer_info{
-				.buffer = *m_shadow_ubos[frame][layer]->getBuffer(),
+				.buffer = m_shadow_ubos[frame][layer]->getBuffer(),
 				.offset = 0,
 				.range = sizeof(ShadowPassUBO)
 			};
@@ -507,8 +507,8 @@ void ShadowRenderSystem::rebuildMegaBuffers(vk::raii::CommandBuffer& cmd, const 
 			.dstOffset = static_cast<vk::DeviceSize>(vertex_offset) * sizeof(glm::vec3),
 			.size = static_cast<vk::DeviceSize>(vc) * sizeof(glm::vec3)
 		};
-		cmd.copyBuffer(*mesh->getShadowVertexBuffer().getBuffer(),
-		               *m_mega_shadow_vbo->getBuffer(), vbo_copy);
+		cmd.copyBuffer(mesh->getShadowVertexBuffer().getBuffer(),
+		               m_mega_shadow_vbo->getBuffer(), vbo_copy);
 
 		// Copy all LOD index buffers into mega-IBO
 		MeshMegaEntry mega_entry;
@@ -522,8 +522,8 @@ void ShadowRenderSystem::rebuildMegaBuffers(vk::raii::CommandBuffer& cmd, const 
 				.dstOffset = static_cast<vk::DeviceSize>(index_offset) * sizeof(uint32_t),
 				.size = static_cast<vk::DeviceSize>(ic) * sizeof(uint32_t)
 			};
-			cmd.copyBuffer(*mesh->getLodIndexBuffer(lod).getBuffer(),
-			               *m_mega_ibo->getBuffer(), ibo_copy);
+			cmd.copyBuffer(mesh->getLodIndexBuffer(lod).getBuffer(),
+			               m_mega_ibo->getBuffer(), ibo_copy);
 
 			mega_entry.lod_entries.push_back({index_offset, ic});
 			index_offset += ic;
@@ -688,7 +688,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 		.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_shadow_atlas->getImage(),
+		.image = m_shadow_atlas->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
 	};
 	vk::DependencyInfo pre_dep{
@@ -702,8 +702,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 	command_buffer.setDepthBias(1.25f, 0.0f, 1.75f);
 
 	if (m_mega_shadow_vbo && m_mega_ibo) {
-		command_buffer.bindVertexBuffers(0, {*m_mega_shadow_vbo->getBuffer()}, {vk::DeviceSize{0}});
-		command_buffer.bindIndexBuffer(*m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
+		command_buffer.bindVertexBuffers(0, {m_mega_shadow_vbo->getBuffer()}, {vk::DeviceSize{0}});
+		command_buffer.bindIndexBuffer(m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
 	}
 
 	// Render CSM cascades
@@ -798,7 +798,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 		.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_shadow_atlas->getImage(),
+		.image = m_shadow_atlas->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
 	};
 	vk::DependencyInfo post_dep{
@@ -824,8 +824,8 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 
 	if (m_mega_shadow_vbo && m_mega_ibo && !m_mega_entries.empty()) {
 		// Mega-buffer path: single VBO/IBO bind, per-group drawIndexed with push constants
-		frame_info.cmd().bindVertexBuffers(0, {*m_mega_shadow_vbo->getBuffer()}, {vk::DeviceSize{0}});
-		frame_info.cmd().bindIndexBuffer(*m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
+		frame_info.cmd().bindVertexBuffers(0, {m_mega_shadow_vbo->getBuffer()}, {vk::DeviceSize{0}});
+		frame_info.cmd().bindIndexBuffer(m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
 
 		for (const auto& group : instance_groups) {
 			auto it = m_mega_entries.find(group.mesh);
@@ -870,7 +870,7 @@ void ShadowRenderSystem::createGpuShadowDescriptorSets(GpuCullingSystem& gpu_cul
 			m_csm_cascade_ubos[frame].back()->map();
 
 			vk::DescriptorBufferInfo cascade_ubo_info{
-				.buffer = *m_csm_cascade_ubos[frame][cascade]->getBuffer(),
+				.buffer = m_csm_cascade_ubos[frame][cascade]->getBuffer(),
 				.offset = 0,
 				.range = sizeof(ShadowPassUBO)
 			};
@@ -896,7 +896,7 @@ void ShadowRenderSystem::createGpuShadowDescriptorSets(GpuCullingSystem& gpu_cul
 			uint32_t slot  = layer;                    // shadow_buf_index = array_layer
 
 			vk::DescriptorBufferInfo buffer_info{
-				.buffer = *m_shadow_ubos[frame][layer]->getBuffer(),
+				.buffer = m_shadow_ubos[frame][layer]->getBuffer(),
 				.offset = 0,
 				.range = sizeof(ShadowPassUBO)
 			};
@@ -956,7 +956,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_shadow_atlas->getImage(),
+		.image = m_shadow_atlas->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
 	};
 	vk::DependencyInfo pre_dep{
@@ -1014,12 +1014,12 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 				scene_mgr.getBucketGroupOffset(bucket)) * sizeof(VkDrawIndexedIndirectCommand);
 			if (gpu_cull_system.compactionEnabled()) {
 				cmd.drawIndexedIndirectCount(
-					*gpu_cull_system.getShadowCompactedIndirectBuffer(frame, c).getBuffer(), offset,
-					*gpu_cull_system.getShadowCompactCountBuffer(frame, c).getBuffer(),
+					gpu_cull_system.getShadowCompactedIndirectBuffer(frame, c).getBuffer(), offset,
+					gpu_cull_system.getShadowCompactCountBuffer(frame, c).getBuffer(),
 					bucket * sizeof(uint32_t),
 					group_count, sizeof(VkDrawIndexedIndirectCommand));
 			} else {
-				cmd.drawIndexedIndirect(*shadow_indirect.getBuffer(), offset,
+				cmd.drawIndexedIndirect(shadow_indirect.getBuffer(), offset,
 					group_count, sizeof(VkDrawIndexedIndirectCommand));
 			}
 		}
@@ -1064,12 +1064,12 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 				scene_mgr.getBucketGroupOffset(bucket)) * sizeof(VkDrawIndexedIndirectCommand);
 			if (gpu_cull_system.compactionEnabled()) {
 				cmd.drawIndexedIndirectCount(
-					*gpu_cull_system.getShadowCompactedIndirectBuffer(frame, slot).getBuffer(), offset,
-					*gpu_cull_system.getShadowCompactCountBuffer(frame, slot).getBuffer(),
+					gpu_cull_system.getShadowCompactedIndirectBuffer(frame, slot).getBuffer(), offset,
+					gpu_cull_system.getShadowCompactCountBuffer(frame, slot).getBuffer(),
 					bucket * sizeof(uint32_t),
 					group_count, sizeof(VkDrawIndexedIndirectCommand));
 			} else {
-				cmd.drawIndexedIndirect(*shadow_indirect.getBuffer(), offset,
+				cmd.drawIndexedIndirect(shadow_indirect.getBuffer(), offset,
 					group_count, sizeof(VkDrawIndexedIndirectCommand));
 			}
 		}
@@ -1088,7 +1088,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_shadow_atlas->getImage(),
+		.image = m_shadow_atlas->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
 	};
 	vk::DependencyInfo post_dep{
@@ -1123,7 +1123,7 @@ void ShadowRenderSystem::createMeshletShadowDescriptorSets(MeshletCullingSystem&
 		m_meshlet_cascade_descriptor_sets[frame].clear();
 		for (uint32_t cascade = 0; cascade < NUM_CSM_CASCADES; cascade++) {
 			vk::DescriptorBufferInfo cascade_ubo_info{
-				.buffer = *m_csm_cascade_ubos[frame][cascade]->getBuffer(),
+				.buffer = m_csm_cascade_ubos[frame][cascade]->getBuffer(),
 				.offset = 0,
 				.range = sizeof(ShadowPassUBO)
 			};
@@ -1148,7 +1148,7 @@ void ShadowRenderSystem::createMeshletShadowDescriptorSets(MeshletCullingSystem&
 			uint32_t slot  = layer;
 
 			vk::DescriptorBufferInfo buffer_info{
-				.buffer = *m_shadow_ubos[frame][layer]->getBuffer(),
+				.buffer = m_shadow_ubos[frame][layer]->getBuffer(),
 				.offset = 0,
 				.range = sizeof(ShadowPassUBO)
 			};
@@ -1218,7 +1218,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_shadow_atlas->getImage(),
+		.image = m_shadow_atlas->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
 	};
 	vk::DependencyInfo pre_dep{
@@ -1271,20 +1271,19 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 
 		auto& shadow_indirect = meshlet_cull.getShadowMeshletIndirectBuffer(frame, c);
 		auto& shadow_draw_counts = meshlet_cull.getShadowMeshletDrawCounts(frame, c);
-		const uint32_t* cpu_counts = m_ve_device.supportsDrawIndirectCount()
-			? nullptr : meshlet_cull.getShadowCpuDrawCounts(frame, c);
+		const uint32_t* cpu_counts = meshlet_cull.getShadowCpuDrawCounts(frame, c);
 		for (uint32_t bucket = 0; bucket < MESHLET_SHADOW_BUCKET_COUNT; bucket++) {
 			auto buf_offset   = static_cast<vk::DeviceSize>(bucket) * SHADOW_MAX_PER_BUCKET
 			                    * sizeof(VkDrawIndexedIndirectCommand);
 			if (cpu_counts) {
 				uint32_t count = std::min(cpu_counts[bucket], SHADOW_MAX_PER_BUCKET);
-				cmd.drawIndexedIndirect(*shadow_indirect.getBuffer(), buf_offset,
+				cmd.drawIndexedIndirect(shadow_indirect.getBuffer(), buf_offset,
 					count, sizeof(VkDrawIndexedIndirectCommand));
 			} else {
 				auto count_offset = static_cast<vk::DeviceSize>(bucket) * sizeof(uint32_t);
 				cmd.drawIndexedIndirectCount(
-					*shadow_indirect.getBuffer(), buf_offset,
-					*shadow_draw_counts.getBuffer(), count_offset,
+					shadow_indirect.getBuffer(), buf_offset,
+					shadow_draw_counts.getBuffer(), count_offset,
 					SHADOW_MAX_PER_BUCKET, sizeof(VkDrawIndexedIndirectCommand));
 			}
 		}
@@ -1323,20 +1322,19 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 
 		auto& shadow_indirect = meshlet_cull.getShadowMeshletIndirectBuffer(frame, slot);
 		auto& shadow_draw_counts = meshlet_cull.getShadowMeshletDrawCounts(frame, slot);
-		const uint32_t* cpu_counts = m_ve_device.supportsDrawIndirectCount()
-			? nullptr : meshlet_cull.getShadowCpuDrawCounts(frame, slot);
+		const uint32_t* cpu_counts = meshlet_cull.getShadowCpuDrawCounts(frame, slot);
 		for (uint32_t bucket = 0; bucket < MESHLET_SHADOW_BUCKET_COUNT; bucket++) {
 			auto buf_offset   = static_cast<vk::DeviceSize>(bucket) * SHADOW_MAX_PER_BUCKET
 			                    * sizeof(VkDrawIndexedIndirectCommand);
 			if (cpu_counts) {
 				uint32_t count = std::min(cpu_counts[bucket], SHADOW_MAX_PER_BUCKET);
-				cmd.drawIndexedIndirect(*shadow_indirect.getBuffer(), buf_offset,
+				cmd.drawIndexedIndirect(shadow_indirect.getBuffer(), buf_offset,
 					count, sizeof(VkDrawIndexedIndirectCommand));
 			} else {
 				auto count_offset = static_cast<vk::DeviceSize>(bucket) * sizeof(uint32_t);
 				cmd.drawIndexedIndirectCount(
-					*shadow_indirect.getBuffer(), buf_offset,
-					*shadow_draw_counts.getBuffer(), count_offset,
+					shadow_indirect.getBuffer(), buf_offset,
+					shadow_draw_counts.getBuffer(), count_offset,
 					SHADOW_MAX_PER_BUCKET, sizeof(VkDrawIndexedIndirectCommand));
 			}
 		}
@@ -1355,7 +1353,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_shadow_atlas->getImage(),
+		.image = m_shadow_atlas->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
 	};
 	vk::DependencyInfo post_dep{

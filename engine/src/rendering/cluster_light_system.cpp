@@ -223,8 +223,8 @@ void ClusterLightSystem::dispatch(VeFrameInfo& frame_info, const VeCamera& camer
 	cmd.pipelineBarrier2(pre_fill_dep);
 
 	// Reset atomic counter and cluster counts to zero
-	cmd.fillBuffer(*m_atomic_counter_ssbos[frame]->getBuffer(), 0, sizeof(uint32_t), 0);
-	cmd.fillBuffer(*m_cluster_count_ssbos[frame]->getBuffer(), 0,
+	cmd.fillBuffer(m_atomic_counter_ssbos[frame]->getBuffer(), 0, sizeof(uint32_t), 0);
+	cmd.fillBuffer(m_cluster_count_ssbos[frame]->getBuffer(), 0,
 		static_cast<vk::DeviceSize>(m_total_clusters) * sizeof(glm::uvec2), 0);
 
 	// Barrier: fillBuffer → compute shader

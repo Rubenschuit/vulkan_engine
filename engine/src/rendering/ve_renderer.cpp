@@ -256,7 +256,7 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer,
 				.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.image = *m_ve_swap_chain->getResolvedDepthImage(),
+				.image = m_ve_swap_chain->getResolvedDepthImage(),
 				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
 			};
 			vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &prep};
@@ -435,7 +435,7 @@ void VeRenderer::beginWboitRender(vk::raii::CommandBuffer& command_buffer) {
 		.newLayout = vk::ImageLayout::eDepthReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *getResolvedDepthImage(),
+		.image = getResolvedDepthImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
 	};
 	vk::ImageMemoryBarrier2 accum_barrier{
@@ -447,7 +447,7 @@ void VeRenderer::beginWboitRender(vk::raii::CommandBuffer& command_buffer) {
 		.newLayout = vk::ImageLayout::eColorAttachmentOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_wboit_accum->getImage(),
+		.image = m_wboit_accum->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	vk::ImageMemoryBarrier2 revealage_barrier{
@@ -459,7 +459,7 @@ void VeRenderer::beginWboitRender(vk::raii::CommandBuffer& command_buffer) {
 		.newLayout = vk::ImageLayout::eColorAttachmentOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_wboit_revealage->getImage(),
+		.image = m_wboit_revealage->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	std::array barriers = {depth_barrier, accum_barrier, revealage_barrier};
@@ -526,7 +526,7 @@ void VeRenderer::endWboitRender(vk::raii::CommandBuffer& command_buffer) {
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_wboit_accum->getImage(),
+		.image = m_wboit_accum->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	vk::ImageMemoryBarrier2 revealage_barrier{
@@ -538,7 +538,7 @@ void VeRenderer::endWboitRender(vk::raii::CommandBuffer& command_buffer) {
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_wboit_revealage->getImage(),
+		.image = m_wboit_revealage->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	std::array barriers = {accum_barrier, revealage_barrier};
@@ -611,7 +611,7 @@ void VeRenderer::endWboitComposite(vk::raii::CommandBuffer& command_buffer) {
 		.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *getResolvedDepthImage(),
+		.image = getResolvedDepthImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
 	};
 	vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_barrier};

@@ -397,12 +397,12 @@ void PbrRenderSystem::renderOpaqueGpuCulled(
 		auto offset = static_cast<vk::DeviceSize>(bucket_group_offsets[bucket]) * sizeof(VkDrawIndexedIndirectCommand);
 		if (compacted_buffer && compact_count_buffer) {
 			cmd.drawIndexedIndirectCount(
-				*compacted_buffer->getBuffer(), offset,
-				*compact_count_buffer->getBuffer(), bucket * sizeof(uint32_t),
+				compacted_buffer->getBuffer(), offset,
+				compact_count_buffer->getBuffer(), bucket * sizeof(uint32_t),
 				bucket_group_counts[bucket], sizeof(VkDrawIndexedIndirectCommand));
 		} else {
 			cmd.drawIndexedIndirect(
-				*indirect_buffer.getBuffer(), offset,
+				indirect_buffer.getBuffer(), offset,
 				bucket_group_counts[bucket], sizeof(VkDrawIndexedIndirectCommand));
 		}
 	}
@@ -463,13 +463,13 @@ void PbrRenderSystem::renderOpaqueGpuCulledMeshlets(
 		if (cpu_draw_counts) {
 			uint32_t count = std::min(cpu_draw_counts[bucket], MAX_PER_BUCKET);
 			cmd.drawIndexedIndirect(
-				*meshlet_indirect.getBuffer(), buf_offset,
+				meshlet_indirect.getBuffer(), buf_offset,
 				count, sizeof(VkDrawIndexedIndirectCommand));
 		} else {
 			auto count_offset = static_cast<vk::DeviceSize>(bucket) * sizeof(uint32_t);
 			cmd.drawIndexedIndirectCount(
-				*meshlet_indirect.getBuffer(), buf_offset,
-				*draw_counts.getBuffer(), count_offset,
+				meshlet_indirect.getBuffer(), buf_offset,
+				draw_counts.getBuffer(), count_offset,
 				MAX_PER_BUCKET, sizeof(VkDrawIndexedIndirectCommand));
 		}
 	}
@@ -516,7 +516,7 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info, const vk::raii::Desc
 		cmd.setDepthCompareOp(
 			(m_depth_prepass_active || is_mask) ? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
 		cmd.drawIndexedIndirect(
-			*m_indirect_buffers[frame_info.current_frame]->getBuffer(),
+			m_indirect_buffers[frame_info.current_frame]->getBuffer(),
 			m_bucket_offsets[bucket] * sizeof(VkDrawIndexedIndirectCommand),
 			m_bucket_counts[bucket],
 			sizeof(VkDrawIndexedIndirectCommand));
@@ -762,12 +762,12 @@ void PbrRenderSystem::renderTransparentWboit(
 		auto offset = static_cast<vk::DeviceSize>(bucket_group_offsets[bucket]) * sizeof(VkDrawIndexedIndirectCommand);
 		if (compacted_buffer && compact_count_buffer) {
 			cmd.drawIndexedIndirectCount(
-				*compacted_buffer->getBuffer(), offset,
-				*compact_count_buffer->getBuffer(), bucket * sizeof(uint32_t),
+				compacted_buffer->getBuffer(), offset,
+				compact_count_buffer->getBuffer(), bucket * sizeof(uint32_t),
 				bucket_group_counts[bucket], sizeof(VkDrawIndexedIndirectCommand));
 		} else {
 			cmd.drawIndexedIndirect(
-				*indirect_buffer.getBuffer(), offset,
+				indirect_buffer.getBuffer(), offset,
 				bucket_group_counts[bucket], sizeof(VkDrawIndexedIndirectCommand));
 		}
 	}
@@ -805,13 +805,13 @@ void PbrRenderSystem::renderTransparentWboitMeshlets(
 			uint32_t count = std::min(cpu_draw_counts[bucket], MAX_PER_BUCKET);
 			if (count == 0) continue;
 			cmd.drawIndexedIndirect(
-				*meshlet_indirect.getBuffer(), buf_offset,
+				meshlet_indirect.getBuffer(), buf_offset,
 				count, sizeof(VkDrawIndexedIndirectCommand));
 		} else {
 			auto count_offset = static_cast<vk::DeviceSize>(bucket) * sizeof(uint32_t);
 			cmd.drawIndexedIndirectCount(
-				*meshlet_indirect.getBuffer(), buf_offset,
-				*draw_counts.getBuffer(), count_offset,
+				meshlet_indirect.getBuffer(), buf_offset,
+				draw_counts.getBuffer(), count_offset,
 				MAX_PER_BUCKET, sizeof(VkDrawIndexedIndirectCommand));
 		}
 	}

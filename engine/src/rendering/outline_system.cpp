@@ -402,7 +402,7 @@ void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_
 		.newLayout = vk::ImageLayout::eColorAttachmentOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_mask_images[frame]->getImage(),
+		.image = m_mask_images[frame]->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	{
@@ -481,7 +481,7 @@ void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_mask_images[frame]->getImage(),
+		.image = m_mask_images[frame]->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	{
@@ -510,7 +510,7 @@ void OutlineSystem::dispatchJFA(VeFrameInfo& fi, float outline_width) {
 		.newLayout = vk::ImageLayout::eGeneral,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *m_jfa_images_a[frame]->getImage(),
+		.image = m_jfa_images_a[frame]->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	{
@@ -548,7 +548,7 @@ void OutlineSystem::dispatchJFA(VeFrameInfo& fi, float outline_width) {
 			.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = *src->getImage(),
+			.image = src->getImage(),
 			.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 		};
 		vk::ImageMemoryBarrier2 dst_barrier{
@@ -560,7 +560,7 @@ void OutlineSystem::dispatchJFA(VeFrameInfo& fi, float outline_width) {
 			.newLayout = vk::ImageLayout::eGeneral,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = *dst->getImage(),
+			.image = dst->getImage(),
 			.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 		};
 		{
@@ -600,7 +600,7 @@ void OutlineSystem::dispatchJFA(VeFrameInfo& fi, float outline_width) {
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *final_jfa->getImage(),
+		.image = final_jfa->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	auto& other_jfa = m_final_reads_a ? m_jfa_images_b[frame] : m_jfa_images_a[frame];
@@ -613,7 +613,7 @@ void OutlineSystem::dispatchJFA(VeFrameInfo& fi, float outline_width) {
 		.newLayout = vk::ImageLayout::eGeneral,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = *other_jfa->getImage(),
+		.image = other_jfa->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
 	{

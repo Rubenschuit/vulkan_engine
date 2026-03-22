@@ -563,7 +563,7 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 			.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = *m_ve_renderer.getResolvedDepthImage(),
+			.image = m_ve_renderer.getResolvedDepthImage(),
 			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
 		};
 		vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_read};
@@ -602,7 +602,7 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 			.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = *m_ve_renderer.getResolvedDepthImage(),
+			.image = m_ve_renderer.getResolvedDepthImage(),
 			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
 		};
 		vk::DependencyInfo dep2{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_attach};
