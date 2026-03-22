@@ -3,6 +3,9 @@
 #include "ui/editor_state.hpp"
 #include <chrono>
 
+struct VmaAllocator_T;
+using VmaAllocator = VmaAllocator_T*;
+
 namespace ve {
 
 class VeRenderer;
@@ -49,6 +52,10 @@ private:
 	float m_gpu_breakdown_sum[BREAKDOWN_COUNT] = {};
 	float m_cpu_breakdown_ms[BREAKDOWN_COUNT] = {};
 	float m_cpu_breakdown_sum[BREAKDOWN_COUNT] = {};
+
+	// VRAM stats
+	VmaAllocator m_allocator;
+	uint32_t m_heap_count;
 };
 
 } // namespace ve

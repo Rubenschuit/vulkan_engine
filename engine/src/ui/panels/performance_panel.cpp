@@ -2,12 +2,14 @@
 #include "ui/panels/performance_panel.hpp"
 #include "ui/imgui_layer.hpp"
 #include "rendering/ve_renderer.hpp"
+#include <vk_mem_alloc.h>
 #include <imgui.h>
 
 namespace ve {
 
 PerformancePanel::PerformancePanel(VeRenderer& renderer)
-	: m_renderer(renderer), m_gpu_name(renderer.getDeviceName()) {}
+	: m_renderer(renderer), m_gpu_name(renderer.getDeviceName()),
+		m_allocator(renderer.getAllocator()), m_heap_count(renderer.getMemoryHeapCount()) {}
 
 static void formatCount(char* buf, size_t buf_size, uint32_t count) {
 	if (count >= 1000000)
@@ -228,6 +230,32 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 	if (m_renderer.isHdrEnabled())
 		row("HDR", "Enabled");
+
+	// --- VRAM usage ---
+	{
+		VmaBudget budgets[VK_MAX_MEMORY_HEAPS];
+		vmaGetHeapBudgets(m_allocator, budgets);
+
+		VkDeviceSize total_used = 0;
+		VkDeviceSize total_budget = 0;
+		for (uint32_t i = 0; i < m_heap_count; i++) {
+			total_used += budgets[i].usage;
+			total_budget += budgets[i].budget;
+		}
+
+		ImGui::Spacing();
+		ImGui::Separator();
+		ImGui::Spacing();
+
+		double used_mb = static_cast<double>(total_used) / (1024.0 * 1024.0);
+		double budget_mb = static_cast<double>(total_budget) / (1024.0 * 1024.0);
+
+		snprintf(val, sizeof(val), "%.0f / %.0f MB", used_mb, budget_mb);
+		row("VRAM", val);
+
+		float fraction = total_budget > 0 ? static_cast<float>(static_cast<double>(total_used) / static_cast<double>(total_budget)) : 0.0f;
+		ImGui::ProgressBar(fraction, ImVec2(-1, 0));
+	}
 
 	ImGui::Spacing();
 	ImGui::Separator();

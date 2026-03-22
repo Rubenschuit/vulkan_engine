@@ -1271,7 +1271,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 
 		auto& shadow_indirect = meshlet_cull.getShadowMeshletIndirectBuffer(frame, c);
 		auto& shadow_draw_counts = meshlet_cull.getShadowMeshletDrawCounts(frame, c);
-		const uint32_t* cpu_counts = meshlet_cull.getShadowCpuDrawCounts(frame, c);
+		const uint32_t* cpu_counts = meshlet_cull.getShadowCpuDrawCounts(c);
 		for (uint32_t bucket = 0; bucket < MESHLET_SHADOW_BUCKET_COUNT; bucket++) {
 			auto buf_offset   = static_cast<vk::DeviceSize>(bucket) * SHADOW_MAX_PER_BUCKET
 			                    * sizeof(VkDrawIndexedIndirectCommand);
@@ -1322,7 +1322,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 
 		auto& shadow_indirect = meshlet_cull.getShadowMeshletIndirectBuffer(frame, slot);
 		auto& shadow_draw_counts = meshlet_cull.getShadowMeshletDrawCounts(frame, slot);
-		const uint32_t* cpu_counts = meshlet_cull.getShadowCpuDrawCounts(frame, slot);
+		const uint32_t* cpu_counts = meshlet_cull.getShadowCpuDrawCounts(slot);
 		for (uint32_t bucket = 0; bucket < MESHLET_SHADOW_BUCKET_COUNT; bucket++) {
 			auto buf_offset   = static_cast<vk::DeviceSize>(bucket) * SHADOW_MAX_PER_BUCKET
 			                    * sizeof(VkDrawIndexedIndirectCommand);

@@ -117,56 +117,87 @@ VeDescriptorPool::VeDescriptorPool(
 		uint32_t max_sets,
 		vk::DescriptorPoolCreateFlags pool_flags,
 		const std::vector<vk::DescriptorPoolSize> &pool_sizes)
-		: m_ve_device{ve_device} {
-
-	vk::DescriptorPoolCreateInfo descriptor_pool_info{
-		.flags = pool_flags,
-		.maxSets = max_sets,
-		.poolSizeCount = static_cast<uint32_t>(pool_sizes.size()),
-		.pPoolSizes = pool_sizes.data()
-	};
-
-	m_descriptor_pool = vk::raii::DescriptorPool(m_ve_device.getDevice(), descriptor_pool_info);
+		: m_ve_device{ve_device}, m_max_sets{max_sets}, m_pool_flags{pool_flags}, m_pool_sizes{pool_sizes} {
+	addPool();
 }
 
 VeDescriptorPool::~VeDescriptorPool() {}
 
-//TODO: consider allocating more than one at once and handling full pool
-void VeDescriptorPool::allocateDescriptor(const vk::raii::DescriptorSetLayout& descriptor_set_layout, vk::raii::DescriptorSet& descriptor_set) const {
+void VeDescriptorPool::addPool() {
+	vk::DescriptorPoolCreateInfo info{
+		.flags = m_pool_flags,
+		.maxSets = m_max_sets,
+		.poolSizeCount = static_cast<uint32_t>(m_pool_sizes.size()),
+		.pPoolSizes = m_pool_sizes.data()
+	};
+	m_pools.emplace_back(m_ve_device.getDevice(), info);
+	VE_LOGI("VeDescriptorPool: created pool page " << m_pools.size()
+		<< " (maxSets=" << m_max_sets << ")");
+}
+
+void VeDescriptorPool::allocateFromPool(
+	vk::raii::DescriptorPool& pool,
+	const vk::raii::DescriptorSetLayout& layout,
+	vk::raii::DescriptorSet& set,
+	const void* p_next) {
 
 	vk::DescriptorSetAllocateInfo alloc_info{
-		.descriptorPool = *m_descriptor_pool,
+		.pNext = p_next,
+		.descriptorPool = *pool,
 		.descriptorSetCount = 1,
-		.pSetLayouts = &*descriptor_set_layout
+		.pSetLayouts = &*layout
 	};
+	auto sets = vk::raii::DescriptorSets(m_ve_device.getDevice(), alloc_info);
+	set = std::move(sets.front());
+}
 
-	auto descriptor_sets = vk::raii::DescriptorSets(m_ve_device.getDevice(), alloc_info);
-	descriptor_set = std::move(descriptor_sets.front());
+void VeDescriptorPool::allocateWithGrow(
+	const vk::raii::DescriptorSetLayout& layout,
+	vk::raii::DescriptorSet& set,
+	const void* p_next) {
+
+	try {
+		allocateFromPool(m_pools.back(), layout, set, p_next);
+	} catch (const vk::SystemError& e) {
+		if (e.code() == vk::Result::eErrorOutOfPoolMemory || e.code() == vk::Result::eErrorFragmentedPool) {
+			VE_LOGW("VeDescriptorPool: pool page " << m_pools.size()
+				<< " exhausted, growing");
+			addPool();
+			allocateFromPool(m_pools.back(), layout, set, p_next);
+		} else
+			throw;
+	}
+}
+
+void VeDescriptorPool::allocateDescriptor(
+	const vk::raii::DescriptorSetLayout& descriptor_set_layout,
+	vk::raii::DescriptorSet& descriptor_set) {
+	allocateWithGrow(descriptor_set_layout, descriptor_set);
 }
 
 void VeDescriptorPool::allocateDescriptorVariableCount(
 	const vk::raii::DescriptorSetLayout& descriptor_set_layout,
-	vk::raii::DescriptorSet& descriptor_set, uint32_t variable_count) const {
+	vk::raii::DescriptorSet& descriptor_set, uint32_t variable_count) {
 
 	vk::DescriptorSetVariableDescriptorCountAllocateInfo variable_info{
 		.descriptorSetCount = 1,
 		.pDescriptorCounts = &variable_count
 	};
-
-	vk::DescriptorSetAllocateInfo alloc_info{
-		.pNext = &variable_info,
-		.descriptorPool = *m_descriptor_pool,
-		.descriptorSetCount = 1,
-		.pSetLayouts = &*descriptor_set_layout
-	};
-
-	auto descriptor_sets = vk::raii::DescriptorSets(m_ve_device.getDevice(), alloc_info);
-	descriptor_set = std::move(descriptor_sets.front());
+	allocateWithGrow(descriptor_set_layout, descriptor_set, &variable_info);
 }
 
 void VeDescriptorPool::resetPool() {
 	vk::Device device = *m_ve_device.getDevice();
-	device.resetDescriptorPool(*m_descriptor_pool);
+	for (auto& pool : m_pools)
+		device.resetDescriptorPool(*pool);
+
+	if (m_pools.size() > 1) {
+		VE_LOGD("VeDescriptorPool: reset, shrinking from " << m_pools.size()
+			<< " pages to 1");
+		auto first = std::move(m_pools.front());
+		m_pools.clear();
+		m_pools.push_back(std::move(first));
+	}
 }
 
 // *************** Descriptor Writer *********************

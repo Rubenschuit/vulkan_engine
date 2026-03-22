@@ -109,8 +109,8 @@ public:
 	const uint32_t* getRawDrawCounts() const { return m_current_readback_valid ? m_readback_counts.data() : nullptr; }
 
 	// Per-slot shadow readback counts for drawIndexedIndirect fallback (only when drawIndirectCount unavailable).
-	const uint32_t* getShadowCpuDrawCounts(uint32_t frame, uint32_t slot) const {
-		assert(frame < MAX_FRAMES_IN_FLIGHT && slot < SHADOW_BUFFER_COUNT);
+	const uint32_t* getShadowCpuDrawCounts(uint32_t slot) const {
+		assert(slot < SHADOW_BUFFER_COUNT);
 		if (m_ve_device.supportsDrawIndirectCount())
 			return nullptr;
 		return m_shadow_readback_high_water[slot].data();

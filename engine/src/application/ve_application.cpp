@@ -828,45 +828,16 @@ void VeApplication::createDescriptors() {
 		.addBinding(5, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eFragment)
 		.build();
 
-	// Descriptor pool — counts broken down by system. TODO: make this dynamic
-	// F = MAX_FRAMES_IN_FLIGHT, S = MAX_SHADOW_LAYERS
-	constexpr uint32_t F = MAX_FRAMES_IN_FLIGHT;
-	constexpr uint32_t S = MAX_SHADOW_LAYERS;
-	constexpr uint32_t MAX_MATERIAL_SETS = 4096;
-	constexpr uint32_t MSH = MeshletCullingSystem::SHADOW_BUFFER_COUNT; // 7 shadow layers for meshlet culling
+	// Set default page sizes of the pool.
+	// If a page fills up, a new one is created automatically.
 	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
-		.setMaxSets(
-			4*F            // global + skybox + bloom + post-process
-			+ S*F          // shadow
-			+ 10           // misc (imgui, etc.)
-			+ F            // depth pre-pass
-			+ MAX_MATERIAL_SETS
-			+ 4*F          // culling + GTAO
-			+ 4*F          // particle
-			+ 10           // headroom
-			+ 5*F          // outline (JFA init + 2 step dirs + 2 composite)
-			+ 3*F          // GPU culling (compute sets + global sets)
-			+ 3*MSH*F      // meshlet shadow (pass1 + pass2 + cull_param)
-			+ (NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS)*F // meshlet shadow global sets (SRS)
-			+ 2)           // IBL (active + dummy)
-		.addPoolSize(vk::DescriptorType::eUniformBuffer,
-			4*F + S*F + MAX_MATERIAL_SETS + 1 + 4*F + 2*F
-			+ MSH*F
-			+ (NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS)*F)
-		.addPoolSize(vk::DescriptorType::eCombinedImageSampler,
-			3*3 + MAX_MATERIAL_SETS*5 + 4*F + 4) // +4 for IBL (2 per set * 2 sets)
-		.addPoolSize(vk::DescriptorType::eSampler,
-			2*F + F + F + 10
-			+ 2*MSH*F)
-		.addPoolSize(vk::DescriptorType::eSampledImage,
-			F + 4*F + 8*F + 10 + 3*F
-			+ 2*MSH*F)     
-		.addPoolSize(vk::DescriptorType::eStorageBuffer,
-			22*F + F + S*F + 14*F + 9*F
-			+ 25*MSH*F     
-			+ (NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS)*F) 
-		.addPoolSize(vk::DescriptorType::eStorageImage,
-			F + 3*F + 3*F)
+		.setMaxSets(1024)
+		.addPoolSize(vk::DescriptorType::eUniformBuffer, 1024)
+		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 4096)
+		.addPoolSize(vk::DescriptorType::eSampler, 256)
+		.addPoolSize(vk::DescriptorType::eSampledImage, 256)
+		.addPoolSize(vk::DescriptorType::eStorageBuffer, 1024)
+		.addPoolSize(vk::DescriptorType::eStorageImage, 128)
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
 		.buildShared();
 

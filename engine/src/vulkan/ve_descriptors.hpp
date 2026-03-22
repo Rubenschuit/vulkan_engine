@@ -84,15 +84,27 @@ public:
 	VeDescriptorPool(const VeDescriptorPool &) = delete;
 	VeDescriptorPool &operator=(const VeDescriptorPool &) = delete;
 
-	void allocateDescriptor(const vk::raii::DescriptorSetLayout& descriptor_set_layout, vk::raii::DescriptorSet& descriptor_set) const;
+	void allocateDescriptor(const vk::raii::DescriptorSetLayout& descriptor_set_layout, vk::raii::DescriptorSet& descriptor_set);
 	void allocateDescriptorVariableCount(const vk::raii::DescriptorSetLayout& descriptor_set_layout,
-		vk::raii::DescriptorSet& descriptor_set, uint32_t variable_count) const;
+		vk::raii::DescriptorSet& descriptor_set, uint32_t variable_count);
 
 	void resetPool();
 
 private:
+	void addPool();
+	void allocateFromPool(vk::raii::DescriptorPool& pool,
+		const vk::raii::DescriptorSetLayout& layout,
+		vk::raii::DescriptorSet& set,
+		const void* p_next = nullptr);
+	void allocateWithGrow(const vk::raii::DescriptorSetLayout& layout,
+		vk::raii::DescriptorSet& set,
+		const void* p_next = nullptr);
+
 	VeDevice &m_ve_device;
-	vk::raii::DescriptorPool m_descriptor_pool = nullptr;
+	std::vector<vk::raii::DescriptorPool> m_pools;
+	uint32_t m_max_sets;
+	vk::DescriptorPoolCreateFlags m_pool_flags;
+	std::vector<vk::DescriptorPoolSize> m_pool_sizes;
 	friend class VeDescriptorWriter;
 };
 

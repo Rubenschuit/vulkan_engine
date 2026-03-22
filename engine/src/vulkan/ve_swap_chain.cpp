@@ -53,19 +53,24 @@ vk::Result VeSwapChain::acquireNextImage(uint32_t* image_index) {
 }
 
 void VeSwapChain::submitComputeWork(vk::CommandBuffer command_buffer) {
+	// Wait for the previous frame's compute work to finish
+	uint64_t wait_value = m_compute_signal_value - 1;
+	bool has_previous = wait_value > 0;
+	vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eComputeShader;
+
 	const vk::TimelineSemaphoreSubmitInfo timeline_info{
 		.sType = vk::StructureType::eTimelineSemaphoreSubmitInfo,
 		.pNext = nullptr,
-		.waitSemaphoreValueCount = 0,
-		.pWaitSemaphoreValues = nullptr,
+		.waitSemaphoreValueCount = has_previous ? 1u : 0u,
+		.pWaitSemaphoreValues = has_previous ? &wait_value : nullptr,
 		.signalSemaphoreValueCount = 1,
 		.pSignalSemaphoreValues = &m_compute_signal_value,
 	};
 	vk::SubmitInfo submit_info{
 		.pNext = &timeline_info,
-		.waitSemaphoreCount = 0,
-		.pWaitSemaphores = nullptr,
-		.pWaitDstStageMask = nullptr,
+		.waitSemaphoreCount = has_previous ? 1u : 0u,
+		.pWaitSemaphores = has_previous ? &*m_compute_timeline : nullptr,
+		.pWaitDstStageMask = has_previous ? &wait_stage : nullptr,
 		.commandBufferCount = 1,
 		.pCommandBuffers = &command_buffer,
 		.signalSemaphoreCount = 1,
