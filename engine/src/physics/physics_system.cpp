@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "physics/physics_system.hpp"
+#include <cstdarg>
 #include <set>
 #include "scene/ve_registry.hpp"
 #include "scene/ve_component.hpp"
@@ -942,8 +943,8 @@ struct PhysicsSystem::Impl {
 
 		// Fixed timestep accumulator
 		accumulator += dt;
-		if (accumulator > config.max_substeps * config.fixed_timestep)
-			accumulator = config.max_substeps * config.fixed_timestep;
+		if (accumulator > static_cast<float>(config.max_substeps) * config.fixed_timestep)
+			accumulator = static_cast<float>(config.max_substeps) * config.fixed_timestep;
 		int steps = static_cast<int>(accumulator / config.fixed_timestep);
 		if (steps <= 0)
 			return;
