@@ -12,6 +12,7 @@ class MeshComponent;
 class PointLightComponent;
 class DirectionalLightComponent;
 class SpotLightComponent;
+class RigidbodyComponent;
 class VeTexture;
 
 class VENGINE_API InspectorPanel : public EditorPanel {
@@ -28,6 +29,7 @@ private:
 	void renderPointLight(PointLightComponent& light);
 	void renderDirectionalLight(DirectionalLightComponent& light);
 	void renderSpotLight(SpotLightComponent& light);
+	void renderRigidbody(RigidbodyComponent& rb, EditorState& state);
 
 	// Texture thumbnail cache
 	struct TextureCacheEntry {

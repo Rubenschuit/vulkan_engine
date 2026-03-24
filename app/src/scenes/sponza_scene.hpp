@@ -9,7 +9,6 @@ class VeModel;
 
 class SponzaScene : public VeScene {
 public:
-    // variant: selects KTX2 quality preset (sponza or sponza_low (ETC1S))
     SponzaScene(const SceneContext& ctx, const AssetPaths& paths);
 
     vk::raii::DescriptorSet& getDescriptorSet() override;

@@ -18,6 +18,8 @@ FrameProfiler::FrameProfiler(VeDevice& device) : m_device(device) {
 }
 
 void FrameProfiler::beginFrame(uint32_t frame_index) {
+	m_results.cpu_ms.fill(0.0f);
+
 	// Resolve GPU results from the previous use of this frame slot
 	// Total timers are always active; individual timers only when profiling is enabled
 	if (m_frame_active[frame_index]) {

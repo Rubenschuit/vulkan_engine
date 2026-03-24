@@ -261,6 +261,21 @@ FetchContent_Declare(meshoptimizer
 FetchContent_MakeAvailable(meshoptimizer)
 message(STATUS "meshoptimizer: ${meshoptimizer_SOURCE_DIR}")
 
+# Jolt Physics
+include(FetchContent)
+FetchContent_Declare(JoltPhysics
+	GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
+	GIT_TAG v5.5.0
+	SOURCE_SUBDIR Build
+)
+set(DOUBLE_PRECISION OFF CACHE BOOL "" FORCE)
+set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+set(TARGET_HELLO_WORLD OFF CACHE BOOL "" FORCE)
+set(TARGET_SAMPLES OFF CACHE BOOL "" FORCE)
+set(TARGET_PERFORMANCE_TEST OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(JoltPhysics)
+message(STATUS "Jolt Physics: ${joltphysics_SOURCE_DIR}")
+
 # Tracy Profiler (optional, gated behind VE_ENABLE_TRACY)
 if(VE_ENABLE_TRACY)
 	include(FetchContent)

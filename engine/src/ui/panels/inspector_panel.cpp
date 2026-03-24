@@ -379,6 +379,45 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 			renderDirectionalLight(*registry->getComponent<DirectionalLightComponent>(entity));
 	}
 
+	// Rigidbody
+	if (registry->hasComponent<RigidbodyComponent>(entity)) {
+		bool open = ImGui::CollapsingHeader("Rigidbody", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		if (ImGui::BeginPopupContextItem("rb_ctx")) {
+			if (ImGui::MenuItem("Copy")) {
+				auto* rb = registry->getComponent<RigidbodyComponent>(entity);
+				CopiedRigidbody crb;
+				crb.motion_type = static_cast<uint8_t>(rb->getMotionType());
+				crb.shape_type = static_cast<uint8_t>(rb->getShapeDesc().type);
+				crb.mass = rb->getMass();
+				crb.friction = rb->getFriction();
+				crb.restitution = rb->getRestitution();
+				crb.hull_tolerance = rb->getHullTolerance();
+				state.component_clipboard = crb;
+			}
+			if (state.component_clipboard && std::holds_alternative<CopiedRigidbody>(*state.component_clipboard))
+				if (ImGui::MenuItem("Paste")) {
+					auto* rb = registry->getComponent<RigidbodyComponent>(entity);
+					auto& crb = std::get<CopiedRigidbody>(*state.component_clipboard);
+					rb->setMotionType(static_cast<PhysicsMotionType>(crb.motion_type));
+					PhysicsShapeDesc desc;
+					desc.type = static_cast<PhysicsShapeType>(crb.shape_type);
+					rb->setShapeDesc(desc);
+					rb->setMass(crb.mass);
+					rb->setFriction(crb.friction);
+					rb->setRestitution(crb.restitution);
+					rb->setHullTolerance(crb.hull_tolerance);
+				}
+			ImGui::EndPopup();
+		}
+		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
+		ImGui::PushID("remove_rb");
+		if (ImGui::SmallButton("X"))
+			registry->queueComponentRemoval(entity, ComponentType::Rigidbody);
+		ImGui::PopID();
+		if (open && registry->hasComponent<RigidbodyComponent>(entity))
+			renderRigidbody(*registry->getComponent<RigidbodyComponent>(entity), state);
+	}
+
 	// Add Component
 	ImGui::Spacing();
 	ImGui::Separator();
@@ -400,6 +439,10 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		if (!registry->hasComponent<DirectionalLightComponent>(entity))
 			if (ImGui::MenuItem("Directional Light"))
 				registry->addComponent<DirectionalLightComponent>(entity);
+
+		if (!registry->hasComponent<RigidbodyComponent>(entity))
+			if (ImGui::MenuItem("Rigidbody"))
+				registry->addComponent<RigidbodyComponent>(entity);
 
 		if (!registry->hasComponent<MeshComponent>(entity)) {
 			ImGui::BeginDisabled(true);
@@ -749,6 +792,71 @@ void InspectorPanel::renderDirectionalLight(DirectionalLightComponent& light) {
 	int ct = static_cast<int>(light.celestial_type);
 	if (ImGui::Combo("Celestial Type", &ct, celestial_types, 2))
 		light.celestial_type = static_cast<CelestialType>(ct);
+}
+
+void InspectorPanel::renderRigidbody(RigidbodyComponent& rb, EditorState& state) {
+	constexpr float label_w = 110.0f;
+
+	const char* motion_types[] = {"Static", "Kinematic", "Dynamic"};
+	int mt = static_cast<int>(rb.getMotionType());
+	labeledWidget(label_w, "Motion Type", [&]() {
+		if (ImGui::Combo("##MotionType", &mt, motion_types, 3)) {
+			rb.setMotionType(static_cast<PhysicsMotionType>(mt));
+			if (mt != 0 && rb.getShapeDesc().type == PhysicsShapeType::MeshStatic) {
+				PhysicsShapeDesc d = rb.getShapeDesc();
+				d.type = PhysicsShapeType::Box;
+				rb.setShapeDesc(d);
+			}
+		}
+	});
+
+	const char* shape_types[] = {"Box", "Sphere", "Capsule", "Convex Hull", "Mesh (Static)"};
+	PhysicsShapeDesc desc = rb.getShapeDesc();
+	int st = static_cast<int>(desc.type);
+	labeledWidget(label_w, "Shape Type", [&]() {
+		if (ImGui::Combo("##ShapeType", &st, shape_types, 5)) {
+			desc.type = static_cast<PhysicsShapeType>(st);
+			rb.setShapeDesc(desc);
+		}
+	});
+
+	if (desc.type == PhysicsShapeType::MeshStatic)
+		ImGui::TextDisabled("Uses mesh geometry");
+
+	if (desc.type == PhysicsShapeType::ConvexHull) {
+		float hull_tol = rb.getHullTolerance();
+		labeledWidget(label_w, "Hull Tolerance", [&]() {
+			if (ImGui::SliderFloat("##HullTolerance", &hull_tol, 0.0f, 0.5f, "%.3f"))
+				rb.setHullTolerance(hull_tol);
+		});
+	}
+
+	if (rb.getMotionType() == PhysicsMotionType::Dynamic) {
+		float mass = rb.getMass();
+		labeledWidget(label_w, "Mass", [&]() {
+			if (ImGui::DragFloat("##Mass", &mass, 0.1f, 0.001f, 100000.0f, "%.2f"))
+				rb.setMass(std::max(mass, 0.001f));
+		});
+	}
+
+	float friction = rb.getFriction();
+	labeledWidget(label_w, "Friction", [&]() {
+		if (ImGui::SliderFloat("##Friction", &friction, 0.0f, 1.0f, "%.2f"))
+			rb.setFriction(friction);
+	});
+
+	float restitution = rb.getRestitution();
+	labeledWidget(label_w, "Restitution", [&]() {
+		if (ImGui::SliderFloat("##Restitution", &restitution, 0.0f, 1.0f, "%.2f"))
+			rb.setRestitution(restitution);
+	});
+
+	if (rb.hasBody()) {
+		ImGui::TextDisabled("Body ID: %u", rb.getBodyId());
+		ImGui::Checkbox("Show Collision Shape", &state.show_collision_shape);
+	} else {
+		ImGui::TextDisabled("No physics body");
+	}
 }
 
 } // namespace ve

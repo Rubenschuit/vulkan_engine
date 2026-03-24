@@ -179,6 +179,9 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UICon
 		ImGui::SetTooltip("Minimum mesh entities to enable parallel cpu frustum culling.\n0 = always parallel");
 
 	ImGui::Separator();
+	ImGui::Checkbox("Physics Simulation", &ctx.physics_enabled);
+
+	ImGui::Separator();
 	ImGui::Text("LOD:");
 	{
 		const char* lod_items[] = {"Auto", "LOD 0", "LOD 1", "LOD 2", "LOD 3"};

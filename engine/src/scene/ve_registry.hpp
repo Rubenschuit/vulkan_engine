@@ -45,7 +45,7 @@ struct WorldTransformCache {
 };
 
 // Deferred component removal (processed alongside entity deletions at safe frame boundary)
-enum class ComponentType : uint8_t { Mesh, PointLight, DirectionalLight, SpotLight };
+enum class ComponentType : uint8_t { Mesh, PointLight, DirectionalLight, SpotLight, Rigidbody };
 struct PendingComponentRemoval {
 	Entity entity;
 	ComponentType type;
@@ -113,6 +113,9 @@ public:
 	ComponentPool<SpotLightComponent>& spotLights() { return m_spot_lights; }
 	const ComponentPool<SpotLightComponent>& spotLights() const { return m_spot_lights; }
 	uint32_t activeSpotLightCount() const;
+
+	ComponentPool<RigidbodyComponent>& rigidbodies() { return m_rigidbodies; }
+	const ComponentPool<RigidbodyComponent>& rigidbodies() const { return m_rigidbodies; }
 
 	// Fast active check (skips generation validation)
 	bool isActiveAtIndex(uint32_t index) const {
@@ -193,6 +196,7 @@ private:
 	ComponentPool<PointLightComponent>       m_point_lights;
 	ComponentPool<DirectionalLightComponent> m_directional_lights;
 	ComponentPool<SpotLightComponent>        m_spot_lights;
+	ComponentPool<RigidbodyComponent>        m_rigidbodies;
 
 	// Active light counters (maintained by setActive / addComponent / removeComponent)
 	uint32_t m_active_point_lights = 0;
@@ -219,6 +223,7 @@ ComponentPool<T>& Registry::pool() {
 	else if constexpr (std::is_same_v<T, PointLightComponent>)      return m_point_lights;
 	else if constexpr (std::is_same_v<T, DirectionalLightComponent>) return m_directional_lights;
 	else if constexpr (std::is_same_v<T, SpotLightComponent>)       return m_spot_lights;
+	else if constexpr (std::is_same_v<T, RigidbodyComponent>)      return m_rigidbodies;
 	else static_assert(sizeof(T) == 0, "Unknown component type");
 }
 
@@ -229,6 +234,7 @@ const ComponentPool<T>& Registry::pool() const {
 	else if constexpr (std::is_same_v<T, PointLightComponent>)      return m_point_lights;
 	else if constexpr (std::is_same_v<T, DirectionalLightComponent>) return m_directional_lights;
 	else if constexpr (std::is_same_v<T, SpotLightComponent>)       return m_spot_lights;
+	else if constexpr (std::is_same_v<T, RigidbodyComponent>)      return m_rigidbodies;
 	else static_assert(sizeof(T) == 0, "Unknown component type");
 }
 
@@ -250,6 +256,8 @@ T& Registry::addComponent(Entity e, Args&&... args) {
 	} else if constexpr (std::is_same_v<T, SpotLightComponent>) {
 		comp = &m_spot_lights.emplace(idx, std::forward<Args>(args)...);
 		if (m_meta[idx].active) m_active_spot_lights++;
+	} else if constexpr (std::is_same_v<T, RigidbodyComponent>) {
+		comp = &m_rigidbodies.emplace(idx, std::forward<Args>(args)...);
 	} else {
 		static_assert(sizeof(T) == 0, "Unknown component type");
 	}
@@ -279,6 +287,8 @@ void Registry::removeComponent(Entity e) {
 		if (m_meta[idx].active)
 			m_active_spot_lights--;
 		m_spot_lights.remove(idx);
+	} else if constexpr (std::is_same_v<T, RigidbodyComponent>) {
+		m_rigidbodies.remove(idx);
 	} else {
 		static_assert(sizeof(T) == 0, "Unknown component type");
 	}
@@ -298,6 +308,8 @@ T* Registry::getComponent(Entity e) {
 		return m_directional_lights.get(idx);
 	} else if constexpr (std::is_same_v<T, SpotLightComponent>) {
 		return m_spot_lights.get(idx);
+	} else if constexpr (std::is_same_v<T, RigidbodyComponent>) {
+		return m_rigidbodies.get(idx);
 	} else {
 		static_assert(sizeof(T) == 0, "Unknown component type");
 		return nullptr;
@@ -318,6 +330,8 @@ const T* Registry::getComponent(Entity e) const {
 		return m_directional_lights.get(idx);
 	} else if constexpr (std::is_same_v<T, SpotLightComponent>) {
 		return m_spot_lights.get(idx);
+	} else if constexpr (std::is_same_v<T, RigidbodyComponent>) {
+		return m_rigidbodies.get(idx);
 	} else {
 		static_assert(sizeof(T) == 0, "Unknown component type");
 		return nullptr;
@@ -338,6 +352,8 @@ bool Registry::hasComponent(Entity e) const {
 		return m_directional_lights.has(idx);
 	} else if constexpr (std::is_same_v<T, SpotLightComponent>) {
 		return m_spot_lights.has(idx);
+	} else if constexpr (std::is_same_v<T, RigidbodyComponent>) {
+		return m_rigidbodies.has(idx);
 	} else {
 		static_assert(sizeof(T) == 0, "Unknown component type");
 		return false;

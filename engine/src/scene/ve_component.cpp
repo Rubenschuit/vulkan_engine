@@ -22,6 +22,7 @@ template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<PointLightComponent
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<DirectionalLightComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MeshComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SpotLightComponent>();
+template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<RigidbodyComponent>();
 
 
 // ---------------------------------------------------------------------------

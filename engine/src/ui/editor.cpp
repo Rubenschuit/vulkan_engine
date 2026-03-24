@@ -93,6 +93,52 @@ void Editor::renderUI(UIContext& context, Registry* registry, VeScene* active_sc
 		}
 	});
 
+	// Cache AABB offset for gizmo/debug shape placement
+	if (m_state.selection_changed && registry) {
+		m_state.cached_aabb_offset = glm::vec3(0.0f);
+		Entity sel = m_state.selected_entity;
+		if (!sel.isNull() && registry->isAlive(sel)) {
+			auto* mc = registry->getComponent<MeshComponent>(sel);
+			if (mc && mc->hasMesh()) {
+				VeMesh::AABB aabb = mc->getMesh()->getLocalAABB();
+				m_state.cached_aabb_offset = (aabb.min + aabb.max) * 0.5f;
+			} else if (registry->getComponent<TransformComponent>(sel)) {
+				const glm::mat4& sel_world = registry->getWorldTransform(sel);
+				glm::vec3 wmin(std::numeric_limits<float>::max());
+				glm::vec3 wmax(std::numeric_limits<float>::lowest());
+				bool found = false;
+				std::function<void(Entity)> gather = [&](Entity e) {
+					Entity child = registry->firstChild(e);
+					while (!child.isNull()) {
+						auto* cmc = registry->getComponent<MeshComponent>(child);
+						if (cmc && cmc->hasMesh()) {
+							VeMesh::AABB la = cmc->getMesh()->getLocalAABB();
+							const glm::mat4& cw = registry->getWorldTransform(child);
+							for (int c = 0; c < 8; c++) {
+								glm::vec3 corner{
+									(c & 1) ? la.max.x : la.min.x,
+									(c & 2) ? la.max.y : la.min.y,
+									(c & 4) ? la.max.z : la.min.z};
+								glm::vec3 wp = glm::vec3(cw * glm::vec4(corner, 1.0f));
+								wmin = glm::min(wmin, wp);
+								wmax = glm::max(wmax, wp);
+							}
+							found = true;
+						}
+						gather(child);
+						child = registry->nextSibling(child);
+					}
+				};
+				gather(sel);
+				if (found) {
+					glm::vec3 world_center = (wmin + wmax) * 0.5f;
+					m_state.cached_aabb_offset = glm::vec3(
+						glm::inverse(sel_world) * glm::vec4(world_center, 1.0f));
+				}
+			}
+		}
+	}
+
 	m_state.selection_changed = false;
 }
 
@@ -107,6 +153,10 @@ void Editor::setCamera(VeCamera* camera) {
 void Editor::setSkyboxSystem(SkyboxRenderSystem* skybox) {
 	if (m_environment_panel)
 		m_environment_panel->setSkyboxSystem(skybox);
+}
+
+void Editor::setPhysicsSystem(PhysicsSystem* ps) {
+	m_viewport_panel.setPhysicsSystem(ps);
 }
 
 void Editor::onSwapChainRecreated() {

@@ -13,6 +13,7 @@
 #include "resources/ve_resource_manager.hpp"
 #include "resources/ve_texture.hpp"
 #include "resources/ve_material_properties.hpp"
+#include "physics/physics_system.hpp"
 #include <memory>
 #include <vector>
 #include <chrono>
@@ -105,6 +106,7 @@ protected:
 	FireworksSystem& getFireworksSystem() { return *m_fireworks_system; }
 	SkyboxRenderSystem& getSkyboxSystem() { return *m_skybox_render_system; }
 	PbrRenderSystem& getPbrSystem() { return *m_pbr_render_system; }
+	PhysicsSystem& getPhysicsSystem() { return *m_physics_system; }
 	Editor& getEditor() { return *m_editor; }
 
 	// --- App name ---
@@ -213,6 +215,9 @@ private:
 	std::unique_ptr<GpuCullingSystem> m_gpu_culling_system;
 	std::unique_ptr<MeshletCullingSystem> m_meshlet_culling_system;
 	std::unique_ptr<HizSystem> m_hiz_system;
+
+	// --- Physics ---
+	std::unique_ptr<PhysicsSystem> m_physics_system;
 
 	// --- Culling backends ---
 	std::unique_ptr<CpuCullingBackend> m_cpu_backend;

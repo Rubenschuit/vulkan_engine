@@ -29,6 +29,7 @@ public:
 	std::string getDeviceName() const { return m_ve_device.getDeviceProperties().deviceName.data(); }
 	VmaAllocator getAllocator() const { return m_ve_device.getAllocator(); }
 	uint32_t getMemoryHeapCount() { return m_ve_device.getPhysicalDevice().getMemoryProperties().memoryHeapCount; }
+	vk::PhysicalDeviceMemoryProperties getMemoryProperties() { return m_ve_device.getPhysicalDevice().getMemoryProperties(); }
 	bool isFrameInProgress() const { return m_is_frame_started; }
 	float getExtentAspectRatio() const;
 	vk::Format getSwapChainImageFormat() const;

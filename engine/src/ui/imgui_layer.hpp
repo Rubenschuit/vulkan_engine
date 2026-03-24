@@ -72,6 +72,7 @@ struct VENGINE_API UIContext {
 		float cpu_scene_render = 0.0f;
 		float cpu_bloom = 0.0f;
 		float cpu_post_process = 0.0f;
+		float cpu_physics = 0.0f;
 
 		uint32_t cull_total_objects = 0;
 		uint32_t cull_visible_objects = 0;
@@ -102,6 +103,9 @@ struct VENGINE_API UIContext {
 	bool hiz_occlusion_enabled = false;
 	bool meshlet_culling_enabled = false;
 	bool meshlet_gpu_shadow_fallback = false;
+
+	// physics
+	bool physics_enabled = true;
 
 	// GPU profiling
 	bool gpu_profiling = false;

@@ -22,6 +22,7 @@ class VeCamera;
 class Registry;
 class VeScene;
 class SkyboxRenderSystem;
+class PhysicsSystem;
 struct UIContext;
 struct SceneEntry;
 struct SceneLoadRequest;
@@ -60,6 +61,9 @@ public:
 
 	// Skybox system access for environment panel
 	void setSkyboxSystem(SkyboxRenderSystem* skybox);
+
+	// Physics system access for collision shape debug rendering
+	void setPhysicsSystem(PhysicsSystem* ps);
 
 	// Panel access for app-side customization
 	HierarchyPanel& getHierarchyPanel() { return m_hierarchy_panel; }

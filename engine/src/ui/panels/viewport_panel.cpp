@@ -3,6 +3,7 @@
 #include "scene/ve_registry.hpp"
 #include "scene/ve_camera.hpp"
 #include "utils/ve_ray.hpp"
+#include "physics/physics_system.hpp"
 #include <imgui.h>
 #include <ImGuizmo.h>
 #include <glm/gtc/type_ptr.hpp>
@@ -37,6 +38,10 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 
 		// Gizmo overlay (drawn on top of the image)
 		renderGizmo(registry, state, image_pos.x, image_pos.y, size.x, size.y);
+
+		// Collision shape debug overlay
+		if (state.show_collision_shape)
+			renderCollisionShape(registry, state, image_pos.x, image_pos.y, size.x, size.y);
 
 		// Raycast picking (left-click in viewport selects entity)
 		if (state.viewport_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
@@ -116,14 +121,29 @@ void ViewportPanel::renderGizmoToolbar(EditorState& state) {
 void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float img_x, float img_y, float img_w, float img_h) {
 	state.gizmo_active = false;
 
-	if (!m_camera || !registry || state.selected_entity.isNull())
+	// Unfreeze if gizmo was active last frame but won't be this frame (early return paths)
+	auto unfreezeIfNeeded = [&]() {
+		if (m_was_gizmo_active && !state.gizmo_active && !m_frozen_entity.isNull() && m_physics_system) {
+			m_physics_system->unfreezeBody(m_frozen_entity);
+			m_frozen_entity = Entity::null();
+		}
+		m_was_gizmo_active = state.gizmo_active;
+	};
+
+	if (!m_camera || !registry || state.selected_entity.isNull()) {
+		unfreezeIfNeeded();
 		return;
-	if (!registry->isAlive(state.selected_entity))
+	}
+	if (!registry->isAlive(state.selected_entity)) {
+		unfreezeIfNeeded();
 		return;
+	}
 
 	auto* transform = registry->getComponent<TransformComponent>(state.selected_entity);
-	if (!transform)
+	if (!transform) {
+		unfreezeIfNeeded();
 		return;
+	}
 
 	// ImGuizmo setup
 	ImGuizmo::SetOrthographic(false);
@@ -158,6 +178,12 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 	glm::mat4 model = world;
 	const glm::mat4& view = m_camera->getView();
 
+	glm::vec3 aabb_offset = state.cached_aabb_offset;
+
+	// Apply offset in local space
+	glm::vec3 world_offset = glm::vec3(model * glm::vec4(aabb_offset, 1.0f)) - glm::vec3(model[3]);
+	model[3] += glm::vec4(world_offset, 0.0f);
+
 	// ImGuizmo expects a standard forward-Z projection
 	// Build one from camera parameters since our actual proj is infinite reverse-Z.
 	glm::mat4 gizmo_proj = glm::perspective(m_camera->getFovY(), m_camera->getAspect(),
@@ -165,6 +191,10 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 
 	if (ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(gizmo_proj),
 	                         op, mode, glm::value_ptr(model), nullptr, snap_ptr)) {
+		// Remove the AABB offset before decomposing back
+		glm::vec3 new_world_offset = glm::vec3(model * glm::vec4(aabb_offset, 1.0f)) - glm::vec3(model[3]);
+		model[3] -= glm::vec4(new_world_offset, 0.0f);
+
 		// Convert back to local space if entity has a parent
 		Entity parent = registry->getParent(state.selected_entity);
 		glm::mat4 local_model = model;
@@ -179,12 +209,174 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 		glm::quat rotation;
 		glm::decompose(local_model, scale, rotation, translation, skew, perspective);
 
-		transform->setTranslation(translation);
-		transform->setRotation(rotation);
-		transform->setScale(scale);
+		if (op == ImGuizmo::TRANSLATE)
+			transform->setTranslation(translation);
+		else if (op == ImGuizmo::ROTATE)
+			transform->setRotation(rotation);
+		else if (op == ImGuizmo::SCALE)
+			transform->setScale(scale);
 	}
 
 	state.gizmo_active = ImGuizmo::IsUsing();
+
+	// Freeze physics body when gizmo drag starts, unfreeze when it ends
+	if (state.gizmo_active && !m_was_gizmo_active && m_physics_system) {
+		m_physics_system->freezeBody(state.selected_entity);
+		m_frozen_entity = state.selected_entity;
+	}
+	unfreezeIfNeeded();
+}
+
+// ── Collision shape wireframe overlay ────────────────────────────────────────
+
+static ImVec2 worldToScreen(const glm::vec3& world, const glm::mat4& vp, float img_x, float img_y, float img_w, float img_h) {
+	glm::vec4 clip = vp * glm::vec4(world, 1.0f);
+	if (clip.w <= 0.0f)
+		return {-1.0f, -1.0f};
+	glm::vec3 ndc = glm::vec3(clip) / clip.w;
+	return {
+		img_x + (ndc.x * 0.5f + 0.5f) * img_w,
+		img_y + (ndc.y * 0.5f + 0.5f) * img_h
+	};
+}
+
+static void drawLine3D(ImDrawList* dl, const glm::vec3& a, const glm::vec3& b,
+	const glm::mat4& vp, float img_x, float img_y, float img_w, float img_h, ImU32 col) {
+	ImVec2 sa = worldToScreen(a, vp, img_x, img_y, img_w, img_h);
+	ImVec2 sb = worldToScreen(b, vp, img_x, img_y, img_w, img_h);
+	if (sa.x < 0 || sb.x < 0)
+		return;
+	dl->AddLine(sa, sb, col, 1.5f);
+}
+
+static void drawWireBox(ImDrawList* dl, const glm::vec3& center, const glm::quat& rot, const glm::vec3& he,
+	const glm::mat4& vp, float ix, float iy, float iw, float ih, ImU32 col) {
+	glm::vec3 corners[8];
+	for (int i = 0; i < 8; i++) {
+		glm::vec3 local{
+			(i & 1) ? he.x : -he.x,
+			(i & 2) ? he.y : -he.y,
+			(i & 4) ? he.z : -he.z
+		};
+		corners[i] = center + rot * local;
+	}
+	// 12 edges of a box
+	static constexpr int edges[12][2] = {
+		{0,1},{2,3},{4,5},{6,7}, // x-axis edges
+		{0,2},{1,3},{4,6},{5,7}, // y-axis edges
+		{0,4},{1,5},{2,6},{3,7}  // z-axis edges
+	};
+	for (auto& e : edges)
+		drawLine3D(dl, corners[e[0]], corners[e[1]], vp, ix, iy, iw, ih, col);
+}
+
+static void drawWireSphere(ImDrawList* dl, const glm::vec3& center, const glm::quat& rot, float radius,
+	const glm::mat4& vp, float ix, float iy, float iw, float ih, ImU32 col) {
+	constexpr int segments = 32;
+	// Draw 3 great circles (XY, XZ, YZ planes)
+	glm::vec3 axes[3] = {
+		rot * glm::vec3(1, 0, 0),
+		rot * glm::vec3(0, 1, 0),
+		rot * glm::vec3(0, 0, 1)
+	};
+	for (int ring = 0; ring < 3; ring++) {
+		glm::vec3 u = axes[ring];
+		glm::vec3 v = axes[(ring + 1) % 3];
+		glm::vec3 prev = center + u * radius;
+		for (int i = 1; i <= segments; i++) {
+			float angle = glm::two_pi<float>() * static_cast<float>(i) / segments;
+			glm::vec3 cur = center + (u * cosf(angle) + v * sinf(angle)) * radius;
+			drawLine3D(dl, prev, cur, vp, ix, iy, iw, ih, col);
+			prev = cur;
+		}
+	}
+}
+
+static void drawWireCapsule(ImDrawList* dl, const glm::vec3& center, const glm::quat& rot,
+	float radius, float half_height, const glm::mat4& vp, float ix, float iy, float iw, float ih, ImU32 col) {
+	constexpr int segments = 32;
+	glm::vec3 up = rot * glm::vec3(0, 1, 0);
+	glm::vec3 right = rot * glm::vec3(1, 0, 0);
+	glm::vec3 forward = rot * glm::vec3(0, 0, 1);
+
+	glm::vec3 top = center + up * half_height;
+	glm::vec3 bot = center - up * half_height;
+
+	// Cylinder body: 2 circles + 4 vertical lines
+	for (int cap = 0; cap < 2; cap++) {
+		glm::vec3 c = cap == 0 ? top : bot;
+		glm::vec3 prev = c + right * radius;
+		for (int i = 1; i <= segments; i++) {
+			float angle = glm::two_pi<float>() * static_cast<float>(i) / segments;
+			glm::vec3 cur = c + (right * cosf(angle) + forward * sinf(angle)) * radius;
+			drawLine3D(dl, prev, cur, vp, ix, iy, iw, ih, col);
+			prev = cur;
+		}
+	}
+	// 4 vertical lines
+	for (int i = 0; i < 4; i++) {
+		float angle = glm::half_pi<float>() * static_cast<float>(i);
+		glm::vec3 offset = (right * cosf(angle) + forward * sinf(angle)) * radius;
+		drawLine3D(dl, top + offset, bot + offset, vp, ix, iy, iw, ih, col);
+	}
+	// Hemisphere arcs
+	for (int cap = 0; cap < 2; cap++) {
+		glm::vec3 c = cap == 0 ? top : bot;
+		float sign = cap == 0 ? 1.0f : -1.0f;
+		for (int arc = 0; arc < 2; arc++) {
+			glm::vec3 tangent = arc == 0 ? right : forward;
+			glm::vec3 prev = c + tangent * radius;
+			for (int i = 1; i <= segments / 2; i++) {
+				float angle = glm::pi<float>() * static_cast<float>(i) / (segments / 2);
+				glm::vec3 cur = c + (tangent * cosf(angle) + up * sign * sinf(angle)) * radius;
+				drawLine3D(dl, prev, cur, vp, ix, iy, iw, ih, col);
+				prev = cur;
+			}
+		}
+	}
+}
+
+void ViewportPanel::renderCollisionShape(Registry* registry, EditorState& state,
+	float img_x, float img_y, float img_w, float img_h) {
+	if (!m_physics_system || !m_camera || !registry || state.selected_entity.isNull())
+		return;
+
+	auto shape = m_physics_system->getDebugShape(state.selected_entity, *registry);
+	if (!shape)
+		return;
+
+	glm::mat4 vp = m_camera->getProj() * m_camera->getView();
+	ImDrawList* dl = ImGui::GetWindowDrawList();
+
+	ImU32 col = shape->is_dynamic ? IM_COL32(0, 255, 100, 200) : IM_COL32(0, 150, 255, 200);
+
+	auto drawShape = [&](const DebugShape& s, auto& self) -> void {
+		glm::vec3 center = s.position;
+		switch (s.type) {
+			case DebugShapeType::Box:
+				drawWireBox(dl, center, s.rotation, s.extents, vp, img_x, img_y, img_w, img_h, col);
+				break;
+			case DebugShapeType::Sphere:
+				drawWireSphere(dl, center, s.rotation, s.extents.x, vp, img_x, img_y, img_w, img_h, col);
+				break;
+			case DebugShapeType::Capsule:
+				drawWireCapsule(dl, center, s.rotation, s.extents.x, s.extents.y,
+					vp, img_x, img_y, img_w, img_h, col);
+				break;
+			case DebugShapeType::ConvexHull:
+				for (const auto& [a, b] : s.hull_edges) {
+					glm::vec3 pa = center + s.rotation * s.hull_vertices[a];
+					glm::vec3 pb = center + s.rotation * s.hull_vertices[b];
+					drawLine3D(dl, pa, pb, vp, img_x, img_y, img_w, img_h, col);
+				}
+				break;
+			case DebugShapeType::Compound:
+				for (const auto& child : s.sub_shapes)
+					self(child, self);
+				break;
+		}
+	};
+	drawShape(*shape, drawShape);
 }
 
 } // namespace ve

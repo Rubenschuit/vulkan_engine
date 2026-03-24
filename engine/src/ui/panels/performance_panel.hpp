@@ -47,7 +47,7 @@ private:
 	int m_graph_frames = 0;
 
 	// Per-system breakdown
-	static constexpr int BREAKDOWN_COUNT = 7;
+	static constexpr int BREAKDOWN_COUNT = 8;
 	float m_gpu_breakdown_ms[BREAKDOWN_COUNT] = {};
 	float m_gpu_breakdown_sum[BREAKDOWN_COUNT] = {};
 	float m_cpu_breakdown_ms[BREAKDOWN_COUNT] = {};
@@ -56,6 +56,7 @@ private:
 	// VRAM stats
 	VmaAllocator m_allocator;
 	uint32_t m_heap_count;
+	uint32_t m_device_local_heap_index = 0;
 };
 
 } // namespace ve

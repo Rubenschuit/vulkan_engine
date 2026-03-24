@@ -216,11 +216,71 @@ private:
 	mutable bool m_range_dirty{true};
 };
 
+// ---------------------------------------------------------------------------
+// RigidbodyComponent
+// ---------------------------------------------------------------------------
+enum class PhysicsShapeType : uint8_t {
+	Box,
+	Sphere,
+	Capsule,
+	ConvexHull,
+	MeshStatic // triangle mesh from VeMesh CPU data
+};
+
+enum class PhysicsMotionType : uint8_t {
+	Static,
+	Kinematic,
+	Dynamic
+};
+
+struct PhysicsShapeDesc {
+	PhysicsShapeType type = PhysicsShapeType::Box;
+};
+
+class VENGINE_API RigidbodyComponent : public Component {
+public:
+	PhysicsMotionType getMotionType() const { return m_motion_type; }
+	void setMotionType(PhysicsMotionType t) { m_motion_type = t; m_dirty = true; }
+
+	const PhysicsShapeDesc& getShapeDesc() const { return m_shape; }
+	void setShapeDesc(const PhysicsShapeDesc& s) { m_shape = s; m_dirty = true; }
+
+	float getMass() const { return m_mass; }
+	void setMass(float m) { m_mass = m; m_dirty = true; }
+
+	float getFriction() const { return m_friction; }
+	void setFriction(float f) { m_friction = f; m_dirty = true; }
+
+	float getRestitution() const { return m_restitution; }
+	void setRestitution(float r) { m_restitution = r; m_dirty = true; }
+
+	float getHullTolerance() const { return m_hull_tolerance; }
+	void setHullTolerance(float t) { m_hull_tolerance = t; m_dirty = true; }
+
+	uint32_t getBodyId() const { return m_body_id; }
+	void setBodyId(uint32_t id) { m_body_id = id; }
+	bool hasBody() const { return m_body_id != UINT32_MAX; }
+
+	bool isDirty() const { return m_dirty; }
+	void clearDirty() { m_dirty = false; }
+
+private:
+	PhysicsMotionType m_motion_type = PhysicsMotionType::Static;
+	PhysicsShapeDesc m_shape;
+	float m_mass = 1.0f;
+	float m_friction = 0.5f;
+	float m_restitution = 0.3f;
+	float m_hull_tolerance = 0.05f;
+	uint32_t m_body_id = UINT32_MAX;
+	bool m_dirty = false;
+};
+
 // suppress implicit instantiation
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<TransformComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<PointLightComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<DirectionalLightComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MeshComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SpotLightComponent>();
+extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<RigidbodyComponent>();
 
 } // namespace ve

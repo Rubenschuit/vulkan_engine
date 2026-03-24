@@ -144,6 +144,14 @@ void VeApplication::run() {
 			m_active_scene->update(m_frame_time);
 		}
 
+		// Physics
+		if (m_ui.physics_enabled) {
+			ZoneScopedN("Physics Update");
+			m_ve_renderer.getProfiler().beginCpuTimer(ProfileTimer::PHYSICS);
+			m_physics_system->update(m_frame_time, m_active_scene->getRegistry());
+			m_ve_renderer.getProfiler().endCpuTimer(ProfileTimer::PHYSICS);
+		}
+
 		// Engine pipeline
 		applySettingChanges();
 		if (m_editor->beginFrame())
@@ -199,6 +207,8 @@ void VeApplication::setActiveScene(std::unique_ptr<VeScene> scene) {
 	unloadScene();
 	m_active_scene = std::move(scene);
 	if (m_active_scene) {
+		m_physics_system->onSceneLoaded(m_active_scene->getRegistry());
+		m_physics_system->addStaticCollidersForAllMeshes(m_active_scene->getRegistry());
 		m_shadow_render_system->subscribeToRegistry(m_active_scene->getRegistry());
 		glm::vec4 ambient = m_active_scene->getDefaultAmbient();
 		m_ui.ambient_light_color = glm::vec3(ambient);
@@ -226,6 +236,7 @@ Registry* VeApplication::getActiveRegistry() {
 void VeApplication::unloadScene() {
 	if (!m_active_scene)
 		return;
+	m_physics_system->onSceneUnloaded();
 	m_scene_resources->unload(*m_pbr_render_system, *m_gpu_culling_system);
 	m_active_scene.reset();
 }
@@ -715,6 +726,7 @@ void VeApplication::collectStats(const VeFrameInfo& fi) {
 	m_ui.stats.cpu_scene_render = results.cpu(ProfileTimer::SCENE_RENDER);
 	m_ui.stats.cpu_bloom = results.cpu(ProfileTimer::BLOOM);
 	m_ui.stats.cpu_post_process = results.cpu(ProfileTimer::POST_PROCESS);
+	m_ui.stats.cpu_physics = results.cpu(ProfileTimer::PHYSICS);
 }
 
 // ─── Swap Chain Recreation ───────────────────────────────────────────────────
@@ -1087,6 +1099,9 @@ void VeApplication::initSystems() {
 	m_meshlet_backend = std::make_unique<MeshletCullingBackend>(
 		*m_meshlet_culling_system, *m_gpu_culling_system);
 	m_active_backend = m_cpu_backend.get();
+
+	// Physics
+	m_physics_system = std::make_unique<PhysicsSystem>();
 }
 
 void VeApplication::initEditor() {
@@ -1099,6 +1114,7 @@ void VeApplication::initEditor() {
 	// Wire scene registry and systems into editor
 	m_editor->setSceneRegistry(&m_scene_entries, &m_current_scene_index, &m_pending_load);
 	m_editor->setSkyboxSystem(m_skybox_render_system.get());
+	m_editor->setPhysicsSystem(m_physics_system.get());
 	m_editor->setCamera(&m_camera);
 
 	m_ui.hdr_enabled = m_ve_renderer.hasHdrSupport() && m_ve_renderer.isHdrEnabled();

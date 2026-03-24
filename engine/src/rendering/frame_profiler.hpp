@@ -21,6 +21,7 @@ enum class ProfileTimer : uint32_t {
 	BLOOM,
 	POST_PROCESS,
 	COMPUTE_TOTAL,
+	PHYSICS,
 	COUNT
 };
 
@@ -35,6 +36,7 @@ inline const char* profileTimerName(ProfileTimer timer) {
 		case ProfileTimer::BLOOM:          return "Bloom";
 		case ProfileTimer::POST_PROCESS:   return "Post Process";
 		case ProfileTimer::COMPUTE_TOTAL:  return "Compute Total";
+		case ProfileTimer::PHYSICS:        return "Physics";
 		default:                           return "Unknown";
 	}
 }

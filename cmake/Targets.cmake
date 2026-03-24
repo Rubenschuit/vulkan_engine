@@ -48,7 +48,11 @@ elseif(KTX_LIBRARIES)
 	message(STATUS "Linking with system KTX library: ${KTX_LIBRARIES}")
 endif()
 
+# Meshoptimizer
 target_link_libraries(VEngineLib PUBLIC meshoptimizer)
+
+# Jolt Physics
+target_link_libraries(VEngineLib PUBLIC Jolt)
 
 # Tracy Profiler
 if(VE_ENABLE_TRACY)

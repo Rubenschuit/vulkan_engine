@@ -9,7 +9,15 @@ namespace ve {
 
 PerformancePanel::PerformancePanel(VeRenderer& renderer)
 	: m_renderer(renderer), m_gpu_name(renderer.getDeviceName()),
-		m_allocator(renderer.getAllocator()), m_heap_count(renderer.getMemoryHeapCount()) {}
+		m_allocator(renderer.getAllocator()), m_heap_count(renderer.getMemoryHeapCount()) {
+	auto mem_props = renderer.getMemoryProperties();
+	for (uint32_t i = 0; i < mem_props.memoryHeapCount; i++) {
+		if (static_cast<VkMemoryHeapFlags>(mem_props.memoryHeaps[i].flags) & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+			m_device_local_heap_index = i;
+			break;
+		}
+	}
+}
 
 static void formatCount(char* buf, size_t buf_size, uint32_t count) {
 	if (count >= 1000000)
@@ -48,13 +56,13 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	const float gpu_src[] = {
 		0.0f, context.stats.gpu_shadow_maps, context.stats.gpu_depth_prepass,
 		context.stats.gpu_gtao, context.stats.gpu_scene_render,
-		context.stats.gpu_bloom, context.stats.gpu_post_process
+		context.stats.gpu_bloom, context.stats.gpu_post_process, 0.0f
 	};
 	const float cpu_src[] = {
 		context.stats.cpu_culling, context.stats.cpu_shadow_maps,
 		context.stats.cpu_depth_prepass, context.stats.cpu_gtao,
 		context.stats.cpu_scene_render, context.stats.cpu_bloom,
-		context.stats.cpu_post_process
+		context.stats.cpu_post_process, context.stats.cpu_physics
 	};
 	for (int i = 0; i < BREAKDOWN_COUNT; i++) {
 		m_gpu_breakdown_sum[i] += gpu_src[i];
@@ -231,29 +239,24 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	if (m_renderer.isHdrEnabled())
 		row("HDR", "Enabled");
 
-	// --- VRAM usage ---
+	// --- VRAM usage (device-local heap only) ---
 	{
 		VmaBudget budgets[VK_MAX_MEMORY_HEAPS];
 		vmaGetHeapBudgets(m_allocator, budgets);
 
-		VkDeviceSize total_used = 0;
-		VkDeviceSize total_budget = 0;
-		for (uint32_t i = 0; i < m_heap_count; i++) {
-			total_used += budgets[i].usage;
-			total_budget += budgets[i].budget;
-		}
+		auto& vram = budgets[m_device_local_heap_index];
 
 		ImGui::Spacing();
 		ImGui::Separator();
 		ImGui::Spacing();
 
-		double used_mb = static_cast<double>(total_used) / (1024.0 * 1024.0);
-		double budget_mb = static_cast<double>(total_budget) / (1024.0 * 1024.0);
+		double used_mb = static_cast<double>(vram.usage) / (1024.0 * 1024.0);
+		double budget_mb = static_cast<double>(vram.budget) / (1024.0 * 1024.0);
 
 		snprintf(val, sizeof(val), "%.0f / %.0f MB", used_mb, budget_mb);
 		row("VRAM", val);
 
-		float fraction = total_budget > 0 ? static_cast<float>(static_cast<double>(total_used) / static_cast<double>(total_budget)) : 0.0f;
+		float fraction = vram.budget > 0 ? static_cast<float>(static_cast<double>(vram.usage) / static_cast<double>(vram.budget)) : 0.0f;
 		ImGui::ProgressBar(fraction, ImVec2(-1, 0));
 	}
 
@@ -264,7 +267,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 	// --- Per-system breakdown table ---
 	static const char* breakdown_labels[] = {
-		"Culling", "Shadows", "Depth Pass", "GTAO", "Scene", "Bloom", "Post Process"
+		"Culling", "Shadows", "Depth Pass", "GTAO", "Scene", "Bloom", "Post Process", "Physics"
 	};
 
 	if (ImGui::BeginTable("##Breakdown", 3, ImGuiTableFlags_None)) {

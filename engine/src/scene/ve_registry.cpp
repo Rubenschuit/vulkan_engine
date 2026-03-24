@@ -57,6 +57,8 @@ void Registry::destroyEntity(Entity e) {
 		m_events.emit(ComponentRemovedEvent<DirectionalLightComponent>{e});
 	if (m_spot_lights.has(idx))
 		m_events.emit(ComponentRemovedEvent<SpotLightComponent>{e});
+	if (m_rigidbodies.has(idx))
+		m_events.emit(ComponentRemovedEvent<RigidbodyComponent>{e});
 
 	// Adjust active light counters before removing components
 	if (m_meta[idx].active) {
@@ -79,6 +81,8 @@ void Registry::destroyEntity(Entity e) {
 		m_directional_lights.remove(idx);
 	if (m_spot_lights.has(idx))
 		m_spot_lights.remove(idx);
+	if (m_rigidbodies.has(idx))
+		m_rigidbodies.remove(idx);
 
 	// Detach from hierarchy: unlink from parent's child list
 	auto& h = m_hierarchy[idx];
@@ -196,6 +200,10 @@ void Registry::processPendingComponentRemovals() {
 			case ComponentType::SpotLight:
 				if (hasComponent<SpotLightComponent>(r.entity))
 					removeComponent<SpotLightComponent>(r.entity);
+				break;
+			case ComponentType::Rigidbody:
+				if (hasComponent<RigidbodyComponent>(r.entity))
+					removeComponent<RigidbodyComponent>(r.entity);
 				break;
 		}
 	}
@@ -443,12 +451,12 @@ Entity Registry::cloneEntity(Entity source) {
 	m_meta[clone.index()].light_source = m_meta[src_idx].light_source;
 
 	// Copy all components via their copy constructors.
-	// When adding a new component type, add one line here.
 	cloneComponentIfPresent<TransformComponent>(source, clone);
 	cloneComponentIfPresent<MeshComponent>(source, clone);
 	cloneComponentIfPresent<PointLightComponent>(source, clone);
 	cloneComponentIfPresent<DirectionalLightComponent>(source, clone);
 	cloneComponentIfPresent<SpotLightComponent>(source, clone);
+	cloneComponentIfPresent<RigidbodyComponent>(source, clone);
 
 	// Match active state
 	if (!m_meta[src_idx].active)
@@ -547,6 +555,7 @@ void Registry::clear() {
 	m_point_lights.clear();
 	m_directional_lights.clear();
 	m_spot_lights.clear();
+	m_rigidbodies.clear();
 	m_meta.clear();
 	m_hierarchy.clear();
 	m_world_cache.clear();

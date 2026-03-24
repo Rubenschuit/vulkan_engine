@@ -1,4 +1,5 @@
 #include "simple_scene.hpp"
+#include "scene/ve_component.hpp"
 #include <string>
 #include <glm/gtc/constants.hpp>
 
@@ -53,7 +54,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 
 
 
-	// floor (grid texture, slightly glossy dielectric, tiled ~1m intervals)
+	// floor (grid texture, tiled at ~1m intervals)
 	{
 		constexpr float half = 100.0f;
 		constexpr float tile_uv = half * 2.0f;  // UV range so texture repeats every 1 world unit
@@ -78,8 +79,13 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 			"default_mr_unit.png",
 			"default_occlusion.png",
 			"default_emissive.png",
-			MaterialAlphaProps{AlphaMode::ALPHA_OPAQUE, 0.5f, false},
-			floor_factors, &m_pool, &m_material_layout);
+			MaterialAlphaProps{
+				.alpha_mode = AlphaMode::ALPHA_OPAQUE,
+				.alpha_cutoff = 0.5f,
+				.double_sided = true,
+				.use_spec_gloss_texture = false},
+			floor_factors, &m_pool, &m_material_layout
+		);
 
 		Entity e = m_registry.createEntity("floor");
 		auto& tc = m_registry.addComponent<TransformComponent>(e);
@@ -126,7 +132,8 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 	auto createPbrGrid = [&](const std::filesystem::path& model_path,
 	                         int rows, int cols,
 	                         glm::vec3 base_translation, glm::vec3 base_rotation, glm::vec3 base_scale,
-	                         float spacing_x, float spacing_y, float z_offset) {
+	                         float spacing_x, float spacing_y, float z_offset,
+	                         PhysicsShapeType shape_type = PhysicsShapeType::Box) {
 		auto mesh_data = VeModel::loadSingleMesh(m_resource_manager, model_path.lexically_normal());
 		if (!mesh_data)
 			return;
@@ -163,25 +170,32 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 				tc.setScale(base_scale);
 				auto& mc = m_registry.addComponent<MeshComponent>(e, mesh_data->mesh, mat_handle);
 				mc.has_texture = 1.0f;
+
+				auto& rb = m_registry.addComponent<RigidbodyComponent>(e);
+				rb.setMotionType(PhysicsMotionType::Dynamic);
+				rb.setShapeDesc({.type = shape_type});
 			}
 		}
 	};
 
-	// Spheres in a grid (PBR sweep)
+	// Spheres in a grid
 	createPbrGrid(paths.sphere_model, 5, 5,
-	              {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, 4.0f, 4.0f, 1.0f);
+	              {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, 4.0f, 4.0f, 1.0f,
+	              PhysicsShapeType::Sphere);
 
-	// Cubes in a grid (PBR sweep)
+	// Cubes in a grid
 	createPbrGrid(paths.cube_model, 5, 5,
 	              {-4.0f, 0, 0}, {0, 0, 0}, {1, 1, 1}, -4.0f, 4.0f, 1.0f);
 
-	// Flat vases (bad normals) in a grid (PBR sweep)
+	// Flat vases (bad normals) in a grid
 	createPbrGrid(paths.flat_vase_model, 5, 5,
-	              {-4.0f, -4.0f, 0}, {glm::radians(-180.0f), 0.0f, 0.0f}, {6.0f, 6.0f, 3.0f}, -4.0f, -4.0f, 0);
+	              {-4.0f, -4.0f, 0}, {glm::radians(-180.0f), 0.0f, 0.0f}, {6.0f, 6.0f, 3.0f}, -4.0f, -4.0f, 0,
+	              PhysicsShapeType::ConvexHull);
 
-	// Smooth vases (interpolated normals) in a grid (PBR sweep)
+	// Smooth vases (interpolated normals) in a grid
 	createPbrGrid(paths.smooth_vase_model, 5, 5,
-	              {0, -4.0f, 0}, {glm::radians(-180.0f), 0.0f, 0.0f}, {6.0f, 6.0f, 3.0f}, 4.0f, -4.0f, 0);
+	              {0, -4.0f, 0}, {glm::radians(-180.0f), 0.0f, 0.0f}, {6.0f, 6.0f, 3.0f}, 4.0f, -4.0f, 0,
+	              PhysicsShapeType::ConvexHull);
 }
 
 } // namespace ve

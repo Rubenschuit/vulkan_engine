@@ -141,8 +141,12 @@ bool hizOcclusionTest(CullParams cp, Texture2D<float> hiz_tex, SamplerState hiz_
 	float y1 = cp.p11 * (prev_cy * prev_cz + radius * t_yz) / denom;
 	float y2 = cp.p11 * (prev_cy * prev_cz - radius * t_yz) / denom;
 
-	float2 uv_min = clamp(float2(min(x1, x2), min(y1, y2)) * 0.5 + 0.5, float2(0.0), float2(1.0));
-	float2 uv_max = clamp(float2(max(x1, x2), max(y1, y2)) * 0.5 + 0.5, float2(0.0), float2(1.0));
+	float2 uv_min = float2(min(x1, x2), min(y1, y2)) * 0.5 + 0.5;
+	float2 uv_max = float2(max(x1, x2), max(y1, y2)) * 0.5 + 0.5;
+
+	// Skip Hi-Z when the sphere projected outside the previous frame's screen.
+	if (uv_min.x < 0.0 || uv_min.y < 0.0 || uv_max.x > 1.0 || uv_max.y > 1.0)
+		return true;
 
 	float2 aabb_pixels = (uv_max - uv_min) * cp.hiz_size;
 	float max_dim = max(aabb_pixels.x, aabb_pixels.y);

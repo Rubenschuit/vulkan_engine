@@ -43,7 +43,16 @@ struct CopiedSpotLight {
 	bool casts_shadow{false};
 };
 
-using ComponentClipboard = std::variant<CopiedTransform, CopiedPointLight, CopiedDirectionalLight, CopiedSpotLight>;
+struct CopiedRigidbody {
+	uint8_t motion_type{0};
+	uint8_t shape_type{0};
+	float mass{1.0f};
+	float friction{0.5f};
+	float restitution{0.3f};
+	float hull_tolerance{0.05f};
+};
+
+using ComponentClipboard = std::variant<CopiedTransform, CopiedPointLight, CopiedDirectionalLight, CopiedSpotLight, CopiedRigidbody>;
 
 enum class GizmoOperation : int {
 	Translate = 0,
@@ -89,6 +98,10 @@ struct VENGINE_API EditorState {
 	float gizmo_snap_rotate = 15.0f;
 	float gizmo_snap_scale = 0.1f;
 	bool gizmo_active = false;
+	glm::vec3 cached_aabb_offset{0.0f}; // local-space AABB center for gizmo placement
+
+	// Physics debug
+	bool show_collision_shape = false;
 
 	// Selection outline
 	float outline_width = 4.0f;
