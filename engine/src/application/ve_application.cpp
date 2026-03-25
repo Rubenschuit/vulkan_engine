@@ -62,6 +62,7 @@ VeApplication::VeApplication(const EngineConfig& config)
 	  m_config(config) {
 
 	m_resource_manager = std::make_unique<VeResourceManager>(m_ve_device);
+	m_asset_loader = std::make_unique<AssetLoadingSystem>(*m_resource_manager);
 	createBuffers();
 	m_scene_resources = std::make_unique<SceneResourceManager>(m_ve_device);
 	createDescriptors();
@@ -125,8 +126,8 @@ void VeApplication::run() {
 			}
 		}
 
-		// Process editor-driven scene load requests
 		processSceneLoadRequest();
+		tickAsyncLoader();
 
 		// App per-frame logic (particle config, etc.)
 		update();
@@ -243,7 +244,16 @@ void VeApplication::unloadScene() {
 
 void VeApplication::registerScene(const std::string& name,
 								   std::function<std::unique_ptr<VeScene>(const SceneContext&)> factory) {
-	m_scene_entries.push_back({name, std::move(factory)});
+	m_scene_entries.push_back({name, std::move(factory), {}, {}});
+	if (m_current_scene_index < 0)
+		m_current_scene_index = 0;
+}
+
+void VeApplication::registerAsyncScene(const std::string& name,
+                                       const std::filesystem::path& gltf_path,
+                                       std::function<std::unique_ptr<VeScene>(const SceneContext&, std::unique_ptr<VeModel>)> factory,
+                                       bool extract_lights, bool flip_tex_coord_v) {
+	m_scene_entries.push_back({name, {}, gltf_path, std::move(factory), extract_lights, flip_tex_coord_v});
 	if (m_current_scene_index < 0)
 		m_current_scene_index = 0;
 }
@@ -267,21 +277,23 @@ void VeApplication::processSceneLoadRequest() {
 		case SceneLoadRequest::Type::LOAD_REGISTERED: {
 			int idx = m_pending_load.scene_index;
 			if (idx >= 0 && idx < static_cast<int>(m_scene_entries.size()) && idx != m_loaded_scene_index) {
-				auto scene = m_scene_entries[static_cast<size_t>(idx)].factory(ctx);
-				setActiveScene(std::move(scene));
-				m_loaded_scene_index = idx;
-				m_current_scene_index = idx;
+				const auto& entry = m_scene_entries[static_cast<size_t>(idx)];
+				if (!entry.gltf_path.empty() && entry.async_factory) {
+					m_asset_loader->beginModelLoad(entry.gltf_path, entry.extract_lights, entry.flip_tex_coord_v);
+					m_async_load_type = SceneLoadRequest::Type::LOAD_REGISTERED;
+					m_pending_async_scene_index = idx;
+				} else {
+					m_asset_loader->cancel();
+					auto scene = entry.factory(ctx);
+					setActiveScene(std::move(scene));
+					m_loaded_scene_index = idx;
+					m_current_scene_index = idx;
+				}
 			}
 			break;
 		}
-		case SceneLoadRequest::Type::LOAD_GLTF_PATH: {
-			auto scene = std::make_unique<GltfScene>(ctx, m_pending_load.gltf_path);
-			setActiveScene(std::move(scene));
-			m_loaded_scene_index = -1;
-			m_current_scene_index = -1;
-			break;
-		}
 		case SceneLoadRequest::Type::NEW_EMPTY: {
+			m_asset_loader->cancel();
 			auto scene = std::make_unique<GltfScene>(ctx);
 			setActiveScene(std::move(scene));
 			m_loaded_scene_index = -1;
@@ -290,19 +302,8 @@ void VeApplication::processSceneLoadRequest() {
 		}
 		case SceneLoadRequest::Type::ADD_MODEL: {
 			if (m_active_scene) {
-				m_active_scene->addModel(m_pending_load.gltf_path);
-				m_scene_resources->rebuildForModelAdd(
-					m_active_scene->getRegistry(), *m_pbr_render_system);
-				// Recreate meshlet culling descriptors (mega buffer was rebuilt)
-				if (m_meshlet_culling_system) {
-					auto& gpu_scene = m_scene_resources->getGpuSceneManager();
-					m_meshlet_culling_system->createDescriptorSets(*m_global_pool,
-						gpu_scene, m_pbr_render_system->getMegaBuffer());
-					m_meshlet_culling_system->createHizDescriptorSets(*m_global_pool,
-						gpu_scene, m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
-					m_meshlet_culling_system->createShadowDescriptorSets(*m_global_pool,
-						gpu_scene, m_pbr_render_system->getMegaBuffer());
-				}
+				m_asset_loader->beginModelLoad(m_pending_load.gltf_path, true, m_pending_load.flip_tex_coord_v);
+				m_async_load_type = SceneLoadRequest::Type::ADD_MODEL;
 			}
 			break;
 		}
@@ -310,6 +311,51 @@ void VeApplication::processSceneLoadRequest() {
 			break;
 	}
 	m_pending_load.type = SceneLoadRequest::Type::NONE;
+}
+
+void VeApplication::tickAsyncLoader() {
+	if (m_asset_loader->getState() == LoadState::IDLE ||
+	    m_asset_loader->getState() == LoadState::FAILED)
+		return;
+
+	m_asset_loader->tick(&*m_global_pool, &*m_material_set_layout);
+
+	if (m_asset_loader->getState() == LoadState::READY)
+		finalizeAsyncLoad();
+}
+
+void VeApplication::finalizeAsyncLoad() {
+	auto model = m_asset_loader->takeModel();
+	if (!model)
+		return;
+
+	auto ctx = getSceneContext();
+	if (m_async_load_type == SceneLoadRequest::Type::LOAD_REGISTERED) {
+		int idx = m_pending_async_scene_index;
+		if (idx >= 0 && idx < static_cast<int>(m_scene_entries.size()) && m_scene_entries[static_cast<size_t>(idx)].async_factory) {
+			auto scene = m_scene_entries[static_cast<size_t>(idx)].async_factory(ctx, std::move(model));
+			setActiveScene(std::move(scene));
+			m_loaded_scene_index = idx;
+			m_current_scene_index = idx;
+		}
+		m_pending_async_scene_index = -1;
+	} else if (m_async_load_type == SceneLoadRequest::Type::ADD_MODEL && m_active_scene) {
+		model->addToScene(m_active_scene->getRegistry(),
+		                  {0.f, 0.f, 0.f}, {0.f, 0.f, 0.f}, {1.f, 1.f, 1.f});
+		m_scene_resources->rebuildForModelAdd(
+			m_active_scene->getRegistry(), *m_pbr_render_system);
+		if (m_meshlet_culling_system) {
+			auto& gpu_scene = m_scene_resources->getGpuSceneManager();
+			m_meshlet_culling_system->createDescriptorSets(*m_global_pool,
+				gpu_scene, m_pbr_render_system->getMegaBuffer());
+			m_meshlet_culling_system->createHizDescriptorSets(*m_global_pool,
+				gpu_scene, m_pbr_render_system->getMegaBuffer(), *m_hiz_system);
+			m_meshlet_culling_system->createShadowDescriptorSets(*m_global_pool,
+				gpu_scene, m_pbr_render_system->getMegaBuffer());
+		}
+	}
+	m_async_load_type = SceneLoadRequest::Type::NONE;
+	m_editor->getHierarchyPanel().setLoadTimeDisplay(4.f);
 }
 
 // ─── Frame Info Construction ─────────────────────────────────────────────────
@@ -1115,6 +1161,7 @@ void VeApplication::initEditor() {
 	m_editor->setSceneRegistry(&m_scene_entries, &m_current_scene_index, &m_pending_load);
 	m_editor->setSkyboxSystem(m_skybox_render_system.get());
 	m_editor->setPhysicsSystem(m_physics_system.get());
+	m_editor->setAssetLoader(m_asset_loader.get());
 	m_editor->setCamera(&m_camera);
 
 	m_ui.hdr_enabled = m_ve_renderer.hasHdrSupport() && m_ve_renderer.isHdrEnabled();

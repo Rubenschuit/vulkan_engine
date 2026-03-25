@@ -24,6 +24,8 @@ class VeResourceManager;
 class VeMesh;
 class VeMaterial;
 class VeTexture;
+struct DecodedTexture;
+struct ProcessedMesh;
 
 /* RAII handle that keeps a resource loaded.
  * Copy increments ref count, destroy decrements. When ref count hits 0, resource is unloaded.
@@ -101,6 +103,9 @@ public:
 	                                         class VeDescriptorPool* pool = nullptr,
 	                                         class VeDescriptorSetLayout* layout = nullptr,
 	                                         bool flip_tex_coord_v = false);
+
+	ResourceHandle<VeMesh> createMeshFromData(const std::string& resource_id,
+	                                          const ProcessedMesh& data);
 
 	// Forcibly unload all resources regardless of reference count.
 	void unloadAll();

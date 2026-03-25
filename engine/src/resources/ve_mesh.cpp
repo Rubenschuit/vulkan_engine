@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "resources/ve_mesh.hpp"
+#include "resources/loaded_asset_data.hpp"
 #include "rendering/meshlet_data.hpp"
 #include "ve_config.hpp"
 
@@ -53,6 +54,21 @@ VeMesh::VeMesh(VeDevice& device, const std::string& resource_id,
 	for (size_t i = 0; i < vertices.size(); i++)
 		m_cpu_positions[i] = vertices[i].pos;
 	m_cpu_indices = indices;
+	setLoaded(true);
+}
+
+VeMesh::VeMesh(VeDevice& device, const ProcessedMesh& data)
+	: Resource(data.resource_id), m_ve_device(device) {
+	m_local_aabb = data.local_aabb;
+	createVertexBuffers(data.vertices);
+	createShadowVertexBuffer(data.vertices);
+	createIndexBuffers(data.indices);
+	for (const auto& lod : data.lod_indices)
+		createLodIndexBuffer(lod);
+	m_cpu_positions = data.cpu_positions;
+	m_cpu_indices = data.cpu_indices;
+	if (data.meshlet_data)
+		m_meshlet_data = std::make_unique<CpuMeshletData>(*data.meshlet_data);
 	setLoaded(true);
 }
 

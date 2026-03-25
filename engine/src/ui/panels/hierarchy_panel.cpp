@@ -324,8 +324,9 @@ void HierarchyPanel::renderGroupControls(const std::string& key, const std::vect
 			float ratio = state.intensity_multiplier / old_mult;
 			for (auto e : lights) {
 				auto* pl = registry.getComponent<PointLightComponent>(e);
-				if (pl)
-					pl->setIntensity(pl->getIntensity() * ratio);
+				if (!pl) continue;
+				float cur = pl->getIntensity();
+				pl->setIntensity(cur > 0.001f ? cur * ratio : state.intensity_multiplier);
 			}
 		}
 	}
@@ -513,20 +514,6 @@ void HierarchyPanel::renderSceneSelector() {
 		*m_current_scene_index = -1;
 	}
 	ImGui::SameLine();
-	if (ImGui::Button("Load GLTF...")) {
-		auto selection = pfd::open_file(
-			"Select GLTF Model", "",
-			{"glTF Files", "*.gltf *.glb"},
-			pfd::opt::none
-		).result();
-		if (!selection.empty()) {
-			m_scene_load_request->type = SceneLoadRequest::Type::LOAD_GLTF_PATH;
-			m_scene_load_request->scene_index = -1;
-			m_scene_load_request->gltf_path = selection[0];
-			*m_current_scene_index = -1;
-		}
-	}
-
 	if (ImGui::Button("Add Model...")) {
 		auto selection = pfd::open_file(
 			"Add GLTF Model", "",
@@ -536,6 +523,18 @@ void HierarchyPanel::renderSceneSelector() {
 		if (!selection.empty()) {
 			m_scene_load_request->type = SceneLoadRequest::Type::ADD_MODEL;
 			m_scene_load_request->gltf_path = selection[0];
+			m_scene_load_request->flip_tex_coord_v = m_flip_tex_coord_v;
+		}
+	}
+	ImGui::Checkbox("Flip UV V", &m_flip_tex_coord_v);
+
+	// Show load time for a few seconds after completion
+	if (m_asset_loader) {
+		float load_time = m_asset_loader->getLastLoadSeconds();
+		if (load_time > 0.f && m_load_time_display_timer > 0.f) {
+			m_load_time_display_timer -= ImGui::GetIO().DeltaTime;
+			float alpha = std::min(m_load_time_display_timer, 1.f);
+			ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, alpha), "Loaded in %.1fs", load_time);
 		}
 	}
 

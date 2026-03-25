@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "resources/ve_texture.hpp"
+#include "resources/loaded_asset_data.hpp"
 #include "vulkan/ve_buffer.hpp"
 
 #include <cmath>

@@ -15,6 +15,8 @@
 
 namespace ve {
 
+struct DecodedTexture;
+
 enum class TextureType {
 	ALBEDO,
 	NORMAL,

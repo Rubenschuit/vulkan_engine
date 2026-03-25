@@ -13,6 +13,7 @@
 #include "resources/ve_resource_manager.hpp"
 #include "resources/ve_texture.hpp"
 #include "resources/ve_material_properties.hpp"
+#include "resources/asset_loading_system.hpp"
 #include "physics/physics_system.hpp"
 #include <memory>
 #include <vector>
@@ -26,14 +27,19 @@ namespace ve {
 struct VENGINE_API SceneEntry {
 	std::string name;
 	std::function<std::unique_ptr<VeScene>(const SceneContext&)> factory;
+	std::filesystem::path gltf_path;
+	std::function<std::unique_ptr<VeScene>(const SceneContext&, std::unique_ptr<VeModel>)> async_factory;
+	bool extract_lights = true;
+	bool flip_tex_coord_v = false;
 };
 
 // Written by editor, consumed by VeApplication main loop (one-frame deferred)
 struct VENGINE_API SceneLoadRequest {
-	enum class Type { NONE, LOAD_REGISTERED, LOAD_GLTF_PATH, NEW_EMPTY, ADD_MODEL };
+	enum class Type { NONE, LOAD_REGISTERED, NEW_EMPTY, ADD_MODEL };
 	Type type = Type::NONE;
 	int scene_index = -1;
 	std::filesystem::path gltf_path;
+	bool flip_tex_coord_v = false;
 };
 
 // Forward declarations
@@ -89,6 +95,11 @@ protected:
 	// --- Scene management ---
 	void registerScene(const std::string& name,
 					   std::function<std::unique_ptr<VeScene>(const SceneContext&)> factory);
+	void registerAsyncScene(const std::string& name,
+	                        const std::filesystem::path& gltf_path,
+	                        std::function<std::unique_ptr<VeScene>(const SceneContext&, std::unique_ptr<VeModel>)> factory,
+	                        bool extract_lights = true,
+	                        bool flip_tex_coord_v = false);
 	void loadDefaultScene(int index);
 	void setActiveScene(std::unique_ptr<VeScene> scene);
 	VeScene* getActiveScene() { return m_active_scene.get(); }
@@ -188,6 +199,13 @@ private:
 	int m_loaded_scene_index = -1;
 	SceneLoadRequest m_pending_load;
 	void processSceneLoadRequest();
+
+	// --- Async loading ---
+	std::unique_ptr<AssetLoadingSystem> m_asset_loader;
+	SceneLoadRequest::Type m_async_load_type{SceneLoadRequest::Type::NONE};
+	int m_pending_async_scene_index{-1};
+	void tickAsyncLoader();
+	void finalizeAsyncLoad();
 
 	// --- UI ---
 	std::unique_ptr<ImGuiLayer> m_imgui_layer;

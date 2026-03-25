@@ -8,6 +8,23 @@ BistroScene::BistroScene(const SceneContext& ctx, const AssetPaths& paths)
 	loadGameObjects(paths);
 }
 
+BistroScene::BistroScene(const SceneContext& ctx, std::unique_ptr<VeModel> model)
+	: VeScene(ctx, "Bistro Scene") {
+	glm::vec3 bistro_translation = {0.0f, 0.0f, 0.0f};
+	model->addToScene(m_registry, bistro_translation, {0.0f, 0.0f, 0.0f}, {2.0f, 2.0f, 2.0f});
+	m_bistro_model = std::move(model);
+
+	// Store default material for getDescriptorSet() fallback
+	for (auto& mc : m_registry.meshes()) {
+		if (mc.hasMaterial() && mc.getMaterial()->hasDescriptorSet()) {
+			m_default_material_handle = mc.getMaterialHandle();
+			break;
+		}
+	}
+
+	setupScene(bistro_translation);
+}
+
 vk::raii::DescriptorSet& BistroScene::getDescriptorSet() {
 	assert(m_default_material_handle.isValid() && m_default_material_handle.get()->hasDescriptorSet() && "BistroScene requires at least one textured material");
 	return m_default_material_handle.get()->getDescriptorSet();
@@ -43,6 +60,10 @@ void BistroScene::loadGameObjects(const AssetPaths& paths) {
 		}
 	}
 
+	setupScene(bistro_translation);
+}
+
+void BistroScene::setupScene(const glm::vec3& /*translation*/) {
 	// Directional light
 	{
 		Entity dl = m_registry.createDirectionalLight(5.0f, glm::vec3(1.0f),

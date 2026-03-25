@@ -91,6 +91,10 @@ void Editor::renderUI(UIContext& context, Registry* registry, VeScene* active_sc
 		} else {
 			m_performance_panel->render(registry, m_state, ctx);
 		}
+
+		// Loading overlay (renders on top of everything)
+		if (m_asset_loader)
+			m_loading_overlay.render(*m_asset_loader);
 	});
 
 	// Cache AABB offset for gizmo/debug shape placement

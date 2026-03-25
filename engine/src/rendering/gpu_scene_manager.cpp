@@ -538,6 +538,10 @@ void GpuSceneManager::rebuildDrawGroups() {
 		offsetof(ObjectDataGPU, lod_draw_group_id);
 	for (uint32_t gpu_id : active_gpu_ids) {
 		const CpuLodData& cpu = m_cpu_lod_data[gpu_id];
+		if (cpu.lod_count == 0) {
+			VE_LOGW("GpuSceneManager: object with gpu_id " << gpu_id << " has zero LODs, skipping draw group assignment");
+			continue;
+		}
 		uint32_t group_ids[MAX_LOD_LEVELS];
 		for (uint32_t l = 0; l < MAX_LOD_LEVELS; l++) {
 			uint32_t src = (l < cpu.lod_count) ? l : cpu.lod_count - 1;

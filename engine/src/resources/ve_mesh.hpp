@@ -20,6 +20,7 @@
 namespace ve {
 
 struct CpuMeshletData;
+struct ProcessedMesh;
 
 class VENGINE_API VeMesh : public Resource {
 public:
@@ -58,6 +59,8 @@ public:
 	VeMesh(VeDevice& device, const std::string& resource_id,
 	       const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices,
 	       const std::vector<std::vector<uint32_t>>& lod_indices);
+	// Create mesh from pre-processed CPU data (async loading path)
+	VeMesh(VeDevice& device, const ProcessedMesh& data);
 	~VeMesh() override;
 
 	VeMesh(const VeMesh&) = delete;

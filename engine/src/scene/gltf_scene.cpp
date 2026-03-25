@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "scene/gltf_scene.hpp"
+#include "resources/ve_model.hpp"
 
 namespace ve {
 
@@ -13,6 +14,24 @@ GltfScene::GltfScene(const SceneContext& ctx, const std::filesystem::path& gltf_
 	: VeScene(ctx, "GLTF: " + gltf_path.filename().string()),
 	  m_fallback_descriptor_set(ctx.default_material_descriptor_set) {
 	addModel(gltf_path);
+	createDirectionalLight();
+}
+
+GltfScene::GltfScene(const SceneContext& ctx, std::unique_ptr<VeModel> model, const std::string& name)
+	: VeScene(ctx, "GLTF: " + name),
+	  m_fallback_descriptor_set(ctx.default_material_descriptor_set) {
+	if (model) {
+		model->addToScene(m_registry, {0.f, 0.f, 0.f}, {0.f, 0.f, 0.f}, {1.f, 1.f, 1.f});
+		if (!m_default_material_handle.isValid()) {
+			for (auto& mc : m_registry.meshes()) {
+				if (mc.hasMaterial() && mc.getMaterial()->hasDescriptorSet()) {
+					m_default_material_handle = mc.getMaterialHandle();
+					break;
+				}
+			}
+		}
+		m_models.push_back(std::move(model));
+	}
 	createDirectionalLight();
 }
 

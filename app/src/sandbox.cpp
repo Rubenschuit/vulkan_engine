@@ -37,12 +37,14 @@ Sandbox::Sandbox(const std::filesystem::path& working_dir)
 	registerScene("Simple", [this](const SceneContext& ctx) {
 		return std::make_unique<SimpleScene>(ctx, m_paths);
 	});
-	registerScene("Sponza", [this](const SceneContext& ctx) {
-		return std::make_unique<SponzaScene>(ctx, m_paths);
-	});
-	registerScene("Bistro", [this](const SceneContext& ctx) {
-		return std::make_unique<BistroScene>(ctx, m_paths);
-	});
+	registerAsyncScene("Sponza", m_paths.sponza_model(),
+		[](const SceneContext& ctx, std::unique_ptr<VeModel> model) {
+			return std::make_unique<SponzaScene>(ctx, std::move(model));
+		});
+	registerAsyncScene("Bistro", m_paths.bistro_model(),
+		[](const SceneContext& ctx, std::unique_ptr<VeModel> model) {
+			return std::make_unique<BistroScene>(ctx, std::move(model));
+		}, true, true);
 
 	// Load the first registered scene
 	loadDefaultScene(0);

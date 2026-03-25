@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "resources/ve_model.hpp"
 #include "resources/ve_texture.hpp"
+#include "resources/loaded_asset_data.hpp"
 #include "scene/ve_component.hpp"
 #include "utils/ve_log.hpp"
 
@@ -12,6 +13,7 @@
 #include "rendering/meshlet_data.hpp"
 
 #include <algorithm>
+#include <fstream>
 #include <numeric>
 #include <cctype>
 #include <filesystem>
@@ -554,11 +556,9 @@ static std::vector<VeModel::ExtractedLight> extractEmissiveLights(
 			const std::string& node_name = gltf.nodes[static_cast<size_t>(np.node_idx)].name;
 			std::string individual_name = !node_name.empty() ? node_name : "light " + std::to_string(emissive_light_count);
 
-			if (diag < EMISSIVE_CLUSTER_EXTENT) {
-				const glm::vec3& center = ce_it->second.first;
-				glm::vec3 world_pos = glm::vec3(W * glm::vec4(center, 1.f));
+			auto pushLight = [&](const glm::vec3& world_pos, const std::string& suffix = "") -> bool {
 				if (!dedup.insert(quantize(world_pos)).second)
-					continue;
+					return false;
 				emissive_lights.push_back({
 					.type = VeModel::ExtractedLightType::Point,
 					.position = world_pos,
@@ -566,28 +566,25 @@ static std::vector<VeModel::ExtractedLight> extractEmissiveLights(
 					.color = color_n,
 					.intensity = intensity,
 					.range = std::max(diag * 1.25f, 0.25f),
-					.name = mat_name + ": " + individual_name,
+					.name = mat_name + ": " + individual_name + suffix,
 					.node_idx = np.node_idx
 				});
 				emissive_light_count++;
+				return true;
+			};
+
+			if (diag < EMISSIVE_CLUSTER_EXTENT) {
+				const glm::vec3& center = ce_it->second.first;
+				glm::vec3 world_pos = glm::vec3(W * glm::vec4(center, 1.f));
+				if (!pushLight(world_pos))
+					continue;
 			} else {
 				const tinygltf::Accessor* pos_acc = findPositionAccessor(np);
 				if (!pos_acc) {
 					const glm::vec3& center = ce_it->second.first;
 					glm::vec3 world_pos = glm::vec3(W * glm::vec4(center, 1.f));
-					if (!dedup.insert(quantize(world_pos)).second)
+					if (!pushLight(world_pos))
 						continue;
-					emissive_lights.push_back({
-						.type = VeModel::ExtractedLightType::Point,
-						.position = world_pos,
-						.direction = glm::vec3(0.0f, 0.0f, -1.0f),
-						.color = color_n,
-						.intensity = intensity,
-						.range = std::max(diag * 1.25f, 0.25f),
-						.name = mat_name + ": " + individual_name,
-						.node_idx = np.node_idx
-					});
-					emissive_light_count++;
 					continue;
 				}
 				const auto& bv = gltf.bufferViews[static_cast<size_t>(pos_acc->bufferView)];
@@ -610,18 +607,7 @@ static std::vector<VeModel::ExtractedLight> extractEmissiveLights(
 
 				for (size_t ci = 0; ci < centroids.size(); ci++) {
 					glm::vec3 world_pos = glm::vec3(W * glm::vec4(centroids[ci], 1.f));
-					if (!dedup.insert(quantize(world_pos)).second) continue;
-					emissive_lights.push_back({
-						.type = VeModel::ExtractedLightType::Point,
-						.position = world_pos,
-						.direction = glm::vec3(0.0f, 0.0f, -1.0f),
-						.color = color_n,
-						.intensity = intensity,
-						.range = std::max(diag * 1.25f, 0.25f),
-						.name = mat_name + ": " + individual_name + " [" + std::to_string(ci) + "]",
-						.node_idx = np.node_idx
-					});
-					emissive_light_count++;
+					pushLight(world_pos, " [" + std::to_string(ci) + "]");
 				}
 			}
 			if (emissive_light_count >= ve::MAX_LIGHTS - 1)
@@ -631,16 +617,6 @@ static std::vector<VeModel::ExtractedLight> extractEmissiveLights(
 	return emissive_lights;
 }
 
-// Context passed to processNode
-struct GltfLoadContext {
-	const tinygltf::Model& gltf;
-	const std::string& model_path_str;
-	VeResourceManager& resource_manager;
-	std::unordered_map<std::string, ResourceHandle<VeMesh>>& geometry_mesh_cache;
-	GeometryCenterExtent& geometry_center_extent;
-	std::vector<NodePrim>& node_primitives;
-};
-
 // Geometry key for mesh deduplication: same geometry+material shares one VeMesh.
 static std::string geometryKey(const tinygltf::Primitive& primitive, size_t material_index) {
 	std::string key = "mat_" + std::to_string(material_index) + "_idx_" + std::to_string(primitive.indices);
@@ -649,13 +625,12 @@ static std::string geometryKey(const tinygltf::Primitive& primitive, size_t mate
 	return key;
 }
 
-// Meshlet data generation is now in VeMesh::buildMeshletData().
-
-// When TANGENT is missing, MikkTSpace generates tangents before vertex deduplication.
-// If out_center_extent is non-null, writes (center, diagonal extent) from deduplicated vertices.
-static ResourceHandle<VeMesh> createPrimitiveMesh(
+// Process a single glTF primitive into a ProcessedMesh (CPU only, no Vulkan calls).
+// Extracts vertices/indices, generates MikkTSpace tangents, deduplicates via meshoptimizer,
+// builds LOD levels and meshlet data. If out_center_extent is non-null, writes (center, diagonal).
+static ProcessedMesh processPrimitive(
 	const tinygltf::Primitive& primitive, const tinygltf::Model& m,
-	const std::string& mesh_id, VeResourceManager& resource_manager,
+	const std::string& mesh_id,
 	std::pair<glm::vec3, float>* out_center_extent = nullptr) {
 
 	std::vector<VeMesh::Vertex> vertices;
@@ -683,7 +658,6 @@ static ResourceHandle<VeMesh> createPrimitiveMesh(
 	const tinygltf::BufferView* tex_bv = has_tex_coords ? &m.bufferViews[static_cast<size_t>(tex_acc->bufferView)] : nullptr;
 	const tinygltf::Buffer* tex_buf = has_tex_coords ? &m.buffers[static_cast<size_t>(tex_bv->buffer)] : nullptr;
 
-	// Strides
 	int pos_stride_val = pos_accessor.ByteStride(pos_bv);
 	const size_t pos_stride = pos_stride_val > 0 ? static_cast<size_t>(pos_stride_val) : gltfComponentSize(pos_accessor.componentType) * 3;
 	int normal_stride_val = normal_accessor.ByteStride(normal_bv);
@@ -715,19 +689,16 @@ static ResourceHandle<VeMesh> createPrimitiveMesh(
 	const size_t tangent_comp_size = has_tangents ? gltfComponentSize(tangent_acc->componentType) : 4;
 	const size_t tex_comp_size = has_tex_coords ? gltfComponentSize(tex_acc->componentType) : 4;
 
-	// Stage 1: build full vertex array (one entry per position, no dedup yet) and raw indices
+	// Stage 1: build vertex array and indices (same as createPrimitiveMesh)
 	vertices.reserve(static_cast<size_t>(pos_accessor.count));
 	for (size_t i = 0; i < pos_accessor.count; i++) {
 		VeMesh::Vertex vertex{};
-
-		// Position (VEC3, any component type)
 		const uint8_t* pos_base = &pos_buf.data[pos_bv.byteOffset + pos_accessor.byteOffset + i * pos_stride];
 		float px = readGltfComponent(pos_base + 0 * pos_comp_size, pos_accessor.componentType, pos_accessor.normalized);
 		float py = readGltfComponent(pos_base + 1 * pos_comp_size, pos_accessor.componentType, pos_accessor.normalized);
 		float pz = readGltfComponent(pos_base + 2 * pos_comp_size, pos_accessor.componentType, pos_accessor.normalized);
 		vertex.pos = {px, -pz, py};
 
-		// Normal (VEC3, any component type)
 		const uint8_t* normal_base = &normal_buf.data[normal_bv.byteOffset + normal_accessor.byteOffset + i * normal_stride];
 		float nx = readGltfComponent(normal_base + 0 * normal_comp_size, normal_accessor.componentType, normal_accessor.normalized);
 		float ny = readGltfComponent(normal_base + 1 * normal_comp_size, normal_accessor.componentType, normal_accessor.normalized);
@@ -739,7 +710,6 @@ static ResourceHandle<VeMesh> createPrimitiveMesh(
 				vertex.normal /= len;
 		}
 
-		// TexCoord (VEC2, any component type)
 		if (has_tex_coords && tex_stride > 0) {
 			const uint8_t* tex_base = &tex_buf->data[tex_bv->byteOffset + tex_acc->byteOffset + i * tex_stride];
 			float tu = readGltfComponent(tex_base + 0 * tex_comp_size, tex_acc->componentType, tex_acc->normalized);
@@ -749,7 +719,6 @@ static ResourceHandle<VeMesh> createPrimitiveMesh(
 			vertex.tex_coord = {0, 0};
 		}
 
-		// Tangent (VEC4, any component type)
 		if (has_tangents && tangent_stride > 0) {
 			const uint8_t* t_base = &tangent_buf->data[tangent_bv->byteOffset + tangent_acc->byteOffset + i * tangent_stride];
 			float tx = readGltfComponent(t_base + 0 * tangent_comp_size, tangent_acc->componentType, tangent_acc->normalized);
@@ -799,7 +768,7 @@ static ResourceHandle<VeMesh> createPrimitiveMesh(
 			indices.push_back(j);
 	}
 
-	// Stage 2: generate tangents via MikkTSpace when glTF has no TANGENT
+	// Stage 2: MikkTSpace tangents
 	if (!has_tangents && has_tex_coords && indices.size() >= 3 && (indices.size() % 3) == 0) {
 		SMikkTSpaceInterface iface{};
 		iface.m_getNumFaces = mikkGetNumFaces;
@@ -819,7 +788,7 @@ static ResourceHandle<VeMesh> createPrimitiveMesh(
 			VE_LOGW("MikkTSpace tangent generation failed for mesh " << mesh_id);
 	}
 
-	// Stage 3: deduplicate vertices and remap indices (meshoptimizer)
+	// Stage 3: deduplicate
 	std::vector<unsigned int> remap(vertices.size());
 	size_t unique_count = meshopt_generateVertexRemap(
 		remap.data(), indices.data(), indices.size(),
@@ -841,7 +810,7 @@ static ResourceHandle<VeMesh> createPrimitiveMesh(
 		out_center_extent->second = glm::length(mx - mn);
 	}
 
-	// Stage 4a: optimize base mesh for vertex cache and overdraw
+	// Stage 4a: optimize
 	meshopt_optimizeVertexCache(out_indices.data(), out_indices.data(),
 	                            out_indices.size(), out_vertices.size());
 	meshopt_optimizeOverdraw(out_indices.data(), out_indices.data(),
@@ -849,12 +818,10 @@ static ResourceHandle<VeMesh> createPrimitiveMesh(
 	                         &out_vertices[0].pos.x, out_vertices.size(),
 	                         sizeof(VeMesh::Vertex), 1.05f);
 
-	// Stage 4b: generate LOD levels via progressive simplification
+	// Stage 4b: LOD generation
 	std::vector<std::vector<uint32_t>> lod_indices;
 	size_t base_index_count = out_indices.size();
-
-	// Build attribute array (normals + UVs) for attribute-aware simplification
-	const size_t attr_count = 5; // normal(3) + uv(2)
+	const size_t attr_count = 5;
 	std::vector<float> vertex_attributes(out_vertices.size() * attr_count);
 	for (size_t v = 0; v < out_vertices.size(); v++) {
 		vertex_attributes[v * attr_count + 0] = out_vertices[v].normal.x;
@@ -877,22 +844,11 @@ static ResourceHandle<VeMesh> createPrimitiveMesh(
 		std::vector<uint32_t> simplified(out_indices.size());
 		float result_error = 0.0f;
 		size_t result_count = meshopt_simplifyWithAttributes(
-			simplified.data(),
-			out_indices.data(),
-			out_indices.size(),
-			&out_vertices[0].pos.x,
-			out_vertices.size(),
-			sizeof(VeMesh::Vertex),
-			vertex_attributes.data(),
-			sizeof(float) * attr_count,
-			attribute_weights,
-			attr_count,
-			nullptr,
-			target_count,
-			ve::LOD_ERROR_THRESHOLD,
-			meshopt_SimplifyLockBorder,
-			&result_error
-		);
+			simplified.data(), out_indices.data(), out_indices.size(),
+			&out_vertices[0].pos.x, out_vertices.size(), sizeof(VeMesh::Vertex),
+			vertex_attributes.data(), sizeof(float) * attr_count,
+			attribute_weights, attr_count, nullptr,
+			target_count, ve::LOD_ERROR_THRESHOLD, meshopt_SimplifyLockBorder, &result_error);
 		simplified.resize(result_count);
 
 		size_t prev_count = lod_indices.empty() ? base_index_count : lod_indices.back().size();
@@ -901,29 +857,193 @@ static ResourceHandle<VeMesh> createPrimitiveMesh(
 
 		meshopt_optimizeVertexCache(simplified.data(), simplified.data(),
 		                            simplified.size(), out_vertices.size());
-
 		lod_indices.push_back(std::move(simplified));
 	}
 
-	ResourceHandle<VeMesh> handle;
-	if (lod_indices.empty())
-		handle = resource_manager.createMesh(mesh_id, out_vertices, out_indices);
-	else
-		handle = resource_manager.createMesh(mesh_id, out_vertices, out_indices, lod_indices);
+	// Compute AABB
+	ProcessedMesh result;
+	result.resource_id = mesh_id;
+	if (!out_vertices.empty()) {
+		glm::vec3 mn(out_vertices[0].pos), mx(out_vertices[0].pos);
+		for (const auto& vert : out_vertices) {
+			mn = glm::min(mn, vert.pos);
+			mx = glm::max(mx, vert.pos);
+		}
+		result.local_aabb = {mn, mx};
+	}
 
-	if (handle)
-		handle.get()->setMeshletData(VeMesh::buildMeshletData(out_vertices, out_indices, lod_indices));
-	return handle;
+	// Store CPU-side positions/indices for culling
+	result.cpu_positions.reserve(out_vertices.size());
+	for (const auto& v : out_vertices)
+		result.cpu_positions.push_back(v.pos);
+	result.cpu_indices = out_indices;
+
+	// Build meshlet data
+	result.meshlet_data = VeMesh::buildMeshletData(out_vertices, out_indices, lod_indices);
+
+	result.vertices = std::move(out_vertices);
+	result.indices = std::move(out_indices);
+	result.lod_indices = std::move(lod_indices);
+	return result;
+}
+
+static DecodedTexture collectTextureRef(
+	const std::filesystem::path& path, TextureType type,
+	const std::unordered_map<std::string, EmbeddedImageData>& embedded_cache) {
+
+	std::string path_str = path.lexically_normal().generic_string();
+	size_t pipe = path_str.find('|');
+	std::string clean_path = (pipe != std::string::npos) ? path_str.substr(0, pipe) : path_str;
+
+	auto fn = std::filesystem::path(clean_path).filename().string();
+	bool is_default = (fn == "default_albedo.png" || fn == "default_normal.png" ||
+	                   fn == "default_metallic_roughness.png" || fn == "default_occlusion.png" ||
+	                   fn == "default_emissive.png" || fn == "default_mr_unit.png" ||
+	                   fn == "white.png" || fn == "black.png");
+
+	DecodedTexture ref;
+	ref.resource_id = path_str;
+	ref.file_path = path;
+	ref.type = type;
+	ref.is_default = is_default;
+
+	auto emb_it = embedded_cache.find(clean_path);
+	if (emb_it != embedded_cache.end() && !VeTexture::hasEmbedded(clean_path))
+		VeTexture::registerEmbedded(clean_path, emb_it->second);
+
+	return ref;
+}
+
+// Context for CPU-only node processing
+struct GltfCpuLoadContext {
+	const tinygltf::Model& gltf;
+	const std::string& model_path_str;
+	const std::vector<ProcessedMaterial>& materials;
+	std::unordered_map<std::string, int>& geometry_mesh_cache;	// key -> index into meshes
+	std::vector<ProcessedMesh>& meshes;
+	GeometryCenterExtent& geometry_center_extent;
+	std::vector<NodePrim>& node_primitives;
+	LoadProgress& progress;
+};
+
+// CPU-only variant of processNode: stores indices instead of ResourceHandles
+static void processNodeCpu(
+	int gltf_node_idx, int parent_node_idx,
+	GltfCpuLoadContext& ctx,
+	std::vector<ModelNode>& nodes,
+	std::vector<std::pair<uint32_t, uint32_t>>& parent_links,
+	std::unordered_set<uint32_t>& root_indices,
+	std::unordered_map<int, uint32_t>& gltf_to_loaded_idx) {
+
+	if (ctx.progress.cancelled.load())
+		return;
+
+	const auto& node = ctx.gltf.nodes[static_cast<size_t>(gltf_node_idx)];
+	NodeTRS trs = getNodeTRS(node);
+
+	uint32_t node_idx = static_cast<uint32_t>(nodes.size());
+	gltf_to_loaded_idx[gltf_node_idx] = node_idx;
+	nodes.push_back({
+		.name = node.name,
+		.translation = trs.translation,
+		.rotation = trs.rotation,
+		.scale = trs.scale
+	});
+
+	if (parent_node_idx >= 0)
+		parent_links.emplace_back(node_idx, static_cast<uint32_t>(parent_node_idx));
+	else
+		root_indices.insert(node_idx);
+
+	if (node.mesh >= 0) {
+		const auto& mesh = ctx.gltf.meshes[static_cast<size_t>(node.mesh)];
+		for (size_t prim_idx = 0; prim_idx < mesh.primitives.size(); prim_idx++) {
+			if (ctx.progress.cancelled.load())
+				return;
+			const auto& primitive = mesh.primitives[prim_idx];
+			if (primitive.attributes.find("NORMAL") == primitive.attributes.end())
+				continue;
+			size_t mat_idx = (primitive.material >= 0 && static_cast<size_t>(primitive.material) < ctx.materials.size())
+			                    ? static_cast<size_t>(primitive.material) : 0;
+			std::string key = geometryKey(primitive, mat_idx);
+			int mesh_data_idx = -1;
+			auto cache_it = ctx.geometry_mesh_cache.find(key);
+			if (cache_it != ctx.geometry_mesh_cache.end()) {
+				mesh_data_idx = cache_it->second;
+			} else {
+				std::string mesh_id = ctx.model_path_str + "::" + key;
+				auto processed = processPrimitive(primitive, ctx.gltf, mesh_id,
+				                                        &ctx.geometry_center_extent[key]);
+				if (!processed.vertices.empty()) {
+					mesh_data_idx = static_cast<int>(ctx.meshes.size());
+					ctx.meshes.push_back(std::move(processed));
+					ctx.geometry_mesh_cache[key] = mesh_data_idx;
+					ctx.progress.completed_items++;
+					ctx.progress.setStatus("Processing mesh " + std::to_string(ctx.meshes.size()));
+				}
+			}
+			ctx.node_primitives.push_back({gltf_node_idx, key, mat_idx});
+			if (mesh_data_idx >= 0 && mat_idx < ctx.materials.size()) {
+				if (prim_idx == 0) {
+					nodes[node_idx].mesh_idx = mesh_data_idx;
+					nodes[node_idx].material_idx = static_cast<int>(mat_idx);
+				} else {
+					uint32_t prim_node_idx = static_cast<uint32_t>(nodes.size());
+					nodes.push_back({
+						.mesh_idx = mesh_data_idx,
+						.material_idx = static_cast<int>(mat_idx)
+					});
+					parent_links.emplace_back(prim_node_idx, node_idx);
+				}
+			}
+		}
+	}
+
+	for (int child_idx : node.children)
+		processNodeCpu(child_idx, static_cast<int>(node_idx), ctx,
+		               nodes, parent_links, root_indices, gltf_to_loaded_idx);
+}
+
+// Lightweight image loader for async path: keeps embedded images (glb) but
+// skips external image loading (gltf) entirely since textures are loaded
+// one at a time during the GPU upload phase via VeTexture.
+static bool LoadImageDataCpuOnly(tinygltf::Image* image, const int image_idx, std::string* err,
+                                 std::string* warn, int req_width, int req_height,
+                                 const unsigned char* bytes, int size, void* /*user_data*/) {
+	if (!image->uri.empty()) {
+		// External image: skip loading, engine resolves via URI later
+		image->image.clear();
+		image->as_is = true;
+		return true;
+	}
+	// Embedded image (glb): keep raw bytes for registerEmbeddedImages
+	bool is_ktx = isKtxMagic(bytes, static_cast<size_t>(size));
+	if (is_ktx) {
+		image->width = image->height = image->component = -1;
+		image->bits = image->pixel_type = -1;
+		image->as_is = true;
+		image->image.assign(bytes, bytes + size);
+		return true;
+	}
+	// Non-KTX embedded: decode to RGBA
+	tinygltf::LoadImageDataOption opt;
+	opt.as_is = false;
+	opt.preserve_channels = false;
+	return tinygltf::LoadImageData(image, image_idx, err, warn, req_width, req_height, bytes, size, &opt);
 }
 
 // Load a glTF/GLB file via tinygltf. Returns true on success.
-static bool loadGltfFile(const std::filesystem::path& model_path, tinygltf::Model& gltf) {
+// When cpu_only is true, uses the lightweight loader that skips external images.
+static bool loadGltfFile(const std::filesystem::path& model_path, tinygltf::Model& gltf, bool cpu_only = false) {
 	tinygltf::TinyGLTF loader;
 	loader.SetImagesAsIs(true);
 	tinygltf::LoadImageDataOption load_opt;
 	load_opt.as_is = true;
 	load_opt.preserve_channels = false;
-	loader.SetImageLoader(LoadImageDataVeModel, &load_opt);
+	if (cpu_only)
+		loader.SetImageLoader(LoadImageDataCpuOnly, nullptr);
+	else
+		loader.SetImageLoader(LoadImageDataVeModel, &load_opt);
 	std::string err, warn;
 	bool ret = false;
 	std::string path_ext = model_path.extension().string();
@@ -1388,28 +1508,28 @@ VeModel::~VeModel() = default;
 void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceManager& resource_manager,
                            VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout,
                            bool extract_lights, bool flip_tex_coord_v) {
-	// 1. Parse glTF file
+	// Parse glTF file
 	tinygltf::Model gltf;
 	if (!loadGltfFile(model_path, gltf))
 		return;
 
 	decompressMeshopt(gltf);
 
-	// 2. Register embedded images for .glb support
+	// Register embedded images for .glb support
 	std::string model_path_str = model_path.lexically_normal().generic_string();
 	registerEmbeddedImages(gltf, model_path_str);
 
-	// 3. Parse and create materials
+	// Parse and create materials
 	float emissive_scale = detectEmissiveScale(gltf);
 	auto parsed_materials = parseAllMaterials(gltf, model_path.parent_path(), model_path_str, emissive_scale);
 	createMaterialResources(parsed_materials, resource_manager, model_path,
 	                        pool, material_layout, flip_tex_coord_v, m_material_handles);
 	VeTexture::clearEmbeddedCache();
 
-	// 4. Determine root nodes
+	// Determine root nodes
 	std::vector<int> root_nodes = determineRootNodes(gltf);
 
-	// 5. Extract punctual lights (KHR_lights_punctual)
+	// Extract punctual lights (KHR_lights_punctual)
 	std::vector<glm::mat4> node_world_engine;
 	PosDedup light_pos_dedup;
 	if (extract_lights) {
@@ -1419,16 +1539,28 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 			light_pos_dedup.insert(quantize(L.position));
 	}
 
-	// 6. Process node hierarchy and build meshes
-	std::unordered_map<std::string, ResourceHandle<VeMesh>> geometry_mesh_cache;
+	// Process node hierarchy and build meshes (reuse CPU-only path)
+	std::vector<ProcessedMaterial> dummy_materials(m_material_handles.size());
+	LoadProgress no_progress;
+	std::unordered_map<std::string, int> geometry_mesh_cache;
+	std::vector<ProcessedMesh> processed_meshes;
 	GeometryCenterExtent geometry_center_extent;
 	std::vector<NodePrim> node_primitives;
-	GltfLoadContext load_ctx{gltf, model_path_str, resource_manager,
-	                         geometry_mesh_cache, geometry_center_extent, node_primitives};
+	GltfCpuLoadContext cpu_ctx{gltf, model_path_str, dummy_materials,
+	                           geometry_mesh_cache, processed_meshes,
+	                           geometry_center_extent, node_primitives, no_progress};
+	std::vector<ModelNode> nodes;
 	for (int root_idx : root_nodes)
-		processNode(root_idx, -1, load_ctx);
+		processNodeCpu(root_idx, -1, cpu_ctx,
+		               nodes, m_parent_links, m_root_indices, m_gltf_to_loaded_idx);
 
-	// 7. Extract emissive lights (after mesh processing so node_primitives is populated)
+	// Upload processed meshes to GPU
+	m_mesh_handles.reserve(processed_meshes.size());
+	for (const auto& pm : processed_meshes)
+		m_mesh_handles.push_back(resource_manager.createMeshFromData(pm.resource_id, pm));
+	m_nodes = std::move(nodes);
+
+	// Extract emissive lights (after mesh processing so node_primitives is populated)
 	if (extract_lights) {
 		m_emissive_lights = extractEmissiveLights(gltf, node_world_engine,
 			node_primitives, geometry_center_extent, extractFactors(parsed_materials), light_pos_dedup);
@@ -1438,71 +1570,165 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	        << m_punctual_lights.size() << " punctual, " << m_emissive_lights.size() << " emissive lights");
 }
 
-// Recursively create nodes from glTF.
-// Each glTF node becomes a LoadedNode with transform + optional mesh/material.
-// A glTF node with multiple primitives produces child LoadedNodes for primitives 2+.
-void VeModel::processNode(int gltf_node_idx, int parent_node_idx, GltfLoadContext& ctx) {
-	const auto& node = ctx.gltf.nodes[static_cast<size_t>(gltf_node_idx)];
-	NodeTRS trs = getNodeTRS(node);
+// CPU-only loading: no Vulkan calls, thread-safe.
+// Parses glTF, decodes textures, processes meshes (MikkTSpace, meshopt, LOD, meshlet).
+LoadedAssetData VeModel::loadFromGltfCpu(
+	const std::filesystem::path& model_path,
+	bool extract_lights, bool flip_tex_coord_v,
+	LoadProgress& progress) {
 
-	uint32_t node_idx = static_cast<uint32_t>(m_nodes.size());
-	m_gltf_to_loaded_idx[gltf_node_idx] = node_idx;
-	LoadedNode loaded{};
-	loaded.name = node.name;
-	loaded.translation = trs.translation;
-	loaded.rotation = trs.rotation;
-	loaded.scale = trs.scale;
-	m_nodes.push_back(std::move(loaded));
+	LoadedAssetData result;
 
-	if (parent_node_idx >= 0)
-		m_parent_links.emplace_back(node_idx, static_cast<uint32_t>(parent_node_idx));
-	else
-		m_root_indices.insert(node_idx);
+	// Parse glTF file (lightweight: skips loading external image data)
+	tinygltf::Model gltf;
+	if (!loadGltfFile(model_path, gltf, /*cpu_only=*/true)) {
+		progress.cpu_failed = true;
+		return result;
+	}
+	if (progress.cancelled.load())
+		return result;
 
-	// If node has mesh: assign first primitive to this node, rest as children
-	if (node.mesh >= 0) {
-		const auto& mesh = ctx.gltf.meshes[static_cast<size_t>(node.mesh)];
-		for (size_t prim_idx = 0; prim_idx < mesh.primitives.size(); prim_idx++) {
-			const auto& primitive = mesh.primitives[prim_idx];
-			if (primitive.attributes.find("NORMAL") == primitive.attributes.end())
-				continue;
-			size_t mat_idx = (primitive.material >= 0 && static_cast<size_t>(primitive.material) < m_material_handles.size())
-			                    ? static_cast<size_t>(primitive.material) : 0;
-			std::string key = geometryKey(primitive, mat_idx);
-			ResourceHandle<VeMesh> mesh_handle;
-			auto cache_it = ctx.geometry_mesh_cache.find(key);
-			if (cache_it != ctx.geometry_mesh_cache.end()) {
-				mesh_handle = cache_it->second;
-			} else {
-				std::string mesh_id = ctx.model_path_str + "::" + key;
-				mesh_handle = createPrimitiveMesh(primitive, ctx.gltf, mesh_id, ctx.resource_manager,
-				                                  &ctx.geometry_center_extent[key]);
-				if (mesh_handle.isValid())
-					ctx.geometry_mesh_cache[key] = mesh_handle;
-			}
-			ctx.node_primitives.push_back({gltf_node_idx, key, mat_idx});
-			ResourceHandle<VeMaterial> mat_handle = (mat_idx < m_material_handles.size())
-			                                           ? m_material_handles[mat_idx]
-			                                           : ResourceHandle<VeMaterial>{};
-			if (mat_handle.isValid()) {
-				if (prim_idx == 0) {
-					m_nodes[node_idx].mesh = std::move(mesh_handle);
-					m_nodes[node_idx].material = std::move(mat_handle);
-				} else {
-					uint32_t prim_node_idx = static_cast<uint32_t>(m_nodes.size());
-					LoadedNode prim_node{};
-					prim_node.mesh = std::move(mesh_handle);
-					prim_node.material = m_material_handles[mat_idx];
-					m_nodes.push_back(std::move(prim_node));
-					m_parent_links.emplace_back(prim_node_idx, node_idx);
-				}
-			}
+	decompressMeshopt(gltf);
+
+	std::string model_path_str = model_path.lexically_normal().generic_string();
+	registerEmbeddedImages(gltf, model_path_str);
+
+	std::unordered_map<std::string, EmbeddedImageData> embedded_cache;
+	float emissive_scale = detectEmissiveScale(gltf);
+	auto parsed_materials = parseAllMaterials(gltf, model_path.parent_path(), model_path_str, emissive_scale);
+
+	// 4. Decode all unique textures referenced by materials
+	// Collect unique texture paths, decode each once
+	struct TexRef { std::filesystem::path path; TextureType type; };
+	std::vector<TexRef> tex_refs;
+	std::unordered_map<std::string, int> tex_path_to_idx;
+
+	auto addTexRef = [&](const std::filesystem::path& path, TextureType type) -> int {
+		std::string key = path.lexically_normal().generic_string();
+		if (type == TextureType::NORMAL) key += "|normal";
+		else if (type == TextureType::METALLIC_ROUGHNESS) key += "|mr";
+		else if (type == TextureType::OCCLUSION) key += "|occlusion";
+		else if (type == TextureType::EMISSIVE) key += "|emissive";
+		else key += "|albedo";
+		auto it = tex_path_to_idx.find(key);
+		if (it != tex_path_to_idx.end())
+			return it->second;
+		int idx = static_cast<int>(tex_refs.size());
+		tex_refs.push_back({path, type});
+		tex_path_to_idx[key] = idx;
+		return idx;
+	};
+
+	// Build ProcessedMaterial array and collect texture references
+	result.materials.reserve(parsed_materials.size());
+	for (size_t i = 0; i < parsed_materials.size(); i++) {
+		const auto& pm = parsed_materials[i];
+		ProcessedMaterial pmat;
+		pmat.resource_id = model_path.generic_string() + "::material_" + std::to_string(i);
+		pmat.alpha_props = pm.alpha_props;
+		pmat.factors = pm.factors;
+		pmat.flip_tex_coord_v = flip_tex_coord_v;
+		pmat.albedo_tex_idx = addTexRef(pm.albedo_path, TextureType::ALBEDO);
+		pmat.normal_tex_idx = addTexRef(pm.normal_path, TextureType::NORMAL);
+		pmat.metallic_roughness_tex_idx = addTexRef(pm.metallic_roughness_path, TextureType::METALLIC_ROUGHNESS);
+		pmat.occlusion_tex_idx = addTexRef(pm.occlusion_path, TextureType::OCCLUSION);
+		pmat.emissive_tex_idx = addTexRef(pm.emissive_path, TextureType::EMISSIVE);
+		result.materials.push_back(std::move(pmat));
+	}
+
+	// Estimate total items: textures + meshes (meshes counted during processNode)
+	// We'll know mesh count after processing, so start with texture count
+	uint32_t estimated_meshes = 0;
+	for (const auto& mesh : gltf.meshes)
+		estimated_meshes += static_cast<uint32_t>(mesh.primitives.size());
+	progress.total_items = static_cast<uint32_t>(tex_refs.size()) + estimated_meshes;
+
+	// Decode textures
+	result.textures.resize(tex_refs.size());
+	for (size_t i = 0; i < tex_refs.size(); i++) {
+		if (progress.cancelled.load())
+			return result;
+		progress.setStatus("Decoding texture " + std::to_string(i + 1) + "/" + std::to_string(tex_refs.size()));
+		result.textures[i] = collectTextureRef(tex_refs[i].path, tex_refs[i].type, embedded_cache);
+		progress.completed_items++;
+	}
+
+	// Determine root nodes
+	std::vector<int> root_nodes = determineRootNodes(gltf);
+
+	// Extract punctual lights
+	std::vector<glm::mat4> node_world_engine;
+	PosDedup light_pos_dedup;
+	if (extract_lights) {
+		node_world_engine = computeNodeWorldMatrices(gltf, root_nodes);
+		result.punctual_lights = extractPunctualLights(gltf, node_world_engine);
+		for (const auto& L : result.punctual_lights)
+			light_pos_dedup.insert(quantize(L.position));
+	}
+
+	// Process node hierarchy and build meshes (CPU only)
+	std::unordered_map<std::string, int> geometry_mesh_cache;
+	GeometryCenterExtent geometry_center_extent;
+	std::vector<NodePrim> node_primitives;
+	GltfCpuLoadContext cpu_ctx{gltf, model_path_str, result.materials,
+	                           geometry_mesh_cache, result.meshes,
+	                           geometry_center_extent, node_primitives, progress};
+	for (int root_idx : root_nodes) {
+		if (progress.cancelled.load())
+			return result;
+		processNodeCpu(root_idx, -1, cpu_ctx,
+		               result.nodes, result.parent_links, result.root_indices,
+		               result.gltf_to_loaded_idx);
+	}
+
+	// Extract emissive lights
+	if (extract_lights) {
+		result.emissive_lights = extractEmissiveLights(gltf, node_world_engine,
+			node_primitives, geometry_center_extent, extractFactors(parsed_materials), light_pos_dedup);
+	}
+
+	// Free buffers holding raw geometry/image bytes we no longer need
+	{
+		for (auto& buf : gltf.buffers) {
+			buf.data.clear();
+			buf.data.shrink_to_fit();
+		}
+		for (auto& img : gltf.images) {
+			img.image.clear();
+			img.image.shrink_to_fit();
 		}
 	}
 
-	for (int child_idx : node.children)
-		processNode(child_idx, static_cast<int>(node_idx), ctx);
+	// Store geometry center/extent for potential future use
+	for (const auto& [key, ce] : geometry_center_extent)
+		result.geometry_center_extent[static_cast<int>(std::hash<std::string>{}(key))] = ce;
+
+	progress.cpu_done = true;
+	VE_LOGI("CPU loading complete for " << model_path << ": "
+	        << result.textures.size() << " textures, "
+	        << result.meshes.size() << " meshes, "
+	        << result.nodes.size() << " nodes");
+	return result;
 }
+
+// Construct a VeModel from pre-uploaded GPU resource handles.
+std::unique_ptr<VeModel> VeModel::fromLoadedData(
+	LoadedAssetData&& data,
+	std::vector<ResourceHandle<VeMesh>>& mesh_handles,
+	std::vector<ResourceHandle<VeMaterial>>& material_handles) {
+
+	auto model = std::make_unique<VeModel>();
+	model->m_nodes = std::move(data.nodes);
+	model->m_mesh_handles = mesh_handles;
+	model->m_material_handles = material_handles;
+	model->m_punctual_lights = std::move(data.punctual_lights);
+	model->m_emissive_lights = std::move(data.emissive_lights);
+	model->m_parent_links = std::move(data.parent_links);
+	model->m_root_indices = std::move(data.root_indices);
+	model->m_gltf_to_loaded_idx = std::move(data.gltf_to_loaded_idx);
+	return model;
+}
+
 
 void VeModel::addToScene(Registry& registry,
                          const glm::vec3& root_translation,
@@ -1523,7 +1749,7 @@ void VeModel::addToScene(Registry& registry,
 	for (const auto& [child_idx, parent_idx] : m_parent_links)
 		parent_of[child_idx] = parent_idx;
 
-	auto localMatrix = [](const LoadedNode& n) -> glm::mat4 {
+	auto localMatrix = [](const ModelNode& n) -> glm::mat4 {
 		return glm::translate(glm::mat4(1.0f), n.translation)
 			* glm::mat4_cast(n.rotation)
 			* glm::scale(glm::mat4(1.0f), n.scale);
@@ -1577,17 +1803,21 @@ void VeModel::addToScene(Registry& registry,
 		tc.setScale(node.scale);
 
 		// MeshComponent (only if node has valid mesh+material)
-		if (node.mesh.isValid() && node.material.isValid()) {
+		if (node.mesh_idx >= 0 && node.material_idx >= 0
+		    && static_cast<size_t>(node.mesh_idx) < m_mesh_handles.size()
+		    && static_cast<size_t>(node.material_idx) < m_material_handles.size()) {
+			auto& mesh_h = m_mesh_handles[static_cast<size_t>(node.mesh_idx)];
+			auto& mat_h = m_material_handles[static_cast<size_t>(node.material_idx)];
 			glm::vec3 pos(worldTransform(i)[3]);
 			DedupKey key{
-				node.mesh.get(), node.material.get(),
+				mesh_h.get(), mat_h.get(),
 				static_cast<int32_t>(std::round(pos.x * 1000.0f)),
 				static_cast<int32_t>(std::round(pos.y * 1000.0f)),
 				static_cast<int32_t>(std::round(pos.z * 1000.0f))
 			};
 			if (mesh_dedup.insert(key).second) {
-				auto& mc = registry.addComponent<MeshComponent>(entity, node.mesh, node.material);
-				auto* mat = node.material.get();
+				auto& mc = registry.addComponent<MeshComponent>(entity, mesh_h, mat_h);
+				auto* mat = mat_h.get();
 				mc.has_texture = (mat && mat->hasDescriptorSet()) ? 1.0f : 0.0f;
 				last_mesh_entity = entity;
 			} else {
@@ -1598,6 +1828,7 @@ void VeModel::addToScene(Registry& registry,
 	if (dedup_count > 0)
 		VE_LOGI("addToScene: skipped " << dedup_count << " duplicate mesh instances");
 	m_nodes.clear();
+	m_mesh_handles.clear();
 
 	// Set up hierarchy from parent links
 	for (const auto& [child_idx, parent_idx] : m_parent_links)
@@ -1689,8 +1920,13 @@ std::optional<VeModel::SingleMeshData> VeModel::loadSingleMesh(
 	bool flip_tex_coord_v) {
 	auto model = load(resource_manager, model_path.lexically_normal(), nullptr, nullptr, false, flip_tex_coord_v);
 	for (const auto& node : model->m_nodes) {
-		if (node.mesh.isValid() && node.material.isValid()) {
-			return SingleMeshData{node.mesh, node.material};
+		if (node.mesh_idx >= 0 && node.material_idx >= 0
+		    && static_cast<size_t>(node.mesh_idx) < model->m_mesh_handles.size()
+		    && static_cast<size_t>(node.material_idx) < model->m_material_handles.size()) {
+			return SingleMeshData{
+				model->m_mesh_handles[static_cast<size_t>(node.mesh_idx)],
+				model->m_material_handles[static_cast<size_t>(node.material_idx)]
+			};
 		}
 	}
 	return std::nullopt;

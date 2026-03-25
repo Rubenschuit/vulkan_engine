@@ -13,6 +13,9 @@ public:
 	// Scene with an initial model.
 	GltfScene(const SceneContext& ctx, const std::filesystem::path& gltf_path);
 
+	// Scene from a pre-loaded model (async loading path).
+	GltfScene(const SceneContext& ctx, std::unique_ptr<VeModel> model, const std::string& name);
+
 	vk::raii::DescriptorSet& getDescriptorSet() override;
 	glm::vec4 getDefaultAmbient() const override { return {1.0f, 1.0f, 1.0f, 0.04f}; }
 

@@ -100,6 +100,7 @@ public:
 	bool hasHdrColorSpaceExtension() const { return m_has_hdr_instance_extension; }
 	bool supportsBC() const { return m_supports_bc; }
 	bool supportsASTC() const { return m_supports_astc; }
+	bool supportsETC2() const { return m_supports_etc2; }
 	bool supportsDrawIndirectCount() const {return m_supports_draw_indirect_count; }
 	bool supportsCalibratedTimestamps() const { return m_supports_calibrated_timestamps; }
 	// Single-time command buffer helpers (select queue/pool)
@@ -149,6 +150,7 @@ private:
 	bool m_has_hdr_instance_extension = false;
 	bool m_supports_bc = false;
 	bool m_supports_astc = false;
+	bool m_supports_etc2 = false;
 	bool m_supports_draw_indirect_count = false;
 	bool m_supports_calibrated_timestamps = false;
 

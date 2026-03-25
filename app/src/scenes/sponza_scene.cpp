@@ -7,6 +7,24 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
     loadGameObjects(paths);
 }
 
+SponzaScene::SponzaScene(const SceneContext& ctx, std::unique_ptr<VeModel> model)
+    : VeScene(ctx, "Sponza Scene") {
+    glm::vec3 sponza_translation = {0.0f, 0.0f, 300.0f};
+    glm::vec3 root_translation = glm::vec3{0.0f, 0.0f, -350.0f} + sponza_translation;
+    model->addToScene(m_registry, root_translation, {0.0f, 0.0f, 0.0f}, {12.5f, 12.5f, 12.5f});
+    m_sponza_model = std::move(model);
+
+    // Store default material for getDescriptorSet() fallback
+    for (auto& mc : m_registry.meshes()) {
+        if (mc.hasMaterial() && mc.getMaterial()->hasDescriptorSet()) {
+            m_default_material_handle = mc.getMaterialHandle();
+            break;
+        }
+    }
+
+    setupScene(sponza_translation);
+}
+
 vk::raii::DescriptorSet& SponzaScene::getDescriptorSet() {
     assert(m_default_material_handle.isValid() && m_default_material_handle.get()->hasDescriptorSet() && "SponzaScene requires at least one textured material");
     return m_default_material_handle.get()->getDescriptorSet();
@@ -14,21 +32,6 @@ vk::raii::DescriptorSet& SponzaScene::getDescriptorSet() {
 
 void SponzaScene::loadGameObjects(const AssetPaths& paths) {
     glm::vec3 sponza_translation = {0.0f, 0.0f, 300.0f};
-
-    // Helper: create a point light entity in Registry
-    auto makeLight = [&](float intensity, float radius, glm::vec3 color, const std::string& name,
-                         glm::vec3 pos, bool rotates, bool casts_shadow,
-                         glm::vec3 light_scale = glm::vec3(-1.0f)) -> Entity {
-        Entity e = m_registry.createPointLight(intensity, radius, color);
-        m_registry.setName(e, name);
-        auto* tc = m_registry.getComponent<TransformComponent>(e);
-        tc->setTranslation(pos);
-        if (light_scale.x >= 0.0f) tc->setScale(light_scale);
-        auto* pl = m_registry.getComponent<PointLightComponent>(e);
-        pl->setRotates(rotates);
-        pl->setCastsShadow(casts_shadow);
-        return e;
-    };
 
     // Sponza model (variant: sponza, sponza_low, sponza_high)
     {
@@ -49,6 +52,25 @@ void SponzaScene::loadGameObjects(const AssetPaths& paths) {
             }
         }
     }
+
+    setupScene(sponza_translation);
+}
+
+void SponzaScene::setupScene(const glm::vec3& sponza_translation) {
+    // Helper: create a point light entity in Registry
+    auto makeLight = [&](float intensity, float radius, glm::vec3 color, const std::string& name,
+                         glm::vec3 pos, bool rotates, bool casts_shadow,
+                         glm::vec3 light_scale = glm::vec3(-1.0f)) -> Entity {
+        Entity e = m_registry.createPointLight(intensity, radius, color);
+        m_registry.setName(e, name);
+        auto* tc = m_registry.getComponent<TransformComponent>(e);
+        tc->setTranslation(pos);
+        if (light_scale.x >= 0.0f) tc->setScale(light_scale);
+        auto* pl = m_registry.getComponent<PointLightComponent>(e);
+        pl->setRotates(rotates);
+        pl->setCastsShadow(casts_shadow);
+        return e;
+    };
 
     // Directional light
     {

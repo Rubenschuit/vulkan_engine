@@ -7,6 +7,7 @@
 #include "ui/panels/performance_panel.hpp"
 #include "ui/panels/graphics_panel.hpp"
 #include "ui/panels/environment_panel.hpp"
+#include "ui/panels/loading_overlay.hpp"
 #include <functional>
 #include <memory>
 #include <vector>
@@ -16,6 +17,7 @@
 
 namespace ve {
 
+class AssetLoadingSystem;
 class ImGuiLayer;
 class VeRenderer;
 class VeCamera;
@@ -65,6 +67,9 @@ public:
 	// Physics system access for collision shape debug rendering
 	void setPhysicsSystem(PhysicsSystem* ps);
 
+	// Asset loader for rendering loading panel
+	void setAssetLoader(AssetLoadingSystem* loader) { m_asset_loader = loader; m_hierarchy_panel.setAssetLoader(loader); }
+
 	// Panel access for app-side customization
 	HierarchyPanel& getHierarchyPanel() { return m_hierarchy_panel; }
 	ViewportPanel& getViewportPanel() { return m_viewport_panel; }
@@ -89,6 +94,10 @@ private:
 	std::unique_ptr<PerformancePanel> m_performance_panel;
 	std::unique_ptr<GraphicsPanel> m_graphics_panel;
 	std::unique_ptr<EnvironmentPanel> m_environment_panel;
+
+	// Loading UI
+	AssetLoadingSystem* m_asset_loader = nullptr;
+	LoadingPanel m_loading_overlay;
 
 	// App callback
 	std::function<void()> m_app_ui_callback;

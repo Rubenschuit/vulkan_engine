@@ -300,9 +300,11 @@ void VeDevice::pickPhysicalDevice() {
 	auto dev_features = m_physical_device.getFeatures();
 	m_supports_bc   = dev_features.textureCompressionBC;
 	m_supports_astc = dev_features.textureCompressionASTC_LDR;
+	m_supports_etc2 = dev_features.textureCompressionETC2;
 	// print the name of the selected physical device
 	auto properties = m_physical_device.getProperties();
 	VE_LOGI("Using device: " << properties.deviceName);
+	VE_LOGI("Texture compression: BC=" << m_supports_bc << " ASTC=" << m_supports_astc << " ETC2=" << m_supports_etc2);
 }
 
 void VeDevice::createLogicalDevice() {

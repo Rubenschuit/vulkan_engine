@@ -1,6 +1,6 @@
 /* VeModel - scene graph container for glTF models.
  * Loads glTF, creates VeMesh and VeMaterial resources, builds node hierarchy.
- * Nodes are stored as lightweight LoadedNode structs; addToScene creates entities in a Registry.
+ * Nodes are stored as ModelNode structs; addToScene creates entities in a Registry.
  */
 #pragma once
 #include "ve_export.hpp"
@@ -9,6 +9,7 @@
 #include "resources/ve_resource_manager.hpp"
 #include "resources/ve_mesh.hpp"
 #include "scene/ve_registry.hpp"
+#include <atomic>
 #include <filesystem>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -22,7 +23,17 @@ namespace ve {
 
 class VeDescriptorPool;
 class VeDescriptorSetLayout;
-struct GltfLoadContext;
+struct LoadedAssetData;
+struct LoadProgress;
+
+struct ModelNode {
+	std::string name;
+	glm::vec3 translation{0.f};
+	glm::quat rotation{1.f, 0.f, 0.f, 0.f};
+	glm::vec3 scale{1.f};
+	int mesh_idx = -1;
+	int material_idx = -1;
+};
 
 class VENGINE_API VeModel {
 public:
@@ -60,7 +71,8 @@ public:
 		const std::filesystem::path& model_path,
 		bool flip_tex_coord_v = false);
 
-	// Lights extracted from glTF (KHR_lights_punctual) or from emissive materials. Applied when addToScene is used.
+	// Lights extracted from glTF (KHR_lights_punctual) or from emissive materials. 
+	// Applied when addToScene is used.
 	enum class ExtractedLightType { Point, Directional, Spot };
 	struct ExtractedLight {
 		ExtractedLightType type = ExtractedLightType::Point;
@@ -69,13 +81,26 @@ public:
 		glm::vec3 color{1.f};
 		float intensity = 1.f;
 		float range = 0.f;  // 0 = no range limit
-		float inner_cone_angle = 0.f;                    // half-angle in radians (glTF default)
+		float inner_cone_angle = 0.f;                    // half-angle in radians (glTF default: 0)
 		float outer_cone_angle = glm::radians(45.0f);    // half-angle in radians (glTF default: pi/4)
 		std::string name;
 		int node_idx = -1;  // glTF node that produced this light (-1 = unknown)
 	};
 	const std::vector<ExtractedLight>& getPunctualLights() const { return m_punctual_lights; }
 	const std::vector<ExtractedLight>& getEmissiveLights() const { return m_emissive_lights; }
+
+	// CPU-only glTF loading: parses, decodes textures, processes meshes.
+	// No vulkan calls; it is thread-safe.
+	static LoadedAssetData loadFromGltfCpu(
+		const std::filesystem::path& model_path,
+		bool extract_lights, bool flip_tex_coord_v,
+		LoadProgress& progress);
+
+	// Construct a VeModel from a fully-uploaded LoadedAssetData (GPU handles already created).
+	static std::unique_ptr<VeModel> fromLoadedData(
+		LoadedAssetData&& data,
+		std::vector<ResourceHandle<VeMesh>>& mesh_handles,
+		std::vector<ResourceHandle<VeMaterial>>& material_handles);
 
 	VeModel();
 
@@ -84,22 +109,12 @@ private:
 	void loadFromGltf(const std::filesystem::path& model_path, VeResourceManager& resource_manager,
 	                  VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout,
 	                  bool extract_lights, bool flip_tex_coord_v = false);
-	void processNode(int gltf_node_idx, int parent_node_idx, GltfLoadContext& ctx);
 
-	// Lightweight node data from glTF parsing
-	struct LoadedNode {
-		std::string name;
-		glm::vec3 translation{0.f};
-		glm::quat rotation{1.f, 0.f, 0.f, 0.f};
-		glm::vec3 scale{1.f};
-		ResourceHandle<VeMesh> mesh;
-		ResourceHandle<VeMaterial> material;
-	};
-
-	std::vector<LoadedNode> m_nodes;
+	std::vector<ModelNode> m_nodes;
 	std::vector<std::pair<uint32_t, uint32_t>> m_parent_links;  // (child_index, parent_index)
 	std::unordered_set<uint32_t> m_root_indices;
 
+	std::vector<ResourceHandle<VeMesh>> m_mesh_handles;
 	std::vector<ResourceHandle<VeMaterial>> m_material_handles;
 	std::vector<ExtractedLight> m_punctual_lights;
 	std::vector<ExtractedLight> m_emissive_lights;

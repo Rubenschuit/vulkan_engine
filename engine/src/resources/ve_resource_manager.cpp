@@ -2,6 +2,7 @@
 #include "resources/ve_mesh.hpp"
 #include "resources/ve_material.hpp"
 #include "resources/ve_texture.hpp"
+#include "resources/loaded_asset_data.hpp"
 #include "rendering/meshlet_data.hpp"
 #include "vulkan/ve_descriptors.hpp"
 
@@ -251,6 +252,23 @@ ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& 
 	type_resources[resource_id] = std::move(resource);
 	m_ref_counts[type_idx][resource_id] = 1;
 	return ResourceHandle<VeMaterial>(resource_id, this);
+}
+
+ResourceHandle<VeMesh> VeResourceManager::createMeshFromData(
+	const std::string& resource_id, const ProcessedMesh& data) {
+	auto type_idx = typeid(VeMesh).hash_code();
+	auto& type_resources = m_resources[type_idx];
+	auto it = type_resources.find(resource_id);
+
+	if (it != type_resources.end()) {
+		m_ref_counts[type_idx][resource_id]++;
+		return ResourceHandle<VeMesh>(resource_id, this);
+	}
+
+	auto resource = std::make_shared<VeMesh>(m_device, data);
+	type_resources[resource_id] = std::move(resource);
+	m_ref_counts[type_idx][resource_id] = 1;
+	return ResourceHandle<VeMesh>(resource_id, this);
 }
 
 // ---------------------------------------------------------------------------
