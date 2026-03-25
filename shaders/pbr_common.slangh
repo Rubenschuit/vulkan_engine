@@ -370,7 +370,8 @@ float4 computePbrLighting(VertexOutput in_vert) {
 
 	// Ambient / IBL
 	float3 ambient;
-	if (ubo.ibl_intensity > 0.0) {
+	bool ibl_active = (ubo.ibl_diffuse_intensity > 0.0) || (ubo.ibl_specular_intensity > 0.0);
+	if (ibl_active) {
 		float3 kD_ibl = (1.0 - F0) * (1.0 - metallic);
 
 		// Convert engine Z-up to cubemap Y-up
@@ -383,18 +384,28 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		float lod = float(ubo.prefiltered_mip_levels - 1) * roughness * (2.0 - roughness);
 		float3 prefiltered = ibl_prefiltered.SampleLevel(R_yup, lod).rgb;
 		float2 env_brdf = ibl_brdf_lut.SampleLevel(float2(NdotV, 1.0 - roughness), 0).rg;
-		float3 specular_ibl = prefiltered * (F0 * env_brdf.x + env_brdf.y);
+
+		// Multiscatter energy compensation (Fdez-Aguera 2019)
+		float3 Fr = max(F0 * env_brdf.x + env_brdf.y, 0.0);
+		float3 F_avg = F0 + (1.0 - F0) / 21.0;
+		float3 FmsEms = (1.0 - Fr) * F_avg / max(1.0 - F_avg * (1.0 - env_brdf.x - env_brdf.y), 0.001);
+		float3 specular_ibl = prefiltered * (Fr + FmsEms);
 		specular_ibl *= saturate(NdotV * 4.0);
 
 		float diffuse_ao = occlusion_sample.r * ssao;
 		float spec_ao = specularAO(NdotV, diffuse_ao, roughness);
 		float shadow_occ = lerp(csm_shadow, 1.0, 0.3 + 0.7 * roughness);
-		ambient = (diffuse_ibl * diffuse_ao + specular_ibl * spec_ao * shadow_occ) * ubo.ibl_intensity;
+		ambient = diffuse_ibl * diffuse_ao * ubo.ibl_diffuse_intensity
+				+ specular_ibl * spec_ao * shadow_occ * ubo.ibl_specular_intensity;
 		ambient *= 1.0 - transmission;
 	} else {
 		ambient = ubo.ambient_light_color.xyz * albedo.rgb * occlusion_sample.r * ssao;
 		ambient *= 1.0 - transmission;
 	}
+
+	// Minimum ambient floor
+	if (ubo.ibl_min_ambient > 0.0)
+		ambient = max(ambient, ubo.ibl_min_ambient * albedo.rgb);
 
 	c.rgb = Lo + ambient + emissive_sample;
 	static const float HIGH_TRANSMISSION_THRESHOLD = 0.5;

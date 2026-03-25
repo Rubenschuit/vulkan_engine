@@ -10,11 +10,12 @@ Shared (generated once):
   brdf_lut.ktx — BRDF integration LUT
 """
 
+import argparse
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-CUBEMAP_SIZE = 1024
 DFG_SIZE = 256
 
 def run(cmd: list[str]) -> None:
@@ -38,18 +39,32 @@ def generate_brdf_lut(script_dir: Path) -> None:
     print("Converting BRDF LUT to KTX...")
     run(["ktx", "create", "--format", "R16G16_SFLOAT", str(brdf_exr), str(brdf_ktx)])
 
-def generate_ibl(env_file: Path) -> None:
+def generate_ibl(env_file: Path, cubemap_size: int, force: bool) -> None:
     deploy_dir = env_file.parent / env_file.stem
 
-    if deploy_dir.exists():
-        print(f"Skipping {env_file.name} (already exists)")
+    if deploy_dir.exists() and not force:
+        print(f"Skipping {env_file.name} (already exists, use --force to regenerate)")
         return
 
-    print(f"Generating IBL for {env_file.name}...")
-    run(["cmgen", f"--size={CUBEMAP_SIZE}", "--format=ktx",
+    if deploy_dir.exists() and force:
+        print(f"Removing existing {deploy_dir.name} for regeneration...")
+        shutil.rmtree(deploy_dir)
+
+    print(f"Generating IBL for {env_file.name} (size={cubemap_size})...")
+    run(["cmgen", f"--size={cubemap_size}", "--format=ktx",
+         "--sh=9", "--ibl-samples=4096",
          f"--deploy={deploy_dir}", str(env_file)])
 
 def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Generate IBL resources from HDR/EXR environment maps.")
+    parser.add_argument("--size", type=int, default=1024,
+                        choices=[512, 1024, 2048],
+                        help="Prefiltered cubemap face resolution (default: 1024)")
+    parser.add_argument("--force", action="store_true",
+                        help="Regenerate even if output directory exists")
+    args = parser.parse_args()
+
     script_dir = Path(__file__).resolve().parent
     env_files = sorted(
         p for p in script_dir.rglob("*")
@@ -64,7 +79,7 @@ def main() -> None:
     generate_brdf_lut(script_dir)
 
     for f in env_files:
-        generate_ibl(f)
+        generate_ibl(f, args.size, args.force)
 
     print("Done.")
 

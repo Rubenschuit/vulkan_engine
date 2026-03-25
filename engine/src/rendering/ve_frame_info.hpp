@@ -157,10 +157,10 @@ struct UniformBufferObject {
 	alignas(16) SpotLight spot_lights[ve::MAX_SPOT_LIGHTS];
 
 	// IBL parameters
-	alignas(4) float ibl_intensity = 0.0f;
+	alignas(4) float ibl_diffuse_intensity = 0.0f;
 	alignas(4) uint32_t prefiltered_mip_levels = 1;
-	alignas(4) float _pad_ibl_0 = 0.0f;
-	alignas(4) float _pad_ibl_1 = 0.0f;
+	alignas(4) float ibl_specular_intensity = 0.0f;
+	alignas(4) float ibl_min_ambient = 0.0f;
 	alignas(16) glm::vec4 sh_coefficients[9]{};
 };
 static_assert(offsetof(UniformBufferObject, dir_lights) % 16 == 0,

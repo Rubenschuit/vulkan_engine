@@ -498,7 +498,16 @@ void VeApplication::populateUBO(VeFrameInfo& fi) {
 	ubo.csm_normal_bias = m_ui.csm_normal_bias;
 	ubo.csm_blend_dithered = static_cast<uint32_t>(m_ui.csm_blend_mode);
 	ubo.ambient_light_color = glm::vec4(m_ui.ambient_light_color, m_ui.ambient_light_intensity);
-	ubo.ibl_intensity = (m_ui.ibl_enabled && m_ibl_system->isAvailable()) ? m_ui.ibl_intensity : 0.0f;
+	m_ui.ibl_exposure_compensation = m_ibl_system->isAvailable() ? m_ibl_system->getExposureCompensation() : 1.0f;
+	if (m_ui.ibl_enabled && m_ibl_system->isAvailable()) {
+		float comp = m_ui.ibl_auto_exposure ? m_ui.ibl_exposure_compensation : 1.0f;
+		ubo.ibl_diffuse_intensity = m_ui.ibl_diffuse_intensity * comp;
+		ubo.ibl_specular_intensity = m_ui.ibl_specular_intensity * comp;
+	} else {
+		ubo.ibl_diffuse_intensity = 0.0f;
+		ubo.ibl_specular_intensity = 0.0f;
+	}
+	ubo.ibl_min_ambient = m_ui.ibl_min_ambient;
 	ubo.prefiltered_mip_levels = m_ibl_system->getPrefilteredMipLevels();
 	auto& sh = m_ibl_system->getSHCoefficients();
 	std::copy(sh.begin(), sh.end(), ubo.sh_coefficients);

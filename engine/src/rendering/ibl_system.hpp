@@ -40,7 +40,10 @@ public:
 	// L2 spherical harmonics coefficients (9 vec4, xyz = rgb, w unused)
 	const std::array<glm::vec4, 9>& getSHCoefficients() const { return m_sh_coefficients; }
 
+	float getExposureCompensation() const { return m_exposure_compensation; }
+
 private:
+	void computeExposureCompensation();
 	void createSetLayout();
 	void createSamplers();
 	void createDummyResources();
@@ -72,6 +75,7 @@ private:
 	bool m_ibl_available = false;
 	uint32_t m_prefiltered_mip_levels = 1;
 	std::array<glm::vec4, 9> m_sh_coefficients{};
+	float m_exposure_compensation = 1.0f;
 };
 
 } // namespace ve

@@ -45,7 +45,11 @@ struct VENGINE_API UIContext {
 	float ambient_light_intensity = 0.006f;
 	bool cluster_enabled = true;
 	bool ibl_enabled = true;
-	float ibl_intensity = 0.2f;
+	float ibl_diffuse_intensity = 0.2f;
+	float ibl_specular_intensity = 0.2f;
+	float ibl_min_ambient = 0.005f;
+	bool ibl_auto_exposure = true;
+	float ibl_exposure_compensation = 1.0f; // read-only, written by application
 
 	// read-only stats (engine writes, UI reads)
 	struct Stats {

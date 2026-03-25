@@ -210,6 +210,24 @@ vk::raii::DescriptorSet& IblSystem::getOutputDescriptorSet(uint32_t frame_index)
 	return m_dummy_descriptor_set;
 }
 
+void IblSystem::computeExposureCompensation() {
+	const glm::vec3 l0(m_sh_coefficients[0]);
+	float avg_luminance = glm::dot(l0, glm::vec3(0.2126f, 0.7152f, 0.0722f));
+
+	constexpr float TARGET_LUMINANCE = 0.5f;
+	constexpr float MAX_BOOST = 10.0f;
+	constexpr float MIN_LUMINANCE = 0.001f;
+
+	if (avg_luminance < MIN_LUMINANCE)
+		m_exposure_compensation = MAX_BOOST;
+	else if (avg_luminance < TARGET_LUMINANCE)
+		m_exposure_compensation = glm::clamp(TARGET_LUMINANCE / avg_luminance, 1.0f, MAX_BOOST);
+	else
+		m_exposure_compensation = 1.0f;
+
+	VE_LOGI("IBL: L0 luminance=" << avg_luminance << " exposure_compensation=" << m_exposure_compensation);
+}
+
 bool IblSystem::loadForSkybox(const std::filesystem::path& skybox_path) {
 	// cmgen structure: textures/skybox/<name>/<name>_skybox.ktx
 	// Companion files: <name>/<name>_ibl.ktx, <name>/sh.txt
@@ -229,6 +247,7 @@ bool IblSystem::loadForSkybox(const std::filesystem::path& skybox_path) {
 	if (!std::filesystem::exists(ibl_path) || !std::filesystem::exists(sh_path)) {
 		m_ibl_available = false;
 		m_sh_coefficients = {};
+		m_exposure_compensation = 1.0f;
 		VE_LOGD("IBL: no companion files for " << skybox_path.filename().generic_string());
 		return false;
 	}
@@ -237,8 +256,11 @@ bool IblSystem::loadForSkybox(const std::filesystem::path& skybox_path) {
 	if (!parseSHFile(sh_path)) {
 		m_ibl_available = false;
 		m_sh_coefficients = {};
+		m_exposure_compensation = 1.0f;
 		return false;
 	}
+
+	computeExposureCompensation();
 
 	// Load prefiltered specular cubemap
 	m_prefiltered_handle = m_resource_manager.load<VeTexture>(

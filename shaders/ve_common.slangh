@@ -97,10 +97,10 @@ struct UniformBuffer {
 	SpotLight spot_lights[MAX_SPOT_LIGHTS];
 
 	// IBL parameters
-	float    ibl_intensity;
+	float    ibl_diffuse_intensity;
 	uint32_t prefiltered_mip_levels;
-	float    _pad_ibl_0;
-	float    _pad_ibl_1;
+	float    ibl_specular_intensity;
+	float    ibl_min_ambient;
 	float4   sh_coefficients[9];
 };
 [vk::binding(0, 0)]

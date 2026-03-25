@@ -51,9 +51,26 @@ void EnvironmentPanel::render(Registry* /*registry*/, EditorState& state, UICont
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Use skybox environment for ambient lighting (requires IBL data).");
 	if (ctx.ibl_enabled) {
-		ImGui::SliderFloat("Intensity##ibl", &ctx.ibl_intensity, 0.0f, 5.0f, "%.2f");
+		ImGui::Checkbox("Auto Exposure##ibl", &ctx.ibl_auto_exposure);
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("IBL contribution strength.");
+			ImGui::SetTooltip("Automatically compensate intensity for dark environments.");
+		if (ctx.ibl_auto_exposure) {
+			ImGui::SameLine();
+			ImGui::TextDisabled("(%.1fx)", ctx.ibl_exposure_compensation);
+		}
+		ImGui::SliderFloat("Diffuse##ibl", &ctx.ibl_diffuse_intensity, 0.0f, 5.0f, "%.2f");
+		if (ImGui::IsItemHovered()) {
+			float effective = ctx.ibl_diffuse_intensity * (ctx.ibl_auto_exposure ? ctx.ibl_exposure_compensation : 1.0f);
+			ImGui::SetTooltip("Diffuse IBL contribution. Effective: %.2f", effective);
+		}
+		ImGui::SliderFloat("Specular##ibl", &ctx.ibl_specular_intensity, 0.0f, 5.0f, "%.2f");
+		if (ImGui::IsItemHovered()) {
+			float effective = ctx.ibl_specular_intensity * (ctx.ibl_auto_exposure ? ctx.ibl_exposure_compensation : 1.0f);
+			ImGui::SetTooltip("Specular IBL contribution. Effective: %.2f", effective);
+		}
+		ImGui::SliderFloat("Min Ambient##ibl", &ctx.ibl_min_ambient, 0.0f, 0.05f, "%.4f");
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Minimum ambient floor to prevent completely black areas.");
 		if (m_skybox) {
 			const auto& available = m_skybox->getAvailableSkyboxes();
 			size_t idx = m_skybox->getCurrentSkyboxIndex();

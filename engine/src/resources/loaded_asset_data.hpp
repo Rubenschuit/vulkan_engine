@@ -42,6 +42,12 @@ struct ProcessedMesh {
 	std::vector<glm::vec3> cpu_positions;
 	std::vector<uint32_t> cpu_indices;
 	std::unique_ptr<CpuMeshletData> meshlet_data;
+
+	ProcessedMesh() = default;
+	ProcessedMesh(ProcessedMesh&&) = default;
+	ProcessedMesh& operator=(ProcessedMesh&&) = default;
+	ProcessedMesh(const ProcessedMesh&) = delete;
+	ProcessedMesh& operator=(const ProcessedMesh&) = delete;
 };
 
 // Texture indices refer into LoadedAssetData::textures (-1 = use default).
@@ -68,6 +74,12 @@ struct VENGINE_API LoadedAssetData {
 	std::vector<VeModel::ExtractedLight> emissive_lights;
 	std::unordered_map<int, uint32_t> gltf_to_loaded_idx;
 	std::unordered_map<int, std::pair<glm::vec3, float>> geometry_center_extent;
+
+	LoadedAssetData() = default;
+	LoadedAssetData(LoadedAssetData&&) = default;
+	LoadedAssetData& operator=(LoadedAssetData&&) = default;
+	LoadedAssetData(const LoadedAssetData&) = delete;
+	LoadedAssetData& operator=(const LoadedAssetData&) = delete;
 };
 
 // Thread-safe progress tracking for async loading.
