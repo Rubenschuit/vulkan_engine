@@ -40,6 +40,12 @@ private:
 	struct LayerCache {
 		vk::raii::ImageView image_view{nullptr};
 		VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+
+		LayerCache() = default;
+		LayerCache(LayerCache&&) = default;
+		LayerCache& operator=(LayerCache&&) = default;
+		LayerCache(const LayerCache&) = delete;
+		LayerCache& operator=(const LayerCache&) = delete;
 	};
 	std::vector<LayerCache> m_layer_cache;
 
