@@ -12,7 +12,13 @@ class VeTexture;
 
 class VENGINE_API TextureInspector {
 public:
+	TextureInspector() = default;
 	~TextureInspector();
+
+	TextureInspector(const TextureInspector&) = delete;
+	TextureInspector& operator=(const TextureInspector&) = delete;
+	TextureInspector(TextureInspector&&) = default;
+	TextureInspector& operator=(TextureInspector&&) = default;
 
 	void open(const VeImage* image, const vk::raii::Sampler& sampler, const char* name);
 	void open(const VeTexture* texture, const char* name);
