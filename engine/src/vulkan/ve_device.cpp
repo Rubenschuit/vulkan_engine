@@ -376,6 +376,15 @@ void VeDevice::createLogicalDevice() {
 		VE_LOGI("Enabled optional extension: " << VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME);
 	}
 
+#if defined(__APPLE__)
+	VkPhysicalDevicePortabilitySubsetFeaturesKHR portability_features{
+		.sType = static_cast<VkStructureType>(1000163000),
+		.pNext = nullptr,
+		.imageViewFormatSwizzle = VK_TRUE,
+	};
+	feature_chain.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().pNext = &portability_features;
+#endif
+
 	vk::DeviceCreateInfo device_create_info {
 		.pNext = &feature_chain.get<vk::PhysicalDeviceFeatures2>(),
 		.queueCreateInfoCount = static_cast<uint32_t>(queue_create_infos.size()),
