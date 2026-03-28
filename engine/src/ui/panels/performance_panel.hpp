@@ -41,7 +41,7 @@ private:
 	float m_compute_gpu_time_sum = 0.0f;
 	float m_gpu_overlap_sum = 0.0f;
 	float m_accumulated_dt = 0.0f;
-	float m_fps_history[120] = {};
+	float m_frametime_history[120] = {};
 	int m_history_offset = 0;
 	float m_graph_update_timer = 0.0f;
 	int m_graph_frames = 0;

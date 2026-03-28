@@ -13,8 +13,9 @@
 namespace ve {
 
 MeshletCullingBackend::MeshletCullingBackend(MeshletCullingSystem& meshlet,
-                                             GpuCullingSystem& gpu_cull)
-	: m_meshlet_cull_system{meshlet}, m_gpu_cull{gpu_cull} {}
+                                             GpuCullingSystem& gpu_cull,
+                                             GpuSceneManager& gpu_scene)
+	: m_meshlet_cull_system{meshlet}, m_gpu_cull{gpu_cull}, m_gpu_scene{gpu_scene} {}
 
 void MeshletCullingBackend::cull(VeFrameInfo& fi, GpuSceneManager& gpu_scene) {
 	auto& cmd = fi.cmd();
@@ -77,16 +78,17 @@ vk::raii::DescriptorSet& MeshletCullingBackend::getGlobalDescriptorSet(uint32_t 
 
 void MeshletCullingBackend::collectStats(uint32_t frame, UIContext& ui, Registry&) const {
 	(void)frame;
+	ui.stats.cull_total_objects = m_gpu_scene.getTotalRegisteredCount();
+	uint32_t readback_visible = m_meshlet_cull_system.readbackVisibleObjectCount();
+	ui.stats.cull_visible_objects = readback_visible > 0 ? readback_visible : ui.stats.cull_total_objects;
 	const uint32_t* rb = m_meshlet_cull_system.getRawDrawCounts();
 	if (rb) {
 		uint32_t total_draws = 0;
 		for (uint32_t b = 0; b < MeshletCullingSystem::BUCKET_COUNT; b++)
 			total_draws += rb[b];
-		ui.stats.draw_calls = total_draws;
-		ui.stats.cull_visible_objects = total_draws;
-		ui.stats.transparent_draw_calls = rb[4] + rb[5];
+		ui.stats.visible_meshlets = total_draws;
 	}
-	ui.stats.visible_triangles = 0;
+	ui.stats.visible_triangles = m_meshlet_cull_system.readbackTriangleCount();
 }
 
 void MeshletCullingBackend::setHizEnabled(bool enabled) { m_meshlet_cull_system.setHizEnabled(enabled); }

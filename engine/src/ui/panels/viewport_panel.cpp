@@ -14,7 +14,7 @@ namespace ve {
 
 void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*context*/) {
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-	bool open = ImGui::Begin("Viewport", &state.show_viewport);
+	bool open = ImGui::Begin("Viewport", &state.show_viewport, ImGuiWindowFlags_NoFocusOnAppearing);
 	ImGui::PopStyleVar();
 
 	if (open) {

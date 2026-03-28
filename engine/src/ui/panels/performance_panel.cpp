@@ -54,7 +54,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 	// Per-system breakdown accumulation
 	const float gpu_src[] = {
-		0.0f, context.stats.gpu_shadow_maps, context.stats.gpu_depth_prepass,
+		context.stats.gpu_culling, context.stats.gpu_shadow_maps, context.stats.gpu_depth_prepass,
 		context.stats.gpu_gtao, context.stats.gpu_scene_render,
 		context.stats.gpu_bloom, context.stats.gpu_post_process, 0.0f
 	};
@@ -99,7 +99,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	m_graph_update_timer += dt;
 	m_graph_frames++;
 	if (m_graph_update_timer >= 0.1f) {
-		m_fps_history[m_history_offset] = static_cast<float>(m_graph_frames) / m_graph_update_timer;
+		m_frametime_history[m_history_offset] = (m_graph_update_timer / static_cast<float>(m_graph_frames)) * 1000.0f;
 		m_history_offset = (m_history_offset + 1) % 120;
 		m_graph_update_timer = 0.0f;
 		m_graph_frames = 0;
@@ -130,16 +130,21 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 			char tri_buf[16];
 			formatCount(tri_buf, sizeof(tri_buf), context.stats.visible_triangles);
-			ImGui::TextDisabled("%s triangles  |  %u/%u objects  |  %u draws",
-				tri_buf, context.stats.cull_visible_objects, context.stats.cull_total_objects,
-				context.stats.draw_calls);
+			ImGui::TextDisabled("%s triangles  |  %u/%u objects",
+				tri_buf, context.stats.cull_visible_objects, context.stats.cull_total_objects);
+			if (context.stats.visible_meshlets > 0) {
+				ImGui::SameLine();
+				char meshlet_buf[16];
+				formatCount(meshlet_buf, sizeof(meshlet_buf), context.stats.visible_meshlets);
+				ImGui::TextDisabled("  |  %s meshlets", meshlet_buf);
+			}
 		}
 		ImGui::End();
 		return;
 	}
 
 	// --- Editor docked panel mode ---
-	if (!ImGui::Begin("Performance", &context.show_performance)) {
+	if (!ImGui::Begin("Performance", &context.show_performance, ImGuiWindowFlags_NoFocusOnAppearing)) {
 		ImGui::End();
 		return;
 	}
@@ -179,22 +184,32 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	ImGui::Separator();
 	ImGui::Spacing();
 
-	// --- FPS graph ---
+	// --- Frame time graph ---
 	{
-		float max_fps = 0.0f;
-		for (float f : m_fps_history)
-			if (f > max_fps)
-				max_fps = f;
-		if (max_fps < 60.0f)
-			max_fps = 60.0f;
-		float graph_max = max_fps * 1.1f;
+		// Use 95th percentile (skip top 6 of 120) so spikes from
+		// mode switches or settings changes don't blow out the Y-axis scale.
+		constexpr int SKIP_TOP = 6;
+		float top[SKIP_TOP + 1] = {};
+		for (float f : m_frametime_history) {
+			if (f > top[0]) {
+				top[0] = f;
+				for (int j = 0; j < SKIP_TOP; j++) {
+					if (top[j] > top[j + 1])
+						std::swap(top[j], top[j + 1]);
+					else
+						break;
+				}
+			}
+		}
+		float max_ft = top[0]; // largest value not in the top SKIP_TOP
+		if (max_ft < 16.67f)
+			max_ft = 16.67f;
+		float graph_max = max_ft * 1.1f;
 
-		// Graph with no overlay text — FPS is already shown above
-		ImGui::PlotLines("##FPS", m_fps_history, 120, m_history_offset,
+		ImGui::PlotLines("##FrameTime", m_frametime_history, 120, m_history_offset,
 			nullptr, 0.0f, graph_max, ImVec2(-1, 60));
 
-		// Y-axis range labels
-		ImGui::TextDisabled("0 - %.0f FPS", graph_max);
+		ImGui::TextDisabled("0 - %.1f ms", graph_max);
 	}
 
 	ImGui::Spacing();
@@ -211,13 +226,18 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		context.stats.cull_visible_objects, context.stats.cull_total_objects, culled);
 	row("Objects", val);
 	row("Triangles", tri_buf);
-	if (context.stats.transparent_draw_calls > 0)
-		snprintf(val, sizeof(val), "%u (+%u transparent)", context.stats.draw_calls, context.stats.transparent_draw_calls);
+	if (context.stats.visible_meshlets > 0) {
+		char meshlet_buf[16];
+		formatCount(meshlet_buf, sizeof(meshlet_buf), context.stats.visible_meshlets);
+		row("Meshlets", meshlet_buf);
+	}
+	if (context.stats.num_spot_lights > 0)
+		snprintf(val, sizeof(val), "%u point, %u dir, %u spot",
+			context.stats.num_point_lights, context.stats.num_directional_lights,
+			context.stats.num_spot_lights);
 	else
-		snprintf(val, sizeof(val), "%u", context.stats.draw_calls);
-	row("Draw Calls", val);
-	snprintf(val, sizeof(val), "%u point, %u dir",
-		context.stats.num_point_lights, context.stats.num_directional_lights);
+		snprintf(val, sizeof(val), "%u point, %u dir",
+			context.stats.num_point_lights, context.stats.num_directional_lights);
 	row("Lights", val);
 
 	ImGui::Spacing();

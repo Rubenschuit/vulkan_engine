@@ -35,12 +35,16 @@ constexpr float CELESTIAL_INTENSITY_BOOST = 100.0f; // Intensity multiplier so b
 // Shadow mapping configuration
 constexpr float SHADOW_BIAS = 0.00042f;
 constexpr float CSM_NORMAL_BIAS = 0.08f; // world-space normal offset for CSM, scaled per cascade
+constexpr float SHADOW_DEPTH_BIAS_CONSTANT = 1.25f;
+constexpr float SHADOW_DEPTH_BIAS_SLOPE = 1.75f;
 constexpr float DIR_SHADOW_MAX_DISTANCE = 300.0f; // Max distance from camera for directional light shadows
 
 // Cascaded Shadow Maps (CSM) configuration
 constexpr uint32_t NUM_CSM_CASCADES = 3; // keep in sync with shader
 constexpr uint32_t CSM_CASCADE_RESOLUTIONS[NUM_CSM_CASCADES] = {2048, 1024, 1024}; // per-cascade atlas resolution
 constexpr float CSM_SPLIT_LAMBDA = 0.80f; // practical split blend (0=linear, 1=logarithmic)
+constexpr int32_t CSM_SCROLL_THRESHOLD = 256; // max texels per frame before fallback to full re-render
+constexpr float CSM_Z_MARGIN = 150.0f; // depth margin behind cascade sphere for shadow casters
 constexpr uint32_t POINT_SHADOW_RESOLUTION = 512; // per-light atlas resolution
 constexpr uint32_t SPOT_SHADOW_RESOLUTION = 512;
 constexpr uint32_t MAX_SHADOW_LAYERS = NUM_CSM_CASCADES + MAX_POINT_SHADOW_LIGHTS + MAX_SPOT_SHADOW_LIGHTS;

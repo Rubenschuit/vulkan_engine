@@ -68,8 +68,7 @@ void CpuCullingBackend::collectStats(uint32_t, UIContext& ui, Registry& registry
 			tri_count += mesh->getMesh()->getLodIndexCount(vo.lod_level) / 3;
 	}
 	ui.stats.visible_triangles = tri_count;
-	ui.stats.draw_calls = m_pbr.getOpaqueDrawCount();
-	ui.stats.transparent_draw_calls = 0;
+	ui.stats.visible_meshlets = 0;
 }
 
 } // namespace ve

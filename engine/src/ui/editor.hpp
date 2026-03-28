@@ -7,7 +7,9 @@
 #include "ui/panels/performance_panel.hpp"
 #include "ui/panels/graphics_panel.hpp"
 #include "ui/panels/environment_panel.hpp"
+#include "ui/panels/debug_panel.hpp"
 #include "ui/panels/loading_overlay.hpp"
+#include "ui/texture_inspector.hpp"
 #include <functional>
 #include <memory>
 #include <vector>
@@ -24,6 +26,7 @@ class VeCamera;
 class Registry;
 class VeScene;
 class SkyboxRenderSystem;
+class ShadowRenderSystem;
 class PhysicsSystem;
 struct UIContext;
 struct SceneEntry;
@@ -67,6 +70,9 @@ public:
 	// Physics system access for collision shape debug rendering
 	void setPhysicsSystem(PhysicsSystem* ps);
 
+	// Shadow render system access for debug panel atlas inspection
+	void setShadowRenderSystem(ShadowRenderSystem* system);
+
 	// Asset loader for rendering loading panel
 	void setAssetLoader(AssetLoadingSystem* loader) { m_asset_loader = loader; m_hierarchy_panel.setAssetLoader(loader); }
 
@@ -94,6 +100,8 @@ private:
 	std::unique_ptr<PerformancePanel> m_performance_panel;
 	std::unique_ptr<GraphicsPanel> m_graphics_panel;
 	std::unique_ptr<EnvironmentPanel> m_environment_panel;
+	std::unique_ptr<DebugPanel> m_debug_panel;
+	TextureInspector m_texture_inspector;
 
 	// Loading UI
 	AssetLoadingSystem* m_asset_loader = nullptr;

@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "ui/panels/inspector_panel.hpp"
 #include "ui/imgui_layer.hpp"
+#include "ui/texture_inspector.hpp"
 #include "scene/ve_registry.hpp"
 #include "resources/ve_mesh.hpp"
 #include "resources/ve_material.hpp"
@@ -96,7 +97,9 @@ void InspectorPanel::renderTextureSlot(const char* label, const std::string& id,
 			ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(ds)),
 			             ImVec2(thumb_size, thumb_size));
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("%s", id.c_str());
+				ImGui::SetTooltip("Click to inspect\n%s", id.c_str());
+			if (ImGui::IsItemClicked() && m_texture_inspector)
+				m_texture_inspector->open(texture, label);
 		} else {
 			ImGui::TextDisabled("[failed]");
 		}
@@ -217,7 +220,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 	if (m_frame_counter % 60 == 0)
 		evictStaleTextures();
 
-	if (!ImGui::Begin("Inspector", &state.show_inspector)) {
+	if (!ImGui::Begin("Entity Inspector", &state.show_inspector, ImGuiWindowFlags_NoFocusOnAppearing)) {
 		ImGui::End();
 		return;
 	}

@@ -37,6 +37,7 @@ struct CullParams {
 	alignas(4) uint32_t max_meshlet_draws{MAX_MESHLET_DRAWS}; // meshlet pass-2 per-bucket capacity
 	alignas(16) glm::vec4 camera_pos;  // xyz = world-space camera position (for cone cull)
 	alignas(4) uint32_t bucket_count{MESHLET_BUCKET_COUNT};   // meshlet pass-2 bucket count
+	alignas(4) uint32_t shadow_cone_cull{0};                  // 1 = enable backface cone culling in shadow pass
 };
 
 class VENGINE_API GpuCullingSystem {

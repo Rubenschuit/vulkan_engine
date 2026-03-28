@@ -10,7 +10,7 @@
 namespace ve {
 
 void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UIContext& ctx) {
-	if (!ImGui::Begin("Graphics")) {
+	if (!ImGui::Begin("Graphics", nullptr, ImGuiWindowFlags_NoFocusOnAppearing)) {
 		ImGui::End();
 		return;
 	}
@@ -106,6 +106,15 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UICon
 		ImGui::SliderFloat("Normal Bias", &ctx.csm_normal_bias, 0.0f, 1.0f, "%.3f");
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("World-space normal offset for CSM shadows.\nPushes shadow lookup along surface normal.\nHigher = less acne on angled surfaces.");
+		ImGui::SliderFloat("Depth Bias Constant", &ctx.depth_bias_constant, 0.0f, 5.0f, "%.2f");
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Rasterizer constant depth bias applied when rendering shadow maps.\nHigher = less acne but more Peter panning.");
+		ImGui::SliderFloat("Depth Bias Slope", &ctx.depth_bias_slope, 0.0f, 5.0f, "%.2f");
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Rasterizer slope-scaled depth bias applied when rendering shadow maps.\nScales with surface slope relative to light direction.");
+		ImGui::SliderFloat("Depth Bias Clamp", &ctx.depth_bias_clamp, 0.0f, 0.1f, "%.4f");
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Maximum absolute depth bias. Caps the total bias to prevent\nPeter panning on surfaces close to the light.");
 		ImGui::Text("CSM Blend: ");
 		ImGui::SameLine();
 		ImGui::RadioButton("Off", &ctx.csm_blend_mode, 0);
@@ -281,63 +290,6 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UICon
 	ImGui::Separator();
 	auto extent = m_renderer.getExtent();
 	ImGui::Text("Resolution: %d x %d", extent.width, extent.height);
-
-	// --- Render mode ---
-	ImGui::Separator();
-	ImGui::Text("Render mode: ");
-	int current_render_mode = static_cast<int>(ctx.render_mode);
-	if (ImGui::RadioButton("BRDF Microfacets", &current_render_mode, static_cast<int>(RenderMode::BRDF_MICROFACET)))
-		ctx.render_mode = RenderMode::BRDF_MICROFACET;
-	ImGui::SameLine();
-	if (ImGui::RadioButton("BRDF Smooth", &current_render_mode, static_cast<int>(RenderMode::BRDF)))
-		ctx.render_mode = RenderMode::BRDF;
-	if (ImGui::RadioButton("Normal vector", &current_render_mode, static_cast<int>(RenderMode::NORMAL_VECTOR)))
-		ctx.render_mode = RenderMode::NORMAL_VECTOR;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Visualize surface normals (RGB = XYZ)");
-	if (ImGui::RadioButton("Tangent vector", &current_render_mode, static_cast<int>(RenderMode::TANGENT_VECTOR)))
-		ctx.render_mode = RenderMode::TANGENT_VECTOR;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Visualize tangent vectors for normal mapping");
-	if (ImGui::RadioButton("Bitangent vector", &current_render_mode, static_cast<int>(RenderMode::BITANGENT_VECTOR)))
-		ctx.render_mode = RenderMode::BITANGENT_VECTOR;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Visualize bitangent vectors for normal mapping");
-	if (ImGui::RadioButton("Normal map", &current_render_mode, static_cast<int>(RenderMode::NORMAL_MAP)))
-		ctx.render_mode = RenderMode::NORMAL_MAP;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Display normal map texture data directly");
-	if (ImGui::RadioButton("CSM Cascades", &current_render_mode, static_cast<int>(RenderMode::CSM_CASCADE)))
-		ctx.render_mode = RenderMode::CSM_CASCADE;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Visualize CSM cascade regions\nRed=0, Green=1, Blue=2, Yellow=3");
-	if (ImGui::RadioButton("Cluster Heatmap", &current_render_mode, static_cast<int>(RenderMode::CLUSTER_HEATMAP)))
-		ctx.render_mode = RenderMode::CLUSTER_HEATMAP;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Visualize lights-per-cluster as a heat gradient\nBlue=few, Red=many, Dark=zero");
-	if (ImGui::RadioButton("LOD Level", &current_render_mode, static_cast<int>(RenderMode::LOD_LEVEL)))
-		ctx.render_mode = RenderMode::LOD_LEVEL;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Visualize mesh LOD levels\nGreen=0, Yellow=1, Orange=2, Red=3");
-	if (ImGui::RadioButton("Meshlet ID", &current_render_mode, static_cast<int>(RenderMode::MESHLET_ID)))
-		ctx.render_mode = RenderMode::MESHLET_ID;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Visualize meshlet boundaries (hash-colored per draw command).\nMost useful with meshlet culling enabled.");
-
-	ImGui::Checkbox("Show Axes", &ctx.show_axes);
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Display XYZ coordinate axes in the scene.\nRed=X, Green=Y, Blue=Z");
-	ImGui::Checkbox("Show AABB outlines", &ctx.show_aabb_debug);
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Display wireframe bounding boxes for visible objects");
-	ImGui::Text("Topology: ");
-	ImGui::SameLine();
-	int topology_int = static_cast<int>(ctx.topology);
-	if (ImGui::RadioButton("Triangle List", &topology_int, static_cast<int>(Topology::TRIANGLE_LIST)))
-		ctx.topology = Topology::TRIANGLE_LIST;
-	ImGui::SameLine();
-	if (ImGui::RadioButton("Line List", &topology_int, static_cast<int>(Topology::LINE_LIST)))
-		ctx.topology = Topology::LINE_LIST;
 
 	ImGui::End();
 }

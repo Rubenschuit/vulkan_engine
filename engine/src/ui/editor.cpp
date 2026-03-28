@@ -13,6 +13,8 @@ Editor::Editor(VeRenderer& renderer, ImGuiLayer& imgui_layer)
 	m_performance_panel = std::make_unique<PerformancePanel>(renderer);
 	m_graphics_panel = std::make_unique<GraphicsPanel>(renderer);
 	m_environment_panel = std::make_unique<EnvironmentPanel>();
+	m_debug_panel = std::make_unique<DebugPanel>(m_texture_inspector);
+	m_inspector_panel.setTextureInspector(&m_texture_inspector);
 	registerViewportImage();
 }
 
@@ -83,8 +85,10 @@ void Editor::renderUI(UIContext& context, Registry* registry, VeScene* active_sc
 			m_hierarchy_panel.render(registry, m_state, ctx);
 			m_inspector_panel.render(registry, m_state, ctx);
 			m_performance_panel->render(registry, m_state, ctx);
+			m_debug_panel->render(registry, m_state, ctx);
 			m_graphics_panel->render(registry, m_state, ctx);
 			m_environment_panel->render(registry, m_state, ctx);
+			m_texture_inspector.render();
 
 			if (m_app_ui_callback)
 				m_app_ui_callback();
@@ -163,8 +167,13 @@ void Editor::setPhysicsSystem(PhysicsSystem* ps) {
 	m_viewport_panel.setPhysicsSystem(ps);
 }
 
+void Editor::setShadowRenderSystem(ShadowRenderSystem* system) {
+	m_debug_panel->setShadowRenderSystem(system);
+}
+
 void Editor::onSwapChainRecreated() {
 	registerViewportImage();
+	m_texture_inspector.invalidateCache();
 }
 
 } // namespace ve

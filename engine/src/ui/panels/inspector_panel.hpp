@@ -14,13 +14,16 @@ class DirectionalLightComponent;
 class SpotLightComponent;
 class RigidbodyComponent;
 class VeTexture;
+class TextureInspector;
 
 class VENGINE_API InspectorPanel : public EditorPanel {
 public:
 	~InspectorPanel();
 
 	void render(Registry* registry, EditorState& state, UIContext& context) override;
-	const char* getName() const override { return "Inspector"; }
+	const char* getName() const override { return "Entity Inspector"; }
+
+	void setTextureInspector(TextureInspector* inspector) { m_texture_inspector = inspector; }
 
 private:
 	void renderEntityHeader(Registry& registry, Entity entity, EditorState& state);
@@ -46,6 +49,8 @@ private:
 	void evictStaleTextures();
 	void clearTextureCache();
 	void renderTextureSlot(const char* label, const std::string& id, const VeTexture* texture, float thumb_size = 48.0f);
+
+	TextureInspector* m_texture_inspector = nullptr;
 };
 
 } // namespace ve

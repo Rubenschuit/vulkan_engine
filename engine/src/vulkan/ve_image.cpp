@@ -102,7 +102,7 @@ void VeImage::createImageView() {
 	assert(*m_image_view != VK_NULL_HANDLE && "Failed to create image view");
 }
 
-vk::raii::ImageView VeImage::createLayerImageView(uint32_t layer) const {
+vk::raii::ImageView VeImage::createLayerImageView(uint32_t layer, vk::ComponentMapping components) const {
 	assert(m_image && "Image must be valid when creating layer image view");
 	assert(layer < m_array_layers && "Layer index out of bounds");
 	vk::ImageViewCreateInfo view_info {
@@ -112,7 +112,7 @@ vk::raii::ImageView VeImage::createLayerImageView(uint32_t layer) const {
 		.image = m_image,
 		.viewType = vk::ImageViewType::e2D,
 		.format = m_format,
-		.components = {},
+		.components = components,
 		.subresourceRange = vk::ImageSubresourceRange {
 			.aspectMask = m_aspect_flags,
 			.baseMipLevel = 0,

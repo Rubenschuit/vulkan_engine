@@ -27,7 +27,8 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 
 		m_counts[i] = std::make_unique<VeBuffer>(m_ve_device,
 			sizeof(uint32_t), 2,
-			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst
+				| vk::BufferUsageFlagBits::eTransferSrc,
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 		m_dispatch_indirect[i] = std::make_unique<VeBuffer>(m_ve_device,
@@ -43,7 +44,7 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 		m_meshlet_draw_counts[i] = std::make_unique<VeBuffer>(m_ve_device,
-			sizeof(uint32_t), BUCKET_COUNT,
+			sizeof(uint32_t), BUCKET_COUNT + 1,
 			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eIndirectBuffer
 				| vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc,
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
@@ -60,9 +61,9 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 			m_ve_device.getDeviceProperties().limits.minUniformBufferOffsetAlignment);
 		m_cull_param_ubos[i]->map();
 
-		// Staging buffer for async readback of per-bucket draw counts
+		// Staging buffer for async readback stats
 		m_readback_staging[i] = std::make_unique<VeBuffer>(m_ve_device,
-			sizeof(uint32_t), BUCKET_COUNT,
+			sizeof(uint32_t), BUCKET_COUNT + 2,
 			vk::BufferUsageFlagBits::eTransferDst,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 		m_readback_staging[i]->map();
@@ -366,6 +367,8 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 	auto* staging_ptr = static_cast<const uint32_t*>(m_readback_staging[frame]->getMappedMemory());
 	if (staging_ptr && m_has_readback[frame]) {
 		std::memcpy(m_readback_counts.data(), staging_ptr, BUCKET_COUNT * sizeof(uint32_t));
+		m_readback_tri_count = staging_ptr[BUCKET_COUNT];
+		m_readback_visible_objects = staging_ptr[BUCKET_COUNT + 1];
 		m_current_readback_valid = true;
 
 		// Update high-water marks: grow fast (2x + headroom), decay slowly (3/4)
@@ -379,7 +382,7 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 	// Clear per-frame counters and init dispatch_indirect to (0, 1, 1)
 	cmd.fillBuffer(m_counts[frame]->getBuffer(), 0, 2 * sizeof(uint32_t), 0);
 	cmd.fillBuffer(m_meshlet_draw_counts[frame]->getBuffer(), 0,
-		static_cast<vk::DeviceSize>(BUCKET_COUNT) * sizeof(uint32_t), 0);
+		static_cast<vk::DeviceSize>(BUCKET_COUNT + 1) * sizeof(uint32_t), 0);
 	cmd.fillBuffer(m_dispatch_indirect[frame]->getBuffer(), 0, 4, 0u);  // groups_x = 0
 	cmd.fillBuffer(m_dispatch_indirect[frame]->getBuffer(), 4, 8, 1u);  // Y = 1, Z = 1
 
@@ -444,10 +447,14 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 	vk::DependencyInfo draw_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &draw_barrier};
 	cmd.pipelineBarrier2(draw_dep);
 
-	// Copy draw counts to staging for CPU readback next time this frame index is used
-	vk::BufferCopy region{0, 0, static_cast<vk::DeviceSize>(BUCKET_COUNT) * sizeof(uint32_t)};
+	// Copy draw counts + triangle count to staging for CPU readback next time this frame index is used
+	vk::BufferCopy region{0, 0, static_cast<vk::DeviceSize>(BUCKET_COUNT + 1) * sizeof(uint32_t)};
 	cmd.copyBuffer(m_meshlet_draw_counts[frame]->getBuffer(),
 		m_readback_staging[frame]->getBuffer(), region);
+
+	// Copy visible object count (from pass 1) to staging for stats readback
+	vk::BufferCopy obj_region{0, static_cast<vk::DeviceSize>(BUCKET_COUNT + 1) * sizeof(uint32_t), sizeof(uint32_t)};
+	cmd.copyBuffer(m_counts[frame]->getBuffer(), m_readback_staging[frame]->getBuffer(), obj_region);
 	m_has_readback[frame] = true;
 }
 
@@ -523,30 +530,33 @@ void MeshletCullingSystem::createShadowGlobalDescriptorSets(
 void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
                                                 const ShadowCullRequest* requests, uint32_t count,
                                                 GpuSceneManager& scene_mgr,
-                                                uint32_t frame_index) {
+                                                uint32_t frame_index,
+                                                bool skip_readback) {
 	uint32_t object_count = scene_mgr.getObjectCount();
 	if (object_count == 0 || count == 0)
 		return;
 
 	uint32_t groups1 = (object_count + MESHLET_CULL_WORKGROUP_SIZE - 1) / MESHLET_CULL_WORKGROUP_SIZE;
 
-	// Async readback: read shadow draw counts written 2 frames ago from mapped staging
-	for (uint32_t r = 0; r < count; r++) {
-		uint32_t slot = requests[r].slot;
-		if (m_shadow_readback_staging[frame_index][slot]) {
-			auto* ptr = static_cast<const uint32_t*>(
-				m_shadow_readback_staging[frame_index][slot]->getMappedMemory());
-			if (ptr && m_shadow_has_readback[frame_index][slot]) {
-				std::memcpy(m_shadow_readback_counts[slot].data(), ptr,
-					MESHLET_SHADOW_BUCKET_COUNT * sizeof(uint32_t));
+	// Async readback: read shadow draw counts written 2 frames ago from mapped staging.
+	if (!skip_readback) {
+		for (uint32_t r = 0; r < count; r++) {
+			uint32_t slot = requests[r].slot;
+			if (m_shadow_readback_staging[frame_index][slot]) {
+				auto* ptr = static_cast<const uint32_t*>(
+					m_shadow_readback_staging[frame_index][slot]->getMappedMemory());
+				if (ptr && m_shadow_has_readback[frame_index][slot]) {
+					std::memcpy(m_shadow_readback_counts[slot].data(), ptr,
+						MESHLET_SHADOW_BUCKET_COUNT * sizeof(uint32_t));
 
-				// Update high-water marks
-				constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
-				for (uint32_t b = 0; b < MESHLET_SHADOW_BUCKET_COUNT; b++)
-					m_shadow_readback_high_water[slot][b] = std::min(
-						std::max(m_shadow_readback_counts[slot][b] * 2 + 1024,
-						         m_shadow_readback_high_water[slot][b] * 3 / 4),
-						SHADOW_MAX_PER_BUCKET);
+					// Update high-water marks
+					constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
+					for (uint32_t b = 0; b < MESHLET_SHADOW_BUCKET_COUNT; b++)
+						m_shadow_readback_high_water[slot][b] = std::min(
+							std::max(m_shadow_readback_counts[slot][b] * 2 + 1024,
+							         m_shadow_readback_high_water[slot][b] * 3 / 4),
+							SHADOW_MAX_PER_BUCKET);
+				}
 			}
 		}
 	}
@@ -570,6 +580,7 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 		params.bucket_count      = MESHLET_SHADOW_BUCKET_COUNT;
 		params.camera_pos        = glm::vec4(req.light_pos, 0.0f);
 		params.hiz_enabled       = 0;
+		params.shadow_cone_cull  = (req.slot < NUM_CSM_CASCADES) ? 1 : 0;
 		m_shadow_cull_param_ubos[frame_index][slot]->writeToBuffer(&params);
 
 		cmd.fillBuffer(m_shadow_counts[frame_index][slot]->getBuffer(),
@@ -642,14 +653,15 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 	vk::DependencyInfo draw_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &draw_barrier};
 	cmd.pipelineBarrier2(draw_dep);
 
-	// Copy shadow draw counts to staging for CPU readback next time this frame index is used
-	for (uint32_t r = 0; r < count; r++) {
-		uint32_t slot = requests[r].slot;
-		vk::BufferCopy region{0, 0,
-			static_cast<vk::DeviceSize>(MESHLET_SHADOW_BUCKET_COUNT) * sizeof(uint32_t)};
-		cmd.copyBuffer(m_shadow_meshlet_draw_counts[frame_index][slot]->getBuffer(),
-			m_shadow_readback_staging[frame_index][slot]->getBuffer(), region);
-		m_shadow_has_readback[frame_index][slot] = true;
+	if (!skip_readback) {
+		for (uint32_t r = 0; r < count; r++) {
+			uint32_t slot = requests[r].slot;
+			vk::BufferCopy region{0, 0,
+				static_cast<vk::DeviceSize>(MESHLET_SHADOW_BUCKET_COUNT) * sizeof(uint32_t)};
+			cmd.copyBuffer(m_shadow_meshlet_draw_counts[frame_index][slot]->getBuffer(),
+				m_shadow_readback_staging[frame_index][slot]->getBuffer(), region);
+			m_shadow_has_readback[frame_index][slot] = true;
+		}
 	}
 }
 

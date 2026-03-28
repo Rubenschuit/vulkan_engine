@@ -6,11 +6,13 @@
 namespace ve {
 
 class GpuCullingSystem;
+class GpuSceneManager;
 class MeshletCullingSystem;
 
 class MeshletCullingBackend final : public CullingBackend {
 public:
-	MeshletCullingBackend(MeshletCullingSystem& meshlet, GpuCullingSystem& gpu_cull);
+	MeshletCullingBackend(MeshletCullingSystem& meshlet, GpuCullingSystem& gpu_cull,
+	                      GpuSceneManager& gpu_scene);
 
 	void cull(VeFrameInfo& fi, GpuSceneManager& gpu_scene) override;
 	void renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
@@ -34,6 +36,7 @@ public:
 private:
 	MeshletCullingSystem& m_meshlet_cull_system;
 	GpuCullingSystem& m_gpu_cull;
+	GpuSceneManager& m_gpu_scene;
 	bool m_gpu_shadow_fallback = false;
 };
 

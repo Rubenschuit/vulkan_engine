@@ -422,6 +422,9 @@ VeFrameInfo VeApplication::buildFrameInfo() {
 		.instance_count = 0,
 		.instance_capacity = INITIAL_INSTANCE_CAPACITY,
 		.shadow_mode = m_ui.shadow_mode,
+		.depth_bias_constant = m_ui.depth_bias_constant,
+		.depth_bias_slope = m_ui.depth_bias_slope,
+		.depth_bias_clamp = m_ui.depth_bias_clamp,
 		.csm_data = {},
 		.shadow_atlas_regions = m_shadow_render_system->getAtlasRegions().data(),
 		.shadow_atlas_width = m_shadow_render_system->getAtlasWidth(),
@@ -442,6 +445,14 @@ VeFrameInfo VeApplication::buildFrameInfo() {
 void VeApplication::applySettingChanges() {
 	m_ve_renderer.getProfiler().setGpuProfilingEnabled(m_ui.gpu_profiling);
 	auto extent = m_ve_renderer.getExtent();
+
+	if (m_ui.depth_bias_constant != m_depth_bias_constant || m_ui.depth_bias_slope != m_depth_bias_slope
+		|| m_ui.depth_bias_clamp != m_depth_bias_clamp) {
+		m_depth_bias_constant = m_ui.depth_bias_constant;
+		m_depth_bias_slope = m_ui.depth_bias_slope;
+		m_depth_bias_clamp = m_ui.depth_bias_clamp;
+		m_shadow_render_system->forceShadowRerender();
+	}
 
 	// Topology change (driven by GraphicsPanel)
 	if (m_ui.topology != m_last_topology) {
@@ -756,6 +767,7 @@ void VeApplication::collectStats(const VeFrameInfo& fi) {
 	m_active_backend->collectStats(fi.current_frame, m_ui, registry);
 	m_ui.stats.num_point_lights = registry.activePointLightCount();
 	m_ui.stats.num_directional_lights = registry.activeDirectionalLightCount();
+	m_ui.stats.num_spot_lights = registry.activeSpotLightCount();
 
 	const auto& results = profiler.getResults();
 	m_ui.stats.fence_wait = results.fence_wait_ms;
@@ -766,6 +778,7 @@ void VeApplication::collectStats(const VeFrameInfo& fi) {
 	m_ui.stats.gpu_overlap = results.gpu_overlap;
 
 	// Per-system GPU breakdown
+	m_ui.stats.gpu_culling = results.gpu(ProfileTimer::CULLING);
 	m_ui.stats.gpu_shadow_maps = results.gpu(ProfileTimer::SHADOW_MAPS);
 	m_ui.stats.gpu_depth_prepass = results.gpu(ProfileTimer::DEPTH_PREPASS);
 	m_ui.stats.gpu_gtao = results.gpu(ProfileTimer::GTAO);
@@ -1152,7 +1165,7 @@ void VeApplication::initSystems() {
 	m_gpu_backend = std::make_unique<GpuCullingBackend>(
 		*m_gpu_culling_system, gpu_scene);
 	m_meshlet_backend = std::make_unique<MeshletCullingBackend>(
-		*m_meshlet_culling_system, *m_gpu_culling_system);
+		*m_meshlet_culling_system, *m_gpu_culling_system, gpu_scene);
 	m_active_backend = m_cpu_backend.get();
 
 	// Physics
@@ -1169,6 +1182,7 @@ void VeApplication::initEditor() {
 	// Wire scene registry and systems into editor
 	m_editor->setSceneRegistry(&m_scene_entries, &m_current_scene_index, &m_pending_load);
 	m_editor->setSkyboxSystem(m_skybox_render_system.get());
+	m_editor->setShadowRenderSystem(m_shadow_render_system.get());
 	m_editor->setPhysicsSystem(m_physics_system.get());
 	m_editor->setAssetLoader(m_asset_loader.get());
 	m_editor->setCamera(&m_camera);

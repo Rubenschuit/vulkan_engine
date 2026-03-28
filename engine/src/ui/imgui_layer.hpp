@@ -34,6 +34,9 @@ struct VENGINE_API UIContext {
 	int csm_blend_mode = 2; // 0=off, 1=linear, 2=dithered TODO: enum
 	float shadow_bias = ve::SHADOW_BIAS;
 	float csm_normal_bias = ve::CSM_NORMAL_BIAS;
+	float depth_bias_constant = ve::SHADOW_DEPTH_BIAS_CONSTANT;
+	float depth_bias_slope = ve::SHADOW_DEPTH_BIAS_SLOPE;
+	float depth_bias_clamp = 0.0f;
 	Topology topology = Topology::TRIANGLE_LIST;
 	RenderMode render_mode = RenderMode::BRDF_MICROFACET;
 	bool hdr_enabled = false;
@@ -61,6 +64,7 @@ struct VENGINE_API UIContext {
 		float gpu_overlap = 0.0f;
 
 		// Per-system GPU breakdown
+		float gpu_culling = 0.0f;
 		float gpu_shadow_maps = 0.0f;
 		float gpu_depth_prepass = 0.0f;
 		float gpu_gtao = 0.0f;
@@ -81,10 +85,10 @@ struct VENGINE_API UIContext {
 		uint32_t cull_total_objects = 0;
 		uint32_t cull_visible_objects = 0;
 		uint32_t visible_triangles = 0;
-		uint32_t draw_calls = 0;
-		uint32_t transparent_draw_calls = 0;
+		uint32_t visible_meshlets = 0;
 		uint32_t num_point_lights = 0;
 		uint32_t num_directional_lights = 0;
+		uint32_t num_spot_lights = 0;
 	};
 	Stats stats;
 
@@ -106,7 +110,7 @@ struct VENGINE_API UIContext {
 	bool gpu_culling_enabled = false;
 	bool hiz_occlusion_enabled = false;
 	bool meshlet_culling_enabled = false;
-	bool meshlet_gpu_shadow_fallback = false;
+	bool meshlet_gpu_shadow_fallback = true;
 
 	// physics
 	bool physics_enabled = true;

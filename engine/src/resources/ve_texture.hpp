@@ -44,6 +44,7 @@ public:
 
 	const vk::raii::Sampler& getSampler() const;
 	const vk::raii::ImageView& getImageView() const { return m_texture_image->getImageView(); };
+	const VeImage* getImage() const { return m_texture_image.get(); }
 	vk::DescriptorImageInfo getDescriptorInfo() const;
 
 	uint32_t getWidth() const { return m_width; }

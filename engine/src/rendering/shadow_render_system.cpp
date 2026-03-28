@@ -25,9 +25,10 @@
 namespace ve {
 
 struct ShadowPushConstantData {
-	alignas(4) uint32_t instance_offset; // SSBO offset (SV_InstanceID is 0-based in Slang)
+	alignas(4) uint32_t instance_offset; // SV_InstanceID is 0-based in Slang
 };
 static_assert(sizeof(ShadowPushConstantData) == 4, "Shadow push constants must be 4 bytes");
+
 
 ShadowRenderSystem::ShadowRenderSystem(
 	VeDevice& device,
@@ -36,7 +37,6 @@ ShadowRenderSystem::ShadowRenderSystem(
 	std::filesystem::path shader_path)
 	: m_ve_device(device), m_descriptor_pool(descriptor_pool), m_shader_path(shader_path) {
 
-	// Initialize 2D arrays for per-frame point light data
 	m_shadow_ubos.resize(MAX_FRAMES_IN_FLIGHT);
 	m_shadow_global_descriptor_sets.resize(MAX_FRAMES_IN_FLIGHT);
 	m_light_views.resize(MAX_FRAMES_IN_FLIGHT);
@@ -47,18 +47,15 @@ ShadowRenderSystem::ShadowRenderSystem(
 		m_shadow_global_descriptor_sets[i].reserve(MAX_SHADOW_LAYERS);
 	}
 
-	// Compute atlas layout and create shadow atlas image
 	computeAtlasLayout();
 	createShadowResources();
 
-	// Create shadow global descriptor set layout (for shadow pass UBO + instance SSBO)
 	m_shadow_global_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eAllGraphics)
 		.addBinding(1, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eVertex)
 		.build();
 
-	// Create shadow descriptor set layout (for sampling shadow atlas)
-	// eCompute needed so the screen-space shadow mask compute shader can read shadow maps
+	// eCompute needed so the shadow mask compute shader can read shadow maps
 	m_shadow_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eSampler, vk::ShaderStageFlagBits::eFragment | vk::ShaderStageFlagBits::eCompute)       // comparison sampler
 		.addBinding(1, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eFragment | vk::ShaderStageFlagBits::eCompute)   // shadow atlas (2D)
@@ -97,7 +94,6 @@ void ShadowRenderSystem::createPipeline(vk::Format depth_format) {
 	PipelineConfigInfo pipeline_config{};
 	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
 
-	// Depth-only pipeline: no color output
 	pipeline_config.color_format = vk::Format::eUndefined;
 	pipeline_config.depth_format = depth_format;
 	pipeline_config.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptionsShadow();
@@ -126,7 +122,6 @@ void ShadowRenderSystem::createPipeline(vk::Format depth_format) {
 
 
 void ShadowRenderSystem::createShadowUBOs() {
-	// Per-frame, per-layer UBOs (all shadow sources share the same ShadowPassUBO format)
 	vk::DeviceSize buffer_size = sizeof(ShadowPassUBO);
 	for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
 		for (size_t layer = 0; layer < MAX_SHADOW_LAYERS; layer++) {
@@ -159,8 +154,6 @@ void ShadowRenderSystem::createShadowInstanceBuffers() {
 
 void ShadowRenderSystem::createShadowPassDescriptorSets(
 	VeDescriptorPool& descriptor_pool) {
-	// Point light shadow descriptor sets: per-frame, per-shadow-layer
-	// Each set: binding 0 = per-light UBO (ShadowPassUBO), binding 1 = shadow instance SSBO
 	for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
 		m_shadow_global_descriptor_sets[frame].clear();
 
@@ -186,14 +179,10 @@ void ShadowRenderSystem::createShadowPassDescriptorSets(
 
 
 void ShadowRenderSystem::computeAtlasLayout() {
-	// Two-phase packing:
-	//   Phase 1: cascade 0 (top-left) + remaining cascades stacked in column 1 (top-right)
-	//   Phase 2: lights fill remaining column 1 space, then overflow to a bottom row
-
+	// Pack cascade 0 top-left, remaining cascades stacked right, lights fill remaining space
 	uint32_t c0_res = CSM_CASCADE_RESOLUTIONS[0];
 	m_atlas_regions[0] = {0, 0, c0_res};
 
-	// Column 1: remaining cascades stacked vertically
 	uint32_t col1_x = c0_res;
 	uint32_t col1_width = 0;
 	uint32_t stack_y = 0;
@@ -204,7 +193,6 @@ void ShadowRenderSystem::computeAtlasLayout() {
 		stack_y += res;
 	}
 
-	// Light packing: grid into column 1 dead space, then overflow below cascade 0
 	constexpr uint32_t total_lights = MAX_POINT_SHADOW_LIGHTS + MAX_SPOT_SHADOW_LIGHTS;
 	auto lightRes = [](uint32_t i) -> uint32_t {
 		return (i < MAX_POINT_SHADOW_LIGHTS) ? POINT_SHADOW_RESOLUTION : SPOT_SHADOW_RESOLUTION;
@@ -212,7 +200,6 @@ void ShadowRenderSystem::computeAtlasLayout() {
 	uint32_t max_light_res = std::max(POINT_SHADOW_RESOLUTION, SPOT_SHADOW_RESOLUTION);
 
 	uint32_t placed = 0;
-	// Fill remaining column 1 space (below cascades, within cascade 0 height)
 	if (col1_width >= max_light_res) {
 		uint32_t per_row = col1_width / max_light_res;
 		uint32_t y = stack_y;
@@ -227,7 +214,6 @@ void ShadowRenderSystem::computeAtlasLayout() {
 	uint32_t top_width = c0_res + col1_width;
 	uint32_t top_height = std::max(c0_res, stack_y);
 
-	// Overflow: remaining lights in a horizontal row below the top zone
 	uint32_t overflow_x = 0;
 	uint32_t overflow_height = 0;
 	for (; placed < total_lights; placed++) {
@@ -253,14 +239,13 @@ void ShadowRenderSystem::computeAtlasLayout() {
 void ShadowRenderSystem::createShadowResources() {
 	VE_LOGD("Shadow system: Creating shadow atlas " << m_atlas_width << "x" << m_atlas_height);
 
-	// Find suitable depth format
 	m_shadow_depth_format = m_ve_device.findSupportedFormat(
 		{vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint},
 		vk::ImageTiling::eOptimal,
 		vk::FormatFeatureFlagBits::eDepthStencilAttachment | vk::FormatFeatureFlagBits::eSampledImage
 	);
 
-	// Create a single 2D depth image for the shadow atlas
+	// Transfer usage needed for CSM scroll copy operations
 	m_shadow_atlas = std::make_unique<VeImage>(
 		m_ve_device,
 		m_atlas_width,
@@ -268,14 +253,14 @@ void ShadowRenderSystem::createShadowResources() {
 		vk::SampleCountFlagBits::e1,
 		m_shadow_depth_format,
 		vk::ImageTiling::eOptimal,
-		vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled,
+		vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled
+			| vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		vk::ImageAspectFlagBits::eDepth,
 		false,  // not cubemap
 		1
 	);
 
-	// Transition shadow atlas
 	m_shadow_atlas->transitionImageLayout(
 		vk::ImageLayout::eUndefined,
 		vk::ImageLayout::eDepthStencilReadOnlyOptimal,
@@ -285,17 +270,33 @@ void ShadowRenderSystem::createShadowResources() {
 		vk::PipelineStageFlagBits2::eFragmentShader
 	);
 
-	// Create comparison sampler (for SampleCmpLevelZero) and raw sampler (for PCSS)
+	for (uint32_t c = 0; c < NUM_CSM_CASCADES; c++) {
+		uint32_t res = CSM_CASCADE_RESOLUTIONS[c];
+		m_cascade_cache[c] = std::make_unique<VeImage>(
+			m_ve_device, res, res,
+			vk::SampleCountFlagBits::e1, m_shadow_depth_format,
+			vk::ImageTiling::eOptimal,
+			vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst
+				| vk::ImageUsageFlagBits::eDepthStencilAttachment,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			vk::ImageAspectFlagBits::eDepth, false, 1);
+		m_cascade_cache[c]->transitionImageLayout(
+			vk::ImageLayout::eUndefined,
+			vk::ImageLayout::eTransferSrcOptimal,
+			vk::AccessFlags2{},
+			vk::AccessFlagBits2::eTransferRead,
+			vk::PipelineStageFlagBits2::eTopOfPipe,
+			vk::PipelineStageFlagBits2::eTransfer);
+	}
+
 	m_shadow_sampler = VeTexture::createDepthCompareSampler(m_ve_device);
 	m_shadow_raw_sampler = VeTexture::createShadowRawSampler(m_ve_device);
 }
 
 void ShadowRenderSystem::createShadowTextureDescriptorSets(VeDescriptorPool& descriptor_pool) {
-	// Create descriptor sets for shadow textures (per-frame) - used by other systems to sample shadows
 	m_shadow_descriptor_sets.clear();
 	m_shadow_descriptor_sets.reserve(MAX_FRAMES_IN_FLIGHT);
 
-	// Prepare descriptor infos (need to persist during the build call)
 	vk::DescriptorImageInfo cmp_sampler_info{
 		.sampler = *m_shadow_sampler,
 		.imageView = nullptr,
@@ -314,19 +315,17 @@ void ShadowRenderSystem::createShadowTextureDescriptorSets(VeDescriptorPool& des
 		.imageLayout = vk::ImageLayout::eUndefined
 	};
 
-	// Create and update all per-frame shadow descriptor sets using the builder pattern
 	for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
 		vk::raii::DescriptorSet set{nullptr};
 		VeDescriptorWriter(*m_shadow_set_layout, descriptor_pool)
-			.writeImage(0, &cmp_sampler_info)   // binding 0: comparison sampler
-			.writeImage(1, &image_info)          // binding 1: shadow map array
-			.writeImage(2, &raw_sampler_info)    // binding 2: raw sampler (PCSS)
+			.writeImage(0, &cmp_sampler_info)
+			.writeImage(1, &image_info)
+			.writeImage(2, &raw_sampler_info)
 			.build(set);
 		m_shadow_descriptor_sets.push_back(std::move(set));
 	}
 }
 
-// Update shadow UBOs from CSM cascade data + point light shadow data
 void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBufferObject& ubo,
                                               const CsmCascadeData& csm_data) {
 	uint32_t total_layers = csm_data.active_cascade_count + ubo.num_shadow_lights;
@@ -339,7 +338,6 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBuffer
 	m_light_views[frame_index].resize(total_layers);
 	m_light_projs[frame_index].resize(total_layers);
 
-	// Helper: builds atlas bias matrix for a given shadow layer
 	auto makeAtlasBias = [this](uint32_t layer) -> glm::mat4 {
 		auto& r = m_atlas_regions[layer];
 		float aw = static_cast<float>(m_atlas_width);
@@ -356,7 +354,6 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBuffer
 		);
 	};
 
-	// CSM cascades: write per-cascade ShadowPassUBOs + dirty tracking
 	if (csm_data.active_cascade_count > 0) {
 		for (uint32_t cascade = 0; cascade < csm_data.active_cascade_count; cascade++) {
 			m_light_views[frame_index][cascade] = csm_data.light_view[cascade];
@@ -367,30 +364,94 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBuffer
 			cascade_ubo.proj = csm_data.light_proj[cascade];
 			cascade_ubo.projection_view = cascade_ubo.proj * cascade_ubo.view;
 
-			// Dirty tracking: skip cascades whose matrices haven't changed
 			auto& state = m_cascade_state[cascade];
-			if (!m_force_full_rerender && state.valid
-				&& state.prev_view == cascade_ubo.view
-				&& state.prev_proj == cascade_ubo.proj) {
-				state.dirty = false;
-			} else {
-				state.dirty = true;
-				state.prev_view = cascade_ubo.view;
-				state.prev_proj = cascade_ubo.proj;
-				state.valid = true;
-			}
+			state.texel_shift = {0, 0};
+			state.incremental = false;
+			state.current_radius = csm_data.radius[cascade];
+			bool csm_scrolling_enabled = true; // toggle for debugging
 
-			// Per-layer UBO (used by CPU shadow path descriptor sets)
+			if (m_force_full_rerender || !state.valid) {
+				state.dirty = true;
+				if (m_force_full_rerender)
+					VE_LOGD("CSM " << cascade << ": FULL (force_full_rerender)");
+				else
+					VE_LOGD("CSM " << cascade << ": FULL (first frame)");
+			} else {
+				// Texel shift from snapped projection matrices: prev and current VP
+				// both map the origin to texel-snapped clip space.
+				glm::mat4 prev_pv = state.prev_proj * state.prev_view;
+				glm::mat4 cur_pv = cascade_ubo.proj * cascade_ubo.view;
+
+				float half_res = static_cast<float>(CSM_CASCADE_RESOLUTIONS[cascade]) * 0.5f;
+				glm::vec4 prev_origin = prev_pv * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+				glm::vec4 cur_origin = cur_pv * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+
+				glm::vec2 delta_texels = glm::vec2(cur_origin - prev_origin) * half_res;
+				glm::ivec2 shift{
+					static_cast<int>(std::round(delta_texels.x)),
+					static_cast<int>(std::round(delta_texels.y))
+				};
+
+				// Bit-identical VP means cascade content is still valid.
+				// shift==0 is not sufficient (sub-texel snapping can differ).
+				bool matrices_identical =
+					cascade_ubo.view == state.prev_view
+					&& cascade_ubo.proj == state.prev_proj;
+
+				if (matrices_identical) {
+					state.dirty = false;
+				} else if (csm_data.radius[cascade] != state.prev_radius) {
+					// Ortho projection scale changed, can't scroll
+					state.dirty = true;
+				} else {
+					// Detect depth-axis eye movement (Z-snap). When the eye jumps
+					// along the light direction, all cached depths become invalid.
+					// Threshold is half a texel in world units.
+					glm::vec3 prev_eye = -glm::transpose(glm::mat3(state.prev_view))
+						* glm::vec3(state.prev_view[3]);
+					glm::vec3 cur_eye = -glm::transpose(glm::mat3(cascade_ubo.view))
+						* glm::vec3(cascade_ubo.view[3]);
+					glm::vec3 light_fwd = -glm::vec3(
+						cascade_ubo.view[0][2], cascade_ubo.view[1][2],
+						cascade_ubo.view[2][2]);
+					float depth_shift = glm::dot(cur_eye - prev_eye, light_fwd);
+					float texel_world = (2.0f * csm_data.radius[cascade])
+						/ static_cast<float>(CSM_CASCADE_RESOLUTIONS[cascade]);
+					float depth_threshold = texel_world * 0.5f;
+
+					if (std::abs(depth_shift) > depth_threshold) {
+						state.dirty = true;
+						VE_LOGD("CSM " << cascade << ": FULL (Z-snap depth shift: "
+							<< depth_shift << ")");
+					} else if (std::abs(shift.x) > CSM_SCROLL_THRESHOLD
+							|| std::abs(shift.y) > CSM_SCROLL_THRESHOLD) {
+						state.dirty = true;
+						VE_LOGD("CSM " << cascade << ": FULL (shift too large: "
+							<< shift.x << "," << shift.y << ")");
+					} else if (csm_scrolling_enabled) {
+						state.dirty = true;
+						state.incremental = true;
+						state.texel_shift = shift;
+						//VE_LOGD("CSM " << cascade << ": INCREMENTAL shift=("
+						//	<< shift.x << "," << shift.y << ")");
+					} else {
+						state.dirty = true;
+					}
+				}
+			}
+			state.prev_radius = csm_data.radius[cascade];
+			state.prev_view = cascade_ubo.view;
+			state.prev_proj = cascade_ubo.proj;
+			state.valid = true;
+
 			m_shadow_ubos[frame_index][cascade]->writeToBuffer(&cascade_ubo);
 
-			// Per-cascade UBO (used by GPU/meshlet culled shadow paths)
 			if (!m_csm_cascade_ubos.empty() && cascade < m_csm_cascade_ubos[frame_index].size())
 				m_csm_cascade_ubos[frame_index][cascade]->writeToBuffer(&cascade_ubo);
 		}
 		m_force_full_rerender = false;
 	}
 
-	// non cascade shadow lights
 	for (uint32_t shadow_idx = 0; shadow_idx < ubo.num_shadow_lights && shadow_idx < MAX_SHADOW_LIGHTS; shadow_idx++) {
 		uint32_t layer = NUM_CSM_CASCADES + shadow_idx;
 		m_light_views[frame_index][csm_data.active_cascade_count + shadow_idx] = ubo.shadow_lights[shadow_idx].light_view;
@@ -401,10 +462,8 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBuffer
 		shadow_ubo.proj = ubo.shadow_lights[shadow_idx].light_proj;
 		shadow_ubo.projection_view = shadow_ubo.proj * shadow_ubo.view;
 
-		// Update main UBO with shadow matrix (used by PBR/simple shaders for point light shadows)
 		ubo.shadow_lights[shadow_idx].shadow_matrix = makeAtlasBias(layer) * shadow_ubo.projection_view;
 
-		// Atlas bounds for XY clamping in fragment shader (prevents sampling adjacent regions)
 		auto& r = m_atlas_regions[layer];
 		float aw = static_cast<float>(m_atlas_width);
 		float ah = static_cast<float>(m_atlas_height);
@@ -422,6 +481,214 @@ void ShadowRenderSystem::invalidateShadowDrawables() {
 	m_shadow_drawables_dirty = true;
 	m_force_full_rerender = true;
 	m_cached_unique_meshes.clear();
+}
+
+void ShadowRenderSystem::forceShadowRerender() {
+	m_force_full_rerender = true;
+}
+
+void ShadowRenderSystem::retireBuffer(std::unique_ptr<VeBuffer> buffer) {
+	if (buffer)
+		m_retired_buffers.push_back({std::move(buffer), MAX_FRAMES_IN_FLIGHT});
+}
+
+void ShadowRenderSystem::flushRetiredBuffers() {
+	for (auto it = m_retired_buffers.begin(); it != m_retired_buffers.end();) {
+		if (--it->frames_remaining == 0)
+			it = m_retired_buffers.erase(it);
+		else
+			++it;
+	}
+}
+
+void ShadowRenderSystem::transitionAtlasPostRender(vk::raii::CommandBuffer& cmd) {
+	vk::ImageMemoryBarrier2 barrier{
+		.sType = vk::StructureType::eImageMemoryBarrier2,
+		.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
+		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+		.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader
+			| vk::PipelineStageFlagBits2::eComputeShader,
+		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+		.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+		.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = m_shadow_atlas->getImage(),
+		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+	};
+	cmd.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier});
+}
+
+void ShadowRenderSystem::transitionAtlasForRendering(
+	vk::raii::CommandBuffer& cmd, uint32_t csm_count) {
+
+	bool any_incremental = false;
+	for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++)
+		if (m_cascade_state[c].dirty && m_cascade_state[c].incremental)
+			any_incremental = true;
+
+	if (any_incremental) {
+		// Scroll preservation: snapshot atlas to cache, shift-copy back, then transition to depth-attachment.
+		std::vector<vk::ImageMemoryBarrier2> snapshot_barriers;
+		snapshot_barriers.push_back({
+			.sType = vk::StructureType::eImageMemoryBarrier2,
+			.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader
+				| vk::PipelineStageFlagBits2::eComputeShader,
+			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
+			.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+			.dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+			.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+			.newLayout = vk::ImageLayout::eTransferSrcOptimal,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_shadow_atlas->getImage(),
+			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+		});
+		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
+			if (m_cascade_state[c].dirty && m_cascade_state[c].incremental) {
+				snapshot_barriers.push_back({
+					.sType = vk::StructureType::eImageMemoryBarrier2,
+					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.srcAccessMask = vk::AccessFlagBits2::eTransferRead,
+					.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+					.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+					.newLayout = vk::ImageLayout::eTransferDstOptimal,
+					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.image = m_cascade_cache[c]->getImage(),
+					.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+				});
+			}
+		}
+		cmd.pipelineBarrier2({.memoryBarrierCount = 0,
+			.imageMemoryBarrierCount = static_cast<uint32_t>(snapshot_barriers.size()),
+			.pImageMemoryBarriers = snapshot_barriers.data()});
+
+		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++)
+			if (m_cascade_state[c].dirty && m_cascade_state[c].incremental)
+				updateCascadeCache(cmd, c);
+
+		std::vector<vk::ImageMemoryBarrier2> shift_barriers;
+		shift_barriers.push_back({
+			.sType = vk::StructureType::eImageMemoryBarrier2,
+			.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+			.srcAccessMask = vk::AccessFlagBits2::eTransferRead,
+			.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+			.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+			.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+			.newLayout = vk::ImageLayout::eTransferDstOptimal,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_shadow_atlas->getImage(),
+			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+		});
+		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
+			if (m_cascade_state[c].dirty && m_cascade_state[c].incremental) {
+				shift_barriers.push_back({
+					.sType = vk::StructureType::eImageMemoryBarrier2,
+					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+					.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+					.oldLayout = vk::ImageLayout::eTransferDstOptimal,
+					.newLayout = vk::ImageLayout::eTransferSrcOptimal,
+					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.image = m_cascade_cache[c]->getImage(),
+					.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+				});
+			}
+		}
+		cmd.pipelineBarrier2({.memoryBarrierCount = 0,
+			.imageMemoryBarrierCount = static_cast<uint32_t>(shift_barriers.size()),
+			.pImageMemoryBarriers = shift_barriers.data()});
+
+		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++)
+			if (m_cascade_state[c].dirty && m_cascade_state[c].incremental)
+				copyPreservedRegion(cmd, c);
+
+		vk::ImageMemoryBarrier2 to_depth{
+			.sType = vk::StructureType::eImageMemoryBarrier2,
+			.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+			.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+			.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+				| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
+			.oldLayout = vk::ImageLayout::eTransferDstOptimal,
+			.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_shadow_atlas->getImage(),
+			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+		};
+		cmd.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &to_depth});
+	} else {
+		vk::ImageMemoryBarrier2 pre_barrier{
+			.sType = vk::StructureType::eImageMemoryBarrier2,
+			.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader
+				| vk::PipelineStageFlagBits2::eComputeShader,
+			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
+			.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+			.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+			.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_shadow_atlas->getImage(),
+			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+		};
+		cmd.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &pre_barrier});
+	}
+}
+
+void ShadowRenderSystem::beginShadowRegionRender(
+	vk::raii::CommandBuffer& cmd,
+	const FrameAtlasRegion& region,
+	vk::AttachmentLoadOp load_op,
+	const StripRegion* strip_clear) {
+
+	vk::Extent2D extent{region.resolution, region.resolution};
+	vk::Rect2D full_area{{static_cast<int32_t>(region.x), static_cast<int32_t>(region.y)}, extent};
+
+	vk::RenderingAttachmentInfo depth_attachment{
+		.imageView = *m_shadow_atlas->getImageView(),
+		.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+		.loadOp = load_op,
+		.storeOp = vk::AttachmentStoreOp::eStore,
+		.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
+	};
+	vk::RenderingInfo rendering_info{
+		.renderArea = full_area,
+		.layerCount = 1,
+		.colorAttachmentCount = 0,
+		.pColorAttachments = nullptr,
+		.pDepthAttachment = &depth_attachment
+	};
+	cmd.beginRendering(rendering_info);
+
+	cmd.setViewport(0, vk::Viewport{
+		static_cast<float>(region.x), static_cast<float>(region.y),
+		static_cast<float>(region.resolution), static_cast<float>(region.resolution),
+		0.0f, 1.0f});
+
+	if (strip_clear) {
+		vk::ClearAttachment clear_depth{
+			.aspectMask = vk::ImageAspectFlagBits::eDepth,
+			.clearValue = vk::ClearValue{vk::ClearDepthStencilValue{1.0f, 0}}
+		};
+		vk::ClearRect clear_rect{
+			.rect = {{static_cast<int32_t>(strip_clear->x), static_cast<int32_t>(strip_clear->y)},
+			         {strip_clear->width, strip_clear->height}},
+			.baseArrayLayer = 0, .layerCount = 1
+		};
+		cmd.clearAttachments(clear_depth, clear_rect);
+		cmd.setScissor(0, vk::Rect2D{
+			{static_cast<int32_t>(strip_clear->x), static_cast<int32_t>(strip_clear->y)},
+			{strip_clear->width, strip_clear->height}});
+	} else {
+		cmd.setScissor(0, full_area);
+	}
 }
 
 void ShadowRenderSystem::subscribeToRegistry(Registry& registry) {
@@ -445,9 +712,119 @@ void ShadowRenderSystem::subscribeToRegistry(Registry& registry) {
 		});
 }
 
+std::vector<ShadowRenderSystem::StripRegion> ShadowRenderSystem::computeStripRegions(uint32_t cascade) const {
+	std::vector<StripRegion> strips;
+	auto& state = m_cascade_state[cascade];
+	auto& region = m_atlas_regions[cascade];
+	uint32_t N = region.resolution;
+	int32_t dx = state.texel_shift.x;
+	int32_t dy = state.texel_shift.y;
+	// Expand strips by a small margin to eliminate depth precision artifacts at boundaries
+	constexpr uint32_t STRIP_MARGIN = 2;
+	uint32_t adx = std::min(N, static_cast<uint32_t>(std::abs(dx)) + STRIP_MARGIN);
+	uint32_t ady = std::min(N, static_cast<uint32_t>(std::abs(dy)) + STRIP_MARGIN);
+
+	// Horizontal strip (full width, ady height at the exposed edge)
+	if (ady > 0) {
+		uint32_t strip_y = (dy > 0)
+			? region.y
+			: region.y + N - ady;
+		strips.push_back({region.x, strip_y, N, ady});
+	}
+
+	// Vertical strip (adx width, remaining height)
+	if (adx > 0) {
+		uint32_t strip_x = (dx > 0)
+			? region.x
+			: region.x + N - adx;
+		uint32_t strip_h = N - ady;
+		uint32_t strip_y = (dy > 0)
+			? region.y + ady
+			: region.y;
+		strips.push_back({strip_x, strip_y, adx, strip_h});
+	}
+
+	return strips;
+}
+
+glm::mat4 ShadowRenderSystem::computeStripFrustumVP(
+	uint32_t cascade, const StripRegion& strip, uint32_t frame) const {
+	auto& region = m_atlas_regions[cascade];
+	uint32_t N = region.resolution;
+	float radius = m_cascade_state[cascade].current_radius;
+	float wpt = (2.0f * radius) / static_cast<float>(N);
+
+	// Convert strip atlas coordinates to light-space ortho bounds
+	// Atlas pixel 0 in cascade = light-space coordinate -radius
+	float x_min = -radius + static_cast<float>(strip.x - region.x) * wpt;
+	float x_max = x_min + static_cast<float>(strip.width) * wpt;
+	float y_min = -radius + static_cast<float>(strip.y - region.y) * wpt;
+	float y_max = y_min + static_cast<float>(strip.height) * wpt;
+
+	// Extract far plane from the actual cascade projection to match depth range.
+	// glm::ortho(l,r,b,t,0,F) with DEPTH_ZERO_TO_ONE produces proj[2][2] = -1/F.
+	float far_plane = -1.0f / m_light_projs[frame][cascade][2][2];
+	glm::mat4 strip_proj = glm::ortho(x_min, x_max, y_min, y_max, 0.0f, far_plane);
+	return strip_proj * m_light_views[frame][cascade];
+}
+
+void ShadowRenderSystem::copyPreservedRegion(vk::raii::CommandBuffer& cmd, uint32_t cascade) {
+	auto& state = m_cascade_state[cascade];
+	auto& region = m_atlas_regions[cascade];
+	uint32_t N = region.resolution;
+	int32_t dx = state.texel_shift.x;
+	int32_t dy = state.texel_shift.y;
+
+	uint32_t preserved_w = N - static_cast<uint32_t>(std::abs(dx));
+	uint32_t preserved_h = N - static_cast<uint32_t>(std::abs(dy));
+
+	if (preserved_w == 0 || preserved_h == 0)
+		return;
+
+	// Source: skip the edge that scrolled off. Destination: paste offset by the shift.
+	// If dx > 0, content shifted right: old texel 0 maps to new texel dx, so dst gets +dx offset.
+	// If dx < 0, content shifted left: old texel |dx| maps to new texel 0, so src gets +|dx| offset.
+	vk::Offset3D src_offset{std::max(-dx, 0), std::max(-dy, 0), 0};
+	vk::Offset3D dst_offset{
+		static_cast<int32_t>(region.x) + std::max(dx, 0),
+		static_cast<int32_t>(region.y) + std::max(dy, 0),
+		0
+	};
+
+	vk::ImageCopy copy_region{
+		.srcSubresource = {vk::ImageAspectFlagBits::eDepth, 0, 0, 1},
+		.srcOffset = src_offset,
+		.dstSubresource = {vk::ImageAspectFlagBits::eDepth, 0, 0, 1},
+		.dstOffset = dst_offset,
+		.extent = {preserved_w, preserved_h, 1}
+	};
+	cmd.copyImage(
+		m_cascade_cache[cascade]->getImage(), vk::ImageLayout::eTransferSrcOptimal,
+		m_shadow_atlas->getImage(), vk::ImageLayout::eTransferDstOptimal,
+		copy_region);
+}
+
+void ShadowRenderSystem::updateCascadeCache(vk::raii::CommandBuffer& cmd, uint32_t cascade) {
+	auto& region = m_atlas_regions[cascade];
+
+	vk::ImageCopy copy_region{
+		.srcSubresource = {vk::ImageAspectFlagBits::eDepth, 0, 0, 1},
+		.srcOffset = {static_cast<int32_t>(region.x), static_cast<int32_t>(region.y), 0},
+		.dstSubresource = {vk::ImageAspectFlagBits::eDepth, 0, 0, 1},
+		.dstOffset = {0, 0, 0},
+		.extent = {region.resolution, region.resolution, 1}
+	};
+	cmd.copyImage(
+		m_shadow_atlas->getImage(), vk::ImageLayout::eTransferSrcOptimal,
+		m_cascade_cache[cascade]->getImage(), vk::ImageLayout::eTransferDstOptimal,
+		copy_region);
+}
+
 void ShadowRenderSystem::growShadowInstanceBuffers(uint32_t new_capacity) {
 	VE_LOGI("Shadow instance buffer growing: " << m_shadow_instance_capacity << " -> " << new_capacity);
 	m_shadow_instance_capacity = new_capacity;
+	for (auto& buf : m_shadow_instance_buffers)
+		retireBuffer(std::move(buf));
 	createShadowInstanceBuffers();
 	createShadowPassDescriptorSets(m_descriptor_pool);
 }
@@ -457,22 +834,21 @@ void ShadowRenderSystem::rebuildMegaBuffers(vk::raii::CommandBuffer& cmd, const 
 	uint32_t total_indices = 0;
 	for (VeMesh* mesh : unique_meshes) {
 		total_vertices += mesh->getVertexCount();
-		// Sum indices for all LOD levels (LOD 0 = base, LOD 1+ = simplified)
 		for (uint32_t lod = 0; lod < mesh->getLodCount(); lod++)
 			total_indices += mesh->getLodIndexCount(lod);
 	}
 
 	if (total_vertices == 0 || total_indices == 0) {
 		m_mega_entries.clear();
-		m_mega_shadow_vbo.reset();
-		m_mega_ibo.reset();
+		retireBuffer(std::move(m_mega_shadow_vbo));
+		retireBuffer(std::move(m_mega_ibo));
 		m_mega_total_vertices = 0;
 		m_mega_total_indices = 0;
 		return;
 	}
 
-	// (Re)create mega-buffers if size changed
 	if (total_vertices != m_mega_total_vertices || !m_mega_shadow_vbo) {
+		retireBuffer(std::move(m_mega_shadow_vbo));
 		m_mega_shadow_vbo = std::make_unique<VeBuffer>(
 			m_ve_device,
 			sizeof(glm::vec3),
@@ -483,6 +859,7 @@ void ShadowRenderSystem::rebuildMegaBuffers(vk::raii::CommandBuffer& cmd, const 
 		m_mega_total_vertices = total_vertices;
 	}
 	if (total_indices != m_mega_total_indices || !m_mega_ibo) {
+		retireBuffer(std::move(m_mega_ibo));
 		m_mega_ibo = std::make_unique<VeBuffer>(
 			m_ve_device,
 			sizeof(uint32_t),
@@ -493,7 +870,6 @@ void ShadowRenderSystem::rebuildMegaBuffers(vk::raii::CommandBuffer& cmd, const 
 		m_mega_total_indices = total_indices;
 	}
 
-	// Record copies into the frame command buffer (caller adds transfer vertex-input barrier)
 	m_mega_entries.clear();
 	uint32_t vertex_offset = 0;
 	uint32_t index_offset = 0;
@@ -501,7 +877,6 @@ void ShadowRenderSystem::rebuildMegaBuffers(vk::raii::CommandBuffer& cmd, const 
 	for (VeMesh* mesh : unique_meshes) {
 		uint32_t vc = mesh->getVertexCount();
 
-		// Copy shadow VBO region (shared across all LODs)
 		vk::BufferCopy vbo_copy{
 			.srcOffset = 0,
 			.dstOffset = static_cast<vk::DeviceSize>(vertex_offset) * sizeof(glm::vec3),
@@ -510,7 +885,6 @@ void ShadowRenderSystem::rebuildMegaBuffers(vk::raii::CommandBuffer& cmd, const 
 		cmd.copyBuffer(mesh->getShadowVertexBuffer().getBuffer(),
 		               m_mega_shadow_vbo->getBuffer(), vbo_copy);
 
-		// Copy all LOD index buffers into mega-IBO
 		MeshMegaEntry mega_entry;
 		mega_entry.vertex_offset = vertex_offset;
 		mega_entry.lod_entries.reserve(mesh->getLodCount());
@@ -538,12 +912,12 @@ void ShadowRenderSystem::rebuildMegaBuffers(vk::raii::CommandBuffer& cmd, const 
 }
 
 void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
+	flushRetiredBuffers();
 	const auto& light_views = m_light_views[frame_info.current_frame];
 
 	if (light_views.empty()) return;
 	assert(light_views.size() <= MAX_SHADOW_LAYERS && "Active shadow layers exceed MAX_SHADOW_LAYERS");
 
-	// Build shadow draw list only when dirty (shared by all layers)
 	if (m_shadow_drawables_dirty) {
 		m_shadow_drawables.clear();
 		auto& registry = *frame_info.registry;
@@ -552,13 +926,12 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 		for (auto [entity, mesh, tc] : view) {
 			if (!mesh.getMesh() || !mesh.has_shadow)
 				continue;
-			// Shadow LOD: at least one step coarser than the visible mesh, clamped to available LODs
+			// Shadow LOD: one step coarser than visible, clamped to available LODs
 			uint32_t shadow_lod = std::min(std::max(1u, mesh.cached_lod + 1),
 			                               mesh.getMesh()->getLodCount() - 1);
 			m_shadow_drawables.push_back({entity, &mesh, shadow_lod});
 		}
 
-		// Sort by (mesh pointer, lod_level) for instanced batching
 		std::sort(m_shadow_drawables.begin(), m_shadow_drawables.end(),
 			[](const ShadowDrawable& a, const ShadowDrawable& b) {
 				VeMesh* ma = a.mesh->getMesh();
@@ -570,7 +943,6 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 
 		m_shadow_drawables_dirty = false;
 
-		// Extract sorted unique meshes and rebuild mega-buffers only if the mesh set changed
 		std::vector<VeMesh*> current_unique_meshes;
 		current_unique_meshes.reserve(m_shadow_drawables.size());
 		for (const auto& d : m_shadow_drawables) {
@@ -583,7 +955,6 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 			m_cached_unique_meshes = std::move(current_unique_meshes);
 			rebuildMegaBuffers(frame_info.cmd(), m_cached_unique_meshes);
 
-			// Barrier: transfer writes must complete before vertex/index reads
 			vk::MemoryBarrier2 transfer_barrier{
 				.sType = vk::StructureType::eMemoryBarrier2,
 				.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
@@ -603,21 +974,17 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 	auto& registry = *frame_info.registry;
 	uint32_t csm_count = frame_info.csm_data.active_cascade_count;
 
-	// Grow shadow instance buffer if needed (worst case: all drawables for CSM + all for point lights)
-	uint32_t max_needed = static_cast<uint32_t>(m_shadow_drawables.size()) * 2;
+	// Worst case: CSM full + point lights + strip instances (2 strips per incremental cascade)
+	uint32_t max_needed = static_cast<uint32_t>(m_shadow_drawables.size()) * (2 + NUM_CSM_CASCADES * 2);
 	if (max_needed > m_shadow_instance_capacity) {
 		growShadowInstanceBuffers(std::max(max_needed, m_shadow_instance_capacity * 2));
 	}
 
-	// Shadow SSBO layout: [CSM instances 0..N-1] [Point light instances N..M-1]
-	// CSM instance groups reference indices 0..N-1
-	// Point light instance groups reference indices N..M-1
-	// Both share m_shadow_instance_buffers; CSM is written first.
+	// SSBO layout: CSM instances first, then point/spot light instances
 	auto* shadow_instance_data = static_cast<InstanceData*>(
 		m_shadow_instance_buffers[frame_info.current_frame]->getMappedMemory());
 	uint32_t shadow_instance_count = 0;
 
-	// CSM: write instances culled against outermost cascade, grouped by mesh for instancing
 	m_csm_instance_groups.clear();
 	if (csm_count > 0) {
 		glm::mat4 outer_vp = m_light_projs[frame_info.current_frame][csm_count - 1]
@@ -651,7 +1018,6 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 		}
 	}
 
-	// --- Point light shadows: un-culled (wide FOV, culling cost > savings) ---
 	m_shadow_instance_groups.clear();
 	for (auto& d : m_shadow_drawables) {
 		if (shadow_instance_count >= m_shadow_instance_capacity) {
@@ -676,137 +1042,101 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 
 	auto& command_buffer = frame_info.cmd();
 
-	// transition entire atlas to depth-attachment
-	vk::ImageMemoryBarrier2 pre_barrier{
-		.sType = vk::StructureType::eImageMemoryBarrier2,
-		.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader
-			| vk::PipelineStageFlagBits2::eComputeShader,
-		.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
-		.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-		.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-		.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_shadow_atlas->getImage(),
-		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
-	};
-	vk::DependencyInfo pre_dep{
-		.sType = vk::StructureType::eDependencyInfo,
-		.imageMemoryBarrierCount = 1,
-		.pImageMemoryBarriers = &pre_barrier
-	};
-	command_buffer.pipelineBarrier2(pre_dep);
+	transitionAtlasForRendering(command_buffer, csm_count);
 
 	command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-	command_buffer.setDepthBias(1.25f, 0.0f, 1.75f);
+	command_buffer.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
 
 	if (m_mega_shadow_vbo && m_mega_ibo) {
 		command_buffer.bindVertexBuffers(0, {m_mega_shadow_vbo->getBuffer()}, {vk::DeviceSize{0}});
 		command_buffer.bindIndexBuffer(m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
 	}
 
-	// Render CSM cascades
 	if (csm_count > 0 && !m_csm_instance_groups.empty()) {
 		for (uint32_t c = 0; c < csm_count; c++) {
 			if (c < NUM_CSM_CASCADES && !m_cascade_state[c].dirty)
 				continue;
 
 			auto& region = m_atlas_regions[c];
-			vk::Extent2D extent{region.resolution, region.resolution};
+			auto& state = m_cascade_state[c];
 
-			vk::RenderingAttachmentInfo depth_attachment{
-				.imageView = *m_shadow_atlas->getImageView(),
-				.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-				.loadOp = vk::AttachmentLoadOp::eClear,
-				.storeOp = vk::AttachmentStoreOp::eStore,
-				.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
-			};
-			vk::RenderingInfo rendering_info{
-				.renderArea = {{static_cast<int32_t>(region.x), static_cast<int32_t>(region.y)}, extent},
-				.layerCount = 1,
-				.colorAttachmentCount = 0,
-				.pColorAttachments = nullptr,
-				.pDepthAttachment = &depth_attachment
-			};
+			if (c < NUM_CSM_CASCADES && state.incremental) {
+				vk::MemoryBarrier2 pre_strip{
+					.sType = vk::StructureType::eMemoryBarrier2,
+					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer
+						| vk::PipelineStageFlagBits2::eEarlyFragmentTests
+						| vk::PipelineStageFlagBits2::eLateFragmentTests,
+					.srcAccessMask = vk::AccessFlagBits2::eTransferWrite
+						| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+					.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+					.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
+						| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+				};
+				command_buffer.pipelineBarrier2({
+					.sType = vk::StructureType::eDependencyInfo,
+					.memoryBarrierCount = 1,
+					.pMemoryBarriers = &pre_strip,
+				});
 
-			command_buffer.beginRendering(rendering_info);
-			command_buffer.setViewport(0, vk::Viewport{
-				.x = static_cast<float>(region.x), .y = static_cast<float>(region.y),
-				.width = static_cast<float>(region.resolution),
-				.height = static_cast<float>(region.resolution),
-				.minDepth = 0.0f, .maxDepth = 1.0f
-			});
-			command_buffer.setScissor(0, vk::Rect2D{
-				.offset = {static_cast<int32_t>(region.x), static_cast<int32_t>(region.y)},
-				.extent = extent
-			});
-			renderShadowMap(frame_info, c, m_csm_instance_groups);
-			command_buffer.endRendering();
+				auto strips = computeStripRegions(c);
+
+				for (auto& strip : strips) {
+					glm::mat4 strip_vp = computeStripFrustumVP(c, strip, frame_info.current_frame);
+					FrustumPlane strip_planes[6];
+					extractFrustumPlanes(strip_vp, strip_planes);
+
+					std::vector<ShadowInstanceGroup> strip_groups;
+					for (auto& d : m_shadow_drawables) {
+						const VeMesh::AABB& aabb = d.mesh->getWorldAABB();
+						if (!isAABBInFrustum(aabb, strip_planes))
+							continue;
+						if (shadow_instance_count >= m_shadow_instance_capacity)
+							break;
+						uint32_t idx = shadow_instance_count++;
+						shadow_instance_data[idx].transform = registry.getWorldTransform(d.entity);
+						shadow_instance_data[idx].normal_transform[0] = glm::vec4(0.0f);
+						shadow_instance_data[idx].normal_transform[1] = glm::vec4(0.0f);
+						shadow_instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
+
+						VeMesh* mesh_ptr = d.mesh->getMesh();
+						if (!strip_groups.empty()
+							&& strip_groups.back().mesh == mesh_ptr
+							&& strip_groups.back().lod_level == d.lod_level) {
+							strip_groups.back().instance_count++;
+						} else {
+							strip_groups.push_back({mesh_ptr, d.lod_level, idx, 1});
+						}
+					}
+
+					beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eLoad, &strip);
+					if (!strip_groups.empty()) {
+						command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+						command_buffer.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
+						renderShadowMap(frame_info, c, strip_groups);
+					}
+					command_buffer.endRendering();
+				}
+			} else {
+				beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eClear);
+				renderShadowMap(frame_info, c, m_csm_instance_groups);
+				command_buffer.endRendering();
+			}
 		}
 	}
 
-	// Point/spot light shadows (per-light with atlas region viewport)
+	// Point/spot light shadows
 	if (!m_shadow_instance_groups.empty()) {
 		for (size_t i = csm_count; i < light_views.size(); i++) {
 			uint32_t layer = NUM_CSM_CASCADES + static_cast<uint32_t>(i - csm_count);
 			assert(layer < MAX_SHADOW_LAYERS);
 			auto& region = m_atlas_regions[layer];
-			vk::Extent2D extent{region.resolution, region.resolution};
-
-			vk::RenderingAttachmentInfo depth_attachment{
-				.imageView = *m_shadow_atlas->getImageView(),
-				.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-				.loadOp = vk::AttachmentLoadOp::eClear,
-				.storeOp = vk::AttachmentStoreOp::eStore,
-				.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
-			};
-			vk::RenderingInfo rendering_info{
-				.renderArea = {{static_cast<int32_t>(region.x), static_cast<int32_t>(region.y)}, extent},
-				.layerCount = 1,
-				.colorAttachmentCount = 0,
-				.pColorAttachments = nullptr,
-				.pDepthAttachment = &depth_attachment
-			};
-
-			command_buffer.beginRendering(rendering_info);
-			command_buffer.setViewport(0, vk::Viewport{
-				.x = static_cast<float>(region.x), .y = static_cast<float>(region.y),
-				.width = static_cast<float>(region.resolution),
-				.height = static_cast<float>(region.resolution),
-				.minDepth = 0.0f, .maxDepth = 1.0f
-			});
-			command_buffer.setScissor(0, vk::Rect2D{
-				.offset = {static_cast<int32_t>(region.x), static_cast<int32_t>(region.y)},
-				.extent = extent
-			});
-
+			beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eClear);
 			renderShadowMap(frame_info, layer, m_shadow_instance_groups);
 			command_buffer.endRendering();
 		}
 	}
 
-	// Single post-barrier: transition entire atlas back to shader-read
-	vk::ImageMemoryBarrier2 post_barrier{
-		.sType = vk::StructureType::eImageMemoryBarrier2,
-		.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
-		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader
-			| vk::PipelineStageFlagBits2::eComputeShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-		.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_shadow_atlas->getImage(),
-		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
-	};
-	vk::DependencyInfo post_dep{
-		.sType = vk::StructureType::eDependencyInfo,
-		.imageMemoryBarrierCount = 1,
-		.pImageMemoryBarriers = &post_barrier
-	};
-	command_buffer.pipelineBarrier2(post_dep);
+	transitionAtlasPostRender(command_buffer);
 }
 
 void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light_index,
@@ -823,8 +1153,7 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 	);
 
 	if (m_mega_shadow_vbo && m_mega_ibo && !m_mega_entries.empty()) {
-		// Mega-buffer path: single VBO/IBO bind, per-group drawIndexed with push constants
-		frame_info.cmd().bindVertexBuffers(0, {m_mega_shadow_vbo->getBuffer()}, {vk::DeviceSize{0}});
+			frame_info.cmd().bindVertexBuffers(0, {m_mega_shadow_vbo->getBuffer()}, {vk::DeviceSize{0}});
 		frame_info.cmd().bindIndexBuffer(m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
 
 		for (const auto& group : instance_groups) {
@@ -851,15 +1180,11 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 	}
 }
 
-void ShadowRenderSystem::createGpuShadowDescriptorSets(GpuCullingSystem& gpu_cull_system) {
-	// Per-cascade descriptor sets: binding 0 = per-cascade ShadowPassUBO, binding 1 = cascade instance buffer
+void ShadowRenderSystem::ensureCascadeUbos() {
+	if (!m_csm_cascade_ubos.empty())
+		return;
 	m_csm_cascade_ubos.resize(MAX_FRAMES_IN_FLIGHT);
-	m_gpu_cascade_descriptor_sets.resize(MAX_FRAMES_IN_FLIGHT);
-
 	for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
-		m_csm_cascade_ubos[frame].clear();
-		m_gpu_cascade_descriptor_sets[frame].clear();
-
 		for (uint32_t cascade = 0; cascade < NUM_CSM_CASCADES; cascade++) {
 			m_csm_cascade_ubos[frame].emplace_back(std::make_unique<VeBuffer>(
 				m_ve_device, sizeof(ShadowPassUBO), 1,
@@ -868,13 +1193,27 @@ void ShadowRenderSystem::createGpuShadowDescriptorSets(GpuCullingSystem& gpu_cul
 				m_ve_device.getDeviceProperties().limits.minUniformBufferOffsetAlignment
 			));
 			m_csm_cascade_ubos[frame].back()->map();
+		}
+	}
+}
 
+void ShadowRenderSystem::createShadowSlotDescriptorSets(
+	std::function<VeBuffer&(uint32_t frame, uint32_t slot)> get_instance_buffer,
+	std::vector<std::vector<vk::raii::DescriptorSet>>& out_cascade_sets,
+	std::vector<std::vector<vk::raii::DescriptorSet>>& out_light_sets) {
+
+	ensureCascadeUbos();
+
+	out_cascade_sets.resize(MAX_FRAMES_IN_FLIGHT);
+	for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
+		out_cascade_sets[frame].clear();
+		for (uint32_t cascade = 0; cascade < NUM_CSM_CASCADES; cascade++) {
 			vk::DescriptorBufferInfo cascade_ubo_info{
 				.buffer = m_csm_cascade_ubos[frame][cascade]->getBuffer(),
 				.offset = 0,
 				.range = sizeof(ShadowPassUBO)
 			};
-			auto instance_info = gpu_cull_system.getShadowInstanceBuffer(
+			auto instance_info = get_instance_buffer(
 				static_cast<uint32_t>(frame), cascade).getDescriptorInfo();
 
 			vk::raii::DescriptorSet ds{nullptr};
@@ -882,35 +1221,40 @@ void ShadowRenderSystem::createGpuShadowDescriptorSets(GpuCullingSystem& gpu_cul
 				.writeBuffer(0, &cascade_ubo_info)
 				.writeBuffer(1, &instance_info)
 				.build(ds);
-			m_gpu_cascade_descriptor_sets[frame].push_back(std::move(ds));
+			out_cascade_sets[frame].push_back(std::move(ds));
 		}
 	}
 
-	// Point/spot light descriptor sets: binding 0 = per-light UBO, binding 1 = per-light instance buffer
-	m_gpu_shadow_descriptor_sets.resize(MAX_FRAMES_IN_FLIGHT);
+	out_light_sets.resize(MAX_FRAMES_IN_FLIGHT);
 	for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
-		m_gpu_shadow_descriptor_sets[frame].clear();
-
+		out_light_sets[frame].clear();
 		for (uint32_t light = 0; light < MAX_SHADOW_LIGHTS; light++) {
-			uint32_t layer = NUM_CSM_CASCADES + light; // UBO index
-			uint32_t slot  = layer;                    // shadow_buf_index = array_layer
+			uint32_t layer = NUM_CSM_CASCADES + light;
 
 			vk::DescriptorBufferInfo buffer_info{
 				.buffer = m_shadow_ubos[frame][layer]->getBuffer(),
 				.offset = 0,
 				.range = sizeof(ShadowPassUBO)
 			};
-			auto instance_info = gpu_cull_system.getShadowInstanceBuffer(
-				static_cast<uint32_t>(frame), slot).getDescriptorInfo();
+			auto instance_info = get_instance_buffer(
+				static_cast<uint32_t>(frame), layer).getDescriptorInfo();
 
 			vk::raii::DescriptorSet ds{nullptr};
 			VeDescriptorWriter(*m_shadow_global_set_layout, m_descriptor_pool)
 				.writeBuffer(0, &buffer_info)
 				.writeBuffer(1, &instance_info)
 				.build(ds);
-			m_gpu_shadow_descriptor_sets[frame].push_back(std::move(ds));
+			out_light_sets[frame].push_back(std::move(ds));
 		}
 	}
+}
+
+void ShadowRenderSystem::createGpuShadowDescriptorSets(GpuCullingSystem& gpu_cull_system) {
+	createShadowSlotDescriptorSets(
+		[&](uint32_t f, uint32_t s) -> VeBuffer& {
+			return gpu_cull_system.getShadowInstanceBuffer(f, s);
+		},
+		m_gpu_cascade_descriptor_sets, m_gpu_shadow_descriptor_sets);
 }
 
 void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
@@ -928,134 +1272,48 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 
 	const VeCamera* cam_for_hiz = gpu_cull_system.isHizEnabled() ? &frame_info.camera : nullptr;
 
-	// Dispatch shadow culls
+	// Classify cascades
+	bool any_incremental = false;
+	bool any_full_dirty = false;
+	for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
+		if (!m_cascade_state[c].dirty) continue;
+		if (m_cascade_state[c].incremental) any_incremental = true;
+		else any_full_dirty = true;
+	}
+	bool any_dirty = any_incremental || any_full_dirty || num_shadow_lights > 0;
+	if (!any_dirty)
+		return;
+
+	// Incremental cascades are culled per-strip later with tight strip frustums
+	bool batched_cull_dispatched = false;
 	for (uint32_t c = 0; c < csm_count; c++) {
-		if (c < NUM_CSM_CASCADES && !m_cascade_state[c].dirty)
+		if (c < NUM_CSM_CASCADES && (!m_cascade_state[c].dirty || m_cascade_state[c].incremental))
 			continue;
 		glm::mat4 cascade_vp = m_light_projs[frame][c] * m_light_views[frame][c];
 		gpu_cull_system.dispatchShadowCull(cmd, cascade_vp, scene_mgr, frame, c,
 		                            static_cast<int32_t>(c) + 1, cam_for_hiz);
+		batched_cull_dispatched = true;
 	}
 	for (uint32_t i = 0; i < num_shadow_lights; i++) {
 		uint32_t slot = NUM_CSM_CASCADES + i;
 		glm::mat4 light_vp = m_light_projs[frame][csm_count + i] * m_light_views[frame][csm_count + i];
 		gpu_cull_system.dispatchShadowCull(cmd, light_vp, scene_mgr, frame, slot, 2, cam_for_hiz);
+		batched_cull_dispatched = true;
 	}
+	if (batched_cull_dispatched)
+		gpu_cull_system.flushShadowCullBarrier(cmd, scene_mgr, frame);
 
-	gpu_cull_system.flushShadowCullBarrier(cmd, scene_mgr, frame);
-
-	// Single pre-barrier: transition entire atlas to depth-attachment
-	vk::ImageMemoryBarrier2 pre_barrier{
-		.sType = vk::StructureType::eImageMemoryBarrier2,
-		.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader
-			| vk::PipelineStageFlagBits2::eComputeShader,
-		.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
-		.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-		.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-		.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_shadow_atlas->getImage(),
-		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
-	};
-	vk::DependencyInfo pre_dep{
-		.sType = vk::StructureType::eDependencyInfo,
-		.imageMemoryBarrierCount = 1,
-		.pImageMemoryBarriers = &pre_barrier
-	};
-	cmd.pipelineBarrier2(pre_dep);
+	transitionAtlasForRendering(cmd, csm_count);
 
 	ShadowPushConstantData push{.instance_offset = 0};
 
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-	cmd.setDepthBias(1.25f, 0.0f, 1.75f);
+	cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
 	mega_buffer.bindShadow(cmd);
 	cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
 		vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
 
-	// Render CSM cascades (skip clean cascades)
-	for (uint32_t c = 0; c < csm_count; c++) {
-		if (c < NUM_CSM_CASCADES && !m_cascade_state[c].dirty)
-			continue;
-
-		auto& region = m_atlas_regions[c];
-		vk::Extent2D extent{region.resolution, region.resolution};
-
-		vk::RenderingAttachmentInfo depth_attachment{
-			.imageView = *m_shadow_atlas->getImageView(),
-			.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-			.loadOp = vk::AttachmentLoadOp::eClear,
-			.storeOp = vk::AttachmentStoreOp::eStore,
-			.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
-		};
-		vk::RenderingInfo rendering_info{
-			.renderArea = {{static_cast<int32_t>(region.x), static_cast<int32_t>(region.y)}, extent},
-			.layerCount = 1,
-			.colorAttachmentCount = 0,
-			.pColorAttachments = nullptr,
-			.pDepthAttachment = &depth_attachment
-		};
-		cmd.beginRendering(rendering_info);
-		cmd.setViewport(0, vk::Viewport{
-			static_cast<float>(region.x), static_cast<float>(region.y),
-			static_cast<float>(region.resolution), static_cast<float>(region.resolution),
-			0.0f, 1.0f});
-		cmd.setScissor(0, vk::Rect2D{
-			{static_cast<int32_t>(region.x), static_cast<int32_t>(region.y)}, extent});
-		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
-			0, {*m_gpu_cascade_descriptor_sets[frame][c]}, {});
-
-		auto& shadow_indirect = gpu_cull_system.getShadowIndirectBuffer(frame, c);
-		for (uint32_t bucket = 0; bucket < GpuCullingSystem::BUCKET_COUNT; bucket++) {
-			uint32_t group_count = scene_mgr.getBucketGroupCount(bucket);
-			if (group_count == 0) continue;
-			auto offset = static_cast<vk::DeviceSize>(
-				scene_mgr.getBucketGroupOffset(bucket)) * sizeof(VkDrawIndexedIndirectCommand);
-			if (gpu_cull_system.compactionEnabled()) {
-				cmd.drawIndexedIndirectCount(
-					gpu_cull_system.getShadowCompactedIndirectBuffer(frame, c).getBuffer(), offset,
-					gpu_cull_system.getShadowCompactCountBuffer(frame, c).getBuffer(),
-					bucket * sizeof(uint32_t),
-					group_count, sizeof(VkDrawIndexedIndirectCommand));
-			} else {
-				cmd.drawIndexedIndirect(shadow_indirect.getBuffer(), offset,
-					group_count, sizeof(VkDrawIndexedIndirectCommand));
-			}
-		}
-		cmd.endRendering();
-	}
-
-	// Render shadow maps for Point/Spot lights
-	for (uint32_t i = 0; i < num_shadow_lights; i++) {
-		uint32_t slot = NUM_CSM_CASCADES + i;
-		auto& region = m_atlas_regions[slot];
-		vk::Extent2D extent{region.resolution, region.resolution};
-
-		vk::RenderingAttachmentInfo depth_attachment{
-			.imageView = *m_shadow_atlas->getImageView(),
-			.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-			.loadOp = vk::AttachmentLoadOp::eClear,
-			.storeOp = vk::AttachmentStoreOp::eStore,
-			.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
-		};
-		vk::RenderingInfo shadow_rendering_info{
-			.renderArea = {{static_cast<int32_t>(region.x), static_cast<int32_t>(region.y)}, extent},
-			.layerCount = 1,
-			.colorAttachmentCount = 0,
-			.pColorAttachments = nullptr,
-			.pDepthAttachment = &depth_attachment
-		};
-		cmd.beginRendering(shadow_rendering_info);
-		cmd.setViewport(0, vk::Viewport{
-			static_cast<float>(region.x), static_cast<float>(region.y),
-			static_cast<float>(region.resolution), static_cast<float>(region.resolution),
-			0.0f, 1.0f});
-		cmd.setScissor(0, vk::Rect2D{
-			{static_cast<int32_t>(region.x), static_cast<int32_t>(region.y)}, extent});
-		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
-			0, {*m_gpu_shadow_descriptor_sets[frame][i]}, {});
-
+	auto drawIndirect = [&](uint32_t slot) {
 		auto& shadow_indirect = gpu_cull_system.getShadowIndirectBuffer(frame, slot);
 		for (uint32_t bucket = 0; bucket < GpuCullingSystem::BUCKET_COUNT; bucket++) {
 			uint32_t group_count = scene_mgr.getBucketGroupCount(bucket);
@@ -1073,96 +1331,71 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 					group_count, sizeof(VkDrawIndexedIndirectCommand));
 			}
 		}
+	};
+
+	// Rebind lambda: needed after interleaved compute dispatches invalidate graphics state
+	auto rebindGraphicsState = [&]() {
+		cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+		cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
+		cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
+			vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
+	};
+
+	for (uint32_t c = 0; c < csm_count; c++) {
+		if (c < NUM_CSM_CASCADES && (!m_cascade_state[c].dirty || m_cascade_state[c].incremental))
+			continue;
+
+		beginShadowRegionRender(cmd, m_atlas_regions[c], vk::AttachmentLoadOp::eClear);
+		rebindGraphicsState();
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+			0, {*m_gpu_cascade_descriptor_sets[frame][c]}, {});
+		drawIndirect(c);
 		cmd.endRendering();
 	}
 
-	// Single post-barrier: transition entire atlas back to shader-read
-	vk::ImageMemoryBarrier2 post_barrier{
-		.sType = vk::StructureType::eImageMemoryBarrier2,
-		.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
-		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader
-			| vk::PipelineStageFlagBits2::eComputeShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-		.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_shadow_atlas->getImage(),
-		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
-	};
-	vk::DependencyInfo post_dep{
-		.sType = vk::StructureType::eDependencyInfo,
-		.imageMemoryBarrierCount = 1,
-		.pImageMemoryBarriers = &post_barrier
-	};
-	cmd.pipelineBarrier2(post_dep);
+	// Render incremental cascades with per-strip frustum culling.
+	// Each strip gets its own cull dispatch with a tight frustum, then render.
+	for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
+		if (!m_cascade_state[c].dirty || !m_cascade_state[c].incremental)
+			continue;
+
+		auto& region = m_atlas_regions[c];
+		auto strips = computeStripRegions(c);
+
+		for (auto& strip : strips) {
+			glm::mat4 strip_vp = computeStripFrustumVP(c, strip, frame);
+			gpu_cull_system.dispatchShadowCull(cmd, strip_vp, scene_mgr, frame, c,
+				static_cast<int32_t>(c) + 1, cam_for_hiz);
+			gpu_cull_system.flushShadowCullBarrier(cmd, scene_mgr, frame);
+
+			beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad, &strip);
+			rebindGraphicsState();
+			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+				0, {*m_gpu_cascade_descriptor_sets[frame][c]}, {});
+			mega_buffer.bindShadow(cmd);
+			drawIndirect(c);
+			cmd.endRendering();
+		}
+	}
+
+	for (uint32_t i = 0; i < num_shadow_lights; i++) {
+		uint32_t slot = NUM_CSM_CASCADES + i;
+		beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eClear);
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+			0, {*m_gpu_shadow_descriptor_sets[frame][i]}, {});
+		drawIndirect(slot);
+		cmd.endRendering();
+	}
+
+	transitionAtlasPostRender(cmd);
 }
 
 void ShadowRenderSystem::createMeshletShadowDescriptorSets(MeshletCullingSystem& meshlet_cull) {
-	// Per-cascade descriptor sets: binding 0 = per-cascade ShadowPassUBO, binding 1 = meshlet instance buffer
-	// Reuse m_csm_cascade_ubos created by createGpuShadowDescriptorSets (or create if not yet present)
-	if (m_csm_cascade_ubos.empty()) {
-		m_csm_cascade_ubos.resize(MAX_FRAMES_IN_FLIGHT);
-		for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
-			m_csm_cascade_ubos[frame].clear();
-			for (uint32_t cascade = 0; cascade < NUM_CSM_CASCADES; cascade++) {
-				m_csm_cascade_ubos[frame].emplace_back(std::make_unique<VeBuffer>(
-					m_ve_device, sizeof(ShadowPassUBO), 1,
-					vk::BufferUsageFlagBits::eUniformBuffer,
-					vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-					m_ve_device.getDeviceProperties().limits.minUniformBufferOffsetAlignment
-				));
-				m_csm_cascade_ubos[frame].back()->map();
-			}
-		}
-	}
-
-	m_meshlet_cascade_descriptor_sets.resize(MAX_FRAMES_IN_FLIGHT);
-	for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
-		m_meshlet_cascade_descriptor_sets[frame].clear();
-		for (uint32_t cascade = 0; cascade < NUM_CSM_CASCADES; cascade++) {
-			vk::DescriptorBufferInfo cascade_ubo_info{
-				.buffer = m_csm_cascade_ubos[frame][cascade]->getBuffer(),
-				.offset = 0,
-				.range = sizeof(ShadowPassUBO)
-			};
-			auto instance_info = meshlet_cull.getShadowInstanceBuffer(
-				static_cast<uint32_t>(frame), cascade).getDescriptorInfo();
-
-			vk::raii::DescriptorSet ds{nullptr};
-			VeDescriptorWriter(*m_shadow_global_set_layout, m_descriptor_pool)
-				.writeBuffer(0, &cascade_ubo_info)
-				.writeBuffer(1, &instance_info)
-				.build(ds);
-			m_meshlet_cascade_descriptor_sets[frame].push_back(std::move(ds));
-		}
-	}
-
-	// Point/spot light descriptor sets
-	m_meshlet_shadow_descriptor_sets.resize(MAX_FRAMES_IN_FLIGHT);
-	for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
-		m_meshlet_shadow_descriptor_sets[frame].clear();
-		for (uint32_t light = 0; light < MAX_SHADOW_LIGHTS; light++) {
-			uint32_t layer = NUM_CSM_CASCADES + light;
-			uint32_t slot  = layer;
-
-			vk::DescriptorBufferInfo buffer_info{
-				.buffer = m_shadow_ubos[frame][layer]->getBuffer(),
-				.offset = 0,
-				.range = sizeof(ShadowPassUBO)
-			};
-			auto instance_info = meshlet_cull.getShadowInstanceBuffer(
-				static_cast<uint32_t>(frame), slot).getDescriptorInfo();
-
-			vk::raii::DescriptorSet ds{nullptr};
-			VeDescriptorWriter(*m_shadow_global_set_layout, m_descriptor_pool)
-				.writeBuffer(0, &buffer_info)
-				.writeBuffer(1, &instance_info)
-				.build(ds);
-			m_meshlet_shadow_descriptor_sets[frame].push_back(std::move(ds));
-		}
-	}
+	createShadowSlotDescriptorSets(
+		[&](uint32_t f, uint32_t s) -> VeBuffer& {
+			return meshlet_cull.getShadowInstanceBuffer(f, s);
+		},
+		m_meshlet_cascade_descriptor_sets, m_meshlet_shadow_descriptor_sets);
 }
 
 void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_info,
@@ -1178,11 +1411,17 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 	uint32_t csm_count = frame_info.csm_data.active_cascade_count;
 	uint32_t num_shadow_lights = static_cast<uint32_t>(light_views.size()) - csm_count;
 
-	// Build batched shadow cull requests
+	bool any_dirty = num_shadow_lights > 0;
+	for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES && !any_dirty; c++)
+		any_dirty = m_cascade_state[c].dirty;
+	if (!any_dirty)
+		return;
+
+	// Incremental cascades are culled per-strip later with tight strip frustums
 	std::vector<MeshletCullingSystem::ShadowCullRequest> requests;
 	requests.reserve(csm_count + num_shadow_lights);
 	for (uint32_t c = 0; c < csm_count; c++) {
-		if (c < NUM_CSM_CASCADES && !m_cascade_state[c].dirty)
+		if (c < NUM_CSM_CASCADES && (!m_cascade_state[c].dirty || m_cascade_state[c].incremental))
 			continue;
 		const glm::mat4& lv = m_light_views[frame][c];
 		glm::vec3 light_dir = -glm::vec3(lv[0][2], lv[1][2], lv[2][2]);
@@ -1203,165 +1442,94 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		});
 	}
 
-	meshlet_cull.dispatchShadowCulls(cmd, requests.data(),
-		static_cast<uint32_t>(requests.size()), scene_mgr, frame);
+	if (!requests.empty())
+		meshlet_cull.dispatchShadowCulls(cmd, requests.data(),
+			static_cast<uint32_t>(requests.size()), scene_mgr, frame);
 
-	// Single pre-barrier: transition entire atlas to depth-attachment
-	vk::ImageMemoryBarrier2 pre_barrier{
-		.sType = vk::StructureType::eImageMemoryBarrier2,
-		.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader
-			| vk::PipelineStageFlagBits2::eComputeShader,
-		.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
-		.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-		.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-		.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_shadow_atlas->getImage(),
-		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
-	};
-	vk::DependencyInfo pre_dep{
-		.sType = vk::StructureType::eDependencyInfo,
-		.imageMemoryBarrierCount = 1,
-		.pImageMemoryBarriers = &pre_barrier
-	};
-	cmd.pipelineBarrier2(pre_dep);
+	transitionAtlasForRendering(cmd, csm_count);
 
 	ShadowPushConstantData push{.instance_offset = 0};
 	constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
 
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-	cmd.setDepthBias(1.25f, 0.0f, 1.75f);
+	cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
 	mega_buffer.bindShadowMeshletIbo(cmd);
 	cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
 		vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
 
-	// Render CSM cascades (skip clean cascades)
+	auto drawMeshletIndirect = [&](uint32_t slot) {
+		auto& shadow_indirect = meshlet_cull.getShadowMeshletIndirectBuffer(frame, slot);
+		auto& shadow_draw_counts = meshlet_cull.getShadowMeshletDrawCounts(frame, slot);
+		const uint32_t* cpu_counts = meshlet_cull.getShadowCpuDrawCounts(slot);
+		for (uint32_t bucket = 0; bucket < MESHLET_SHADOW_BUCKET_COUNT; bucket++) {
+			auto buf_offset = static_cast<vk::DeviceSize>(bucket) * SHADOW_MAX_PER_BUCKET
+			                  * sizeof(VkDrawIndexedIndirectCommand);
+			if (cpu_counts) {
+				uint32_t count = std::min(cpu_counts[bucket], SHADOW_MAX_PER_BUCKET);
+				cmd.drawIndexedIndirect(shadow_indirect.getBuffer(), buf_offset,
+					count, sizeof(VkDrawIndexedIndirectCommand));
+			} else {
+				auto count_offset = static_cast<vk::DeviceSize>(bucket) * sizeof(uint32_t);
+				cmd.drawIndexedIndirectCount(
+					shadow_indirect.getBuffer(), buf_offset,
+					shadow_draw_counts.getBuffer(), count_offset,
+					SHADOW_MAX_PER_BUCKET, sizeof(VkDrawIndexedIndirectCommand));
+			}
+		}
+	};
+
 	for (uint32_t c = 0; c < csm_count; c++) {
 		if (c < NUM_CSM_CASCADES && !m_cascade_state[c].dirty)
 			continue;
 
 		auto& region = m_atlas_regions[c];
-		vk::Extent2D extent{region.resolution, region.resolution};
 
-		vk::RenderingAttachmentInfo depth_attachment{
-			.imageView = *m_shadow_atlas->getImageView(),
-			.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-			.loadOp = vk::AttachmentLoadOp::eClear,
-			.storeOp = vk::AttachmentStoreOp::eStore,
-			.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
-		};
-		vk::RenderingInfo rendering_info{
-			.renderArea = {{static_cast<int32_t>(region.x), static_cast<int32_t>(region.y)}, extent},
-			.layerCount = 1,
-			.colorAttachmentCount = 0,
-			.pColorAttachments = nullptr,
-			.pDepthAttachment = &depth_attachment
-		};
-		cmd.beginRendering(rendering_info);
-		cmd.setViewport(0, vk::Viewport{
-			static_cast<float>(region.x), static_cast<float>(region.y),
-			static_cast<float>(region.resolution), static_cast<float>(region.resolution),
-			0.0f, 1.0f});
-		cmd.setScissor(0, vk::Rect2D{
-			{static_cast<int32_t>(region.x), static_cast<int32_t>(region.y)}, extent});
-		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
-			0, {*m_meshlet_cascade_descriptor_sets[frame][c]}, {});
+		if (c < NUM_CSM_CASCADES && m_cascade_state[c].incremental) {
+			auto strips = computeStripRegions(c);
+			const glm::mat4& lv = m_light_views[frame][c];
+			glm::vec3 light_dir = -glm::vec3(lv[0][2], lv[1][2], lv[2][2]);
 
-		auto& shadow_indirect = meshlet_cull.getShadowMeshletIndirectBuffer(frame, c);
-		auto& shadow_draw_counts = meshlet_cull.getShadowMeshletDrawCounts(frame, c);
-		const uint32_t* cpu_counts = meshlet_cull.getShadowCpuDrawCounts(c);
-		for (uint32_t bucket = 0; bucket < MESHLET_SHADOW_BUCKET_COUNT; bucket++) {
-			auto buf_offset   = static_cast<vk::DeviceSize>(bucket) * SHADOW_MAX_PER_BUCKET
-			                    * sizeof(VkDrawIndexedIndirectCommand);
-			if (cpu_counts) {
-				uint32_t count = std::min(cpu_counts[bucket], SHADOW_MAX_PER_BUCKET);
-				cmd.drawIndexedIndirect(shadow_indirect.getBuffer(), buf_offset,
-					count, sizeof(VkDrawIndexedIndirectCommand));
-			} else {
-				auto count_offset = static_cast<vk::DeviceSize>(bucket) * sizeof(uint32_t);
-				cmd.drawIndexedIndirectCount(
-					shadow_indirect.getBuffer(), buf_offset,
-					shadow_draw_counts.getBuffer(), count_offset,
-					SHADOW_MAX_PER_BUCKET, sizeof(VkDrawIndexedIndirectCommand));
+			for (auto& strip : strips) {
+				glm::mat4 strip_vp = computeStripFrustumVP(c, strip, frame);
+				MeshletCullingSystem::ShadowCullRequest strip_req{
+					.view_proj = strip_vp,
+					.light_pos = -light_dir * 100000.0f,
+					.slot      = c,
+					.lod_bias  = static_cast<int32_t>(c) + 1,
+				};
+				meshlet_cull.dispatchShadowCulls(cmd, &strip_req, 1, scene_mgr, frame, true);
+
+				beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad, &strip);
+				// Re-bind after compute dispatch
+				cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+				cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
+				mega_buffer.bindShadowMeshletIbo(cmd);
+				cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
+					vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
+				cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+					0, {*m_meshlet_cascade_descriptor_sets[frame][c]}, {});
+				drawMeshletIndirect(c);
+				cmd.endRendering();
 			}
+		} else {
+			beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eClear);
+			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+				0, {*m_meshlet_cascade_descriptor_sets[frame][c]}, {});
+			drawMeshletIndirect(c);
+			cmd.endRendering();
 		}
-		cmd.endRendering();
 	}
 
-	// Render shadow maps for Point/Spot lights
 	for (uint32_t i = 0; i < num_shadow_lights; i++) {
 		uint32_t slot = NUM_CSM_CASCADES + i;
-		auto& region = m_atlas_regions[slot];
-		vk::Extent2D extent{region.resolution, region.resolution};
-
-		vk::RenderingAttachmentInfo depth_attachment{
-			.imageView = *m_shadow_atlas->getImageView(),
-			.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-			.loadOp = vk::AttachmentLoadOp::eClear,
-			.storeOp = vk::AttachmentStoreOp::eStore,
-			.clearValue = vk::ClearDepthStencilValue{.depth = 1.0f, .stencil = 0}
-		};
-		vk::RenderingInfo shadow_rendering_info{
-			.renderArea = {{static_cast<int32_t>(region.x), static_cast<int32_t>(region.y)}, extent},
-			.layerCount = 1,
-			.colorAttachmentCount = 0,
-			.pColorAttachments = nullptr,
-			.pDepthAttachment = &depth_attachment
-		};
-		cmd.beginRendering(shadow_rendering_info);
-		cmd.setViewport(0, vk::Viewport{
-			static_cast<float>(region.x), static_cast<float>(region.y),
-			static_cast<float>(region.resolution), static_cast<float>(region.resolution),
-			0.0f, 1.0f});
-		cmd.setScissor(0, vk::Rect2D{
-			{static_cast<int32_t>(region.x), static_cast<int32_t>(region.y)}, extent});
+		beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eClear);
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			0, {*m_meshlet_shadow_descriptor_sets[frame][i]}, {});
-
-		auto& shadow_indirect = meshlet_cull.getShadowMeshletIndirectBuffer(frame, slot);
-		auto& shadow_draw_counts = meshlet_cull.getShadowMeshletDrawCounts(frame, slot);
-		const uint32_t* cpu_counts = meshlet_cull.getShadowCpuDrawCounts(slot);
-		for (uint32_t bucket = 0; bucket < MESHLET_SHADOW_BUCKET_COUNT; bucket++) {
-			auto buf_offset   = static_cast<vk::DeviceSize>(bucket) * SHADOW_MAX_PER_BUCKET
-			                    * sizeof(VkDrawIndexedIndirectCommand);
-			if (cpu_counts) {
-				uint32_t count = std::min(cpu_counts[bucket], SHADOW_MAX_PER_BUCKET);
-				cmd.drawIndexedIndirect(shadow_indirect.getBuffer(), buf_offset,
-					count, sizeof(VkDrawIndexedIndirectCommand));
-			} else {
-				auto count_offset = static_cast<vk::DeviceSize>(bucket) * sizeof(uint32_t);
-				cmd.drawIndexedIndirectCount(
-					shadow_indirect.getBuffer(), buf_offset,
-					shadow_draw_counts.getBuffer(), count_offset,
-					SHADOW_MAX_PER_BUCKET, sizeof(VkDrawIndexedIndirectCommand));
-			}
-		}
+		drawMeshletIndirect(slot);
 		cmd.endRendering();
 	}
 
-	// Single post-barrier: transition entire atlas back to shader-read
-	vk::ImageMemoryBarrier2 post_barrier{
-		.sType = vk::StructureType::eImageMemoryBarrier2,
-		.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
-		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader
-			| vk::PipelineStageFlagBits2::eComputeShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-		.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_shadow_atlas->getImage(),
-		.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
-	};
-	vk::DependencyInfo post_dep{
-		.sType = vk::StructureType::eDependencyInfo,
-		.imageMemoryBarrierCount = 1,
-		.pImageMemoryBarriers = &post_barrier
-	};
-	cmd.pipelineBarrier2(post_dep);
+	transitionAtlasPostRender(cmd);
 }
 
 } // namespace ve

@@ -3,6 +3,7 @@
 #include "ve_config.hpp"
 #include "rendering/ve_frame_info.hpp"
 
+#include <array>
 #include <memory>
 #include <vector>
 #include <filesystem>
@@ -46,5 +47,14 @@ private:
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_ve_pipeline;
 	std::filesystem::path m_shader_path;
+
+	// Per-cascade Z-snap hysteresis state
+	struct CascadeZState {
+		float snapped_z = 0.0f;
+		float z_snap = 0.0f;
+		glm::vec3 cached_eye{0.0f};
+		bool valid = false;
+	};
+	std::array<CascadeZState, NUM_CSM_CASCADES> m_cascade_z_state{};
 };
 }

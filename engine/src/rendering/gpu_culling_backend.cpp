@@ -84,9 +84,7 @@ void GpuCullingBackend::collectStats(uint32_t frame, UIContext& ui, Registry&) c
 	ui.stats.cull_total_objects = m_gpu_scene.getTotalRegisteredCount();
 	ui.stats.cull_visible_objects = m_cull.readbackDrawCounts(frame);
 	ui.stats.visible_triangles = m_cull.readbackTriangleCount(frame);
-	ui.stats.draw_calls = m_cull.readbackDrawCounts(frame);
-	const auto* rb = m_cull.getReadbackCounts(frame);
-	ui.stats.transparent_draw_calls = rb[4] + rb[5];
+	ui.stats.visible_meshlets = 0;
 }
 
 void GpuCullingBackend::setHizEnabled(bool enabled) { m_cull.setHizEnabled(enabled); }

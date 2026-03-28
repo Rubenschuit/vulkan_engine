@@ -64,6 +64,7 @@ struct CullParams {
 	uint     max_meshlet_draws;  // MAX_MESHLET_DRAWS for main, MAX_MESHLET_SHADOW_DRAWS for shadow
 	float4   camera_pos;         // xyz = world-space camera position (for cone culling)
 	uint     bucket_count;       // MESHLET_BUCKET_COUNT (6); used by meshlet pass-2 for per-bucket capacity
+	uint     shadow_cone_cull;   // 1 = enable backface cone culling in shadow pass (directional lights)
 };
 
 // Per-meshlet GPU metadata (64 bytes, matches MeshletGPU in C++)

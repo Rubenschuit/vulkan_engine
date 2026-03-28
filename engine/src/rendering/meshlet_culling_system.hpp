@@ -71,10 +71,13 @@ public:
 	};
 
 	// Batched 2-pass meshlet shadow cull for all shadow layers at once.
+	// When skip_readback is true, the staging copy is skipped and the full
+	// indirect buffer capacity is used.
 	void dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 	                         const ShadowCullRequest* requests, uint32_t count,
 	                         GpuSceneManager& scene_mgr,
-	                         uint32_t frame_index);
+	                         uint32_t frame_index,
+	                         bool skip_readback = false);
 
 	VeBuffer& getShadowMeshletIndirectBuffer(uint32_t frame, uint32_t slot) {
 		assert(frame < MAX_FRAMES_IN_FLIGHT && slot < SHADOW_BUFFER_COUNT);
@@ -107,6 +110,10 @@ public:
 	}
 	// Raw readback counts for stats display (actual draw counts from 2 frames ago).
 	const uint32_t* getRawDrawCounts() const { return m_current_readback_valid ? m_readback_counts.data() : nullptr; }
+	// Triangle count from readback (index_count / 3 accumulated by pass-2 shader).
+	uint32_t readbackTriangleCount() const { return m_current_readback_valid ? m_readback_tri_count / 3 : 0; }
+	// Visible object count from pass 1 readback.
+	uint32_t readbackVisibleObjectCount() const { return m_current_readback_valid ? m_readback_visible_objects : 0; }
 
 	// Per-slot shadow readback counts for drawIndexedIndirect fallback (only when drawIndirectCount unavailable).
 	const uint32_t* getShadowCpuDrawCounts(uint32_t slot) const {
@@ -186,6 +193,8 @@ private:
 	// Async readback of per-bucket draw counts
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_readback_staging;
 	std::array<uint32_t, MESHLET_BUCKET_COUNT> m_readback_counts{};
+	uint32_t m_readback_tri_count = 0;
+	uint32_t m_readback_visible_objects = 0;
 	std::array<uint32_t, MESHLET_BUCKET_COUNT> m_readback_high_water{};
 	std::array<bool, MAX_FRAMES_IN_FLIGHT> m_has_readback{};
 	bool m_current_readback_valid = false;

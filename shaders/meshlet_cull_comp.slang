@@ -79,6 +79,8 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 	// Claim a slot within this bucket
 	uint slot;
 	draw_counts.InterlockedAdd(bucket * 4, 1, slot);
+	if (cull_params.is_shadow_pass == 0)
+		draw_counts.InterlockedAdd(cull_params.bucket_count * 4, m.index_count);
 
 	uint max_per_bucket = cull_params.max_meshlet_draws / cull_params.bucket_count;
 	if (slot >= max_per_bucket)

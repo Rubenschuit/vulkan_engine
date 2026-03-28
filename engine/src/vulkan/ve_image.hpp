@@ -36,9 +36,10 @@ public:
 	uint32_t getHeight() const { return m_height; }
 	uint32_t getMipLevels() const { return m_mip_levels; }
 	vk::ImageAspectFlags getAspectFlags() const { return m_aspect_flags; }
+	uint32_t getArrayLayers() const { return m_array_layers; }
 	vk::Extent2D getExtent2D() const { return vk::Extent2D{ m_width, m_height }; }
 
-	vk::raii::ImageView createLayerImageView(uint32_t layer) const;
+	vk::raii::ImageView createLayerImageView(uint32_t layer, vk::ComponentMapping components = {}) const;
 	vk::raii::ImageView createMultiLayerImageView(uint32_t base_layer, uint32_t layer_count) const;
 
 	void printDebugInfo() const {

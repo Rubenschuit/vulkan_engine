@@ -45,7 +45,7 @@ bool HierarchyPanel::isLightOnly(Registry& registry, Entity entity) {
 }
 
 void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /*context*/) {
-	if (!ImGui::Begin("Scene Hierarchy", &state.show_hierarchy)) {
+	if (!ImGui::Begin("Scene Hierarchy", &state.show_hierarchy, ImGuiWindowFlags_NoFocusOnAppearing)) {
 		ImGui::End();
 		return;
 	}

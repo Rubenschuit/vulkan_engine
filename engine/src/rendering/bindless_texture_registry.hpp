@@ -36,7 +36,7 @@ private:
 	void writeSlot(uint32_t index, VeTexture* texture);
 
 	VeDevice& m_ve_device;
-	uint32_t m_max_textures;
+	[[maybe_unused]] uint32_t m_max_textures;
 
 	std::unique_ptr<VeDescriptorPool> m_pool;
 	std::unique_ptr<VeDescriptorSetLayout> m_set_layout;

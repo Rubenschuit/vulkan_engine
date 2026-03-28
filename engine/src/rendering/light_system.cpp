@@ -274,7 +274,7 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 			glm::vec3 up = std::abs(glm::dot(dir, glm::vec3(0.0f, 1.0f, 0.0f))) > 0.99f
 				? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
 
-			constexpr float z_margin = 150.0f;
+			constexpr float z_margin = CSM_Z_MARGIN;
 
 			for (uint32_t cascade = 0; cascade < NUM_CSM_CASCADES; cascade++) {
 				float near_split = (cascade == 0) ? shadow_near : splits[cascade - 1];
@@ -313,13 +313,55 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 				float texels_per_unit = cascade_res / (2.0f * radius);
 				radius = std::ceil(radius * texels_per_unit) / texels_per_unit;
 
-				// Light view: position light behind the sphere along light direction
-				glm::mat4 light_view = glm::lookAt(center - dir * (radius + z_margin), center, up);
+				// Cascade geometry for scroll tracking
+				frame_info.csm_data.center[cascade] = center;
+				frame_info.csm_data.radius[cascade] = radius;
 
-				// Ortho projection from sphere (rotation-invariant)
+				// Snap the center's component along the light direction to a coarse grid.
+				// This keeps depth values stable between snap events, enabling shadow map
+				// caching.
+				float depth_range = 2.0f * radius + z_margin;
+				float z_snap = depth_range * 0.5f;
+				float center_along_light = glm::dot(center, dir);
+
+				// Z-snap with hysteresis
+				auto& zs = m_cascade_z_state[cascade];
+				float naive_snap = std::floor(center_along_light / z_snap) * z_snap;
+				float snapped_z;
+				if (!zs.valid || zs.z_snap != z_snap) {
+					snapped_z = naive_snap;
+				} else {
+					float drift = center_along_light - zs.snapped_z;
+					if (drift > z_snap * 1.25f || drift < -z_snap * 0.25f)
+						snapped_z = naive_snap;
+					else
+						snapped_z = zs.snapped_z;
+				}
+				bool z_snap_changed = (snapped_z != zs.snapped_z) || !zs.valid;
+				zs.snapped_z = snapped_z;  // must be after z_snap_changed check
+				zs.z_snap = z_snap;
+				zs.valid = true;
+				glm::vec3 light_right = glm::normalize(glm::cross(dir, up));
+				glm::vec3 light_up = glm::cross(light_right, dir);
+				glm::vec3 snapped_center = light_right * glm::dot(center, light_right)
+					+ light_up * glm::dot(center, light_up)
+					+ dir * snapped_z;
+
+				glm::vec3 eye = snapped_center - dir * (radius + z_margin);
+				if (!z_snap_changed) {
+					float cached_depth = glm::dot(zs.cached_eye, dir);
+					float cur_depth = glm::dot(eye, dir);
+					eye += dir * (cached_depth - cur_depth);
+				}
+				zs.cached_eye = eye;
+				glm::mat4 light_view = glm::lookAt(eye, eye + dir, up);
+
+				// Widen depth range to cover the full cascade sphere at maximum
+				// Z-snap drift (up to z_snap * 1.25 from hysteresis)
+				float total_depth_range = depth_range + z_snap * 2.5f;
 				glm::mat4 light_proj = glm::ortho(
 					-radius, radius, -radius, radius,
-					0.0f, 2.0f * radius + z_margin);
+					0.0f, total_depth_range);
 
 				// Texel snapping: eliminates sub-texel jitter
 				applyTexelSnapping(light_proj, light_view, CSM_CASCADE_RESOLUTIONS[cascade]);

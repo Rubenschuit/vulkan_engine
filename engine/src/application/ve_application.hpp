@@ -261,6 +261,9 @@ private:
 	bool m_gtao_half_res = true;
 	int m_pcf_samples = 8;
 	int m_pcss_filter_samples = 16;
+	float m_depth_bias_constant = ve::SHADOW_DEPTH_BIAS_CONSTANT;
+	float m_depth_bias_slope = ve::SHADOW_DEPTH_BIAS_SLOPE;
+	float m_depth_bias_clamp = 0.0f;
 	Topology m_last_topology = Topology::TRIANGLE_LIST;
 	size_t m_last_skybox_index = SIZE_MAX;
 

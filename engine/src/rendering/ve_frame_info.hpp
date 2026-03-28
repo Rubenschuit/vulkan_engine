@@ -208,6 +208,10 @@ struct CsmCascadeData {
 	glm::mat4 light_view[ve::NUM_CSM_CASCADES];
 	glm::mat4 light_proj[ve::NUM_CSM_CASCADES];
 	uint32_t  active_cascade_count = 0;
+
+	// Cascade geometry for scroll tracking (set by LightSystem)
+	glm::vec3 center[ve::NUM_CSM_CASCADES]{};   // bounding sphere center (world space)
+	float     radius[ve::NUM_CSM_CASCADES]{};    // rounded radius (world units)
 };
 
 // TODO: restructure
@@ -239,6 +243,11 @@ struct VeFrameInfo {
 
 	// Shadow mode for pipeline variant selection (set by application, consumed by render systems)
 	ShadowMode shadow_mode = ShadowMode::REGULAR;
+
+	// depth bias for shadow map rendering
+	float depth_bias_constant = ve::SHADOW_DEPTH_BIAS_CONSTANT;
+	float depth_bias_slope = ve::SHADOW_DEPTH_BIAS_SLOPE;
+	float depth_bias_clamp = 0.0f;
 
 	// Filled by LightSystem, consumed by ShadowRenderSystem
 	CsmCascadeData csm_data;
