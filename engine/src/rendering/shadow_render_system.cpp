@@ -1729,10 +1729,10 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 
 	rebindMeshletState();
 
-	auto drawMeshletIndirect = [&](uint32_t slot) {
+	auto drawMeshletIndirect = [&](uint32_t slot, bool is_dynamic = false) {
 		auto& shadow_indirect = meshlet_cull.getShadowMeshletIndirectBuffer(frame, slot);
 		auto& shadow_draw_counts = meshlet_cull.getShadowMeshletDrawCounts(frame, slot);
-		const uint32_t* cpu_counts = meshlet_cull.getShadowCpuDrawCounts(slot);
+		const uint32_t* cpu_counts = meshlet_cull.getShadowCpuDrawCounts(slot, is_dynamic);
 		for (uint32_t bucket = 0; bucket < MESHLET_SHADOW_BUCKET_COUNT; bucket++) {
 			auto buf_offset = static_cast<vk::DeviceSize>(bucket) * SHADOW_MAX_PER_BUCKET
 			                  * sizeof(VkDrawIndexedIndirectCommand);
@@ -1897,13 +1897,13 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 				.lod_bias     = static_cast<int32_t>(c) + 1,
 				.shadow_mode  = ShadowPassMode::DYNAMIC_ONLY,
 			};
-			meshlet_cull.dispatchShadowCulls(cmd, &dyn_req, 1, scene_mgr, frame, true);
+			meshlet_cull.dispatchShadowCulls(cmd, &dyn_req, 1, scene_mgr, frame);
 
 			beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad);
 			rebindMeshletState();
 			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 				0, {*m_meshlet_cascade_descriptor_sets[frame][c]}, {});
-			drawMeshletIndirect(c);
+			drawMeshletIndirect(c, true);
 			cmd.endRendering();
 		}
 	}

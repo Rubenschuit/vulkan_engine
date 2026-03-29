@@ -117,11 +117,12 @@ public:
 	uint32_t readbackVisibleObjectCount() const { return m_current_readback_valid ? m_readback_visible_objects : 0; }
 
 	// Per-slot shadow readback counts for drawIndexedIndirect fallback (only when drawIndirectCount unavailable).
-	const uint32_t* getShadowCpuDrawCounts(uint32_t slot) const {
+	const uint32_t* getShadowCpuDrawCounts(uint32_t slot, bool is_dynamic = false) const {
 		assert(slot < SHADOW_BUFFER_COUNT);
 		if (m_ve_device.supportsDrawIndirectCount())
 			return nullptr;
-		return m_shadow_readback_high_water[slot].data();
+		return is_dynamic ? m_shadow_readback_high_water_dynamic[slot].data()
+		                  : m_shadow_readback_high_water[slot].data();
 	}
 
 	bool isHizEnabled() const { return m_hiz_enabled; }
@@ -204,10 +205,17 @@ private:
 	using ShadowBufSet = std::array<std::unique_ptr<VeBuffer>, SHADOW_BUFFER_COUNT>;
 
 	// Shadow async readback (fallback when drawIndirectCount unavailable)
+	// Static pass tracking (from batch dispatch with STATIC_ONLY / ALL_OBJECTS)
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_readback_staging;
 	std::array<std::array<uint32_t, MESHLET_SHADOW_BUCKET_COUNT>, SHADOW_BUFFER_COUNT> m_shadow_readback_counts{};
 	std::array<std::array<uint32_t, MESHLET_SHADOW_BUCKET_COUNT>, SHADOW_BUFFER_COUNT> m_shadow_readback_high_water{};
 	std::array<std::array<bool, SHADOW_BUFFER_COUNT>, MAX_FRAMES_IN_FLIGHT> m_shadow_has_readback{};
+
+	// Dynamic pass tracking
+	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_readback_staging_dynamic;
+	std::array<std::array<uint32_t, MESHLET_SHADOW_BUCKET_COUNT>, SHADOW_BUFFER_COUNT> m_shadow_readback_counts_dynamic{};
+	std::array<std::array<uint32_t, MESHLET_SHADOW_BUCKET_COUNT>, SHADOW_BUFFER_COUNT> m_shadow_readback_high_water_dynamic{};
+	std::array<std::array<bool, SHADOW_BUFFER_COUNT>, MAX_FRAMES_IN_FLIGHT> m_shadow_has_readback_dynamic{};
 
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_visible_objects;
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_meshlet_object_map;

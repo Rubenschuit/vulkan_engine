@@ -342,6 +342,7 @@ void VeApplication::finalizeAsyncLoad() {
 	} else if (m_async_load_type == SceneLoadRequest::Type::ADD_MODEL && m_active_scene) {
 		model->addToScene(m_active_scene->getRegistry(),
 		                  {0.f, 0.f, 0.f}, {0.f, 0.f, 0.f}, {1.f, 1.f, 1.f});
+		m_physics_system->addStaticCollidersForAllMeshes(m_active_scene->getRegistry());
 		m_scene_resources->rebuildForModelAdd(
 			m_active_scene->getRegistry(), *m_pbr_render_system);
 		if (m_meshlet_culling_system) {

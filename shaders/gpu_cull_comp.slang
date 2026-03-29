@@ -36,6 +36,26 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 	uint idx = active_ids[tid.x].gpu_id;
 
 	ObjectDataGPU obj = objects[idx];
+
+	// Determine bucket from material flags
+	uint alpha_mode = obj.material_flags & MAT_FLAG_ALPHA_MODE_MASK;
+	bool is_mask = (alpha_mode == 1);
+	bool is_double_sided = (obj.material_flags & MAT_FLAG_DOUBLE_SIDED) != 0;
+	bool is_transparent = (obj.object_flags & OBJ_FLAG_IS_TRANSPARENT) != 0;
+
+	// Shadow pass filtering
+	if (cull_params.is_shadow_pass != 0) {
+		if (is_transparent)
+			return;
+		if ((obj.object_flags & OBJ_FLAG_NO_SHADOW) != 0)
+			return;
+		bool is_dynamic_obj = (obj.object_flags & OBJ_FLAG_DYNAMIC) != 0;
+		if (cull_params.is_shadow_pass == 2 && is_dynamic_obj) 
+			return;
+		if (cull_params.is_shadow_pass == 3 && !is_dynamic_obj) 
+			return;
+	}
+
 	TransformGPU xform = transforms[idx];
 
 	// Transform bounding sphere center to world space
@@ -46,25 +66,6 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 
 	if (!frustumTest(cull_params, center_world, radius))
 		return;
-
-	// Determine bucket from material flags
-	uint alpha_mode = obj.material_flags & MAT_FLAG_ALPHA_MODE_MASK;
-	bool is_mask = (alpha_mode == 1);
-	bool is_double_sided = (obj.material_flags & MAT_FLAG_DOUBLE_SIDED) != 0;
-	bool is_transparent = (obj.object_flags & OBJ_FLAG_IS_TRANSPARENT) != 0;
-
-	// Transparent objects skip shadow passes
-	if (is_transparent && cull_params.is_shadow_pass != 0)
-		return;
-
-	bool no_shadow = (obj.object_flags & OBJ_FLAG_NO_SHADOW) != 0;
-	if (cull_params.is_shadow_pass != 0 && no_shadow)
-		return;
-
-	// Static/dynamic shadow filtering (is_shadow_pass 2 = static only, 3 = dynamic only)
-	bool is_dynamic_obj = (obj.object_flags & OBJ_FLAG_DYNAMIC) != 0;
-	if (cull_params.is_shadow_pass == 2 && is_dynamic_obj) return;
-	if (cull_params.is_shadow_pass == 3 && !is_dynamic_obj) return;
 
 	if (cull_params.hiz_enabled != 0 && cull_params.is_shadow_pass == 0)
 		if (!hizOcclusionTest(cull_params, hiz_pyramid, hiz_sampler, center_world, radius))
