@@ -16,11 +16,11 @@
 
 namespace ve {
 
-SceneResourceManager::SceneResourceManager(VeDevice& device)
+SceneResourceManager::SceneResourceManager(VeDevice& device, EventBus& event_bus)
 	: m_ve_device(device),
 	  m_mega_buffer(std::make_unique<PbrMegaBuffer>(device)),
 	  m_bindless_registry(std::make_unique<BindlessTextureRegistry>(device)),
-	  m_material_ssbo_manager(std::make_unique<MaterialSSBOManager>(device, *m_bindless_registry)),
+	  m_material_ssbo_manager(std::make_unique<MaterialSSBOManager>(device, *m_bindless_registry, event_bus)),
 	  m_gpu_scene_manager(std::make_unique<GpuSceneManager>(device)) {}
 
 SceneResourceManager::~SceneResourceManager() = default;

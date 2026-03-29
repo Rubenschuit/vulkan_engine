@@ -63,6 +63,12 @@ struct InputActionEvent {
 	uint32_t value = 0;
 };
 
+// ── Material changes ────────────────────────────────────────────────────────
+
+struct MaterialDataChangedEvent {
+	uint32_t gpu_index;
+};
+
 // ── Settings changes ────────────────────────────────────────────────────────
 
 class VeDescriptorPool;

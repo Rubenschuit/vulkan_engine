@@ -710,6 +710,10 @@ void ShadowRenderSystem::subscribeToRegistry(Registry& registry) {
 			m_dynamic_drawables_dirty = true;
 			m_force_full_rerender = true;
 		});
+	registry.events().subscribe<LightDataChangedEvent>(
+		[this](const LightDataChangedEvent&) {
+			m_force_full_rerender = true;
+		});
 }
 
 std::vector<ShadowRenderSystem::StripRegion> ShadowRenderSystem::computeStripRegions(uint32_t cascade) const {

@@ -6,6 +6,7 @@
 #include "vulkan/ve_compute_pipeline.hpp"
 #include "scene/ve_registry.hpp"
 #include "scene/ve_component.hpp"
+#include "scene/ecs_event_dispatcher.hpp"
 #include "utils/ve_log.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
@@ -29,7 +30,6 @@ ClusterLightSystem::ClusterLightSystem(
 	event_bus.subscribe<ClusterEnabledChangedEvent>([this](const ClusterEnabledChangedEvent& e) {
 		m_ui_enabled = e.enabled;
 	});
-
 	createBuffers(screen_extent);
 	createComputeSetLayout();
 	createOutputSetLayout();

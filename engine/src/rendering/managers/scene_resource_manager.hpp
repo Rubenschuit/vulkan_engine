@@ -19,7 +19,7 @@ class EventBus;
 // GPU scene) and consolidates scene load / unload / model-add orchestration.
 class VENGINE_API SceneResourceManager {
 public:
-	SceneResourceManager(VeDevice& device);
+	SceneResourceManager(VeDevice& device, EventBus& event_bus);
 	~SceneResourceManager();
 
 	SceneResourceManager(const SceneResourceManager&) = delete;

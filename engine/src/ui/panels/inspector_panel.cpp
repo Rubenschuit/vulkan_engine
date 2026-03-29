@@ -354,22 +354,22 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 			if (ImGui::MenuItem("Copy")) {
 				auto* dl = registry->getComponent<DirectionalLightComponent>(entity);
 				CopiedDirectionalLight cdl;
-				cdl.direction = dl->direction;
-				cdl.color = dl->color;
-				cdl.intensity = dl->intensity;
-				cdl.casts_shadow = dl->casts_shadow;
-				cdl.celestial_type = static_cast<uint8_t>(dl->celestial_type);
+				cdl.direction = dl->getDirection();
+				cdl.color = dl->getColor();
+				cdl.intensity = dl->getIntensity();
+				cdl.casts_shadow = dl->getCastsShadow();
+				cdl.celestial_type = static_cast<uint8_t>(dl->getCelestialType());
 				state.component_clipboard = cdl;
 			}
 			if (state.component_clipboard && std::holds_alternative<CopiedDirectionalLight>(*state.component_clipboard))
 				if (ImGui::MenuItem("Paste")) {
 					auto* dl = registry->getComponent<DirectionalLightComponent>(entity);
 					auto& cdl = std::get<CopiedDirectionalLight>(*state.component_clipboard);
-					dl->direction = cdl.direction;
-					dl->color = cdl.color;
-					dl->intensity = cdl.intensity;
-					dl->casts_shadow = cdl.casts_shadow;
-					dl->celestial_type = static_cast<CelestialType>(cdl.celestial_type);
+					dl->setDirection(cdl.direction);
+					dl->setColor(cdl.color);
+					dl->setIntensity(cdl.intensity);
+					dl->setCastsShadow(cdl.casts_shadow);
+					dl->setCelestialType(static_cast<CelestialType>(cdl.celestial_type));
 				}
 			ImGui::EndPopup();
 		}
@@ -409,7 +409,6 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 					rb->setFriction(crb.friction);
 					rb->setRestitution(crb.restitution);
 					rb->setHullTolerance(crb.hull_tolerance);
-					registry->events().emit(RigidbodyChangedEvent{entity});
 				}
 			ImGui::EndPopup();
 		}
@@ -774,28 +773,35 @@ void InspectorPanel::renderSpotLight(SpotLightComponent& light) {
 }
 
 void InspectorPanel::renderDirectionalLight(DirectionalLightComponent& light) {
-	if (drawVec3Control("Direction", light.direction, 0.01f)) {
-		float len = glm::length(light.direction);
+	glm::vec3 dir = light.getDirection();
+	if (drawVec3Control("Direction", dir, 0.01f)) {
+		float len = glm::length(dir);
 		if (len > 0.001f)
-			light.direction = light.direction / len;
+			light.setDirection(dir / len);
 	}
 
 	constexpr float light_label_w = 110.0f;
 
+	glm::vec3 color = light.getColor();
 	labeledWidget(light_label_w, "Color", [&]() {
-		ImGui::ColorEdit3("##Color", glm::value_ptr(light.color));
-	}, [&]() { light.color = glm::vec3(1.f); });
+		if (ImGui::ColorEdit3("##Color", glm::value_ptr(color)))
+			light.setColor(color);
+	}, [&]() { light.setColor(glm::vec3(1.f)); });
 
+	float intensity = light.getIntensity();
 	labeledWidget(light_label_w, "Intensity", [&]() {
-		ImGui::DragFloat("##Intensity", &light.intensity, 0.1f, 0.0f, 100.0f);
-	}, [&]() { light.intensity = 1.f; });
+		if (ImGui::DragFloat("##Intensity", &intensity, 0.1f, 0.0f, 100.0f))
+			light.setIntensity(intensity);
+	}, [&]() { light.setIntensity(1.f); });
 
-	ImGui::Checkbox("Casts Shadow", &light.casts_shadow);
+	bool casts_shadow = light.getCastsShadow();
+	if (ImGui::Checkbox("Casts Shadow", &casts_shadow))
+		light.setCastsShadow(casts_shadow);
 
 	const char* celestial_types[] = { "Moon", "Sun" };
-	int ct = static_cast<int>(light.celestial_type);
+	int ct = static_cast<int>(light.getCelestialType());
 	if (ImGui::Combo("Celestial Type", &ct, celestial_types, 2))
-		light.celestial_type = static_cast<CelestialType>(ct);
+		light.setCelestialType(static_cast<CelestialType>(ct));
 }
 
 void InspectorPanel::renderRigidbody(RigidbodyComponent& rb, EditorState& state) {
@@ -806,8 +812,6 @@ void InspectorPanel::renderRigidbody(RigidbodyComponent& rb, EditorState& state)
 	labeledWidget(label_w, "Motion Type", [&]() {
 		if (ImGui::Combo("##MotionType", &mt, motion_types, 3)) {
 			rb.setMotionType(static_cast<PhysicsMotionType>(mt));
-			if (rb.getRegistry())
-				rb.getRegistry()->events().emit(RigidbodyChangedEvent{rb.getEntity()});
 			if (mt != 0 && rb.getShapeDesc().type == PhysicsShapeType::MeshStatic) {
 				PhysicsShapeDesc d = rb.getShapeDesc();
 				d.type = PhysicsShapeType::Box;

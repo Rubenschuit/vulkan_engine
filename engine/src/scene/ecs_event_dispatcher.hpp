@@ -51,6 +51,10 @@ struct RigidbodyChangedEvent {
 	Entity entity;
 };
 
+struct LightDataChangedEvent {
+	Entity entity;
+};
+
 // Deferred deletion request (emitted by UI, processed at safe frame boundary)
 struct DeleteEntityRequest {
 	Entity entity;

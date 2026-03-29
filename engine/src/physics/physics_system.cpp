@@ -192,9 +192,13 @@ struct PhysicsSystem::Impl {
 
 	SubscriptionId sub_rb_added = 0;
 	SubscriptionId sub_rb_removed = 0;
+	SubscriptionId sub_rb_changed = 0;
 	Registry* active_registry = nullptr;
 
 	EventBus* event_bus = nullptr;
+
+	// Event-driven dirty tracking (replaces per-frame scan in rebuildDirtyBodies)
+	std::vector<uint32_t> m_dirty_rb_indices;
 
 	float accumulator = 0.0f;
 	uint32_t dynamic_body_count = 0; // non-static bodies (dynamic + kinematic)
@@ -290,6 +294,13 @@ struct PhysicsSystem::Impl {
 				onRigidbodyRemoved(event.entity);
 			});
 
+		sub_rb_changed = registry.events().subscribe<RigidbodyChangedEvent>(
+			[this](const RigidbodyChangedEvent& event) {
+				uint32_t idx = event.entity.index();
+				if (hasBody(idx))
+					m_dirty_rb_indices.push_back(idx);
+			});
+
 		// Copy entity indices before iterating: onRigidbodyAdded calls
 		// removeDescendantRigidbodies which does swap-and-pop on the pool
 		auto& rb_pool = registry.rigidbodies();
@@ -312,8 +323,10 @@ struct PhysicsSystem::Impl {
 		if (active_registry) {
 			active_registry->events().unsubscribe<ComponentAddedEvent<RigidbodyComponent>>(sub_rb_added);
 			active_registry->events().unsubscribe<ComponentRemovedEvent<RigidbodyComponent>>(sub_rb_removed);
+			active_registry->events().unsubscribe<RigidbodyChangedEvent>(sub_rb_changed);
 		}
 		removeAllBodies();
+		m_dirty_rb_indices.clear();
 		active_registry = nullptr;
 		accumulator = 0.0f;
 	}
@@ -1006,19 +1019,23 @@ struct PhysicsSystem::Impl {
 	}
 
 	void rebuildDirtyBodies(Registry& registry) {
-		std::vector<uint32_t> dirty;
-		for (uint32_t idx : active_body_indices) {
-			Entity entity = registry.entityFromIndex(idx);
-			if (!registry.isAlive(entity))
-				continue;
-			auto* rb = registry.getComponent<RigidbodyComponent>(entity);
-			if (rb && rb->isDirty())
-				dirty.push_back(idx);
-		}
-		for (uint32_t idx : dirty) {
+		if (m_dirty_rb_indices.empty())
+			return;
+
+		// Swap-and-process: prevents re-entry when recreateBody emits RigidbodyChangedEvent
+		std::vector<uint32_t> to_process;
+		to_process.swap(m_dirty_rb_indices);
+
+		// Deduplicate
+		std::sort(to_process.begin(), to_process.end());
+		to_process.erase(std::unique(to_process.begin(), to_process.end()), to_process.end());
+
+		for (uint32_t idx : to_process) {
 			if (!hasBody(idx))
 				continue;
 			Entity entity = registry.entityFromIndex(idx);
+			if (!registry.isAlive(entity))
+				continue;
 			auto* rb = registry.getComponent<RigidbodyComponent>(entity);
 			auto* tc = registry.getComponent<TransformComponent>(entity);
 			if (!rb || !tc)
@@ -1038,7 +1055,6 @@ struct PhysicsSystem::Impl {
 			} else if (was_dynamic != is_dynamic) {
 				dynamic_body_count += is_dynamic ? 1 : -1;
 			}
-			registry.events().emit(RigidbodyChangedEvent{entity});
 		}
 	}
 

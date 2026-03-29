@@ -514,9 +514,11 @@ Entity Registry::createGameObject(const std::string& name) {
 
 Entity Registry::createPointLight(float intensity, float radius, glm::vec3 color) {
 	Entity e = createGameObject();
+	m_events.beginBatch();
 	auto& pl = addComponent<PointLightComponent>(e);
 	pl.setIntensity(intensity);
 	pl.setColor(color);
+	m_events.endBatch();
 
 	auto* transform = getComponent<TransformComponent>(e);
 	transform->setScale(glm::vec3(radius));
@@ -525,23 +527,27 @@ Entity Registry::createPointLight(float intensity, float radius, glm::vec3 color
 
 Entity Registry::createDirectionalLight(float intensity, glm::vec3 color, glm::vec3 direction) {
 	Entity e = createEntity();
+	m_events.beginBatch();
 	auto& dl = addComponent<DirectionalLightComponent>(e);
-	dl.intensity = intensity;
-	dl.color = color;
-	dl.direction = glm::normalize(direction);
-	dl.casts_shadow = false;
+	dl.setIntensity(intensity);
+	dl.setColor(color);
+	dl.setDirection(glm::normalize(direction));
+	dl.setCastsShadow(false);
+	m_events.endBatch();
 	return e;
 }
 
 Entity Registry::createSpotLight(float intensity, float radius, glm::vec3 color,
                                  glm::vec3 direction, float inner_cone, float outer_cone) {
 	Entity e = createGameObject();
+	m_events.beginBatch();
 	auto& sl = addComponent<SpotLightComponent>(e);
 	sl.setIntensity(intensity);
 	sl.setColor(color);
 	sl.setDirection(direction);
 	sl.setInnerConeAngle(inner_cone);
 	sl.setOuterConeAngle(outer_cone);
+	m_events.endBatch();
 	auto* transform = getComponent<TransformComponent>(e);
 	transform->setScale(glm::vec3(radius));
 	return e;

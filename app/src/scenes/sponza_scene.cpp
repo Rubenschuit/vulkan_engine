@@ -77,7 +77,7 @@ void SponzaScene::setupScene(const glm::vec3& sponza_translation) {
         Entity dl = m_registry.createDirectionalLight(3.0f, glm::vec3(1.0f),
             glm::normalize(glm::vec3(0.5f, -1.0f, -3.0f)));
         m_registry.setName(dl, "Directional Light");
-        m_registry.getComponent<DirectionalLightComponent>(dl)->casts_shadow = true;
+        m_registry.getComponent<DirectionalLightComponent>(dl)->setCastsShadow(true);
     }
 
     // sponza fire lights

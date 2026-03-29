@@ -67,7 +67,7 @@ VeApplication::VeApplication(const EngineConfig& config)
 	m_resource_manager = std::make_unique<VeResourceManager>(m_ve_device);
 	m_asset_loader = std::make_unique<AssetLoadingSystem>(*m_resource_manager);
 	createBuffers();
-	m_scene_resources = std::make_unique<SceneResourceManager>(m_ve_device);
+	m_scene_resources = std::make_unique<SceneResourceManager>(m_ve_device, *m_event_bus);
 	createDescriptors();
 	initSystems();
 	initEditor();

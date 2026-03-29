@@ -16,7 +16,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 	{
 		Entity dl = m_registry.createDirectionalLight(3.0f, glm::vec3(0.2f), glm::vec3(0.6f, 0.7f, -1.0f));
 		m_registry.setName(dl, "Directional Light");
-		m_registry.getComponent<DirectionalLightComponent>(dl)->casts_shadow = true;
+		m_registry.getComponent<DirectionalLightComponent>(dl)->setCastsShadow(true);
 	}
 
 	// Create some point lights with ranging colors

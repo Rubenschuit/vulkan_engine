@@ -69,7 +69,7 @@ void BistroScene::setupScene(const glm::vec3& /*translation*/) {
 		Entity dl = m_registry.createDirectionalLight(5.0f, glm::vec3(1.0f),
 			glm::normalize(glm::vec3(-1.0f, -0.5f, -2.5f)));
 		m_registry.setName(dl, "Directional Light");
-		m_registry.getComponent<DirectionalLightComponent>(dl)->casts_shadow = true;
+		m_registry.getComponent<DirectionalLightComponent>(dl)->setCastsShadow(true);
 	}
 }
 

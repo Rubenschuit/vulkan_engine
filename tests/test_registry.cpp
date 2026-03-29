@@ -269,9 +269,9 @@ TEST_CASE("Registry createDirectionalLight adds Transform + DirectionalLight", "
 	REQUIRE(!reg.hasComponent<ve::PointLightComponent>(e));
 
 	auto* dl = reg.getComponent<ve::DirectionalLightComponent>(e);
-	REQUIRE(dl->intensity == 10.0f);
-	REQUIRE(dl->color == glm::vec3(1.0f, 0.5f, 0.0f));
-	REQUIRE(dl->direction == glm::vec3(0.0f, -1.0f, 0.0f));
+	REQUIRE(dl->getIntensity() == 10.0f);
+	REQUIRE(dl->getColor() == glm::vec3(1.0f, 0.5f, 0.0f));
+	REQUIRE(dl->getDirection() == glm::vec3(0.0f, -1.0f, 0.0f));
 }
 
 TEST_CASE("Registry directional light pool iteration", "[ecs][registry]") {
@@ -288,7 +288,7 @@ TEST_CASE("Registry directional light pool iteration", "[ecs][registry]") {
 
 	float intensity_sum = 0.0f;
 	for (uint32_t i = 0; i < dl_pool.size(); i++) {
-		intensity_sum += dl_pool.data()[i].intensity;
+		intensity_sum += dl_pool.data()[i].getIntensity();
 	}
 	REQUIRE(intensity_sum == 10.0f);
 

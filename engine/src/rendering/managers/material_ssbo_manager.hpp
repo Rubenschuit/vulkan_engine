@@ -13,6 +13,7 @@ namespace ve {
 class VeDevice;
 class VeMaterial;
 class BindlessTextureRegistry;
+class EventBus;
 
 struct MaterialGPU {
 	glm::vec4 base_color_factor;
@@ -32,7 +33,7 @@ static_assert(sizeof(MaterialGPU) == 96, "MaterialGPU must be 96 bytes for SSBO 
 
 class VENGINE_API MaterialSSBOManager {
 public:
-	MaterialSSBOManager(VeDevice& device, BindlessTextureRegistry& texture_registry);
+	MaterialSSBOManager(VeDevice& device, BindlessTextureRegistry& texture_registry, EventBus& event_bus);
 	~MaterialSSBOManager();
 
 	MaterialSSBOManager(const MaterialSSBOManager&) = delete;
@@ -54,6 +55,7 @@ private:
 
 	VeDevice& m_ve_device;
 	BindlessTextureRegistry& m_texture_registry;
+	EventBus& m_event_bus;
 
 	std::unique_ptr<VeBuffer> m_buffer;          // device-local
 	std::unique_ptr<VeBuffer> m_staging_buffer;  // host-visible, persistently mapped

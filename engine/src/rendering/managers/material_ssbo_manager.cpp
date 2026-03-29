@@ -2,12 +2,14 @@
 #include "rendering/managers/material_ssbo_manager.hpp"
 #include "rendering/managers/bindless_texture_registry.hpp"
 #include "resources/ve_material.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 #include "utils/ve_log.hpp"
 
 namespace ve {
 
-MaterialSSBOManager::MaterialSSBOManager(VeDevice& device, BindlessTextureRegistry& texture_registry)
-	: m_ve_device(device), m_texture_registry(texture_registry) {
+MaterialSSBOManager::MaterialSSBOManager(VeDevice& device, BindlessTextureRegistry& texture_registry, EventBus& event_bus)
+	: m_ve_device(device), m_texture_registry(texture_registry), m_event_bus(event_bus) {
 
 	m_buffer = std::make_unique<VeBuffer>(m_ve_device,
 		sizeof(MaterialGPU), MAX_GPU_MATERIALS,
@@ -123,6 +125,7 @@ void MaterialSSBOManager::writeMaterialGPU(uint32_t index, VeMaterial* mat) {
 	m_staging_buffer->writeToBuffer(&gpu, sizeof(MaterialGPU),
 		static_cast<vk::DeviceSize>(index) * sizeof(MaterialGPU));
 	m_dirty = true;
+	m_event_bus.enqueue(MaterialDataChangedEvent{index});
 }
 
 } // namespace ve

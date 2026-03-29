@@ -166,13 +166,13 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 	// Celestial billboards for directional lights (sun/moon)
 	glm::vec3 cam_pos = frame_info.camera.getPosition();
 	for (auto [entity, dl] : registry.view<DirectionalLightComponent>()) {
-		glm::vec3 celestial_pos = cam_pos - glm::normalize(dl.direction) * CELESTIAL_DISTANCE;
+		glm::vec3 celestial_pos = cam_pos - glm::normalize(dl.getDirection()) * CELESTIAL_DISTANCE;
 
 		SimplePushConstantData push{};
 		push.position = glm::vec4{celestial_pos, 1.0f};
-		push.color = glm::vec4{dl.color, dl.intensity * CELESTIAL_INTENSITY_BOOST};
+		push.color = glm::vec4{dl.getColor(), dl.getIntensity() * CELESTIAL_INTENSITY_BOOST};
 		push.scale = CELESTIAL_SCALE;
-		push.billboard_type = (dl.celestial_type == CelestialType::Sun) ? 2 : 1;
+		push.billboard_type = (dl.getCelestialType() == CelestialType::Sun) ? 2 : 1;
 		frame_info.cmd().pushConstants(
 			*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
@@ -253,16 +253,18 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 	for (auto [entity, dl] : registry.view<DirectionalLightComponent>()) {
 		assert(num_dir_lights < MAX_DIR_LIGHTS && "Number of directional lights exceeds MAX_DIR_LIGHTS");
 
-		glm::vec3 dir = glm::normalize(dl.direction);
+		glm::vec3 dir = glm::normalize(dl.getDirection());
+		glm::vec3 dl_color = dl.getColor();
+		float dl_intensity = dl.getIntensity();
 
 		ubo.dir_lights[num_dir_lights].direction = glm::vec4{dir, 0.0f};
-		ubo.dir_lights[num_dir_lights].color.x = dl.color.x * dl.intensity;
-		ubo.dir_lights[num_dir_lights].color.y = dl.color.y * dl.intensity;
-		ubo.dir_lights[num_dir_lights].color.z = dl.color.z * dl.intensity;
-		ubo.dir_lights[num_dir_lights].color.w = dl.intensity;
+		ubo.dir_lights[num_dir_lights].color.x = dl_color.x * dl_intensity;
+		ubo.dir_lights[num_dir_lights].color.y = dl_color.y * dl_intensity;
+		ubo.dir_lights[num_dir_lights].color.z = dl_color.z * dl_intensity;
+		ubo.dir_lights[num_dir_lights].color.w = dl_intensity;
 
 		// CSM for the first shadow-casting directional light
-		if (dl.casts_shadow && !csm_assigned) {
+		if (dl.getCastsShadow() && !csm_assigned) {
 			const auto& cam = frame_info.camera;
 			float shadow_near = std::max(cam.getNear(), 0.5f); // CSM near floor: avoid wasting cascade 0 on tiny near plane
 			float shadow_far = std::min(cam.getFar(), DIR_SHADOW_MAX_DISTANCE);

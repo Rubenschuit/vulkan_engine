@@ -107,8 +107,8 @@ public:
 	void setIntensity(float v);
 	void setColor(const glm::vec3& v);
 	void setRange(float v);
-	void setRotates(bool v) { m_rotates = v; }
-	void setCastsShadow(bool v) { m_casts_shadow = v; }
+	void setRotates(bool v);
+	void setCastsShadow(bool v);
 
 	/// Returns range if explicitly set, otherwise derives from intensity/color
 	/// using the KHR_lights_punctual cutoff threshold. Cached until dirty.
@@ -170,11 +170,24 @@ enum class CelestialType : uint8_t { Moon = 0, Sun = 1 };
 
 class VENGINE_API DirectionalLightComponent : public Component {
 public:
-	glm::vec3 direction{0.f, -1.f, -1.f};  // world-space light direction (toward surface)
-	glm::vec3 color{1.f};
-	float intensity{1.f};
-	bool casts_shadow{false};
-	CelestialType celestial_type{CelestialType::Sun};
+	const glm::vec3& getDirection() const { return m_direction; }
+	const glm::vec3& getColor() const { return m_color; }
+	float getIntensity() const { return m_intensity; }
+	bool getCastsShadow() const { return m_casts_shadow; }
+	CelestialType getCelestialType() const { return m_celestial_type; }
+
+	void setDirection(const glm::vec3& v);
+	void setColor(const glm::vec3& v);
+	void setIntensity(float v);
+	void setCastsShadow(bool v);
+	void setCelestialType(CelestialType t);
+
+private:
+	glm::vec3 m_direction{0.f, -1.f, -1.f};  // world-space light direction (toward surface)
+	glm::vec3 m_color{1.f};
+	float m_intensity{1.f};
+	bool m_casts_shadow{false};
+	CelestialType m_celestial_type{CelestialType::Sun};
 };
 
 // ---------------------------------------------------------------------------
@@ -196,7 +209,7 @@ public:
 	void setDirection(const glm::vec3& v);
 	void setInnerConeAngle(float radians);
 	void setOuterConeAngle(float radians);
-	void setCastsShadow(bool v) { m_casts_shadow = v; }
+	void setCastsShadow(bool v);
 
 	/// Returns range if explicitly set, otherwise derives from intensity
 	float getEffectiveRange() const;
@@ -240,22 +253,22 @@ struct PhysicsShapeDesc {
 class VENGINE_API RigidbodyComponent : public Component {
 public:
 	PhysicsMotionType getMotionType() const { return m_motion_type; }
-	void setMotionType(PhysicsMotionType t) { m_motion_type = t; m_dirty = true; }
+	void setMotionType(PhysicsMotionType t);
 
 	const PhysicsShapeDesc& getShapeDesc() const { return m_shape; }
-	void setShapeDesc(const PhysicsShapeDesc& s) { m_shape = s; m_dirty = true; }
+	void setShapeDesc(const PhysicsShapeDesc& s);
 
 	float getMass() const { return m_mass; }
-	void setMass(float m) { m_mass = m; m_dirty = true; }
+	void setMass(float m);
 
 	float getFriction() const { return m_friction; }
-	void setFriction(float f) { m_friction = f; m_dirty = true; }
+	void setFriction(float f);
 
 	float getRestitution() const { return m_restitution; }
-	void setRestitution(float r) { m_restitution = r; m_dirty = true; }
+	void setRestitution(float r);
 
 	float getHullTolerance() const { return m_hull_tolerance; }
-	void setHullTolerance(float t) { m_hull_tolerance = t; m_dirty = true; }
+	void setHullTolerance(float t);
 
 	uint32_t getBodyId() const { return m_body_id; }
 	void setBodyId(uint32_t id) { m_body_id = id; }

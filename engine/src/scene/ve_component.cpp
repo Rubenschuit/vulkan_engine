@@ -1,5 +1,6 @@
 #include "scene/ve_component.hpp"
 #include "scene/ve_registry.hpp"
+#include "scene/ecs_event_dispatcher.hpp"
 #include "resources/ve_mesh.hpp"
 #include "ve_config.hpp"
 
@@ -96,16 +97,22 @@ void TransformComponent::updateTransform() const {
 void PointLightComponent::setIntensity(float v) {
 	m_intensity = v;
 	m_range_dirty = true;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
 }
 
 void PointLightComponent::setColor(const glm::vec3& v) {
 	m_color = v;
 	m_range_dirty = true;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
 }
 
 void PointLightComponent::setRange(float v) {
 	m_range = v;
 	m_range_dirty = true;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
 }
 
 float PointLightComponent::getEffectiveRange() const {
@@ -122,6 +129,18 @@ void PointLightComponent::updateEffectiveRange() const {
 		m_effective_range = std::min(std::sqrt(max_i / CLUSTER_LIGHT_CUTOFF), CLUSTER_MAX_EFFECTIVE_RANGE);
 	}
 	m_range_dirty = false;
+}
+
+void PointLightComponent::setRotates(bool v) {
+	m_rotates = v;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
+}
+
+void PointLightComponent::setCastsShadow(bool v) {
+	m_casts_shadow = v;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
 }
 
 void PointLightComponent::update(float /*delta_time*/) {}
@@ -152,34 +171,86 @@ void MeshComponent::render() {
 }
 
 // ---------------------------------------------------------------------------
+// DirectionalLightComponent
+// ---------------------------------------------------------------------------
+
+void DirectionalLightComponent::setDirection(const glm::vec3& v) {
+	m_direction = v;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
+}
+
+void DirectionalLightComponent::setColor(const glm::vec3& v) {
+	m_color = v;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
+}
+
+void DirectionalLightComponent::setIntensity(float v) {
+	m_intensity = v;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
+}
+
+void DirectionalLightComponent::setCastsShadow(bool v) {
+	m_casts_shadow = v;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
+}
+
+void DirectionalLightComponent::setCelestialType(CelestialType t) {
+	m_celestial_type = t;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
+}
+
+// ---------------------------------------------------------------------------
 // SpotLightComponent
 // ---------------------------------------------------------------------------
 
 void SpotLightComponent::setIntensity(float v) {
 	m_intensity = v;
 	m_range_dirty = true;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
 }
 
 void SpotLightComponent::setColor(const glm::vec3& v) {
 	m_color = v;
 	m_range_dirty = true;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
 }
 
 void SpotLightComponent::setRange(float v) {
 	m_range = v;
 	m_range_dirty = true;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
 }
 
 void SpotLightComponent::setDirection(const glm::vec3& v) {
 	m_direction = glm::normalize(v);
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
 }
 
 void SpotLightComponent::setInnerConeAngle(float radians) {
 	m_inner_cone_angle = radians;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
 }
 
 void SpotLightComponent::setOuterConeAngle(float radians) {
 	m_outer_cone_angle = radians;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
+}
+
+void SpotLightComponent::setCastsShadow(bool v) {
+	m_casts_shadow = v;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
 }
 
 float SpotLightComponent::getEffectiveRange() const {
@@ -196,6 +267,52 @@ void SpotLightComponent::updateEffectiveRange() const {
 		m_effective_range = std::min(std::sqrt(max_i / CLUSTER_LIGHT_CUTOFF), CLUSTER_MAX_EFFECTIVE_RANGE);
 	}
 	m_range_dirty = false;
+}
+
+// ---------------------------------------------------------------------------
+// RigidbodyComponent
+// ---------------------------------------------------------------------------
+
+void RigidbodyComponent::setMotionType(PhysicsMotionType t) {
+	m_motion_type = t;
+	m_dirty = true;
+	if (m_registry)
+		m_registry->events().emit(RigidbodyChangedEvent{m_entity});
+}
+
+void RigidbodyComponent::setShapeDesc(const PhysicsShapeDesc& s) {
+	m_shape = s;
+	m_dirty = true;
+	if (m_registry)
+		m_registry->events().emit(RigidbodyChangedEvent{m_entity});
+}
+
+void RigidbodyComponent::setMass(float m) {
+	m_mass = m;
+	m_dirty = true;
+	if (m_registry)
+		m_registry->events().emit(RigidbodyChangedEvent{m_entity});
+}
+
+void RigidbodyComponent::setFriction(float f) {
+	m_friction = f;
+	m_dirty = true;
+	if (m_registry)
+		m_registry->events().emit(RigidbodyChangedEvent{m_entity});
+}
+
+void RigidbodyComponent::setRestitution(float r) {
+	m_restitution = r;
+	m_dirty = true;
+	if (m_registry)
+		m_registry->events().emit(RigidbodyChangedEvent{m_entity});
+}
+
+void RigidbodyComponent::setHullTolerance(float t) {
+	m_hull_tolerance = t;
+	m_dirty = true;
+	if (m_registry)
+		m_registry->events().emit(RigidbodyChangedEvent{m_entity});
 }
 
 } // namespace ve
