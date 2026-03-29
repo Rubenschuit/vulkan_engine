@@ -43,6 +43,7 @@ struct VENGINE_API SceneLoadRequest {
 };
 
 // Forward declarations
+class EventBus;
 class CullingSystem;
 class ShadowRenderSystem;
 class DepthPrePassSystem;
@@ -123,6 +124,9 @@ protected:
 	// --- App name ---
 	const std::string& getAppSettingsWindowName() const;
 
+	// --- Engine event bus ---
+	EventBus& eventBus() { return *m_event_bus; }
+
 	// --- Settings struct (app writes, engine reads) ---
 	UIContext& ui() { return m_ui; }
 
@@ -148,13 +152,13 @@ private:
 	// --- Main loop ---
 	VeFrameInfo buildFrameInfo();
 	void selectBackend();
-	void applySettingChanges();
+	void pushPerFrameSettings();
+	void emitSettingEvents();
 	void populateUBO(VeFrameInfo& fi);
 	void dispatchCompute(VeFrameInfo& fi);
 	void renderFrame(VeFrameInfo& fi);
 	void collectStats(const VeFrameInfo& fi);
 	void onSwapChainRecreated();
-	void recreatePipelines();
 	void recreateResolutionDependentSystems();
 
 	// --- Camera ---
@@ -206,6 +210,9 @@ private:
 	int m_pending_async_scene_index{-1};
 	void tickAsyncLoader();
 	void finalizeAsyncLoad();
+
+	// --- Engine event bus (must outlive all subscriber systems below) ---
+	std::unique_ptr<EventBus> m_event_bus;
 
 	// --- UI ---
 	std::unique_ptr<ImGuiLayer> m_imgui_layer;
@@ -265,7 +272,6 @@ private:
 	float m_depth_bias_slope = ve::SHADOW_DEPTH_BIAS_SLOPE;
 	float m_depth_bias_clamp = 0.0f;
 	Topology m_last_topology = Topology::TRIANGLE_LIST;
-	size_t m_last_skybox_index = SIZE_MAX;
 
 	void setWindowTitle();
 };

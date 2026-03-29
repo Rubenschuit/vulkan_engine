@@ -7,7 +7,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "ve_entity.hpp"
-#include "ve_event.hpp"
+#include "ecs_event_dispatcher.hpp"
 #include "ve_component_pool.hpp"
 #include "ve_component.hpp"
 
@@ -169,8 +169,8 @@ public:
 	Entity entityFromIndex(uint32_t index) const;
 
 	// Event dispatcher (scoped to this registry's lifetime)
-	EventDispatcher& events() { return m_events; }
-	const EventDispatcher& events() const { return m_events; }
+	EcsEventDispatcher& events() { return m_events; }
+	const EcsEventDispatcher& events() const { return m_events; }
 
 private:
 	void ensureSlotSize(uint32_t index);
@@ -209,7 +209,7 @@ private:
 	// World transform cache (indexed by entity index)
 	mutable std::vector<WorldTransformCache> m_world_cache;
 
-	EventDispatcher m_events;
+	EcsEventDispatcher m_events;
 	std::vector<DeleteEntityRequest> m_pending_deletions;
 	std::vector<PendingComponentRemoval> m_pending_component_removals;
 };

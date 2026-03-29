@@ -5,6 +5,8 @@
 #include "vulkan/ve_image.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "utils/ve_log.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 #include <fstream>
 #include <sstream>
@@ -14,8 +16,13 @@ namespace ve {
 
 IblSystem::IblSystem(VeDevice& device, VeDescriptorPool& descriptor_pool,
                      VeResourceManager& resource_manager,
-                     const std::filesystem::path& brdf_lut_path)
+                     const std::filesystem::path& brdf_lut_path,
+                     EventBus& event_bus)
 	: m_ve_device(device), m_resource_manager(resource_manager), m_descriptor_pool(descriptor_pool) {
+
+	event_bus.subscribe<SkyboxChangedEvent>([this](const SkyboxChangedEvent& e) {
+		loadForSkybox(e.skybox_path);
+	});
 
 	createSetLayout();
 	createSamplers();

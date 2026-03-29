@@ -1,9 +1,9 @@
 #include "pch.hpp"
 #include "rendering/shadow_render_system.hpp"
-#include "rendering/gpu_culling_system.hpp"
-#include "rendering/meshlet_culling_system.hpp"
-#include "rendering/gpu_scene_manager.hpp"
-#include "rendering/pbr_mega_buffer.hpp"
+#include "rendering/culling/gpu_culling_system.hpp"
+#include "rendering/culling/meshlet_culling_system.hpp"
+#include "rendering/managers/gpu_scene_manager.hpp"
+#include "rendering/managers/pbr_mega_buffer.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_pipeline.hpp"
 #include "vulkan/ve_buffer.hpp"
@@ -16,6 +16,8 @@
 #include "resources/ve_mesh.hpp"
 #include "utils/ve_log.hpp"
 #include "utils/ve_frustum.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -34,8 +36,19 @@ ShadowRenderSystem::ShadowRenderSystem(
 	VeDevice& device,
 	VeDescriptorPool& descriptor_pool,
 	const vk::raii::DescriptorSetLayout& material_set_layout,
-	std::filesystem::path shader_path)
+	std::filesystem::path shader_path,
+	EventBus& event_bus)
 	: m_ve_device(device), m_descriptor_pool(descriptor_pool), m_shader_path(shader_path) {
+
+	event_bus.subscribe<DepthBiasChangedEvent>([this](const DepthBiasChangedEvent&) {
+		forceShadowRerender();
+	});
+	event_bus.subscribe<BackendChangedEvent>([this](const BackendChangedEvent&) {
+		forceShadowRerender();
+	});
+	event_bus.subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
+		subscribeToRegistry(*e.registry);
+	});
 
 	m_shadow_ubos.resize(MAX_FRAMES_IN_FLIGHT);
 	m_shadow_global_descriptor_sets.resize(MAX_FRAMES_IN_FLIGHT);

@@ -11,6 +11,7 @@ namespace ve {
 class VeDevice;
 class VeDescriptorPool;
 class VeDescriptorSetLayout;
+class EventBus;
 }
 
 namespace ve {
@@ -19,7 +20,8 @@ class VENGINE_API IblSystem {
 public:
 	IblSystem(VeDevice& device, VeDescriptorPool& descriptor_pool,
 	          VeResourceManager& resource_manager,
-	          const std::filesystem::path& brdf_lut_path);
+	          const std::filesystem::path& brdf_lut_path,
+	          EventBus& event_bus);
 	~IblSystem();
 
 	IblSystem(const IblSystem&) = delete;

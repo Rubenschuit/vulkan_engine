@@ -5,6 +5,8 @@
 #include "vulkan/ve_descriptors.hpp"
 #include "vulkan/ve_compute_pipeline.hpp"
 #include "utils/ve_log.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 #include <cmath>
 
@@ -26,8 +28,13 @@ HizSystem::HizSystem(
 	vk::Extent2D extent,
 	const vk::raii::ImageView& depth_image_view,
 	vk::Image depth_image,
-	const std::filesystem::path& shaders_dir)
+	const std::filesystem::path& shaders_dir,
+	EventBus& event_bus)
 	: m_ve_device(device) {
+
+	event_bus.subscribe<ResolutionChangedEvent>([this](const ResolutionChangedEvent& e) {
+		recreate(e.pool, e.extent, e.depth_image_view, e.depth_image);
+	});
 
 	m_depth_image = depth_image;
 	m_depth_image_view = *depth_image_view;

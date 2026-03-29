@@ -20,6 +20,7 @@ public:
 	Entity() : m_id(NULL_ID) {}
 
 	static Entity null() { return Entity{}; }
+	static Entity fromRaw(uint32_t raw) { Entity e; e.m_id = raw; return e; }
 	bool isNull() const { return m_id == NULL_ID; }
 
 	uint32_t index() const { return m_id & INDEX_MASK; }

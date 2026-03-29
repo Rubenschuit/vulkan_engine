@@ -9,6 +9,8 @@
 #include "scene/ve_component.hpp"
 #include "scene/ve_registry.hpp"
 #include "utils/ve_log.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -46,8 +48,13 @@ OutlineSystem::OutlineSystem(
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	std::filesystem::path shader_path,
 	vk::Extent2D extent,
-	vk::Format composite_color_format)
+	vk::Format composite_color_format,
+	EventBus& event_bus)
 	: m_ve_device(device), m_shader_path(std::move(shader_path)), m_extent(extent) {
+
+	event_bus.subscribe<ResolutionChangedEvent>([this](const ResolutionChangedEvent& e) {
+		recreate(e.pool, e.extent, e.swap_chain_format);
+	});
 
 	createImages(extent);
 	createSampler();

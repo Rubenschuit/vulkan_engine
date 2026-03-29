@@ -1,7 +1,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "ve_config.hpp"
-#include "rendering/meshlet_data.hpp"
+#include "rendering/culling/meshlet_data.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "vulkan/ve_compute_pipeline.hpp"
 #include "vulkan/ve_descriptors.hpp"
@@ -19,11 +19,16 @@ class VeImage;
 class GpuSceneManager;
 class PbrMegaBuffer;
 class HizSystem;
+class EventBus;
+class SceneResourceManager;
 struct VeFrameInfo;
 
 class VENGINE_API MeshletCullingSystem {
 public:
-	MeshletCullingSystem(VeDevice& device, const std::filesystem::path& shaders_dir);
+	MeshletCullingSystem(VeDevice& device, const std::filesystem::path& shaders_dir,
+	                     EventBus& event_bus, VeDescriptorPool& pool,
+	                     SceneResourceManager& scene_resources,
+	                     PbrMegaBuffer& mega_buffer, HizSystem& hiz);
 	~MeshletCullingSystem();
 
 	MeshletCullingSystem(const MeshletCullingSystem&) = delete;

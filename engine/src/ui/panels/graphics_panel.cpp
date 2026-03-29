@@ -2,6 +2,8 @@
 #include "ui/panels/graphics_panel.hpp"
 #include "ui/imgui_layer.hpp"
 #include "rendering/ve_renderer.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 #include <imgui.h>
 #include <algorithm>
 #include <string>
@@ -145,18 +147,24 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UICon
 			ImGui::Checkbox("Half Resolution##gtao", &ctx.gtao_half_res);
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Compute AO at half screen resolution.\n4x fewer compute invocations, bilinear upsampled.");
-			ImGui::SliderFloat("AO Radius", &ctx.gtao_radius, 0.1f, 3.0f, "%.2f");
+			bool radius_changed = ImGui::SliderFloat("AO Radius", &ctx.gtao_radius, 0.1f, 3.0f, "%.2f");
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("World-space sampling radius for AO.\nLarger = broader occlusion, smaller = finer detail.");
-			ImGui::SliderFloat("AO Intensity", &ctx.gtao_intensity, 0.5f, 5.0f, "%.2f");
+			bool intensity_changed = ImGui::SliderFloat("AO Intensity", &ctx.gtao_intensity, 0.5f, 5.0f, "%.2f");
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Power curve applied to AO.\nHigher = darker/stronger occlusion effect.");
+			if (radius_changed || intensity_changed)
+				m_event_bus.emitImmediate(GtaoParametersChangedEvent{ctx.gtao_radius, ctx.gtao_intensity});
 			ImGui::Unindent();
 		}
 	}
 
 	// --- Culling ---
 	if (ImGui::CollapsingHeader("Culling", ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (ImGui::Checkbox("Depth Pre-pass", &ctx.depth_prepass_enabled))
+			m_event_bus.emitImmediate(DepthPrePassChangedEvent{ctx.depth_prepass_enabled});
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Early depth pass. Required by GTAO, shadow mask, and Hi-Z occlusion culling.");
 		ImGui::Checkbox("Frustum culling", &ctx.enable_frustum_culling);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Skip drawing objects outside the camera view");
@@ -173,14 +181,16 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UICon
 				ImGui::SetTooltip("Sub-object meshlet culling (frustum + backface cone + Hi-Z).\nReduces triangle count for partially-visible large meshes.\n More overhead on Apple silicon.");
 			if (ctx.meshlet_culling_enabled) {
 				ImGui::Indent();
-				ImGui::Checkbox("Object Culled Shadows", &ctx.meshlet_gpu_shadow_fallback);
+				if (ImGui::Checkbox("Object Culled Shadows", &ctx.meshlet_gpu_shadow_fallback))
+					m_event_bus.emitImmediate(GpuShadowFallbackChangedEvent{ctx.meshlet_gpu_shadow_fallback});
 				if (ImGui::IsItemHovered())
 					ImGui::SetTooltip("Use object-level GPU culling for shadows instead of meshlet culling.");
 				ImGui::Unindent();
 			}
 			ImGui::Unindent();
 		}
-		ImGui::Checkbox("Clustered Lighting", &ctx.cluster_enabled);
+		if (ImGui::Checkbox("Clustered Lighting", &ctx.cluster_enabled))
+			m_event_bus.emitImmediate(ClusterEnabledChangedEvent{ctx.cluster_enabled});
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Use 3D cluster grid to cull lights per-fragment");
 

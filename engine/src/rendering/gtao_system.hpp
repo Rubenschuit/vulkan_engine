@@ -22,6 +22,7 @@ namespace ve {
 	class VeBuffer;
 	class VeDescriptorPool;
 	class VeDescriptorSetLayout;
+	class EventBus;
 }
 
 namespace ve {
@@ -37,7 +38,8 @@ public:
 		vk::Extent2D ao_extent,
 		vk::Extent2D depth_extent,
 		const vk::raii::ImageView& depth_image_view,
-		vk::Image depth_image);
+		vk::Image depth_image,
+		EventBus& event_bus);
 	~GtaoSystem();
 
 	GtaoSystem(const GtaoSystem&) = delete;
@@ -66,9 +68,6 @@ public:
 	vk::raii::DescriptorSet& getDummyOutputDescriptorSet() {
 		return m_dummy_output_descriptor_set;
 	}
-
-	void setRadius(float r) { m_radius = r; }
-	void setIntensity(float i) { m_intensity = i; }
 
 private:
 	void createAoImages(vk::Extent2D extent);

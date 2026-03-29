@@ -12,6 +12,7 @@ namespace ve {
     // Forward declarations
     class VeDevice;
     class VePipeline;
+    class EventBus;
 }
 
 namespace ve {
@@ -24,7 +25,8 @@ public:
 		const vk::raii::DescriptorSetLayout& material_set_layout,
 		vk::Format color_format,
 		vk::SampleCountFlagBits sample_count,
-		std::filesystem::path shader_path);
+		std::filesystem::path shader_path,
+		EventBus& event_bus);
 	~LightSystem();
 
 	//destroy copy and move constructors and assignment operators

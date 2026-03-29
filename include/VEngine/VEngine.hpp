@@ -26,12 +26,15 @@
 #include "scene/ve_scene.hpp"
 #include "scene/gltf_scene.hpp"
 
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
+
 #include "utils/ve_log.hpp"
 #include "input/input_controller.hpp"
 
 #include "ui/imgui_layer.hpp"
 
-#include "rendering/culling_system.hpp"
+#include "rendering/culling/culling_system.hpp"
 #include "rendering/aabb_debug_render_system.hpp"
 #include "rendering/axes_render_system.hpp"
 #include "rendering/light_system.hpp"

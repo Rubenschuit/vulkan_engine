@@ -1,26 +1,17 @@
 #pragma once
-#include "rendering/culling_backend.hpp"
+#include "rendering/culling/culling_backend.hpp"
 
 #include <cstdint>
-#include <vector>
-
-namespace vk::raii {
-class DescriptorSet;
-}
 
 namespace ve {
 
-class CullingSystem;
-class MaterialSSBOManager;
-class VeThreadPool;
-struct UIContext;
+class GpuCullingSystem;
+class GpuSceneManager;
+class VeBuffer;
 
-class CpuCullingBackend final : public CullingBackend {
+class GpuCullingBackend final : public CullingBackend {
 public:
-	CpuCullingBackend(CullingSystem& culling, PbrRenderSystem& pbr,
-	                  MaterialSSBOManager& mat_mgr, UIContext& ui,
-	                  std::vector<vk::raii::DescriptorSet>& global_sets,
-	                  VeThreadPool& thread_pool);
+	GpuCullingBackend(GpuCullingSystem& cull_system, GpuSceneManager& gpu_scene);
 
 	void cull(VeFrameInfo& fi, GpuSceneManager& gpu_scene) override;
 	void renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
@@ -36,16 +27,22 @@ public:
 	vk::raii::DescriptorSet& getGlobalDescriptorSet(uint32_t frame) override;
 	void collectStats(uint32_t frame, UIContext& ui,
 	                  Registry& registry) const override;
-	void setHizEnabled(bool) override {}
-	bool isHizEnabled() const override { return false; }
+	void setHizEnabled(bool enabled) override;
+	bool isHizEnabled() const override;
+
+	// Compaction-aware buffer source (eliminates repeated compaction checks)
+	struct IndirectDrawSource {
+		const VeBuffer& indirect;
+		const uint32_t* bucket_offsets;
+		const uint32_t* bucket_counts;
+		const VeBuffer* compact_indirect;
+		const VeBuffer* compact_counts;
+	};
+	IndirectDrawSource getDrawSource(uint32_t frame) const;
 
 private:
-	CullingSystem& m_culling;
-	PbrRenderSystem& m_pbr;
-	MaterialSSBOManager& m_mat_mgr;
-	UIContext& m_ui;
-	std::vector<vk::raii::DescriptorSet>& m_global_sets;
-	VeThreadPool& m_thread_pool;
+	GpuCullingSystem& m_cull;
+	GpuSceneManager& m_gpu_scene;
 };
 
 } // namespace ve

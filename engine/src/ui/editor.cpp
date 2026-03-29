@@ -8,10 +8,10 @@
 
 namespace ve {
 
-Editor::Editor(VeRenderer& renderer, ImGuiLayer& imgui_layer)
+Editor::Editor(VeRenderer& renderer, ImGuiLayer& imgui_layer, EventBus& event_bus)
 	: m_renderer(renderer), m_imgui_layer(imgui_layer) {
 	m_performance_panel = std::make_unique<PerformancePanel>(renderer);
-	m_graphics_panel = std::make_unique<GraphicsPanel>(renderer);
+	m_graphics_panel = std::make_unique<GraphicsPanel>(renderer, event_bus);
 	m_environment_panel = std::make_unique<EnvironmentPanel>();
 	m_debug_panel = std::make_unique<DebugPanel>(m_texture_inspector);
 	m_inspector_panel.setTextureInspector(&m_texture_inspector);

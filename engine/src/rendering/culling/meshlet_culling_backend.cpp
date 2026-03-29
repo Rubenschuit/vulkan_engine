@@ -1,21 +1,28 @@
 #include "pch.hpp"
-#include "rendering/meshlet_culling_backend.hpp"
-#include "rendering/meshlet_culling_system.hpp"
-#include "rendering/gpu_culling_system.hpp"
-#include "rendering/gpu_scene_manager.hpp"
+#include "rendering/culling/meshlet_culling_backend.hpp"
+#include "rendering/culling/meshlet_culling_system.hpp"
+#include "rendering/culling/gpu_culling_system.hpp"
+#include "rendering/managers/gpu_scene_manager.hpp"
 #include "rendering/depth_prepass_system.hpp"
 #include "rendering/pbr_render_system.hpp"
 #include "rendering/shadow_render_system.hpp"
 #include "rendering/ve_renderer.hpp"
 #include "rendering/ve_frame_info.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 #include "ui/imgui_layer.hpp"
 
 namespace ve {
 
 MeshletCullingBackend::MeshletCullingBackend(MeshletCullingSystem& meshlet,
                                              GpuCullingSystem& gpu_cull,
-                                             GpuSceneManager& gpu_scene)
-	: m_meshlet_cull_system{meshlet}, m_gpu_cull{gpu_cull}, m_gpu_scene{gpu_scene} {}
+                                             GpuSceneManager& gpu_scene,
+                                             EventBus& event_bus)
+	: m_meshlet_cull_system{meshlet}, m_gpu_cull{gpu_cull}, m_gpu_scene{gpu_scene} {
+	event_bus.subscribe<GpuShadowFallbackChangedEvent>([this](const GpuShadowFallbackChangedEvent& e) {
+		m_gpu_shadow_fallback = e.enabled;
+	});
+}
 
 void MeshletCullingBackend::cull(VeFrameInfo& fi, GpuSceneManager& gpu_scene) {
 	auto& cmd = fi.cmd();

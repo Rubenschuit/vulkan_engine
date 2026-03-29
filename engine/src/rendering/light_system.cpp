@@ -5,6 +5,8 @@
 #include "scene/ve_component.hpp"
 #include "scene/ve_registry.hpp"
 #include "utils/ve_log.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -62,8 +64,13 @@ LightSystem::LightSystem( VeDevice& device,
 									const vk::raii::DescriptorSetLayout& material_set_layout,
 									vk::Format color_format,
 									vk::SampleCountFlagBits sample_count,
-									std::filesystem::path shader_path)
+									std::filesystem::path shader_path,
+									EventBus& event_bus)
 									: m_ve_device(device), m_shader_path(shader_path) {
+
+	event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
+		recreatePipeline(e.offscreen_format, e.sample_count);
+	});
 
 	createPipelineLayout(global_set_layout, material_set_layout);
 	createPipeline(color_format, sample_count);

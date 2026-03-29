@@ -11,6 +11,7 @@
 
 namespace ve {
 
+class EventBus;
 class Registry;
 
 enum class DebugShapeType : uint8_t { Box, Sphere, Capsule, ConvexHull, Compound };
@@ -54,6 +55,8 @@ public:
 	void freezeBody(Entity entity);
 	void unfreezeBody(Entity entity);
 	void setPreserveVelocity(Entity entity, bool preserve);
+
+	void setEventBus(EventBus* bus);
 
 	uint32_t getActiveBodyCount() const;
 	std::optional<DebugShape> getDebugShape(Entity entity, Registry& registry) const;

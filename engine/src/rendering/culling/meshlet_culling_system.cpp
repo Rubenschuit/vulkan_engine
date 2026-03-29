@@ -1,18 +1,37 @@
 #include "pch.hpp"
-#include "rendering/meshlet_culling_system.hpp"
-#include "rendering/gpu_culling_system.hpp"
-#include "rendering/gpu_scene_manager.hpp"
-#include "rendering/pbr_mega_buffer.hpp"
+#include "rendering/culling/meshlet_culling_system.hpp"
+#include "rendering/culling/gpu_culling_system.hpp"
+#include "rendering/managers/gpu_scene_manager.hpp"
+#include "rendering/managers/pbr_mega_buffer.hpp"
 #include "rendering/hiz_system.hpp"
 #include "rendering/ve_frame_info.hpp"
 #include "vulkan/ve_image.hpp"
 #include "utils/ve_frustum.hpp"
 #include "utils/ve_log.hpp"
+#include "rendering/managers/scene_resource_manager.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 namespace ve {
 
-MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesystem::path& shaders_dir)
+MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesystem::path& shaders_dir,
+                                           EventBus& event_bus, VeDescriptorPool& pool,
+                                           SceneResourceManager& scene_resources,
+                                           PbrMegaBuffer& mega_buffer, HizSystem& hiz)
 	: m_ve_device(device) {
+
+	auto rebuild = [this, &pool, &scene_resources, &mega_buffer, &hiz]() {
+		auto& gpu_scene = scene_resources.getGpuSceneManager();
+		createDescriptorSets(pool, gpu_scene, mega_buffer);
+		createHizDescriptorSets(pool, gpu_scene, mega_buffer, hiz);
+		createShadowDescriptorSets(pool, gpu_scene, mega_buffer);
+	};
+	event_bus.subscribe<SceneLoadedEvent>([rebuild](const SceneLoadedEvent&) { rebuild(); });
+	event_bus.subscribe<AssetLoadCompleteEvent>([rebuild](const AssetLoadCompleteEvent&) { rebuild(); });
+	event_bus.subscribe<ResolutionChangedEvent>([this, &pool, &scene_resources, &mega_buffer, &hiz](const ResolutionChangedEvent&) {
+		auto& gpu_scene = scene_resources.getGpuSceneManager();
+		createHizDescriptorSets(pool, gpu_scene, mega_buffer, hiz);
+	});
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		m_visible_objects[i] = std::make_unique<VeBuffer>(m_ve_device,

@@ -1,5 +1,5 @@
 #include "pch.hpp"
-#include "rendering/bindless_texture_registry.hpp"
+#include "rendering/managers/bindless_texture_registry.hpp"
 #include "utils/ve_log.hpp"
 
 namespace ve {

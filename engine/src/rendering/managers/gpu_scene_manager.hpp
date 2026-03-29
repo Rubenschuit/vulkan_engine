@@ -1,10 +1,10 @@
 #pragma once
 #include "ve_export.hpp"
 #include "ve_config.hpp"
-#include "rendering/meshlet_data.hpp"
+#include "rendering/culling/meshlet_data.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "scene/ve_entity.hpp"
-#include "scene/ve_event.hpp"
+#include "scene/ecs_event_dispatcher.hpp"
 
 #include <glm/glm.hpp>
 #include <array>
@@ -123,6 +123,7 @@ public:
 	uint32_t getObjectCount() const { return static_cast<uint32_t>(m_active_ids.size()); }
 	uint32_t getTotalRegisteredCount() const { return m_active_count; }
 	bool hasRegisteredObjects() const { return m_active_count > 0; }
+	Registry* getRegistry() const { return m_registry; }
 	uint32_t getDispatchCount() const { return m_next_id; }
 	bool hasDynamicObjects() const { return m_dynamic_object_count > 0; }
 	uint32_t getDynamicObjectCount() const { return m_dynamic_object_count; }

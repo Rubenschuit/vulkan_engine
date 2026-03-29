@@ -14,6 +14,7 @@ namespace ve {
 	class VeImage;
 	class VeDescriptorPool;
 	class VeDescriptorSetLayout;
+	class EventBus;
 }
 
 namespace ve {
@@ -30,7 +31,8 @@ public:
 		vk::Extent2D mask_extent,
 		vk::Extent2D depth_extent,
 		const vk::raii::ImageView& depth_image_view,
-		vk::Image depth_image);
+		vk::Image depth_image,
+		EventBus& event_bus);
 	~ShadowMaskSystem();
 
 	ShadowMaskSystem(const ShadowMaskSystem&) = delete;

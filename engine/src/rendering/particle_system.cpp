@@ -1,5 +1,7 @@
 #include "pch.hpp"
 #include "rendering/particle_system.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 #include <random>
 #include <chrono>
 #include <chrono>
@@ -16,10 +18,18 @@ ParticleSystem::ParticleSystem(
 	uint32_t particle_count,
 	glm::vec3 origin,
 	std::filesystem::path shader_path,
-	bool start_active)
+	bool start_active,
+	EventBus* event_bus)
 	: m_ve_device(device), m_particle_count(particle_count),
 	  m_origin(origin), m_descriptor_pool(std::move(descriptor_pool)),
 	  m_shader_path(shader_path) {
+
+	if (event_bus) {
+		event_bus->subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
+			recreatePipeline(e.offscreen_format, e.sample_count);
+		});
+	}
+
 	VE_LOGI("ParticleSystem constructor: particles=" << m_particle_count);
 	m_pending_particle_count = m_particle_count;
 	m_capacity = 0;

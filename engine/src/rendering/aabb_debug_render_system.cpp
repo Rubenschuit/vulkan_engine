@@ -5,6 +5,8 @@
 #include "vulkan/ve_buffer.hpp"
 #include "resources/ve_mesh.hpp"
 #include "scene/ve_component.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 namespace ve {
 
@@ -51,8 +53,14 @@ AabbDebugRenderSystem::AabbDebugRenderSystem(
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	vk::Format color_format,
 	vk::SampleCountFlagBits sample_count,
-	std::filesystem::path shader_path)
+	std::filesystem::path shader_path,
+	EventBus& event_bus)
 	: m_ve_device(device), m_shader_path(std::move(shader_path)), m_color_format(color_format), m_sample_count(sample_count) {
+
+	event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
+		recreatePipeline(e.offscreen_format, e.sample_count);
+	});
+
 	createPipelineLayout(global_set_layout);
 	createPipeline(color_format, sample_count);
 	createVertexBuffer();

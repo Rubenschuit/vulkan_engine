@@ -1,8 +1,11 @@
 #include "pch.hpp"
 #include "rendering/post_process_system.hpp"
+#include "rendering/bloom_system.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_pipeline.hpp"
 #include "utils/ve_log.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 namespace ve {
 
@@ -11,8 +14,13 @@ PostProcessSystem::PostProcessSystem(
 	vk::Format color_format,
 	const vk::raii::ImageView& resolve_target_view,
 	const vk::raii::ImageView& bloom_texture_view,
-	std::filesystem::path shader_path)
-	: m_ve_device(device), m_shader_path(std::move(shader_path)) {
+	std::filesystem::path shader_path,
+	EventBus& event_bus, BloomSystem& bloom)
+	: m_ve_device(device), m_shader_path(std::move(shader_path)), m_bloom(&bloom) {
+
+	event_bus.subscribe<ResolutionChangedEvent>([this](const ResolutionChangedEvent& e) {
+		recreatePipeline(e.swap_chain_format, e.resolve_target_view, m_bloom->getBloomTexture());
+	});
 
 	createDescriptorSetLayout();
 	createDescriptorPool();

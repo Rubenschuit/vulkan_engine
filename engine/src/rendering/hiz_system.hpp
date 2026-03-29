@@ -12,6 +12,7 @@ class VeImage;
 class VeDescriptorPool;
 class VeDescriptorSetLayout;
 class VeComputePipeline;
+class EventBus;
 }
 
 namespace ve {
@@ -24,7 +25,8 @@ public:
 		vk::Extent2D extent,
 		const vk::raii::ImageView& depth_image_view,
 		vk::Image depth_image,
-		const std::filesystem::path& shaders_dir);
+		const std::filesystem::path& shaders_dir,
+		EventBus& event_bus);
 	~HizSystem();
 
 	HizSystem(const HizSystem&) = delete;

@@ -13,6 +13,7 @@ namespace ve {
 	class VeDescriptorPool;
 	class VeDescriptorSetLayout;
 	class VeComputePipeline;
+	class EventBus;
 }
 
 namespace ve {
@@ -24,7 +25,8 @@ public:
 		VeDescriptorPool& descriptor_pool,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		std::filesystem::path shader_path,
-		vk::Extent2D screen_extent);
+		vk::Extent2D screen_extent,
+		EventBus& event_bus);
 	~ClusterLightSystem();
 
 	ClusterLightSystem(const ClusterLightSystem&) = delete;
@@ -41,7 +43,7 @@ public:
 
 	void recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D screen_extent);
 
-	void setEnabled(bool enabled) { m_enabled = enabled; }
+	void setLightCountActive(bool has_lights);
 	bool isEnabled() const { return m_enabled; }
 
 	const vk::raii::DescriptorSetLayout& getOutputSetLayout() const {
@@ -64,6 +66,7 @@ private:
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;
 	bool m_enabled = false;
+	bool m_ui_enabled = true;
 	uint32_t m_last_light_count = 0;       // total (point + spot), set by uploadLightData()
 	uint32_t m_last_point_light_count = 0; // point lights only, for cluster_params.num_point_lights
 

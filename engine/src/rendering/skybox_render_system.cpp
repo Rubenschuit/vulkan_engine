@@ -8,6 +8,8 @@
 #include "resources/ve_mesh.hpp"
 #include "resources/ve_model.hpp"
 #include "utils/ve_log.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -33,8 +35,10 @@ SkyboxRenderSystem::SkyboxRenderSystem(
 	std::filesystem::path shader_path,
 	const std::filesystem::path& cube_model_path,
 	vk::Format color_format,
-	vk::SampleCountFlagBits sample_count)
+	vk::SampleCountFlagBits sample_count,
+	EventBus& event_bus)
 	: m_ve_device(device),
+	  m_event_bus(event_bus),
 	  m_resource_manager(resource_manager),
 	  m_descriptor_pool(descriptor_pool),
 	  m_material_set_layout(material_set_layout),
@@ -46,6 +50,10 @@ SkyboxRenderSystem::SkyboxRenderSystem(
 	createPipeline(color_format, sample_count);
 	loadCubeModel(resource_manager, cube_model_path);
 
+	m_event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
+		recreatePipeline(e.offscreen_format, e.sample_count);
+	});
+
 	if (!m_available_skyboxes.empty()) {
 		size_t default_index = 0;
 		for (size_t i = 0; i < m_available_skyboxes.size(); ++i) {
@@ -56,6 +64,7 @@ SkyboxRenderSystem::SkyboxRenderSystem(
 		}
 		loadSkyboxTexture(m_available_skyboxes[default_index].path);
 		m_current_index = default_index;
+		m_event_bus.emitImmediate(SkyboxChangedEvent{m_available_skyboxes[default_index].path});
 	} else {
 		VE_LOGW("No skybox textures found in " << m_skybox_base_path.generic_string());
 	}
@@ -176,18 +185,20 @@ void SkyboxRenderSystem::createPipeline(vk::Format color_format, vk::SampleCount
 
 // Draws a big cube and binds cubemap texture for shader
 // TODO: move update logic to a separate function
+void SkyboxRenderSystem::processPendingLoad() {
+	if (!m_pending_load.has_value())
+		return;
+	m_ve_device.getDevice().waitIdle();
+	size_t idx = *m_pending_load;
+	loadSkyboxTexture(m_available_skyboxes[idx].path);
+	m_current_index = idx;
+	m_pending_load = std::nullopt;
+	m_event_bus.emitImmediate(SkyboxChangedEvent{m_available_skyboxes[idx].path});
+}
+
 void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 	if (!m_has_cubemap_descriptor)
 		return;
-
-	// Apply pending skybox load (deferred to avoid destroying texture in use)
-	if (m_pending_load.has_value()) {
-		m_ve_device.getDevice().waitIdle();
-		size_t idx = *m_pending_load;
-		loadSkyboxTexture(m_available_skyboxes[idx].path);
-		m_current_index = idx;
-		m_pending_load = std::nullopt;
-	}
 
 	frame_info.cmd().bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 	frame_info.cmd().bindDescriptorSets(

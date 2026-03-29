@@ -1,7 +1,7 @@
 #include "pch.hpp"
 #include "rendering/pbr_render_system.hpp"
-#include "rendering/pbr_mega_buffer.hpp"
-#include "rendering/material_ssbo_manager.hpp"
+#include "rendering/managers/pbr_mega_buffer.hpp"
+#include "rendering/managers/material_ssbo_manager.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_pipeline.hpp"
 #include "vulkan/ve_descriptors.hpp"
@@ -12,6 +12,8 @@
 #include "scene/ve_scene.hpp"
 #include "utils/ve_log.hpp"
 #include "utils/ve_frustum.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -34,10 +36,30 @@ PbrRenderSystem::PbrRenderSystem(
 	const vk::raii::DescriptorSetLayout& ibl_set_layout,
 	vk::Format color_format,
 	vk::SampleCountFlagBits sample_count,
-	std::filesystem::path shader_path)
-	: m_ve_device(device), m_shader_path(std::move(shader_path)), m_color_format(color_format), m_sample_count(sample_count) {
+	std::filesystem::path shader_path,
+	EventBus& event_bus,
+	PbrMegaBuffer& mega_buffer)
+	: m_ve_device(device), m_shader_path(std::move(shader_path)), m_color_format(color_format),
+	  m_sample_count(sample_count), m_mega_buffer(mega_buffer) {
 
-	m_mega_buffer = std::make_unique<PbrMegaBuffer>(m_ve_device);
+	event_bus.subscribe<TopologyChangedEvent>([this](const TopologyChangedEvent& e) {
+		setTopology(e.topology);
+	});
+	event_bus.subscribe<ShadowSamplesChangedEvent>([this](const ShadowSamplesChangedEvent& e) {
+		setShadowSamples(e.pcf_samples, e.pcss_filter_samples);
+	});
+	event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
+		recreatePipeline(e.offscreen_format, e.sample_count);
+	});
+	event_bus.subscribe<DepthPrePassChangedEvent>([this](const DepthPrePassChangedEvent& e) {
+		m_depth_prepass_active = e.enabled;
+	});
+	event_bus.subscribe<ResolutionChangedEvent>([this](const ResolutionChangedEvent& e) {
+		recreateWboit(e.wboit_accum_view, e.wboit_revealage_view, e.offscreen_format);
+	});
+	event_bus.subscribe<SceneUnloadedEvent>([this](const SceneUnloadedEvent&) {
+		m_total_indirect_count = 0;
+	});
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		m_indirect_buffers[i] = std::make_unique<VeBuffer>(m_ve_device,
@@ -99,10 +121,6 @@ void PbrRenderSystem::createPipelines(vk::Format color_format, vk::SampleCountFl
 		pipeline_config.specialization_constants = {{0, mode}, {1, m_pcf_samples}, {2, m_pcss_filter_samples}, {3, 1u}};
 		m_pipelines_mask[mode] = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
 	}
-}
-
-void PbrRenderSystem::buildMegaBuffer(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh*>& meshes) {
-	m_mega_buffer->build(cmd, meshes);
 }
 
 void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr) const {
@@ -197,7 +215,7 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 
 	for (size_t i = 0; i < m_opaque_drawables.size(); ) {
 		auto& d = m_opaque_drawables[i];
-		const auto* entry = m_mega_buffer->getEntry(d.mesh_ptr);
+		const auto* entry = m_mega_buffer.getEntry(d.mesh_ptr);
 		if (!entry || d.lod_level >= entry->lod_entries.size()) {
 			i++;
 			continue;
@@ -353,7 +371,7 @@ void PbrRenderSystem::renderOpaqueGpuCulled(
 	const VeBuffer* compact_count_buffer,
 	const vk::raii::DescriptorSet* global_set_override) const {
 
-	if (!m_mega_buffer->isValid())
+	if (!m_mega_buffer.isValid())
 		return;
 
 	auto& cmd = frame_info.cmd();
@@ -382,7 +400,7 @@ void PbrRenderSystem::renderOpaqueGpuCulled(
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			6, {**frame_info.ibl_descriptor_set}, {});
 
-	m_mega_buffer->bind(cmd);
+	m_mega_buffer.bind(cmd);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
 	cmd.setDepthWriteEnable(VK_TRUE);
 
@@ -414,7 +432,7 @@ void PbrRenderSystem::renderOpaqueGpuCulledMeshlets(
 	const uint32_t* cpu_draw_counts,
 	const vk::raii::DescriptorSet* global_set_override) const {
 
-	if (!m_mega_buffer->hasMeshletData())
+	if (!m_mega_buffer.hasMeshletData())
 		return;
 
 	auto& cmd = frame_info.cmd();
@@ -443,7 +461,7 @@ void PbrRenderSystem::renderOpaqueGpuCulledMeshlets(
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			6, {**frame_info.ibl_descriptor_set}, {});
 
-	m_mega_buffer->bindMeshletIbo(cmd);
+	m_mega_buffer.bindMeshletIbo(cmd);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
 	cmd.setDepthWriteEnable(VK_TRUE);
 
@@ -476,7 +494,7 @@ void PbrRenderSystem::renderOpaqueGpuCulledMeshlets(
 }
 
 void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set) const {
-	if (m_total_indirect_count == 0 || !m_mega_buffer->isValid())
+	if (m_total_indirect_count == 0 || !m_mega_buffer.isValid())
 		return;
 
 	auto& cmd = frame_info.cmd();
@@ -504,7 +522,7 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info, const vk::raii::Desc
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			6, {**frame_info.ibl_descriptor_set}, {});
 
-	m_mega_buffer->bind(cmd);
+	m_mega_buffer.bind(cmd);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
 	cmd.setDepthWriteEnable(VK_TRUE);
 
@@ -525,7 +543,7 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info, const vk::raii::Desc
 
 void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
                                          const vk::raii::DescriptorSet* global_set_override) const {
-	if (m_transparent_drawables.empty() || !m_mega_buffer->isValid())
+	if (m_transparent_drawables.empty() || !m_mega_buffer.isValid())
 		return;
 
 	auto& cmd = frame_info.cmd();
@@ -557,10 +575,10 @@ void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info, const vk::raii:
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			6, {**frame_info.ibl_descriptor_set}, {});
 
-	m_mega_buffer->bind(cmd);
+	m_mega_buffer.bind(cmd);
 
 	for (const auto& d : m_transparent_drawables) {
-		const auto* entry = m_mega_buffer->getEntry(d.mesh_ptr);
+		const auto* entry = m_mega_buffer.getEntry(d.mesh_ptr);
 		if (!entry || d.lod_level >= entry->lod_entries.size())
 			continue;
 		MaterialAlphaProps alpha_props = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};
@@ -588,7 +606,7 @@ void PbrRenderSystem::bindPbrResources(VeFrameInfo& frame_info, const vk::raii::
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout, 5, {**frame_info.ao_descriptor_set}, {});
 	if (frame_info.ibl_descriptor_set)
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout, 6, {**frame_info.ibl_descriptor_set}, {});
-	m_mega_buffer->bind(cmd);
+	m_mega_buffer.bind(cmd);
 }
 
 void PbrRenderSystem::createWboitGeometryPipelines() {
@@ -741,7 +759,7 @@ void PbrRenderSystem::renderTransparentWboit(
 	const VeBuffer* compact_count_buffer,
 	const vk::raii::DescriptorSet* global_set_override) const {
 
-	if (!m_mega_buffer->isValid() || !m_wboit_pipelines[0])
+	if (!m_mega_buffer.isValid() || !m_wboit_pipelines[0])
 		return;
 
 	auto& cmd = frame_info.cmd();
@@ -779,7 +797,7 @@ void PbrRenderSystem::renderTransparentWboitMeshlets(
 	const uint32_t* cpu_draw_counts,
 	const vk::raii::DescriptorSet* global_set_override) const {
 
-	if (!m_mega_buffer->hasMeshletData() || !m_wboit_pipelines[0])
+	if (!m_mega_buffer.hasMeshletData() || !m_wboit_pipelines[0])
 		return;
 
 	auto& cmd = frame_info.cmd();
@@ -787,7 +805,7 @@ void PbrRenderSystem::renderTransparentWboitMeshlets(
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_wboit_pipelines[mode]->getPipeline());
 
 	bindPbrResources(frame_info, bindless_set, global_set_override);
-	m_mega_buffer->bindMeshletIbo(cmd);
+	m_mega_buffer.bindMeshletIbo(cmd);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
 	cmd.setDepthWriteEnable(VK_FALSE);
 	cmd.setDepthCompareOp(vk::CompareOp::eGreaterOrEqual);

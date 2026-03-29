@@ -10,7 +10,7 @@
 
 #include <mikktspace.h>
 #include <meshoptimizer.h>
-#include "rendering/meshlet_data.hpp"
+#include "rendering/culling/meshlet_data.hpp"
 
 #include <algorithm>
 #include <fstream>

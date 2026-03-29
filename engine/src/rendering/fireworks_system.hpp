@@ -13,6 +13,8 @@
 
 namespace ve {
 
+class EventBus;
+
 struct Rocket {
     glm::vec3 pos;
     glm::vec3 vel;
@@ -56,7 +58,8 @@ public:
         const vk::raii::DescriptorSetLayout& texture_set_layout,
         vk::Format color_format,
         vk::SampleCountFlagBits sample_count,
-        std::filesystem::path shader_path);
+        std::filesystem::path shader_path,
+        EventBus& event_bus);
 
     void recordComputeCommands(VeFrameInfo& frame_info);
     void render(VeFrameInfo& frame_info) const;

@@ -24,6 +24,7 @@ namespace ve {
 	class VeResourceManager;
 	class VeDescriptorPool;
 	class VeDescriptorSetLayout;
+	class EventBus;
 }
 
 namespace ve {
@@ -52,11 +53,15 @@ public:
 						std::filesystem::path shader_path,
 						const std::filesystem::path& cube_model_path,
 						vk::Format color_format,
-						vk::SampleCountFlagBits sample_count);
+						vk::SampleCountFlagBits sample_count,
+						EventBus& event_bus);
 	~SkyboxRenderSystem();
 
 	SkyboxRenderSystem(const SkyboxRenderSystem&) = delete;
 	SkyboxRenderSystem& operator=(const SkyboxRenderSystem&) = delete;
+
+	// Process deferred skybox load (call before frame recording begins)
+	void processPendingLoad();
 
 	// Slowly rotate the skybox over time and render it
 	void render(VeFrameInfo& frame_info);
@@ -90,6 +95,7 @@ private:
 	void createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
 
 	VeDevice& m_ve_device;
+	EventBus& m_event_bus;
 	VeResourceManager& m_resource_manager;
 	VeDescriptorPool& m_descriptor_pool;
 	VeDescriptorSetLayout& m_material_set_layout;

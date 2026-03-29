@@ -11,6 +11,9 @@
 
 namespace ve {
 
+class EventBus;
+class BloomSystem;
+
 class VENGINE_API PostProcessSystem {
 public:
 	PostProcessSystem(
@@ -18,7 +21,8 @@ public:
 		vk::Format color_format,
 		const vk::raii::ImageView& resolve_target_view,
 		const vk::raii::ImageView& bloom_texture_view,
-		std::filesystem::path shader_path);
+		std::filesystem::path shader_path,
+		EventBus& event_bus, BloomSystem& bloom);
 	~PostProcessSystem();
 
 	PostProcessSystem(const PostProcessSystem&) = delete;
@@ -44,6 +48,8 @@ private:
 
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_ve_pipeline;
+
+	BloomSystem* m_bloom = nullptr;
 };
 
 } // namespace ve

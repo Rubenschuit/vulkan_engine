@@ -1,6 +1,6 @@
 #include "pch.hpp"
-#include "rendering/material_ssbo_manager.hpp"
-#include "rendering/bindless_texture_registry.hpp"
+#include "rendering/managers/material_ssbo_manager.hpp"
+#include "rendering/managers/bindless_texture_registry.hpp"
 #include "resources/ve_material.hpp"
 #include "utils/ve_log.hpp"
 

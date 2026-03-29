@@ -1,10 +1,12 @@
 #include "pch.hpp"
 #include "rendering/depth_prepass_system.hpp"
-#include "rendering/pbr_mega_buffer.hpp"
+#include "rendering/managers/pbr_mega_buffer.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_pipeline.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "resources/ve_mesh.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 namespace ve {
 
@@ -12,8 +14,14 @@ DepthPrePassSystem::DepthPrePassSystem(
 	VeDevice& device,
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	vk::SampleCountFlagBits sample_count,
-	std::filesystem::path shader_path)
+	std::filesystem::path shader_path,
+	EventBus& event_bus)
 	: m_ve_device(device), m_shader_path(std::move(shader_path)) {
+
+	event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
+		recreatePipeline(e.sample_count);
+	});
+
 	createPipelineLayout(global_set_layout);
 	createPipeline(sample_count);
 }

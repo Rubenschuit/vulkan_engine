@@ -6,6 +6,8 @@
 #include "vulkan/ve_descriptors.hpp"
 #include "platform/ve_file_system.hpp"
 #include "utils/ve_log.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 namespace ve {
 
@@ -40,9 +42,23 @@ GtaoSystem::GtaoSystem(
 	vk::Extent2D ao_extent,
 	vk::Extent2D depth_extent,
 	const vk::raii::ImageView& depth_image_view,
-	vk::Image depth_image)
+	vk::Image depth_image,
+	EventBus& event_bus)
 	: m_ve_device(device), m_shader_path(std::move(shader_path)),
 	  m_extent(ao_extent), m_depth_extent(depth_extent) {
+
+	event_bus.subscribe<GtaoResolutionChangedEvent>([this](const GtaoResolutionChangedEvent& e) {
+		recreate(e.pool, e.ao_extent, e.depth_extent, e.depth_image_view, e.depth_image);
+	});
+	event_bus.subscribe<ResolutionChangedEvent>([this](const ResolutionChangedEvent& e) {
+		vk::Extent2D ao_extent = e.gtao_half_res
+			? vk::Extent2D{e.extent.width / 2, e.extent.height / 2} : e.extent;
+		recreate(e.pool, ao_extent, e.extent, e.depth_image_view, e.depth_image);
+	});
+	event_bus.subscribe<GtaoParametersChangedEvent>([this](const GtaoParametersChangedEvent& e) {
+		m_radius = e.radius;
+		m_intensity = e.intensity;
+	});
 
 	m_depth_image = depth_image;
 	m_depth_image_view = *depth_image_view;

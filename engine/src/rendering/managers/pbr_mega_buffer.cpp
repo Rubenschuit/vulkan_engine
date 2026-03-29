@@ -1,6 +1,6 @@
 #include "pch.hpp"
-#include "rendering/pbr_mega_buffer.hpp"
-#include "rendering/meshlet_data.hpp"
+#include "rendering/managers/pbr_mega_buffer.hpp"
+#include "rendering/culling/meshlet_data.hpp"
 #include "resources/ve_mesh.hpp"
 #include "utils/ve_log.hpp"
 

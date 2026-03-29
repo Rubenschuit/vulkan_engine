@@ -59,6 +59,11 @@ public:
 	vk::Result acquireNextImage(uint32_t* imageIndex);
 	void submitComputeWork(vk::CommandBuffer commandBuffer);
 	vk::Result submitAndPresent(vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* imageIndex);
+
+	// Split-submission for async depth consumers
+	void submitGraphicsPhase1(vk::CommandBuffer cb);
+	void submitComputePhase2(vk::CommandBuffer cb);
+	vk::Result submitGraphicsPhase2AndPresent(vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* imageIndex);
 	void waitForCurrentFence();
 	void resetCurrentFence();
 	void advanceFrame();

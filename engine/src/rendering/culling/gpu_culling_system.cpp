@@ -1,12 +1,14 @@
 #include "pch.hpp"
-#include "rendering/gpu_culling_system.hpp"
-#include "rendering/gpu_scene_manager.hpp"
+#include "rendering/culling/gpu_culling_system.hpp"
+#include "rendering/managers/gpu_scene_manager.hpp"
 #include "rendering/hiz_system.hpp"
 #include "rendering/ve_frame_info.hpp"
 #include "vulkan/ve_image.hpp"
 #include "scene/ve_camera.hpp"
 #include "utils/ve_frustum.hpp"
 #include "utils/ve_log.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 namespace ve {
 
@@ -687,6 +689,16 @@ void GpuCullingSystem::clearReadback() {
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		std::memset(m_readback_buffers[i]->getMappedMemory(), 0,
 			(BUCKET_COUNT + 1) * sizeof(uint32_t));
+}
+
+void GpuCullingSystem::subscribeToEvents(EventBus& event_bus, HizSystem& hiz, GpuSceneManager& scene_mgr) {
+	event_bus.subscribe<ResolutionChangedEvent>([this, &hiz, &scene_mgr](const ResolutionChangedEvent& e) {
+		createHizDescriptorSets(e.pool, scene_mgr, hiz);
+		createShadowHizDescriptorSets(e.pool, scene_mgr, hiz);
+	});
+	event_bus.subscribe<SceneUnloadedEvent>([this](const SceneUnloadedEvent&) {
+		clearReadback();
+	});
 }
 
 } // namespace ve

@@ -1,17 +1,19 @@
 #pragma once
-#include "rendering/culling_backend.hpp"
+#include "rendering/culling/culling_backend.hpp"
 
 #include <cstdint>
 
 namespace ve {
 
+class EventBus;
 class GpuCullingSystem;
 class GpuSceneManager;
-class VeBuffer;
+class MeshletCullingSystem;
 
-class GpuCullingBackend final : public CullingBackend {
+class MeshletCullingBackend final : public CullingBackend {
 public:
-	GpuCullingBackend(GpuCullingSystem& cull_system, GpuSceneManager& gpu_scene);
+	MeshletCullingBackend(MeshletCullingSystem& meshlet, GpuCullingSystem& gpu_cull,
+	                      GpuSceneManager& gpu_scene, EventBus& event_bus);
 
 	void cull(VeFrameInfo& fi, GpuSceneManager& gpu_scene) override;
 	void renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
@@ -30,19 +32,11 @@ public:
 	void setHizEnabled(bool enabled) override;
 	bool isHizEnabled() const override;
 
-	// Compaction-aware buffer source (eliminates repeated compaction checks)
-	struct IndirectDrawSource {
-		const VeBuffer& indirect;
-		const uint32_t* bucket_offsets;
-		const uint32_t* bucket_counts;
-		const VeBuffer* compact_indirect;
-		const VeBuffer* compact_counts;
-	};
-	IndirectDrawSource getDrawSource(uint32_t frame) const;
-
 private:
-	GpuCullingSystem& m_cull;
+	MeshletCullingSystem& m_meshlet_cull_system;
+	GpuCullingSystem& m_gpu_cull;
 	GpuSceneManager& m_gpu_scene;
+	bool m_gpu_shadow_fallback = true;
 };
 
 } // namespace ve

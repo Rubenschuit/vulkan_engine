@@ -22,6 +22,7 @@ class VeImage;
 class VePipeline;
 class VeDescriptorPool;
 class VeDescriptorSetLayout;
+class EventBus;
 }
 
 namespace ve {
@@ -34,7 +35,8 @@ public:
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		std::filesystem::path shader_path,
 		vk::Extent2D extent,
-		vk::Format composite_color_format);
+		vk::Format composite_color_format,
+		EventBus& event_bus);
 	~OutlineSystem();
 
 	OutlineSystem(const OutlineSystem&) = delete;

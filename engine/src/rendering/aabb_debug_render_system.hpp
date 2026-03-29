@@ -10,6 +10,7 @@ namespace ve {
 class VeDevice;
 class VePipeline;
 class VeBuffer;
+class EventBus;
 
 class VENGINE_API AabbDebugRenderSystem {
 public:
@@ -18,7 +19,8 @@ public:
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		vk::Format color_format,
 		vk::SampleCountFlagBits sample_count,
-		std::filesystem::path shader_path);
+		std::filesystem::path shader_path,
+		EventBus& event_bus);
 	~AabbDebugRenderSystem();
 
 	AabbDebugRenderSystem(const AabbDebugRenderSystem&) = delete;

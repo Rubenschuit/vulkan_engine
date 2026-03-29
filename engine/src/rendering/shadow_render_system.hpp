@@ -36,6 +36,7 @@ namespace ve {
 	class MeshletCullingSystem;
 	class PbrMegaBuffer;
 	class GpuSceneManager;
+	class EventBus;
 }
 
 namespace ve {
@@ -46,7 +47,8 @@ public:
 		VeDevice& device,
 		VeDescriptorPool& descriptor_pool,
 		const vk::raii::DescriptorSetLayout& material_set_layout,
-		std::filesystem::path shader_path);
+		std::filesystem::path shader_path,
+		EventBus& event_bus);
 	~ShadowRenderSystem();
 
 	ShadowRenderSystem(const ShadowRenderSystem&) = delete;

@@ -11,6 +11,7 @@ namespace ve {
 	class VePipeline;
 	class VeBuffer;
 	class PbrMegaBuffer;
+	class EventBus;
 }
 
 namespace ve {
@@ -21,7 +22,8 @@ public:
 		VeDevice& device,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		vk::SampleCountFlagBits sample_count,
-		std::filesystem::path shader_path);
+		std::filesystem::path shader_path,
+		EventBus& event_bus);
 	~DepthPrePassSystem();
 
 	DepthPrePassSystem(const DepthPrePassSystem&) = delete;

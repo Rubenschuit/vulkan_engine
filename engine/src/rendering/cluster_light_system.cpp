@@ -7,6 +7,8 @@
 #include "scene/ve_registry.hpp"
 #include "scene/ve_component.hpp"
 #include "utils/ve_log.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 #include <cmath>
 
@@ -17,8 +19,16 @@ ClusterLightSystem::ClusterLightSystem(
 	VeDescriptorPool& descriptor_pool,
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	std::filesystem::path shader_path,
-	vk::Extent2D screen_extent)
+	vk::Extent2D screen_extent,
+	EventBus& event_bus)
 	: m_ve_device(device), m_shader_path(std::move(shader_path)) {
+
+	event_bus.subscribe<ResolutionChangedEvent>([this](const ResolutionChangedEvent& e) {
+		recreate(e.pool, e.extent);
+	});
+	event_bus.subscribe<ClusterEnabledChangedEvent>([this](const ClusterEnabledChangedEvent& e) {
+		m_ui_enabled = e.enabled;
+	});
 
 	createBuffers(screen_extent);
 	createComputeSetLayout();
@@ -29,6 +39,10 @@ ClusterLightSystem::ClusterLightSystem(
 }
 
 ClusterLightSystem::~ClusterLightSystem() = default;
+
+void ClusterLightSystem::setLightCountActive(bool has_lights) {
+	m_enabled = m_ui_enabled && has_lights;
+}
 
 void ClusterLightSystem::createBuffers(vk::Extent2D screen_extent) {
 	m_tiles_x = (screen_extent.width + CLUSTER_TILE_SIZE - 1) / CLUSTER_TILE_SIZE;

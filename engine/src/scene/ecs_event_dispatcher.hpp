@@ -1,4 +1,4 @@
-/* EventDispatcher - lightweight type-safe event system for ECS Registry.
+/* EcsEventDispatcher
  *
  * Events are plain structs. The dispatcher is owned by Registry,
  * so subscription lifetimes are scoped to the scene. Systems subscribe once per
@@ -57,17 +57,17 @@ struct DeleteEntityRequest {
 	bool recursive = false;
 };
 
-// ── EventDispatcher ─────────────────────────────────────────────────────────
+// ── EcsEventDispatcher ──────────────────────────────────────────────────────
 
 using SubscriptionId = uint32_t;
 
-class EventDispatcher {
+class EcsEventDispatcher {
 public:
-	EventDispatcher() = default;
-	~EventDispatcher() = default;
+	EcsEventDispatcher() = default;
+	~EcsEventDispatcher() = default;
 
-	EventDispatcher(const EventDispatcher&) = delete;
-	EventDispatcher& operator=(const EventDispatcher&) = delete;
+	EcsEventDispatcher(const EcsEventDispatcher&) = delete;
+	EcsEventDispatcher& operator=(const EcsEventDispatcher&) = delete;
 
 	template <typename EventT>
 	SubscriptionId subscribe(std::function<void(const EventT&)> handler) {

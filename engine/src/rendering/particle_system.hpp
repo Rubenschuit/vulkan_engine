@@ -15,6 +15,8 @@
 
 namespace ve {
 
+class EventBus;
+
 // not enum class because we pass to shader
 enum class ParticleResetKind : uint32_t {
 	POINT = 1,
@@ -113,7 +115,8 @@ public:
 		uint32_t particle_count,
 		glm::vec3 origin,
 		std::filesystem::path shader_path,
-		bool start_active = true);
+		bool start_active = true,
+		EventBus* event_bus = nullptr);
 	~ParticleSystem();
 
 	ParticleSystem(const ParticleSystem&) = delete;

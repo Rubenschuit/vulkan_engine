@@ -17,6 +17,7 @@ class VeCamera;
 class VeImage;
 class GpuSceneManager;
 class HizSystem;
+class EventBus;
 struct VeFrameInfo;
 
 struct CullParams {
@@ -118,6 +119,8 @@ public:
 	static constexpr uint32_t BUCKET_COUNT = GPU_CULL_BUCKET_COUNT;
 
 	void createCompactionDescriptorSets(VeDescriptorPool& pool);
+
+	void subscribeToEvents(EventBus& event_bus, HizSystem& hiz, GpuSceneManager& scene_mgr);
 
 private:
 	void createPipelineLayout();

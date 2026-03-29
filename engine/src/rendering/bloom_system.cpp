@@ -1,6 +1,8 @@
 #include "pch.hpp"
 #include "rendering/bloom_system.hpp"
 #include "utils/ve_log.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 namespace ve {
 
@@ -9,10 +11,15 @@ BloomSystem::BloomSystem(
 	vk::Extent2D extent,
 	const vk::raii::ImageView& input_image_view,
 	std::filesystem::path downsample_shader_path,
-	std::filesystem::path upsample_shader_path)
+	std::filesystem::path upsample_shader_path,
+	EventBus& event_bus)
 	: m_ve_device(device),
 	  m_downsample_shader_path(std::move(downsample_shader_path)),
 	  m_upsample_shader_path(std::move(upsample_shader_path)) {
+
+	event_bus.subscribe<ResolutionChangedEvent>([this](const ResolutionChangedEvent& e) {
+		recreateResources(e.extent, e.resolve_target_view);
+	});
 
 	createDescriptorSetLayout();
 	createDescriptorPool();

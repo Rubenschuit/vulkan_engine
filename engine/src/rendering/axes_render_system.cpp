@@ -5,6 +5,8 @@
 #include "resources/ve_mesh.hpp"
 #include "utils/ve_log.hpp"
 #include "glm/gtc/constants.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 namespace ve {
 
@@ -14,8 +16,14 @@ AxesRenderSystem::AxesRenderSystem(
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	vk::Format color_format,
 	vk::SampleCountFlagBits sample_count,
-	std::filesystem::path shader_path)
+	std::filesystem::path shader_path,
+	EventBus& event_bus)
 	: m_ve_device(device), m_resource_manager(&resource_manager), m_shader_path(shader_path) {
+
+	event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
+		recreatePipeline(e.offscreen_format, e.sample_count);
+	});
+
 	createPipelineLayout(global_set_layout);
 	createPipeline(color_format, sample_count);
 	createAxesModel();

@@ -2,7 +2,7 @@
 #include "ve_export.hpp"
 #include "ve_config.hpp"
 #include "rendering/ve_frame_info.hpp"
-#include "rendering/pbr_mega_buffer.hpp"
+#include "rendering/managers/pbr_mega_buffer.hpp"
 #include "resources/ve_material_properties.hpp"
 
 #include <array>
@@ -20,6 +20,7 @@ namespace ve {
 	class MaterialSSBOManager;
 	class VeDescriptorSetLayout;
 	class VeDescriptorPool;
+	class EventBus;
 }
 
 namespace ve {
@@ -37,14 +38,13 @@ public:
 		const vk::raii::DescriptorSetLayout& ibl_set_layout,
 		vk::Format color_format,
 		vk::SampleCountFlagBits sample_count,
-		std::filesystem::path shader_path);
+		std::filesystem::path shader_path,
+		EventBus& event_bus,
+		PbrMegaBuffer& mega_buffer);
 	~PbrRenderSystem();
 
 	PbrRenderSystem(const PbrRenderSystem&) = delete;
 	PbrRenderSystem& operator=(const PbrRenderSystem&) = delete;
-
-	// Build the mega buffer from all meshes in the scene. Call once after scene load.
-	void buildMegaBuffer(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh*>& meshes);
 
 	void prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr) const;
 	void prepareTransparents(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr,
@@ -115,12 +115,6 @@ public:
 	}
 
 	uint32_t getOpaqueDrawCount() const { return m_total_indirect_count; }
-	void setDepthPrePassActive(bool active) { m_depth_prepass_active = active; }
-
-	PbrMegaBuffer& getMegaBuffer() { return *m_mega_buffer; }
-	const PbrMegaBuffer& getMegaBuffer() const { return *m_mega_buffer; }
-
-	void resetMegaBuffer() { m_mega_buffer->clear(); m_total_indirect_count = 0; }
 
 	// Depth prepass uses buckets 0-1 from the main indirect buffer
 	const uint32_t* getDepthBucketOffsets() const { return m_bucket_offsets; }
@@ -128,7 +122,7 @@ public:
 	const VeBuffer& getIndirectBuffer(uint32_t frame) const { return *m_indirect_buffers[frame]; }
 
 private:
-	bool m_depth_prepass_active = false;
+	bool m_depth_prepass_active = true;
 	void createPipelineLayout(
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		const vk::raii::DescriptorSetLayout& bindless_set_layout,
@@ -155,7 +149,7 @@ private:
 	std::array<std::unique_ptr<VePipeline>, SHADOW_MODE_COUNT> m_pipelines;
 	std::array<std::unique_ptr<VePipeline>, SHADOW_MODE_COUNT> m_pipelines_mask;
 
-	std::unique_ptr<PbrMegaBuffer> m_mega_buffer;
+	PbrMegaBuffer& m_mega_buffer;
 
 	// WBOIT geometry pipeline (one per shadow mode, same layout as PBR)
 	std::array<std::unique_ptr<VePipeline>, SHADOW_MODE_COUNT> m_wboit_pipelines;

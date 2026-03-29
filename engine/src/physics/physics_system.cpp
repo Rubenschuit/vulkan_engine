@@ -4,7 +4,9 @@
 #include <set>
 #include "scene/ve_registry.hpp"
 #include "scene/ve_component.hpp"
-#include "scene/ve_event.hpp"
+#include "scene/ecs_event_dispatcher.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 #include "resources/ve_mesh.hpp"
 
 // Jolt headers (only included in this translation unit)
@@ -26,6 +28,7 @@
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
+#include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Core/IssueReporting.h>
 
 JPH_SUPPRESS_WARNINGS
@@ -110,7 +113,43 @@ public:
 	}
 };
 
-// ── Per-body tracking data ──────────────────────────────────────────────────
+class ContactListenerImpl : public JPH::ContactListener {
+public:
+	EventBus* event_bus = nullptr;
+
+	JPH::ValidateResult OnContactValidate(
+		[[maybe_unused]] const JPH::Body& body1,
+		[[maybe_unused]] const JPH::Body& body2,
+		[[maybe_unused]] JPH::RVec3Arg base_offset,
+		[[maybe_unused]] const JPH::CollideShapeResult& result) override {
+		return JPH::ValidateResult::AcceptAllContactsForThisBodyPair;
+	}
+
+	void OnContactAdded(
+		const JPH::Body& body1,
+		const JPH::Body& body2,
+		[[maybe_unused]] const JPH::ContactManifold& manifold,
+		[[maybe_unused]] JPH::ContactSettings& settings) override {
+		if (!event_bus)
+			return;
+		Entity a = Entity::fromRaw(static_cast<uint32_t>(body1.GetUserData()));
+		Entity b = Entity::fromRaw(static_cast<uint32_t>(body2.GetUserData()));
+		auto cp = manifold.GetWorldSpaceContactPointOn1(0);
+		auto cn = manifold.mWorldSpaceNormal;
+		event_bus->enqueue(CollisionEvent{
+			a, b,
+			{cp.GetX(), cp.GetY(), cp.GetZ()},
+			{cn.GetX(), cn.GetY(), cn.GetZ()},
+			manifold.mPenetrationDepth});
+	}
+
+	void OnContactRemoved(
+		[[maybe_unused]] const JPH::SubShapeIDPair& sub_shape_pair) override {
+		// CollisionEndEvent requires entity mapping from BodyID, which is not
+		// available in this callback (only SubShapeIDs). Deferred to a future
+		// iteration when a BodyID->Entity reverse map is maintained.
+	}
+};
 
 struct BodyData {
 	JPH::BodyID body_id;
@@ -143,6 +182,7 @@ struct PhysicsSystem::Impl {
 	BPLayerInterfaceImpl bp_layer_interface;
 	ObjectVsBPLayerFilterImpl obj_vs_bp_filter;
 	ObjectLayerPairFilterImpl obj_pair_filter;
+	ContactListenerImpl contact_listener;
 
 	// Entity index -> Jolt body mapping
 	std::vector<std::optional<BodyData>> body_map;
@@ -153,6 +193,8 @@ struct PhysicsSystem::Impl {
 	SubscriptionId sub_rb_added = 0;
 	SubscriptionId sub_rb_removed = 0;
 	Registry* active_registry = nullptr;
+
+	EventBus* event_bus = nullptr;
 
 	float accumulator = 0.0f;
 	uint32_t dynamic_body_count = 0; // non-static bodies (dynamic + kinematic)
@@ -215,6 +257,7 @@ struct PhysicsSystem::Impl {
 			cfg.max_bodies, 0, cfg.max_body_pairs, cfg.max_contact_constraints,
 			bp_layer_interface, obj_vs_bp_filter, obj_pair_filter);
 		physics_system->SetGravity(JPH::Vec3(cfg.gravity.x, cfg.gravity.y, cfg.gravity.z));
+		physics_system->SetContactListener(&contact_listener);
 	}
 
 	~Impl() {
@@ -307,6 +350,7 @@ struct PhysicsSystem::Impl {
 			VE_LOGW("PhysicsSystem: failed to create body for entity " << entity.index());
 			return;
 		}
+		body->SetUserData(static_cast<uint64_t>(entity.id()));
 
 		JPH::EActivation activation = (rb.getMotionType() == PhysicsMotionType::Static)
 			? JPH::EActivation::DontActivate
@@ -894,6 +938,7 @@ struct PhysicsSystem::Impl {
 		JPH::Body* body = body_interface.CreateBody(body_settings);
 		if (!body)
 			return false;
+		body->SetUserData(static_cast<uint64_t>(entity.id()));
 
 		JPH::EActivation activation = (rb.getMotionType() == PhysicsMotionType::Static)
 			? JPH::EActivation::DontActivate
@@ -1234,6 +1279,25 @@ PhysicsSystem::PhysicsSystem(const PhysicsConfig& config)
 	: m_impl(std::make_unique<Impl>(config)) {}
 
 PhysicsSystem::~PhysicsSystem() = default;
+
+void PhysicsSystem::setEventBus(EventBus* bus) {
+	m_impl->event_bus = bus;
+	m_impl->contact_listener.event_bus = bus;
+
+	if (bus) {
+		bus->subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
+			m_impl->onSceneLoaded(*e.registry);
+			m_impl->addStaticCollidersForAllMeshes(*e.registry);
+		});
+		bus->subscribe<SceneUnloadedEvent>([this](const SceneUnloadedEvent&) {
+			m_impl->onSceneUnloaded();
+		});
+		bus->subscribe<AssetLoadCompleteEvent>([this](const AssetLoadCompleteEvent&) {
+			if (m_impl->active_registry)
+				m_impl->addStaticCollidersForAllMeshes(*m_impl->active_registry);
+		});
+	}
+}
 
 void PhysicsSystem::onSceneLoaded(Registry& registry) {
 	m_impl->onSceneLoaded(registry);

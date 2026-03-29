@@ -14,6 +14,7 @@ namespace ve {
     class VePipeline;
     class VeMesh;
     class VeResourceManager;
+    class EventBus;
 }
 
 namespace ve {
@@ -27,7 +28,8 @@ AxesRenderSystem(
 		const vk::raii::DescriptorSetLayout& descriptor_set_layout,
 		vk::Format color_format,
 		vk::SampleCountFlagBits sample_count,
-		std::filesystem::path shader_path);
+		std::filesystem::path shader_path,
+		EventBus& event_bus);
 	~AxesRenderSystem();
 
 	AxesRenderSystem(const AxesRenderSystem&) = delete;

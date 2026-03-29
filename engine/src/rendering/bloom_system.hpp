@@ -20,6 +20,8 @@
 
 namespace ve {
 
+class EventBus;
+
 struct BloomMip {
 	std::unique_ptr<VeImage> image;
 	vk::raii::DescriptorSet descriptor_set{nullptr};
@@ -32,7 +34,8 @@ public:
 		vk::Extent2D extent,
 		const vk::raii::ImageView& input_image_view,
 		std::filesystem::path downsample_shader_path,
-		std::filesystem::path upsample_shader_path);
+		std::filesystem::path upsample_shader_path,
+		EventBus& event_bus);
 	~BloomSystem();
 
 	BloomSystem(const BloomSystem&) = delete;

@@ -8,7 +8,7 @@
 #include "resources/ve_texture.hpp"
 #include "resources/ve_material_properties.hpp"
 #include "resources/ve_model.hpp"
-#include "rendering/meshlet_data.hpp"
+#include "rendering/culling/meshlet_data.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>

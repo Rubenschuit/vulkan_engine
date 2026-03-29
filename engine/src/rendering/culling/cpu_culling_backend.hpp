@@ -1,18 +1,26 @@
 #pragma once
-#include "rendering/culling_backend.hpp"
+#include "rendering/culling/culling_backend.hpp"
 
 #include <cstdint>
+#include <vector>
+
+namespace vk::raii {
+class DescriptorSet;
+}
 
 namespace ve {
 
-class GpuCullingSystem;
-class GpuSceneManager;
-class MeshletCullingSystem;
+class CullingSystem;
+class MaterialSSBOManager;
+class VeThreadPool;
+struct UIContext;
 
-class MeshletCullingBackend final : public CullingBackend {
+class CpuCullingBackend final : public CullingBackend {
 public:
-	MeshletCullingBackend(MeshletCullingSystem& meshlet, GpuCullingSystem& gpu_cull,
-	                      GpuSceneManager& gpu_scene);
+	CpuCullingBackend(CullingSystem& culling, PbrRenderSystem& pbr,
+	                  MaterialSSBOManager& mat_mgr, UIContext& ui,
+	                  std::vector<vk::raii::DescriptorSet>& global_sets,
+	                  VeThreadPool& thread_pool);
 
 	void cull(VeFrameInfo& fi, GpuSceneManager& gpu_scene) override;
 	void renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
@@ -28,16 +36,16 @@ public:
 	vk::raii::DescriptorSet& getGlobalDescriptorSet(uint32_t frame) override;
 	void collectStats(uint32_t frame, UIContext& ui,
 	                  Registry& registry) const override;
-	void setHizEnabled(bool enabled) override;
-	bool isHizEnabled() const override;
-
-	void setGpuShadowFallback(bool enabled) { m_gpu_shadow_fallback = enabled; }
+	void setHizEnabled(bool) override {}
+	bool isHizEnabled() const override { return false; }
 
 private:
-	MeshletCullingSystem& m_meshlet_cull_system;
-	GpuCullingSystem& m_gpu_cull;
-	GpuSceneManager& m_gpu_scene;
-	bool m_gpu_shadow_fallback = false;
+	CullingSystem& m_culling;
+	PbrRenderSystem& m_pbr;
+	MaterialSSBOManager& m_mat_mgr;
+	UIContext& m_ui;
+	std::vector<vk::raii::DescriptorSet>& m_global_sets;
+	VeThreadPool& m_thread_pool;
 };
 
 } // namespace ve

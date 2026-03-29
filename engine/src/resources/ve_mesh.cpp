@@ -1,7 +1,7 @@
 #include "pch.hpp"
 #include "resources/ve_mesh.hpp"
 #include "resources/loaded_asset_data.hpp"
-#include "rendering/meshlet_data.hpp"
+#include "rendering/culling/meshlet_data.hpp"
 #include "ve_config.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>

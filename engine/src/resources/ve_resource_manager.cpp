@@ -3,7 +3,7 @@
 #include "resources/ve_material.hpp"
 #include "resources/ve_texture.hpp"
 #include "resources/loaded_asset_data.hpp"
-#include "rendering/meshlet_data.hpp"
+#include "rendering/culling/meshlet_data.hpp"
 #include "vulkan/ve_descriptors.hpp"
 
 namespace ve {
