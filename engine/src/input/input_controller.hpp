@@ -1,29 +1,23 @@
-// Class to handle input and pass actions to the application.
-// TODO: Move application specific input handling to the application class.
-// TODO: look into using a callback for input handling.
+// Handles camera movement and dispatches registered input actions via EventBus.
 #pragma once
 #include "ve_export.hpp"
 #include "platform/ve_window.hpp"
 #include "scene/ve_camera.hpp"
+#include "input/input_action.hpp"
+
+#include <deque>
 
 namespace ve {
 
-struct InputActions {
-	// particles
-	bool reset_particles = false;
-	bool launch_firework = false;
-	uint32_t set_mode = 0; // 1..4 when pressed, 0 = no change
-	bool reset_disc = false; // G key toggles disc reset mode
+class EventBus;
 
-	// UI
-	bool ui_toggle = false;   // true exactly on the frame Tab toggled state
-	bool ui_visible = false;  // true when mouse-look is disabled
-	bool toggle_performance_ui = false;
+struct RegisteredAction {
+	ActionBinding binding;
+	int prev_state = GLFW_RELEASE;
 };
 
 class VENGINE_API InputController {
 public:
-
 	struct KeyMappings {
 		int move_forward = GLFW_KEY_W;
 		int move_backward = GLFW_KEY_S;
@@ -38,16 +32,6 @@ public:
 		int look_right = GLFW_KEY_RIGHT;
 
 		int toggle_mouse_look = GLFW_KEY_TAB;
-		int toggle_performance_ui = GLFW_KEY_P;
-		int reset_camera = GLFW_KEY_R;
-		int reset_particles = GLFW_KEY_E;
-		int launch_firework = GLFW_KEY_F;
-		int reset_disc_toggle = GLFW_KEY_G;
-		int mode1 = GLFW_KEY_1;
-		int mode2 = GLFW_KEY_2;
-		int mode3 = GLFW_KEY_3;
-		int mode4 = GLFW_KEY_4;
-		int mode5 = GLFW_KEY_5;
 	};
 
 	InputController(VeWindow& window);
@@ -56,11 +40,15 @@ public:
 	InputController(const InputController&) = delete;
 	InputController& operator=(const InputController&) = delete;
 
-	InputActions processInput(float delta_time, VeCamera& camera);
+	void processInput(float delta_time, VeCamera& camera);
+
+	void setEventBus(EventBus* bus);
+	void registerAction(ActionBinding&& binding);
+	const std::deque<RegisteredAction>& getRegisteredActions() const;
+	bool isEditorMode() const;
 
 private:
 	void processMouseMovement(double xpos, double ypos);
-	void handleMouseToggle();
 
 	GLFWwindow* m_window{nullptr};
 
@@ -75,19 +63,12 @@ private:
 	float m_yaw_delta = 0.0f;
 	float m_pitch_delta = 0.0f;
 
-	// Mouse-look toggle state
 	bool m_mouse_look_enabled = true;
 	int m_prev_toggle_state = GLFW_RELEASE;
-	int m_prev_p_state = GLFW_RELEASE;
 	int m_prev_escape_state = GLFW_RELEASE;
-	int m_prev_reset_state = GLFW_RELEASE;
-	int m_prev_firework_state = GLFW_RELEASE;
-	int m_prev_g_state = GLFW_RELEASE;
-	int m_prev_mode1 = GLFW_RELEASE;
-	int m_prev_mode2 = GLFW_RELEASE;
-	int m_prev_mode3 = GLFW_RELEASE;
-	int m_prev_mode4 = GLFW_RELEASE;
-	int m_prev_mode5 = GLFW_RELEASE;
+
+	EventBus* m_event_bus = nullptr;
+	std::deque<RegisteredAction> m_actions;
 };
 
-} // ve
+} // namespace ve

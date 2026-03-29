@@ -1,6 +1,8 @@
 #include "pch.hpp"
 #include "ui/editor.hpp"
 #include "ui/imgui_layer.hpp"
+#include "input/input_controller.hpp"
+#include "input/input_action.hpp"
 #include "rendering/ve_renderer.hpp"
 #include "application/ve_application.hpp"
 #include <imgui.h>
@@ -81,19 +83,32 @@ void Editor::renderUI(UIContext& context, Registry* registry, VeScene* active_sc
 				m_state.selection_changed = true;
 			}
 
-			m_viewport_panel.render(registry, m_state, ctx);
-			m_hierarchy_panel.render(registry, m_state, ctx);
-			m_inspector_panel.render(registry, m_state, ctx);
-			m_performance_panel->render(registry, m_state, ctx);
-			m_debug_panel->render(registry, m_state, ctx);
-			m_graphics_panel->render(registry, m_state, ctx);
-			m_environment_panel->render(registry, m_state, ctx);
+			renderMenuBar();
+			if (m_state.show_keybindings)
+				renderKeybindingsWindow();
+
+			if (m_state.show_viewport)
+				m_viewport_panel.render(registry, m_state, ctx);
+			if (m_state.show_hierarchy)
+				m_hierarchy_panel.render(registry, m_state, ctx);
+			if (m_state.show_inspector)
+				m_inspector_panel.render(registry, m_state, ctx);
+			if (m_state.show_performance)
+				m_performance_panel->render(registry, m_state, ctx);
+			if (m_state.show_debug)
+				m_debug_panel->render(registry, m_state, ctx);
+			if (m_state.show_settings)
+				m_graphics_panel->render(registry, m_state, ctx);
+			if (m_state.show_environment)
+				m_environment_panel->render(registry, m_state, ctx);
 			m_texture_inspector.render();
 
-			if (m_app_ui_callback)
+			if (m_state.show_app_settings && m_app_ui_callback)
 				m_app_ui_callback();
 		} else {
 			m_performance_panel->render(registry, m_state, ctx);
+			if (m_app_ui_callback)
+				m_app_ui_callback();
 		}
 
 		// Loading overlay (renders on top of everything)
@@ -174,6 +189,96 @@ void Editor::setShadowRenderSystem(ShadowRenderSystem* system) {
 void Editor::onSwapChainRecreated() {
 	registerViewportImage();
 	m_texture_inspector.invalidateCache();
+}
+
+void Editor::renderMenuBar() {
+	if (ImGui::BeginMainMenuBar()) {
+		if (ImGui::BeginMenu("View")) {
+			ImGui::MenuItem("Viewport", nullptr, &m_state.show_viewport);
+			ImGui::MenuItem("Hierarchy", nullptr, &m_state.show_hierarchy);
+			ImGui::MenuItem("Inspector", nullptr, &m_state.show_inspector);
+			ImGui::MenuItem("Performance", nullptr, &m_state.show_performance);
+			ImGui::MenuItem("Graphics", nullptr, &m_state.show_settings);
+			ImGui::MenuItem("Environment", nullptr, &m_state.show_environment);
+			ImGui::MenuItem("Debug", nullptr, &m_state.show_debug);
+			if (m_app_ui_callback)
+				ImGui::MenuItem("App Settings", nullptr, &m_state.show_app_settings);
+			ImGui::EndMenu();
+		}
+		if (ImGui::BeginMenu("Help")) {
+			ImGui::MenuItem("Keybindings", nullptr, &m_state.show_keybindings);
+			ImGui::EndMenu();
+		}
+		ImGui::EndMainMenuBar();
+	}
+}
+
+void Editor::renderKeybindingsWindow() {
+	ImGui::SetNextWindowSize(ImVec2(420, 500), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Keybindings", &m_state.show_keybindings)) {
+		ImGui::End();
+		return;
+	}
+
+	auto tableRow = [](const char* key, const char* desc) {
+		ImGui::TableNextRow();
+		ImGui::TableNextColumn();
+		ImGui::TextUnformatted(key);
+		ImGui::TableNextColumn();
+		ImGui::TextUnformatted(desc);
+	};
+
+	if (ImGui::CollapsingHeader("Engine", ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (ImGui::BeginTable("engine_keys", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH)) {
+			ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+			ImGui::TableSetupColumn("Action");
+			tableRow("Tab", "Toggle editor mode");
+			tableRow("Escape", "Exit editor / close app");
+			tableRow("WASD", "Move camera");
+			tableRow("Space / C", "Move up / down");
+			tableRow("Shift", "Sprint");
+			tableRow("Arrow keys", "Look around");
+			ImGui::EndTable();
+		}
+	}
+
+	if (ImGui::CollapsingHeader("Gizmo", ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (ImGui::BeginTable("gizmo_keys", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH)) {
+			ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+			ImGui::TableSetupColumn("Action");
+			tableRow("T", "Translate");
+			tableRow("R", "Rotate");
+			tableRow("E", "Scale");
+			tableRow("Delete", "Delete entity");
+			ImGui::EndTable();
+		}
+	}
+
+	if (m_input_controller && ImGui::CollapsingHeader("Application", ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (ImGui::BeginTable("app_keys", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH)) {
+			ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+			ImGui::TableSetupColumn("Action");
+			ImGui::TableSetupColumn("Context", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+			for (const auto& action : m_input_controller->getRegisteredActions()) {
+				ImGui::TableNextRow();
+				ImGui::TableNextColumn();
+				auto key_name = keyDisplayName(action.binding.key);
+				ImGui::TextUnformatted(key_name.c_str());
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(action.binding.description.c_str());
+				ImGui::TableNextColumn();
+				const char* ctx = "Always";
+				if (action.binding.context == InputContext::GameMode)
+					ctx = "Game";
+				else if (action.binding.context == InputContext::EditorMode)
+					ctx = "Editor";
+				ImGui::TextUnformatted(ctx);
+			}
+			ImGui::EndTable();
+		}
+	}
+
+	ImGui::End();
 }
 
 } // namespace ve

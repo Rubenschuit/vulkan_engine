@@ -29,6 +29,7 @@ namespace ve {
 
 class AssetLoadingSystem;
 class ImGuiLayer;
+class InputController;
 class VeRenderer;
 class VeCamera;
 class Registry;
@@ -78,6 +79,9 @@ public:
 	// Asset loader for rendering loading panel
 	void setAssetLoader(AssetLoadingSystem* loader) { m_asset_loader = loader; m_hierarchy_panel.setAssetLoader(loader); }
 
+	// Input controller for keybindings display
+	void setInputController(const InputController* ic) { m_input_controller = ic; }
+
 	// Panel access
 	HierarchyPanel& getHierarchyPanel() { return m_hierarchy_panel; }
 	ViewportPanel& getViewportPanel() { return m_viewport_panel; }
@@ -88,6 +92,8 @@ private:
 	bool handleModeTransition();
 	bool handleViewportResize();
 	void registerViewportImage();
+	void renderMenuBar();
+	void renderKeybindingsWindow();
 
 	VeRenderer& m_renderer;
 	ImGuiLayer& m_imgui_layer;
@@ -104,6 +110,7 @@ private:
 	std::unique_ptr<DebugPanel> m_debug_panel;
 	TextureInspector m_texture_inspector;
 
+	const InputController* m_input_controller = nullptr;
 	AssetLoadingSystem* m_asset_loader = nullptr;
 	LoadingPanel m_loading_overlay;
 

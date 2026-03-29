@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "ui/panels/graphics_panel.hpp"
+#include "ui/editor_state.hpp"
 #include "ui/imgui_layer.hpp"
 #include "rendering/ve_renderer.hpp"
 #include "events/event_bus.hpp"
@@ -11,8 +12,8 @@
 
 namespace ve {
 
-void GraphicsPanel::render(Registry* /*registry*/, EditorState& /*state*/, UIContext& ctx) {
-	if (!ImGui::Begin("Graphics", nullptr, ImGuiWindowFlags_NoFocusOnAppearing)) {
+void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext& ctx) {
+	if (!ImGui::Begin("Graphics", &state.show_settings, ImGuiWindowFlags_NoFocusOnAppearing)) {
 		ImGui::End();
 		return;
 	}

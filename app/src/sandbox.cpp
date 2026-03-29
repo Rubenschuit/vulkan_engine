@@ -48,36 +48,85 @@ Sandbox::Sandbox(const std::filesystem::path& working_dir)
 
 	// Load the first registered scene
 	loadDefaultScene(0);
+
+	registerInputActions();
+}
+
+Sandbox::~Sandbox() {
+	eventBus().unsubscribe<InputActionEvent>(m_input_sub);
+}
+
+// ─── Input Actions ───────────────────────────────────────────────────────────
+
+void Sandbox::registerInputActions() {
+	auto& ic = getInputController();
+
+	ic.registerAction({
+		.name = "Reset Particles", .key = GLFW_KEY_E,
+		.trigger = TriggerType::OnPress, .context = InputContext::GameMode,
+		.description = "Reset particles at camera look position"
+	});
+	ic.registerAction({
+		.name = "Reset Disc", .key = GLFW_KEY_G,
+		.trigger = TriggerType::OnPress, .context = InputContext::GameMode,
+		.description = "Reset particles as disc at camera look position"
+	});
+	ic.registerAction({
+		.name = "Launch Firework", .key = GLFW_KEY_F,
+		.trigger = TriggerType::OnPress, .context = InputContext::GameMode,
+		.description = "Launch a firework rocket"
+	});
+	static const char* mode_names[] = {
+		"Gravity Earth", "Cool", "Succ", "Stasis", "Galaxy Massive"
+	};
+	for (int i = 1; i <= 5; ++i) {
+		ic.registerAction({
+			.name = "Set Mode", .key = GLFW_KEY_0 + i,
+			.trigger = TriggerType::OnPress, .context = InputContext::GameMode,
+			.description = std::string(mode_names[i - 1]) + " (mode " + std::to_string(i) + ")",
+			.value = static_cast<uint32_t>(i)
+		});
+	}
+
+	ic.registerAction({
+		.name = "Toggle Controls", .key = GLFW_KEY_H,
+		.trigger = TriggerType::OnPress, .context = InputContext::Always,
+		.description = "Toggle controls overlay"
+	});
+
+	m_input_sub = eventBus().subscribe<InputActionEvent>(
+		[this](const InputActionEvent& e) {
+			auto& ps = getParticleSystem();
+			if (e.name == "Reset Particles") {
+				ps.setOrigin(m_camera.getForward() * 100.0f + m_camera.getPosition());
+				ps.resetPoint();
+			} else if (e.name == "Reset Disc") {
+				ps.setOrigin(m_camera.getForward() * 100.0f + m_camera.getPosition());
+				ps.resetDisc();
+			} else if (e.name == "Launch Firework") {
+				getFireworksSystem().launchRocket();
+			} else if (e.name == "Set Mode") {
+				auto mode = static_cast<ParticleMode>(e.value);
+				ps.setMode(mode);
+				m_particles.mode = mode;
+			} else if (e.name == "Toggle Controls") {
+				m_show_controls = !m_show_controls;
+			}
+		});
 }
 
 // ─── Per-Frame Update ────────────────────────────────────────────────────────
 
 void Sandbox::update() {
-	updateParticles(getInputActions());
+	updateParticles();
 }
 
-void Sandbox::updateParticles(const InputActions& actions) {
+void Sandbox::updateParticles() {
 	auto& ps = getParticleSystem();
 	auto& fw = getFireworksSystem();
 
 	ps.setEnabled(m_particles_enabled);
 	fw.setEnabled(m_fireworks_enabled);
-
-	// Keyboard actions
-	if (actions.set_mode >= 1 && actions.set_mode <= 5) {
-		ParticleMode mode = static_cast<ParticleMode>(actions.set_mode);
-		ps.setMode(mode);
-		m_particles.mode = mode;
-	}
-	if (actions.reset_particles) {
-		ps.setOrigin(m_camera.getForward() * 100.0f + m_camera.getPosition());
-		ps.resetPoint();
-	} else if (actions.reset_disc) {
-		ps.setOrigin(m_camera.getForward() * 100.0f + m_camera.getPosition());
-		ps.resetDisc();
-	}
-	if (actions.launch_firework)
-		fw.launchRocket();
 
 	// UI-driven config
 	ps.stageParticleCount(m_particles.pending_count);
@@ -98,8 +147,61 @@ void Sandbox::updateParticles(const InputActions& actions) {
 
 // ─── UI Rendering ────────────────────────────────────────────────────────────
 
+void Sandbox::renderGameModeOverlay() {
+	static const char* mode_labels[] = {
+		"Gravity Earth", "Cool", "Succ", "Stasis", "Galaxy Massive"
+	};
+
+	const ImGuiViewport* vp = ImGui::GetMainViewport();
+	float padding = 10.0f;
+	ImGui::SetNextWindowPos(
+		ImVec2(vp->WorkPos.x + padding, vp->WorkPos.y + padding),
+		ImGuiCond_Always, ImVec2(0.0f, 0.0f));
+	ImGui::SetNextWindowBgAlpha(0.5f);
+	ImGui::SetNextWindowSize(ImVec2(0, 0));
+	ImGuiWindowFlags flags =
+		ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoDocking |
+		ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+		ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
+		ImGuiWindowFlags_NoMove;
+
+	if (ImGui::Begin("##ControlsOverlay", nullptr, flags)) {
+		auto keyLabel = [](const char* key, const char* desc) {
+			ImGui::Text("%s", key);
+			ImGui::SameLine(0.0f, 0.0f);
+			ImGui::TextDisabled("  %s", desc);
+		};
+
+		ImGui::TextDisabled("Controls");
+		ImGui::Separator();
+		keyLabel("E", "Reset Particles");
+		ImGui::SameLine(0.0f, 16.0f);
+		keyLabel("G", "Reset Disc");
+		keyLabel("F", "Launch Firework");
+		int mode_idx = static_cast<int>(m_particles.mode) - 1;
+		const char* label = (mode_idx >= 0 && mode_idx < 5) ? mode_labels[mode_idx] : "Unknown";
+		ImGui::Text("1-5");
+		ImGui::SameLine(0.0f, 0.0f);
+		ImGui::TextDisabled("  Mode %d: %s", mode_idx + 1, label);
+		ImGui::Separator();
+		keyLabel("Tab", "Editor");
+		ImGui::SameLine(0.0f, 16.0f);
+		keyLabel("P", "Performance");
+		ImGui::SameLine(0.0f, 16.0f);
+		keyLabel("H", "Hide");
+	}
+	ImGui::End();
+}
+
 void Sandbox::renderUI() {
-	if (ImGui::Begin(getAppSettingsWindowName().c_str(), nullptr, ImGuiWindowFlags_NoFocusOnAppearing)) {
+	if (!getInputController().isEditorMode()) {
+		if (m_show_controls)
+			renderGameModeOverlay();
+		return;
+	}
+
+	auto& app_visible = getEditor().getState().show_app_settings;
+	if (ImGui::Begin(getAppSettingsWindowName().c_str(), &app_visible, ImGuiWindowFlags_NoFocusOnAppearing)) {
 		if (ImGui::BeginTabBar("SettingsTabs")) {
 			if (ImGui::BeginTabItem("Particle")) {
 				ImGui::Checkbox("Enabled##particles", &m_particles_enabled);

@@ -130,8 +130,8 @@ protected:
 	// --- Settings struct (app writes, engine reads) ---
 	UIContext& ui() { return m_ui; }
 
-	// --- Input (last frame's actions, for app-specific key handling) ---
-	const InputActions& getInputActions() const { return m_last_input_actions; }
+	// --- Input ---
+	InputController& getInputController() { return m_input_controller; }
 
 	// Engine-managed state accessible to app
 	VeWindow m_ve_window;
@@ -263,7 +263,6 @@ private:
 	float m_total_time{0.0f};
 	float m_frame_time{0.0f};
 
-	InputActions m_last_input_actions;
 	bool m_shadow_mask_half_res = false;
 	bool m_gtao_half_res = true;
 	int m_pcf_samples = 8;

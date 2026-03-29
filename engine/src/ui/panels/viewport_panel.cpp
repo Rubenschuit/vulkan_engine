@@ -66,11 +66,11 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 
 		// Keyboard shortcuts for gizmo mode (when viewport is hovered)
 		if (state.viewport_hovered || state.viewport_focused) {
-			if (ImGui::IsKeyPressed(ImGuiKey_W) && !ImGui::GetIO().WantTextInput)
+			if (ImGui::IsKeyPressed(ImGuiKey_T) && !ImGui::GetIO().WantTextInput)
 				state.gizmo_operation = GizmoOperation::Translate;
-			if (ImGui::IsKeyPressed(ImGuiKey_E) && !ImGui::GetIO().WantTextInput)
-				state.gizmo_operation = GizmoOperation::Rotate;
 			if (ImGui::IsKeyPressed(ImGuiKey_R) && !ImGui::GetIO().WantTextInput)
+				state.gizmo_operation = GizmoOperation::Rotate;
+			if (ImGui::IsKeyPressed(ImGuiKey_E) && !ImGui::GetIO().WantTextInput)
 				state.gizmo_operation = GizmoOperation::Scale;
 		}
 	}
@@ -87,19 +87,19 @@ void ViewportPanel::renderGizmoToolbar(EditorState& state) {
 	bool is_scale = state.gizmo_operation == GizmoOperation::Scale;
 
 	if (is_translate) ImGui::PushStyleColor(ImGuiCol_Button, active_color);
-	if (ImGui::SmallButton("W Translate"))
+	if (ImGui::SmallButton("T Translate"))
 		state.gizmo_operation = GizmoOperation::Translate;
 	if (is_translate) ImGui::PopStyleColor();
 
 	ImGui::SameLine();
 	if (is_rotate) ImGui::PushStyleColor(ImGuiCol_Button, active_color);
-	if (ImGui::SmallButton("E Rotate"))
+	if (ImGui::SmallButton("R Rotate"))
 		state.gizmo_operation = GizmoOperation::Rotate;
 	if (is_rotate) ImGui::PopStyleColor();
 
 	ImGui::SameLine();
 	if (is_scale) ImGui::PushStyleColor(ImGuiCol_Button, active_color);
-	if (ImGui::SmallButton("R Scale"))
+	if (ImGui::SmallButton("E Scale"))
 		state.gizmo_operation = GizmoOperation::Scale;
 	if (is_scale) ImGui::PopStyleColor();
 

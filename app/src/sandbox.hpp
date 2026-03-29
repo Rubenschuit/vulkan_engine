@@ -11,7 +11,7 @@ namespace ve {
 class Sandbox : public VeApplication {
 public:
 	explicit Sandbox(const std::filesystem::path& working_dir);
-	~Sandbox() override = default;
+	~Sandbox() override;
 
 protected:
 	void update() override;
@@ -39,7 +39,12 @@ private:
 	};
 	ParticleConfig m_particles;
 
-	void updateParticles(const InputActions& actions);
+	void registerInputActions();
+	void updateParticles();
+	void renderGameModeOverlay();
+
+	bool m_show_controls = true;
+	EventSubscriptionId m_input_sub = 0;
 };
 
 } // namespace ve

@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <glm/vec3.hpp>
 #include <string>
+#include <string_view>
 
 namespace ve {
 
@@ -51,15 +52,7 @@ struct CollisionEndEvent {
 // ── Input actions ───────────────────────────────────────────────────────────
 
 struct InputActionEvent {
-	enum class Action : uint8_t {
-		ResetParticles,
-		LaunchFirework,
-		SetMode,
-		ResetDisc,
-		ToggleUI,
-		TogglePerformanceUI
-	};
-	Action action;
+	std::string_view name;
 	uint32_t value = 0;
 };
 

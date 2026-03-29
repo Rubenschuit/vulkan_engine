@@ -31,6 +31,7 @@
 
 #include "utils/ve_log.hpp"
 #include "input/input_controller.hpp"
+#include "input/input_action.hpp"
 
 #include "ui/imgui_layer.hpp"
 

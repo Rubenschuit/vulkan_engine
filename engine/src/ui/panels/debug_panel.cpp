@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "ui/panels/debug_panel.hpp"
+#include "ui/editor_state.hpp"
 #include "ui/imgui_layer.hpp"
 #include "ui/texture_inspector.hpp"
 #include "rendering/shadow_render_system.hpp"
@@ -7,8 +8,8 @@
 
 namespace ve {
 
-void DebugPanel::render(Registry* /*registry*/, EditorState& /*state*/, UIContext& ctx) {
-	if (!ImGui::Begin("Debug", nullptr, ImGuiWindowFlags_NoFocusOnAppearing)) {
+void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& ctx) {
+	if (!ImGui::Begin("Debug", &state.show_debug, ImGuiWindowFlags_NoFocusOnAppearing)) {
 		ImGui::End();
 		return;
 	}

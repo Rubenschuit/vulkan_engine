@@ -29,7 +29,7 @@ static void formatCount(char* buf, size_t buf_size, uint32_t count) {
 }
 
 void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UIContext& context) {
-	if (!context.show_performance)
+	if (!state.show_performance)
 		return;
 
 	// --- Accumulate timing data (runs every frame regardless of display) ---
@@ -120,7 +120,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 			ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
 			ImGuiWindowFlags_NoMove;
 
-		if (ImGui::Begin("##PerfOverlay", &context.show_performance, overlay_flags)) {
+		if (ImGui::Begin("##PerfOverlay", &state.show_performance, overlay_flags)) {
 			ImGui::Text("%.0f FPS  (%.2f ms)", m_fps, m_frame_time_ms);
 			ImGui::TextDisabled("CPU %.2f ms | Fence %.2f ms | Acquire %.2f ms | GPU %.2f ms", m_cpu_time_ms, m_fence_wait_ms, m_acquire_wait_ms, m_gpu_time_ms);
 			if (m_compute_gpu_time_ms > 0.01f) {
@@ -144,7 +144,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	}
 
 	// --- Editor docked panel mode ---
-	if (!ImGui::Begin("Performance", &context.show_performance, ImGuiWindowFlags_NoFocusOnAppearing)) {
+	if (!ImGui::Begin("Performance", &state.show_performance, ImGuiWindowFlags_NoFocusOnAppearing)) {
 		ImGui::End();
 		return;
 	}

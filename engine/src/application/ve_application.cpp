@@ -5,6 +5,7 @@
 #include "ui/editor.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "input/input_controller.hpp"
+#include "input/input_action.hpp"
 #include "scene/ve_camera.hpp"
 #include "scene/ve_scene.hpp"
 #include "scene/gltf_scene.hpp"
@@ -113,27 +114,10 @@ void VeApplication::run() {
 		m_total_time += m_frame_time;
 
 		// Process input and camera
-		m_last_input_actions = m_input_controller.processInput(m_frame_time, m_camera);
-		m_ui.visible = m_last_input_actions.ui_visible;
-		m_editor->getState().editor_mode = m_last_input_actions.ui_visible;
-		if (m_last_input_actions.toggle_performance_ui)
-			m_ui.show_performance = !m_ui.show_performance;
+		m_input_controller.processInput(m_frame_time, m_camera);
+		m_ui.visible = m_input_controller.isEditorMode();
+		m_editor->getState().editor_mode = m_input_controller.isEditorMode();
 		updateCamera(glm::radians(m_ui.fov));
-
-		// Enqueue input action events for game logic subscribers
-		using Action = InputActionEvent::Action;
-		if (m_last_input_actions.reset_particles)
-			m_event_bus->enqueue(InputActionEvent{Action::ResetParticles});
-		if (m_last_input_actions.launch_firework)
-			m_event_bus->enqueue(InputActionEvent{Action::LaunchFirework});
-		if (m_last_input_actions.set_mode > 0)
-			m_event_bus->enqueue(InputActionEvent{Action::SetMode, m_last_input_actions.set_mode});
-		if (m_last_input_actions.reset_disc)
-			m_event_bus->enqueue(InputActionEvent{Action::ResetDisc});
-		if (m_last_input_actions.ui_toggle)
-			m_event_bus->enqueue(InputActionEvent{Action::ToggleUI});
-		if (m_last_input_actions.toggle_performance_ui)
-			m_event_bus->enqueue(InputActionEvent{Action::TogglePerformanceUI});
 
 		// Process pending entity deletions at a safe point
 		if (m_active_scene) {
@@ -979,6 +963,20 @@ void VeApplication::initSystems() {
 	VE_LOGD("Initialising systems");
 	auto shader = [this](const char* name) { return m_config.shaders_dir / name; };
 
+	// Register engine-level input actions
+	m_input_controller.setEventBus(m_event_bus.get());
+	m_input_controller.registerAction({
+		.name = "Toggle Performance UI", 
+		.key = GLFW_KEY_P,
+		.trigger = TriggerType::OnPress, 
+		.context = InputContext::Always,
+		.description = "Toggle performance panel"
+	});
+	m_event_bus->subscribe<InputActionEvent>([this](const InputActionEvent& e) {
+		if (e.name == "Toggle Performance UI")
+			m_ui.show_performance = !m_ui.show_performance;
+	});
+
 	m_culling_system = std::make_unique<CullingSystem>(m_camera);
 
 	m_shadow_render_system = std::make_unique<ShadowRenderSystem>(
@@ -1199,6 +1197,7 @@ void VeApplication::initEditor() {
 	m_editor->setPhysicsSystem(m_physics_system.get());
 	m_editor->setAssetLoader(m_asset_loader.get());
 	m_editor->setCamera(&m_camera);
+	m_editor->setInputController(&m_input_controller);
 
 	m_ui.hdr_enabled = m_ve_renderer.hasHdrSupport() && m_ve_renderer.isHdrEnabled();
 	m_ui.fov = glm::degrees(m_fov);

@@ -81,6 +81,7 @@ struct VENGINE_API EditorState {
 	bool show_settings = true;
 	bool show_environment = true;
 	bool show_debug = true;
+	bool show_app_settings = true;
 
 	// Viewport state (updated by viewport panel each frame)
 	bool viewport_hovered = false;
@@ -103,6 +104,9 @@ struct VENGINE_API EditorState {
 
 	// Physics debug
 	bool show_collision_shape = false;
+
+	// Windows
+	bool show_keybindings = false;
 
 	// Selection outline
 	float outline_width = 4.0f;
