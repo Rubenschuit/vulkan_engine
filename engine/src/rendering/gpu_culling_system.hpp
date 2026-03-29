@@ -77,7 +77,8 @@ public:
 	                        uint32_t frame_index,
 	                        uint32_t shadow_buf_index,
 	                        int32_t lod_bias,
-	                        const VeCamera* camera = nullptr);
+	                        const VeCamera* camera = nullptr,
+	                        ShadowPassMode shadow_mode = ShadowPassMode::ALL_OBJECTS);
 
 	// Single global compute→draw barrier covering all shadow buffer slots.
 	// Call once after all dispatchShadowCull calls for a frame.

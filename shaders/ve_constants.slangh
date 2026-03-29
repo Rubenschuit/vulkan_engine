@@ -39,6 +39,18 @@ enum ShadowMode {
 	PCSS = 3,
 };
 
+// Material flags (bits 0-5, in material_flags field)
+#define MAT_FLAG_ALPHA_MODE_MASK   0x3u
+#define MAT_FLAG_DOUBLE_SIDED      0x4u
+#define MAT_FLAG_FLIP_TEX_V        0x8u
+#define MAT_FLAG_SPEC_GLOSS        0x10u
+#define MAT_FLAG_HAS_TEXTURE       0x20u
+
+// Object flags (in object_flags field)
+#define OBJ_FLAG_IS_TRANSPARENT    0x1u
+#define OBJ_FLAG_NO_SHADOW         0x2u
+#define OBJ_FLAG_DYNAMIC           0x4u
+
 [vk::constant_id(0)] const uint SHADOW_MODE_SPEC = 0;
 [vk::constant_id(1)] const uint PCF_SAMPLES_SPEC = 8; // PCF + PCSS blocker: 4, 8, 16, or 32
 [vk::constant_id(2)] const uint PCSS_FILTER_SAMPLES_SPEC = 16; // PCSS filter: 8, 16, or 32

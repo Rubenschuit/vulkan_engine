@@ -202,8 +202,8 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 			}
 		}
 		float max_ft = top[0]; // largest value not in the top SKIP_TOP
-		if (max_ft < 16.67f)
-			max_ft = 16.67f;
+		if (max_ft < 1.0f)
+			max_ft = 1.0f;
 		float graph_max = max_ft * 1.1f;
 
 		ImGui::PlotLines("##FrameTime", m_frametime_history, 120, m_history_offset,

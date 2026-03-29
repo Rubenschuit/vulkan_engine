@@ -68,6 +68,7 @@ public:
 		glm::vec3 light_pos;
 		uint32_t slot;
 		int32_t lod_bias;
+		ShadowPassMode shadow_mode = ShadowPassMode::ALL_OBJECTS;
 	};
 
 	// Batched 2-pass meshlet shadow cull for all shadow layers at once.

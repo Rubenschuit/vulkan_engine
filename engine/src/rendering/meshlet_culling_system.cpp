@@ -110,10 +110,9 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 
 			m_shadow_cull_param_ubos[i][slot] = std::make_unique<VeBuffer>(m_ve_device,
 				sizeof(CullParams), 1,
-				vk::BufferUsageFlagBits::eUniformBuffer,
-				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+				vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst,
+				vk::MemoryPropertyFlagBits::eDeviceLocal,
 				m_ve_device.getDeviceProperties().limits.minUniformBufferOffsetAlignment);
-			m_shadow_cull_param_ubos[i][slot]->map();
 
 			m_shadow_readback_staging[i][slot] = std::make_unique<VeBuffer>(m_ve_device,
 				sizeof(uint32_t), MESHLET_SHADOW_BUCKET_COUNT,
@@ -123,13 +122,12 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 		}
 	}
 
-	// Initialize high-water marks to max capacity so drawIndexedIndirect fallback works before first readback
+	// Initialize high-water marks with a small cap for the drawIndexedIndirect fallback.
 	if (!m_ve_device.supportsDrawIndirectCount()) {
-		constexpr uint32_t MAX_PER_BUCKET = MAX_MESHLET_DRAWS / BUCKET_COUNT;
-		m_readback_high_water.fill(MAX_PER_BUCKET);
-		constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
+		constexpr uint32_t INITIAL_HW = 8192;
+		m_readback_high_water.fill(INITIAL_HW);
 		for (auto& hw : m_shadow_readback_high_water)
-			hw.fill(SHADOW_MAX_PER_BUCKET);
+			hw.fill(INITIAL_HW);
 	}
 
 	// Pass 1 layout: objects, transforms, cull_params, active_ids, meshlet_obj_info,
@@ -371,11 +369,11 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 		m_readback_visible_objects = staging_ptr[BUCKET_COUNT + 1];
 		m_current_readback_valid = true;
 
-		// Update high-water marks: grow fast (2x + headroom), decay slowly (3/4)
+		// Update high-water marks: jump directly to 2x actual + headroom
 		constexpr uint32_t MAX_PER_BUCKET = MAX_MESHLET_DRAWS / BUCKET_COUNT;
 		for (uint32_t b = 0; b < BUCKET_COUNT; b++)
 			m_readback_high_water[b] = std::min(
-				std::max(m_readback_counts[b] * 2 + 1024, m_readback_high_water[b] * 3 / 4),
+				m_readback_counts[b] * 2 + 1024,
 				MAX_PER_BUCKET);
 	}
 
@@ -549,12 +547,11 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 					std::memcpy(m_shadow_readback_counts[slot].data(), ptr,
 						MESHLET_SHADOW_BUCKET_COUNT * sizeof(uint32_t));
 
-					// Update high-water marks
+					// Update high-water marks: jump directly to 2x actual + headroom
 					constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
 					for (uint32_t b = 0; b < MESHLET_SHADOW_BUCKET_COUNT; b++)
 						m_shadow_readback_high_water[slot][b] = std::min(
-							std::max(m_shadow_readback_counts[slot][b] * 2 + 1024,
-							         m_shadow_readback_high_water[slot][b] * 3 / 4),
+							m_shadow_readback_counts[slot][b] * 2 + 1024,
 							SHADOW_MAX_PER_BUCKET);
 				}
 			}
@@ -574,14 +571,17 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 			params.frustum_planes[i] = cpu_planes[i].plane;
 		params.view_proj         = req.view_proj;
 		params.object_count      = object_count;
-		params.is_shadow_pass    = 1;
+		params.is_shadow_pass    = static_cast<uint32_t>(req.shadow_mode);
 		params.lod_bias          = req.lod_bias;
 		params.max_meshlet_draws = MAX_MESHLET_SHADOW_DRAWS;
 		params.bucket_count      = MESHLET_SHADOW_BUCKET_COUNT;
 		params.camera_pos        = glm::vec4(req.light_pos, 0.0f);
 		params.hiz_enabled       = 0;
 		params.shadow_cone_cull  = (req.slot < NUM_CSM_CASCADES) ? 1 : 0;
-		m_shadow_cull_param_ubos[frame_index][slot]->writeToBuffer(&params);
+		// Record UBO data into the command stream so each dispatch sees its own
+		// parameters even when the same slot is reused for static and dynamic passes.
+		cmd.updateBuffer<CullParams>(m_shadow_cull_param_ubos[frame_index][slot]->getBuffer(),
+			vk::DeviceSize{0}, params);
 
 		cmd.fillBuffer(m_shadow_counts[frame_index][slot]->getBuffer(),
 			0, 2 * sizeof(uint32_t), 0);

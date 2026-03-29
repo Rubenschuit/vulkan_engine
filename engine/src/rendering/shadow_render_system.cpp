@@ -478,7 +478,8 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBuffer
 }
 
 void ShadowRenderSystem::invalidateShadowDrawables() {
-	m_shadow_drawables_dirty = true;
+	m_static_drawables_dirty = true;
+	m_dynamic_drawables_dirty = true;
 	m_force_full_rerender = true;
 	m_cached_unique_meshes.clear();
 }
@@ -528,81 +529,24 @@ void ShadowRenderSystem::transitionAtlasForRendering(
 			any_incremental = true;
 
 	if (any_incremental) {
-		// Scroll preservation: snapshot atlas to cache, shift-copy back, then transition to depth-attachment.
-		std::vector<vk::ImageMemoryBarrier2> snapshot_barriers;
-		snapshot_barriers.push_back({
+		// Copy from the existing static cache (populated by
+		// the previous frame's snapshot) directly to the atlas. The cache is already in
+		// eTransferSrcOptimal and contains static-only content
+		vk::ImageMemoryBarrier2 atlas_to_dst{
 			.sType = vk::StructureType::eImageMemoryBarrier2,
 			.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader
 				| vk::PipelineStageFlagBits2::eComputeShader,
 			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
 			.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
-			.dstAccessMask = vk::AccessFlagBits2::eTransferRead,
-			.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-			.newLayout = vk::ImageLayout::eTransferSrcOptimal,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = m_shadow_atlas->getImage(),
-			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
-		});
-		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
-			if (m_cascade_state[c].dirty && m_cascade_state[c].incremental) {
-				snapshot_barriers.push_back({
-					.sType = vk::StructureType::eImageMemoryBarrier2,
-					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-					.srcAccessMask = vk::AccessFlagBits2::eTransferRead,
-					.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
-					.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
-					.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
-					.newLayout = vk::ImageLayout::eTransferDstOptimal,
-					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-					.image = m_cascade_cache[c]->getImage(),
-					.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
-				});
-			}
-		}
-		cmd.pipelineBarrier2({.memoryBarrierCount = 0,
-			.imageMemoryBarrierCount = static_cast<uint32_t>(snapshot_barriers.size()),
-			.pImageMemoryBarriers = snapshot_barriers.data()});
-
-		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++)
-			if (m_cascade_state[c].dirty && m_cascade_state[c].incremental)
-				updateCascadeCache(cmd, c);
-
-		std::vector<vk::ImageMemoryBarrier2> shift_barriers;
-		shift_barriers.push_back({
-			.sType = vk::StructureType::eImageMemoryBarrier2,
-			.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-			.srcAccessMask = vk::AccessFlagBits2::eTransferRead,
-			.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
 			.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
-			.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+			.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
 			.newLayout = vk::ImageLayout::eTransferDstOptimal,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.image = m_shadow_atlas->getImage(),
 			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
-		});
-		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
-			if (m_cascade_state[c].dirty && m_cascade_state[c].incremental) {
-				shift_barriers.push_back({
-					.sType = vk::StructureType::eImageMemoryBarrier2,
-					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-					.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-					.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
-					.dstAccessMask = vk::AccessFlagBits2::eTransferRead,
-					.oldLayout = vk::ImageLayout::eTransferDstOptimal,
-					.newLayout = vk::ImageLayout::eTransferSrcOptimal,
-					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-					.image = m_cascade_cache[c]->getImage(),
-					.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
-				});
-			}
-		}
-		cmd.pipelineBarrier2({.memoryBarrierCount = 0,
-			.imageMemoryBarrierCount = static_cast<uint32_t>(shift_barriers.size()),
-			.pImageMemoryBarriers = shift_barriers.data()});
+		};
+		cmd.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &atlas_to_dst});
 
 		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++)
 			if (m_cascade_state[c].dirty && m_cascade_state[c].incremental)
@@ -692,23 +636,66 @@ void ShadowRenderSystem::beginShadowRegionRender(
 }
 
 void ShadowRenderSystem::subscribeToRegistry(Registry& registry) {
+	m_registry = &registry;
 	invalidateShadowDrawables();
 
 	registry.events().subscribe<ComponentAddedEvent<MeshComponent>>(
-		[this](const ComponentAddedEvent<MeshComponent>&) {
-			invalidateShadowDrawables();
+		[this](const ComponentAddedEvent<MeshComponent>& event) {
+			if (m_registry && isDynamicEntity(*m_registry, event.entity))
+				m_dynamic_drawables_dirty = true;
+			else {
+				m_static_drawables_dirty = true;
+				m_force_full_rerender = true;
+			}
 		});
 	registry.events().subscribe<ComponentRemovedEvent<MeshComponent>>(
-		[this](const ComponentRemovedEvent<MeshComponent>&) {
-			invalidateShadowDrawables();
+		[this](const ComponentRemovedEvent<MeshComponent>& event) {
+			if (m_registry && isDynamicEntity(*m_registry, event.entity))
+				m_dynamic_drawables_dirty = true;
+			else {
+				m_static_drawables_dirty = true;
+				m_force_full_rerender = true;
+			}
+		});
+	registry.events().subscribe<ComponentAddedEvent<RigidbodyComponent>>(
+		[this](const ComponentAddedEvent<RigidbodyComponent>& event) {
+			if (event.component.getMotionType() == PhysicsMotionType::Dynamic) {
+				// Entity moved from static to dynamic
+				m_static_drawables_dirty = true;
+				m_dynamic_drawables_dirty = true;
+				m_force_full_rerender = true;
+			}
+		});
+	registry.events().subscribe<ComponentRemovedEvent<RigidbodyComponent>>(
+		[this](const ComponentRemovedEvent<RigidbodyComponent>&) {
+			// Entity becomes static
+			m_static_drawables_dirty = true;
+			m_dynamic_drawables_dirty = true;
+			m_force_full_rerender = true;
 		});
 	registry.events().subscribe<EntityDestroyedEvent>(
 		[this](const EntityDestroyedEvent&) {
-			m_shadow_drawables_dirty = true;
+			m_static_drawables_dirty = true;
+			m_dynamic_drawables_dirty = true;
 		});
 	registry.events().subscribe<MeshDataChangedEvent>(
 		[this](const MeshDataChangedEvent&) {
 			invalidateShadowDrawables();
+		});
+	registry.events().subscribe<TransformInvalidatedEvent>(
+		[this](const TransformInvalidatedEvent& event) {
+			// Static shadow-casting object moved in editor: force static cache rerender
+			if (!m_registry || isDynamicEntity(*m_registry, event.entity))
+				return;
+			const auto* mesh = m_registry->getComponent<MeshComponent>(event.entity);
+			if (mesh && mesh->has_shadow)
+				m_force_full_rerender = true;
+		});
+	registry.events().subscribe<RigidbodyChangedEvent>(
+		[this](const RigidbodyChangedEvent&) {
+			m_static_drawables_dirty = true;
+			m_dynamic_drawables_dirty = true;
+			m_force_full_rerender = true;
 		});
 }
 
@@ -761,8 +748,7 @@ glm::mat4 ShadowRenderSystem::computeStripFrustumVP(
 	float y_min = -radius + static_cast<float>(strip.y - region.y) * wpt;
 	float y_max = y_min + static_cast<float>(strip.height) * wpt;
 
-	// Extract far plane from the actual cascade projection to match depth range.
-	// glm::ortho(l,r,b,t,0,F) with DEPTH_ZERO_TO_ONE produces proj[2][2] = -1/F.
+	// Extract far plane from the cascade projection to match depth range.
 	float far_plane = -1.0f / m_light_projs[frame][cascade][2][2];
 	glm::mat4 strip_proj = glm::ortho(x_min, x_max, y_min, y_max, 0.0f, far_plane);
 	return strip_proj * m_light_views[frame][cascade];
@@ -818,6 +804,30 @@ void ShadowRenderSystem::updateCascadeCache(vk::raii::CommandBuffer& cmd, uint32
 		m_shadow_atlas->getImage(), vk::ImageLayout::eTransferSrcOptimal,
 		m_cascade_cache[cascade]->getImage(), vk::ImageLayout::eTransferDstOptimal,
 		copy_region);
+}
+
+bool ShadowRenderSystem::isDynamicEntity(const Registry& registry, Entity entity) {
+	return GpuSceneManager::isDynamicEntity(registry, entity);
+}
+
+void ShadowRenderSystem::copyStaticCacheToAtlas(vk::raii::CommandBuffer& cmd, uint32_t cascade) {
+	auto& region = m_atlas_regions[cascade];
+
+	vk::ImageCopy copy_region{
+		.srcSubresource = {vk::ImageAspectFlagBits::eDepth, 0, 0, 1},
+		.srcOffset = {0, 0, 0},
+		.dstSubresource = {vk::ImageAspectFlagBits::eDepth, 0, 0, 1},
+		.dstOffset = {static_cast<int32_t>(region.x), static_cast<int32_t>(region.y), 0},
+		.extent = {region.resolution, region.resolution, 1}
+	};
+	cmd.copyImage(
+		m_cascade_cache[cascade]->getImage(), vk::ImageLayout::eTransferSrcOptimal,
+		m_shadow_atlas->getImage(), vk::ImageLayout::eTransferDstOptimal,
+		copy_region);
+}
+
+void ShadowRenderSystem::snapshotAtlasToStaticCache(vk::raii::CommandBuffer& cmd, uint32_t cascade) {
+	updateCascadeCache(cmd, cascade);
 }
 
 void ShadowRenderSystem::growShadowInstanceBuffers(uint32_t new_capacity) {
@@ -907,7 +917,7 @@ void ShadowRenderSystem::rebuildMegaBuffers(vk::raii::CommandBuffer& cmd, const 
 		vertex_offset += vc;
 	}
 
-	VE_LOGD("Shadow mega-buffer: " << unique_meshes.size() << " unique meshes, " << m_shadow_drawables.size() << " drawables, "
+	VE_LOGD("Shadow mega-buffer: " << unique_meshes.size() << " unique meshes, "
 	         << total_vertices << " verts, " << total_indices << " indices");
 }
 
@@ -918,38 +928,61 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 	if (light_views.empty()) return;
 	assert(light_views.size() <= MAX_SHADOW_LAYERS && "Active shadow layers exceed MAX_SHADOW_LAYERS");
 
-	if (m_shadow_drawables_dirty) {
-		m_shadow_drawables.clear();
+	bool any_list_dirty = m_static_drawables_dirty || m_dynamic_drawables_dirty;
+	if (any_list_dirty) {
+		m_static_shadow_drawables.clear();
+		m_dynamic_shadow_drawables.clear();
 		auto& registry = *frame_info.registry;
 		auto view = registry.view<MeshComponent, TransformComponent>();
-		m_shadow_drawables.reserve(view.sizeHint());
+
 		for (auto [entity, mesh, tc] : view) {
 			if (!mesh.getMesh() || !mesh.has_shadow)
 				continue;
-			// Shadow LOD: one step coarser than visible, clamped to available LODs
 			uint32_t shadow_lod = std::min(std::max(1u, mesh.cached_lod + 1),
 			                               mesh.getMesh()->getLodCount() - 1);
-			m_shadow_drawables.push_back({entity, &mesh, shadow_lod});
+			ShadowDrawable drawable{entity, &mesh, shadow_lod};
+
+			if (isDynamicEntity(registry, entity))
+				m_dynamic_shadow_drawables.push_back(drawable);
+			else
+				m_static_shadow_drawables.push_back(drawable);
 		}
 
-		std::sort(m_shadow_drawables.begin(), m_shadow_drawables.end(),
-			[](const ShadowDrawable& a, const ShadowDrawable& b) {
-				VeMesh* ma = a.mesh->getMesh();
-				VeMesh* mb = b.mesh->getMesh();
-				if (ma != mb)
-					return ma < mb;
-				return a.lod_level < b.lod_level;
-			});
+		auto sortDrawables = [](std::vector<ShadowDrawable>& list) {
+			std::sort(list.begin(), list.end(),
+				[](const ShadowDrawable& a, const ShadowDrawable& b) {
+					VeMesh* ma = a.mesh->getMesh();
+					VeMesh* mb = b.mesh->getMesh();
+					if (ma != mb)
+						return ma < mb;
+					return a.lod_level < b.lod_level;
+				});
+		};
+		sortDrawables(m_static_shadow_drawables);
+		sortDrawables(m_dynamic_shadow_drawables);
 
-		m_shadow_drawables_dirty = false;
+		m_static_drawables_dirty = false;
+		m_dynamic_drawables_dirty = false;
 
+		// Merge both lists for unique mesh tracking and mega-buffer rebuild
 		std::vector<VeMesh*> current_unique_meshes;
-		current_unique_meshes.reserve(m_shadow_drawables.size());
-		for (const auto& d : m_shadow_drawables) {
-			VeMesh* m = d.mesh->getMesh();
-			if (current_unique_meshes.empty() || current_unique_meshes.back() != m)
-				current_unique_meshes.push_back(m);
-		}
+		size_t total = m_static_shadow_drawables.size() + m_dynamic_shadow_drawables.size();
+		current_unique_meshes.reserve(total);
+		auto collectUnique = [&](const std::vector<ShadowDrawable>& list) {
+			for (const auto& d : list) {
+				VeMesh* m = d.mesh->getMesh();
+				if (current_unique_meshes.empty() || current_unique_meshes.back() != m)
+					current_unique_meshes.push_back(m);
+			}
+		};
+		collectUnique(m_static_shadow_drawables);
+		size_t boundary = current_unique_meshes.size();
+		collectUnique(m_dynamic_shadow_drawables);
+		std::inplace_merge(current_unique_meshes.begin(),
+		                   current_unique_meshes.begin() + static_cast<ptrdiff_t>(boundary),
+		                   current_unique_meshes.end());
+		auto last = std::unique(current_unique_meshes.begin(), current_unique_meshes.end());
+		current_unique_meshes.erase(last, current_unique_meshes.end());
 
 		if (current_unique_meshes != m_cached_unique_meshes) {
 			m_cached_unique_meshes = std::move(current_unique_meshes);
@@ -973,32 +1006,29 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 
 	auto& registry = *frame_info.registry;
 	uint32_t csm_count = frame_info.csm_data.active_cascade_count;
+	size_t all_drawables_size = m_static_shadow_drawables.size() + m_dynamic_shadow_drawables.size();
 
-	// Worst case: CSM full + point lights + strip instances (2 strips per incremental cascade)
-	uint32_t max_needed = static_cast<uint32_t>(m_shadow_drawables.size()) * (2 + NUM_CSM_CASCADES * 2);
-	if (max_needed > m_shadow_instance_capacity) {
+	// Worst case: CSM static + CSM dynamic + point lights + strip instances
+	uint32_t max_needed = static_cast<uint32_t>(all_drawables_size) * (3 + NUM_CSM_CASCADES * 2);
+	if (max_needed > m_shadow_instance_capacity)
 		growShadowInstanceBuffers(std::max(max_needed, m_shadow_instance_capacity * 2));
-	}
 
-	// SSBO layout: CSM instances first, then point/spot light instances
 	auto* shadow_instance_data = static_cast<InstanceData*>(
 		m_shadow_instance_buffers[frame_info.current_frame]->getMappedMemory());
 	uint32_t shadow_instance_count = 0;
 
-	m_csm_instance_groups.clear();
-	if (csm_count > 0) {
-		glm::mat4 outer_vp = m_light_projs[frame_info.current_frame][csm_count - 1]
-		                    * m_light_views[frame_info.current_frame][csm_count - 1];
-		FrustumPlane planes[6];
-		extractFrustumPlanes(outer_vp, planes);
-
-		for (auto& d : m_shadow_drawables) {
-			const VeMesh::AABB& aabb = d.mesh->getWorldAABB();
-			if (!isAABBInFrustum(aabb, planes))
-				continue;
-
+	// Helper: populate instance groups from a drawable list, frustum-culled
+	auto populateInstanceGroups = [&](const std::vector<ShadowDrawable>& drawables,
+	                                  std::vector<ShadowInstanceGroup>& groups,
+	                                  const FrustumPlane* planes) {
+		for (auto& d : drawables) {
+			if (planes) {
+				const VeMesh::AABB& aabb = d.mesh->getWorldAABB();
+				if (!isAABBInFrustum(aabb, planes))
+					continue;
+			}
 			if (shadow_instance_count >= m_shadow_instance_capacity) {
-				VE_LOGW("Shadow instance buffer full, skipping remaining CSM objects");
+				VE_LOGW("Shadow instance buffer full");
 				break;
 			}
 			uint32_t idx = shadow_instance_count++;
@@ -1008,37 +1038,33 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 			shadow_instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
 
 			VeMesh* mesh_ptr = d.mesh->getMesh();
-			if (!m_csm_instance_groups.empty()
-				&& m_csm_instance_groups.back().mesh == mesh_ptr
-				&& m_csm_instance_groups.back().lod_level == d.lod_level) {
-				m_csm_instance_groups.back().instance_count++;
+			if (!groups.empty()
+				&& groups.back().mesh == mesh_ptr
+				&& groups.back().lod_level == d.lod_level) {
+				groups.back().instance_count++;
 			} else {
-				m_csm_instance_groups.push_back({mesh_ptr, d.lod_level, idx, 1});
+				groups.push_back({mesh_ptr, d.lod_level, idx, 1});
 			}
 		}
+	};
+
+	// CSM instance groups: static and dynamic, frustum-culled against outer cascade
+	m_static_csm_instance_groups.clear();
+	m_dynamic_csm_instance_groups.clear();
+	if (csm_count > 0) {
+		glm::mat4 outer_vp = m_light_projs[frame_info.current_frame][csm_count - 1]
+		                    * m_light_views[frame_info.current_frame][csm_count - 1];
+		FrustumPlane planes[6];
+		extractFrustumPlanes(outer_vp, planes);
+
+		populateInstanceGroups(m_static_shadow_drawables, m_static_csm_instance_groups, planes);
+		populateInstanceGroups(m_dynamic_shadow_drawables, m_dynamic_csm_instance_groups, planes);
 	}
 
+	// Point/spot light instance groups: all drawables combined, no frustum cull
 	m_shadow_instance_groups.clear();
-	for (auto& d : m_shadow_drawables) {
-		if (shadow_instance_count >= m_shadow_instance_capacity) {
-			VE_LOGW("Shadow instance buffer full, skipping remaining point light shadow objects");
-			break;
-		}
-		uint32_t idx = shadow_instance_count++;
-		shadow_instance_data[idx].transform = registry.getWorldTransform(d.entity);
-		shadow_instance_data[idx].normal_transform[0] = glm::vec4(0.0f);
-		shadow_instance_data[idx].normal_transform[1] = glm::vec4(0.0f);
-		shadow_instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
-
-		VeMesh* mesh_ptr = d.mesh->getMesh();
-		if (!m_shadow_instance_groups.empty()
-			&& m_shadow_instance_groups.back().mesh == mesh_ptr
-			&& m_shadow_instance_groups.back().lod_level == d.lod_level) {
-			m_shadow_instance_groups.back().instance_count++;
-		} else {
-			m_shadow_instance_groups.push_back({mesh_ptr, d.lod_level, idx, 1});
-		}
-	}
+	populateInstanceGroups(m_static_shadow_drawables, m_shadow_instance_groups, nullptr);
+	populateInstanceGroups(m_dynamic_shadow_drawables, m_shadow_instance_groups, nullptr);
 
 	auto& command_buffer = frame_info.cmd();
 
@@ -1052,73 +1078,189 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 		command_buffer.bindIndexBuffer(m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
 	}
 
-	if (csm_count > 0 && !m_csm_instance_groups.empty()) {
-		for (uint32_t c = 0; c < csm_count; c++) {
-			if (c < NUM_CSM_CASCADES && !m_cascade_state[c].dirty)
-				continue;
+	bool has_dynamics = !m_dynamic_csm_instance_groups.empty();
 
+	if (csm_count > 0 && (!m_static_csm_instance_groups.empty() || has_dynamics)) {
+		for (uint32_t c = 0; c < csm_count; c++) {
 			auto& region = m_atlas_regions[c];
 			auto& state = m_cascade_state[c];
 
-			if (c < NUM_CSM_CASCADES && state.incremental) {
-				vk::MemoryBarrier2 pre_strip{
-					.sType = vk::StructureType::eMemoryBarrier2,
-					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer
-						| vk::PipelineStageFlagBits2::eEarlyFragmentTests
-						| vk::PipelineStageFlagBits2::eLateFragmentTests,
-					.srcAccessMask = vk::AccessFlagBits2::eTransferWrite
-						| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-					.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
-					.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
-						| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-				};
-				command_buffer.pipelineBarrier2({
-					.sType = vk::StructureType::eDependencyInfo,
-					.memoryBarrierCount = 1,
-					.pMemoryBarriers = &pre_strip,
-				});
+			if (c < NUM_CSM_CASCADES && state.dirty) {
+				// Static cache needs updating (scroll or static scene change)
+				if (state.incremental) {
+					vk::MemoryBarrier2 pre_strip{
+						.sType = vk::StructureType::eMemoryBarrier2,
+						.srcStageMask = vk::PipelineStageFlagBits2::eTransfer
+							| vk::PipelineStageFlagBits2::eEarlyFragmentTests
+							| vk::PipelineStageFlagBits2::eLateFragmentTests,
+						.srcAccessMask = vk::AccessFlagBits2::eTransferWrite
+							| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+						.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+						.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
+							| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+					};
+					command_buffer.pipelineBarrier2({
+						.sType = vk::StructureType::eDependencyInfo,
+						.memoryBarrierCount = 1,
+						.pMemoryBarriers = &pre_strip,
+					});
 
-				auto strips = computeStripRegions(c);
+					auto strips = computeStripRegions(c);
 
-				for (auto& strip : strips) {
-					glm::mat4 strip_vp = computeStripFrustumVP(c, strip, frame_info.current_frame);
-					FrustumPlane strip_planes[6];
-					extractFrustumPlanes(strip_vp, strip_planes);
+					for (auto& strip : strips) {
+						glm::mat4 strip_vp = computeStripFrustumVP(c, strip, frame_info.current_frame);
+						FrustumPlane strip_planes[6];
+						extractFrustumPlanes(strip_vp, strip_planes);
 
-					std::vector<ShadowInstanceGroup> strip_groups;
-					for (auto& d : m_shadow_drawables) {
-						const VeMesh::AABB& aabb = d.mesh->getWorldAABB();
-						if (!isAABBInFrustum(aabb, strip_planes))
-							continue;
-						if (shadow_instance_count >= m_shadow_instance_capacity)
-							break;
-						uint32_t idx = shadow_instance_count++;
-						shadow_instance_data[idx].transform = registry.getWorldTransform(d.entity);
-						shadow_instance_data[idx].normal_transform[0] = glm::vec4(0.0f);
-						shadow_instance_data[idx].normal_transform[1] = glm::vec4(0.0f);
-						shadow_instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
+						// Only render static objects into strips
+						std::vector<ShadowInstanceGroup> strip_groups;
+						for (auto& d : m_static_shadow_drawables) {
+							const VeMesh::AABB& aabb = d.mesh->getWorldAABB();
+							if (!isAABBInFrustum(aabb, strip_planes))
+								continue;
+							if (shadow_instance_count >= m_shadow_instance_capacity)
+								break;
+							uint32_t idx = shadow_instance_count++;
+							shadow_instance_data[idx].transform = registry.getWorldTransform(d.entity);
+							shadow_instance_data[idx].normal_transform[0] = glm::vec4(0.0f);
+							shadow_instance_data[idx].normal_transform[1] = glm::vec4(0.0f);
+							shadow_instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
 
-						VeMesh* mesh_ptr = d.mesh->getMesh();
-						if (!strip_groups.empty()
-							&& strip_groups.back().mesh == mesh_ptr
-							&& strip_groups.back().lod_level == d.lod_level) {
-							strip_groups.back().instance_count++;
-						} else {
-							strip_groups.push_back({mesh_ptr, d.lod_level, idx, 1});
+							VeMesh* mesh_ptr = d.mesh->getMesh();
+							if (!strip_groups.empty()
+								&& strip_groups.back().mesh == mesh_ptr
+								&& strip_groups.back().lod_level == d.lod_level) {
+								strip_groups.back().instance_count++;
+							} else {
+								strip_groups.push_back({mesh_ptr, d.lod_level, idx, 1});
+							}
 						}
-					}
 
-					beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eLoad, &strip);
-					if (!strip_groups.empty()) {
-						command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-						command_buffer.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
-						renderShadowMap(frame_info, c, strip_groups);
+						beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eLoad, &strip);
+						if (!strip_groups.empty()) {
+							command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+							command_buffer.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
+							renderShadowMap(frame_info, c, strip_groups);
+						}
+						command_buffer.endRendering();
 					}
+				} else {
+					// Full re-render with only static drawables
+					beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eClear);
+					renderShadowMap(frame_info, c, m_static_csm_instance_groups);
 					command_buffer.endRendering();
 				}
+
+				// Snapshot the clean static result into the cache
+				{
+					vk::ImageMemoryBarrier2 to_transfer_src{
+						.sType = vk::StructureType::eImageMemoryBarrier2,
+						.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
+						.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+						.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+						.dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+						.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+						.newLayout = vk::ImageLayout::eTransferSrcOptimal,
+						.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+						.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+						.image = m_shadow_atlas->getImage(),
+						.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+					};
+					vk::ImageMemoryBarrier2 cache_to_dst{
+						.sType = vk::StructureType::eImageMemoryBarrier2,
+						.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+						.srcAccessMask = vk::AccessFlagBits2::eTransferRead,
+						.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+						.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+						.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+						.newLayout = vk::ImageLayout::eTransferDstOptimal,
+						.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+						.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+						.image = m_cascade_cache[c]->getImage(),
+						.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+					};
+					vk::ImageMemoryBarrier2 barriers[] = {to_transfer_src, cache_to_dst};
+					command_buffer.pipelineBarrier2({.imageMemoryBarrierCount = 2, .pImageMemoryBarriers = barriers});
+
+					snapshotAtlasToStaticCache(command_buffer, c);
+
+					// Transition cache back to transfer-src for future restores, atlas back to depth-attachment
+					vk::ImageMemoryBarrier2 cache_back{
+						.sType = vk::StructureType::eImageMemoryBarrier2,
+						.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+						.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+						.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+						.dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+						.oldLayout = vk::ImageLayout::eTransferDstOptimal,
+						.newLayout = vk::ImageLayout::eTransferSrcOptimal,
+						.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+						.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+						.image = m_cascade_cache[c]->getImage(),
+						.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+					};
+					vk::ImageMemoryBarrier2 atlas_back{
+						.sType = vk::StructureType::eImageMemoryBarrier2,
+						.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+						.srcAccessMask = vk::AccessFlagBits2::eTransferRead,
+						.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+						.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+							| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
+						.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+						.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+						.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+						.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+						.image = m_shadow_atlas->getImage(),
+						.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+					};
+					vk::ImageMemoryBarrier2 post_barriers[] = {cache_back, atlas_back};
+					command_buffer.pipelineBarrier2({.imageMemoryBarrierCount = 2, .pImageMemoryBarriers = post_barriers});
+				}
+			} else if (has_dynamics) {
+				// Static cache is clean but we need it in the atlas for the dynamic overlay
+				vk::ImageMemoryBarrier2 atlas_to_dst{
+					.sType = vk::StructureType::eImageMemoryBarrier2,
+					.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+						| vk::PipelineStageFlagBits2::eLateFragmentTests,
+					.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+					.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+					.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+					.newLayout = vk::ImageLayout::eTransferDstOptimal,
+					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.image = m_shadow_atlas->getImage(),
+					.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+				};
+				command_buffer.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &atlas_to_dst});
+
+				copyStaticCacheToAtlas(command_buffer, c);
+
+				vk::ImageMemoryBarrier2 atlas_back{
+					.sType = vk::StructureType::eImageMemoryBarrier2,
+					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+					.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+					.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+						| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
+					.oldLayout = vk::ImageLayout::eTransferDstOptimal,
+					.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.image = m_shadow_atlas->getImage(),
+					.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+				};
+				command_buffer.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &atlas_back});
 			} else {
-				beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eClear);
-				renderShadowMap(frame_info, c, m_csm_instance_groups);
+				// Static cache is clean AND no dynamics: skip cascade entirely
+				continue;
+			}
+
+			// Render dynamic objects on top using the full cascade VP (loadOp = eLoad)
+			if (has_dynamics) {
+				beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eLoad);
+				command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+				command_buffer.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
+				renderShadowMap(frame_info, c, m_dynamic_csm_instance_groups);
 				command_buffer.endRendering();
 			}
 		}
@@ -1272,6 +1414,14 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 
 	const VeCamera* cam_for_hiz = gpu_cull_system.isHizEnabled() ? &frame_info.camera : nullptr;
 
+	// If an object changed between static and dynamic, force a full re-render
+	if (scene_mgr.consumeDynamicClassificationChanged()) {
+		for (uint32_t c = 0; c < NUM_CSM_CASCADES; c++) {
+			m_cascade_state[c].dirty = true;
+			m_cascade_state[c].incremental = false;
+		}
+	}
+
 	// Classify cascades
 	bool any_incremental = false;
 	bool any_full_dirty = false;
@@ -1280,24 +1430,26 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		if (m_cascade_state[c].incremental) any_incremental = true;
 		else any_full_dirty = true;
 	}
-	bool any_dirty = any_incremental || any_full_dirty || num_shadow_lights > 0;
+	bool has_dynamics = scene_mgr.hasDynamicObjects();
+	bool any_dirty = any_incremental || any_full_dirty || num_shadow_lights > 0 || has_dynamics;
 	if (!any_dirty)
 		return;
 
-	// Incremental cascades are culled per-strip later with tight strip frustums
+	// Batch cull dispatches for full-dirty cascades (static only) and point/spot lights (all)
 	bool batched_cull_dispatched = false;
 	for (uint32_t c = 0; c < csm_count; c++) {
 		if (c < NUM_CSM_CASCADES && (!m_cascade_state[c].dirty || m_cascade_state[c].incremental))
 			continue;
 		glm::mat4 cascade_vp = m_light_projs[frame][c] * m_light_views[frame][c];
 		gpu_cull_system.dispatchShadowCull(cmd, cascade_vp, scene_mgr, frame, c,
-		                            static_cast<int32_t>(c) + 1, cam_for_hiz);
+		                            static_cast<int32_t>(c) + 1, cam_for_hiz, ShadowPassMode::STATIC_ONLY);
 		batched_cull_dispatched = true;
 	}
 	for (uint32_t i = 0; i < num_shadow_lights; i++) {
 		uint32_t slot = NUM_CSM_CASCADES + i;
 		glm::mat4 light_vp = m_light_projs[frame][csm_count + i] * m_light_views[frame][csm_count + i];
-		gpu_cull_system.dispatchShadowCull(cmd, light_vp, scene_mgr, frame, slot, 2, cam_for_hiz);
+		gpu_cull_system.dispatchShadowCull(cmd, light_vp, scene_mgr, frame, slot, 2, cam_for_hiz,
+		                            ShadowPassMode::ALL_OBJECTS);
 		batched_cull_dispatched = true;
 	}
 	if (batched_cull_dispatched)
@@ -1306,12 +1458,6 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 	transitionAtlasForRendering(cmd, csm_count);
 
 	ShadowPushConstantData push{.instance_offset = 0};
-
-	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-	cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
-	mega_buffer.bindShadow(cmd);
-	cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
-		vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
 
 	auto drawIndirect = [&](uint32_t slot) {
 		auto& shadow_indirect = gpu_cull_system.getShadowIndirectBuffer(frame, slot);
@@ -1333,54 +1479,166 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		}
 	};
 
-	// Rebind lambda: needed after interleaved compute dispatches invalidate graphics state
 	auto rebindGraphicsState = [&]() {
 		cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 		cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
+		mega_buffer.bindShadow(cmd);
 		cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
 			vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
 	};
 
-	for (uint32_t c = 0; c < csm_count; c++) {
-		if (c < NUM_CSM_CASCADES && (!m_cascade_state[c].dirty || m_cascade_state[c].incremental))
-			continue;
-
-		beginShadowRegionRender(cmd, m_atlas_regions[c], vk::AttachmentLoadOp::eClear);
-		rebindGraphicsState();
-		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
-			0, {*m_gpu_cascade_descriptor_sets[frame][c]}, {});
-		drawIndirect(c);
-		cmd.endRendering();
-	}
-
-	// Render incremental cascades with per-strip frustum culling.
-	// Each strip gets its own cull dispatch with a tight frustum, then render.
+	// Per-cascade: render static, snapshot to cache, then dynamic overlay
 	for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
-		if (!m_cascade_state[c].dirty || !m_cascade_state[c].incremental)
-			continue;
-
 		auto& region = m_atlas_regions[c];
-		auto strips = computeStripRegions(c);
 
-		for (auto& strip : strips) {
-			glm::mat4 strip_vp = computeStripFrustumVP(c, strip, frame);
-			gpu_cull_system.dispatchShadowCull(cmd, strip_vp, scene_mgr, frame, c,
-				static_cast<int32_t>(c) + 1, cam_for_hiz);
+		if (m_cascade_state[c].dirty) {
+			if (m_cascade_state[c].incremental) {
+				// Per-strip cull + render (static only)
+				auto strips = computeStripRegions(c);
+				for (auto& strip : strips) {
+					glm::mat4 strip_vp = computeStripFrustumVP(c, strip, frame);
+					gpu_cull_system.dispatchShadowCull(cmd, strip_vp, scene_mgr, frame, c,
+						static_cast<int32_t>(c) + 1, cam_for_hiz, ShadowPassMode::STATIC_ONLY);
+					gpu_cull_system.flushShadowCullBarrier(cmd, scene_mgr, frame);
+
+					beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad, &strip);
+					rebindGraphicsState();
+					cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+						0, {*m_gpu_cascade_descriptor_sets[frame][c]}, {});
+					drawIndirect(c);
+					cmd.endRendering();
+				}
+			} else {
+				// Full re-render (static only, already dispatched above)
+				beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eClear);
+				rebindGraphicsState();
+				cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+					0, {*m_gpu_cascade_descriptor_sets[frame][c]}, {});
+				drawIndirect(c);
+				cmd.endRendering();
+			}
+
+			// Snapshot static result to cache
+			{
+				vk::ImageMemoryBarrier2 to_src{
+					.sType = vk::StructureType::eImageMemoryBarrier2,
+					.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
+					.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+					.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+					.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+					.newLayout = vk::ImageLayout::eTransferSrcOptimal,
+					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.image = m_shadow_atlas->getImage(),
+					.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+				};
+				vk::ImageMemoryBarrier2 cache_dst{
+					.sType = vk::StructureType::eImageMemoryBarrier2,
+					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.srcAccessMask = vk::AccessFlagBits2::eTransferRead,
+					.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+					.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+					.newLayout = vk::ImageLayout::eTransferDstOptimal,
+					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.image = m_cascade_cache[c]->getImage(),
+					.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+				};
+				vk::ImageMemoryBarrier2 snap_barriers[] = {to_src, cache_dst};
+				cmd.pipelineBarrier2({.imageMemoryBarrierCount = 2, .pImageMemoryBarriers = snap_barriers});
+				snapshotAtlasToStaticCache(cmd, c);
+
+				vk::ImageMemoryBarrier2 cache_back{
+					.sType = vk::StructureType::eImageMemoryBarrier2,
+					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+					.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+					.oldLayout = vk::ImageLayout::eTransferDstOptimal,
+					.newLayout = vk::ImageLayout::eTransferSrcOptimal,
+					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.image = m_cascade_cache[c]->getImage(),
+					.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+				};
+				vk::ImageMemoryBarrier2 atlas_back{
+					.sType = vk::StructureType::eImageMemoryBarrier2,
+					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.srcAccessMask = vk::AccessFlagBits2::eTransferRead,
+					.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+					.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+						| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
+					.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+					.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.image = m_shadow_atlas->getImage(),
+					.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+				};
+				vk::ImageMemoryBarrier2 post_barriers[] = {cache_back, atlas_back};
+				cmd.pipelineBarrier2({.imageMemoryBarrierCount = 2, .pImageMemoryBarriers = post_barriers});
+			}
+		} else if (has_dynamics) {
+			// Restore static cache to atlas for dynamic overlay
+			vk::ImageMemoryBarrier2 atlas_dst{
+				.sType = vk::StructureType::eImageMemoryBarrier2,
+				.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+					| vk::PipelineStageFlagBits2::eLateFragmentTests,
+				.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+				.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+				.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+				.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+				.newLayout = vk::ImageLayout::eTransferDstOptimal,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = m_shadow_atlas->getImage(),
+				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+			};
+			cmd.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &atlas_dst});
+			copyStaticCacheToAtlas(cmd, c);
+
+			vk::ImageMemoryBarrier2 atlas_back{
+				.sType = vk::StructureType::eImageMemoryBarrier2,
+				.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+				.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+					| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
+				.oldLayout = vk::ImageLayout::eTransferDstOptimal,
+				.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = m_shadow_atlas->getImage(),
+				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+			};
+			cmd.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &atlas_back});
+		} else {
+			continue;
+		}
+
+		// Dynamic overlay: cull + render dynamic objects on top using full cascade VP
+		if (has_dynamics) {
+			glm::mat4 cascade_vp = m_light_projs[frame][c] * m_light_views[frame][c];
+			gpu_cull_system.dispatchShadowCull(cmd, cascade_vp, scene_mgr, frame, c,
+				static_cast<int32_t>(c) + 1, cam_for_hiz, ShadowPassMode::DYNAMIC_ONLY);
 			gpu_cull_system.flushShadowCullBarrier(cmd, scene_mgr, frame);
 
-			beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad, &strip);
+			beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad);
 			rebindGraphicsState();
 			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 				0, {*m_gpu_cascade_descriptor_sets[frame][c]}, {});
-			mega_buffer.bindShadow(cmd);
 			drawIndirect(c);
 			cmd.endRendering();
 		}
 	}
 
+	// Point/spot light shadows (already culled with ALL_OBJECTS)
 	for (uint32_t i = 0; i < num_shadow_lights; i++) {
 		uint32_t slot = NUM_CSM_CASCADES + i;
 		beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eClear);
+		rebindGraphicsState();
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 			0, {*m_gpu_shadow_descriptor_sets[frame][i]}, {});
 		drawIndirect(slot);
@@ -1411,13 +1669,21 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 	uint32_t csm_count = frame_info.csm_data.active_cascade_count;
 	uint32_t num_shadow_lights = static_cast<uint32_t>(light_views.size()) - csm_count;
 
-	bool any_dirty = num_shadow_lights > 0;
+	if (scene_mgr.consumeDynamicClassificationChanged()) {
+		for (uint32_t c = 0; c < NUM_CSM_CASCADES; c++) {
+			m_cascade_state[c].dirty = true;
+			m_cascade_state[c].incremental = false;
+		}
+	}
+
+	bool has_dynamics = scene_mgr.hasDynamicObjects();
+	bool any_dirty = num_shadow_lights > 0 || has_dynamics;
 	for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES && !any_dirty; c++)
 		any_dirty = m_cascade_state[c].dirty;
 	if (!any_dirty)
 		return;
 
-	// Incremental cascades are culled per-strip later with tight strip frustums
+	// Batch cull dispatches for full-dirty cascades (static only) and point/spot lights (all)
 	std::vector<MeshletCullingSystem::ShadowCullRequest> requests;
 	requests.reserve(csm_count + num_shadow_lights);
 	for (uint32_t c = 0; c < csm_count; c++) {
@@ -1426,19 +1692,21 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		const glm::mat4& lv = m_light_views[frame][c];
 		glm::vec3 light_dir = -glm::vec3(lv[0][2], lv[1][2], lv[2][2]);
 		requests.push_back({
-			.view_proj = m_light_projs[frame][c] * lv,
-			.light_pos = -light_dir * 100000.0f,
-			.slot      = c,
-			.lod_bias  = static_cast<int32_t>(c) + 1,
+			.view_proj    = m_light_projs[frame][c] * lv,
+			.light_pos    = -light_dir * 100000.0f,
+			.slot         = c,
+			.lod_bias     = static_cast<int32_t>(c) + 1,
+			.shadow_mode  = ShadowPassMode::STATIC_ONLY,
 		});
 	}
 	for (uint32_t i = 0; i < num_shadow_lights; i++) {
 		const glm::mat4& lv = m_light_views[frame][csm_count + i];
 		requests.push_back({
-			.view_proj = m_light_projs[frame][csm_count + i] * lv,
-			.light_pos = -glm::transpose(glm::mat3(lv)) * glm::vec3(lv[3]),
-			.slot      = NUM_CSM_CASCADES + i,
-			.lod_bias  = 2,
+			.view_proj    = m_light_projs[frame][csm_count + i] * lv,
+			.light_pos    = -glm::transpose(glm::mat3(lv)) * glm::vec3(lv[3]),
+			.slot         = NUM_CSM_CASCADES + i,
+			.lod_bias     = 2,
+			.shadow_mode  = ShadowPassMode::ALL_OBJECTS,
 		});
 	}
 
@@ -1451,11 +1719,15 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 	ShadowPushConstantData push{.instance_offset = 0};
 	constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
 
-	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-	cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
-	mega_buffer.bindShadowMeshletIbo(cmd);
-	cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
-		vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
+	auto rebindMeshletState = [&]() {
+		cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+		cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
+		mega_buffer.bindShadowMeshletIbo(cmd);
+		cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
+			vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
+	};
+
+	rebindMeshletState();
 
 	auto drawMeshletIndirect = [&](uint32_t slot) {
 		auto& shadow_indirect = meshlet_cull.getShadowMeshletIndirectBuffer(frame, slot);
@@ -1478,41 +1750,157 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		}
 	};
 
-	for (uint32_t c = 0; c < csm_count; c++) {
-		if (c < NUM_CSM_CASCADES && !m_cascade_state[c].dirty)
-			continue;
-
+	// Per-cascade: render static, snapshot to cache, then dynamic overlay
+	for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
 		auto& region = m_atlas_regions[c];
 
-		if (c < NUM_CSM_CASCADES && m_cascade_state[c].incremental) {
-			auto strips = computeStripRegions(c);
-			const glm::mat4& lv = m_light_views[frame][c];
-			glm::vec3 light_dir = -glm::vec3(lv[0][2], lv[1][2], lv[2][2]);
+		if (m_cascade_state[c].dirty) {
+			if (m_cascade_state[c].incremental) {
+				auto strips = computeStripRegions(c);
+				const glm::mat4& lv = m_light_views[frame][c];
+				glm::vec3 light_dir = -glm::vec3(lv[0][2], lv[1][2], lv[2][2]);
 
-			for (auto& strip : strips) {
-				glm::mat4 strip_vp = computeStripFrustumVP(c, strip, frame);
-				MeshletCullingSystem::ShadowCullRequest strip_req{
-					.view_proj = strip_vp,
-					.light_pos = -light_dir * 100000.0f,
-					.slot      = c,
-					.lod_bias  = static_cast<int32_t>(c) + 1,
-				};
-				meshlet_cull.dispatchShadowCulls(cmd, &strip_req, 1, scene_mgr, frame, true);
+				for (auto& strip : strips) {
+					glm::mat4 strip_vp = computeStripFrustumVP(c, strip, frame);
+					MeshletCullingSystem::ShadowCullRequest strip_req{
+						.view_proj    = strip_vp,
+						.light_pos    = -light_dir * 100000.0f,
+						.slot         = c,
+						.lod_bias     = static_cast<int32_t>(c) + 1,
+						.shadow_mode  = ShadowPassMode::STATIC_ONLY,
+					};
+					meshlet_cull.dispatchShadowCulls(cmd, &strip_req, 1, scene_mgr, frame, true);
 
-				beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad, &strip);
-				// Re-bind after compute dispatch
-				cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-				cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
-				mega_buffer.bindShadowMeshletIbo(cmd);
-				cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
-					vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
+					beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad, &strip);
+					rebindMeshletState();
+					cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+						0, {*m_meshlet_cascade_descriptor_sets[frame][c]}, {});
+					drawMeshletIndirect(c);
+					cmd.endRendering();
+				}
+			} else {
+				beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eClear);
 				cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 					0, {*m_meshlet_cascade_descriptor_sets[frame][c]}, {});
 				drawMeshletIndirect(c);
 				cmd.endRendering();
 			}
+
+			// Snapshot static result to cache
+			{
+				vk::ImageMemoryBarrier2 to_src{
+					.sType = vk::StructureType::eImageMemoryBarrier2,
+					.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
+					.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+					.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+					.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+					.newLayout = vk::ImageLayout::eTransferSrcOptimal,
+					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.image = m_shadow_atlas->getImage(),
+					.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+				};
+				vk::ImageMemoryBarrier2 cache_dst{
+					.sType = vk::StructureType::eImageMemoryBarrier2,
+					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.srcAccessMask = vk::AccessFlagBits2::eTransferRead,
+					.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+					.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+					.newLayout = vk::ImageLayout::eTransferDstOptimal,
+					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.image = m_cascade_cache[c]->getImage(),
+					.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+				};
+				vk::ImageMemoryBarrier2 snap_barriers[] = {to_src, cache_dst};
+				cmd.pipelineBarrier2({.imageMemoryBarrierCount = 2, .pImageMemoryBarriers = snap_barriers});
+				snapshotAtlasToStaticCache(cmd, c);
+
+				vk::ImageMemoryBarrier2 cache_back{
+					.sType = vk::StructureType::eImageMemoryBarrier2,
+					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+					.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+					.oldLayout = vk::ImageLayout::eTransferDstOptimal,
+					.newLayout = vk::ImageLayout::eTransferSrcOptimal,
+					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.image = m_cascade_cache[c]->getImage(),
+					.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+				};
+				vk::ImageMemoryBarrier2 atlas_back{
+					.sType = vk::StructureType::eImageMemoryBarrier2,
+					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+					.srcAccessMask = vk::AccessFlagBits2::eTransferRead,
+					.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+					.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+						| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
+					.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+					.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+					.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+					.image = m_shadow_atlas->getImage(),
+					.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+				};
+				vk::ImageMemoryBarrier2 post_barriers[] = {cache_back, atlas_back};
+				cmd.pipelineBarrier2({.imageMemoryBarrierCount = 2, .pImageMemoryBarriers = post_barriers});
+			}
+		} else if (has_dynamics) {
+			// Restore static cache to atlas
+			vk::ImageMemoryBarrier2 atlas_dst{
+				.sType = vk::StructureType::eImageMemoryBarrier2,
+				.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+					| vk::PipelineStageFlagBits2::eLateFragmentTests,
+				.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+				.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+				.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+				.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+				.newLayout = vk::ImageLayout::eTransferDstOptimal,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = m_shadow_atlas->getImage(),
+				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+			};
+			cmd.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &atlas_dst});
+			copyStaticCacheToAtlas(cmd, c);
+
+			vk::ImageMemoryBarrier2 atlas_back{
+				.sType = vk::StructureType::eImageMemoryBarrier2,
+				.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+				.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+					| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
+				.oldLayout = vk::ImageLayout::eTransferDstOptimal,
+				.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = m_shadow_atlas->getImage(),
+				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1}
+			};
+			cmd.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &atlas_back});
 		} else {
-			beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eClear);
+			continue;
+		}
+
+		// Dynamic overlay: cull + render dynamic objects on top using full cascade VP
+		if (has_dynamics) {
+			const glm::mat4& lv = m_light_views[frame][c];
+			glm::vec3 light_dir = -glm::vec3(lv[0][2], lv[1][2], lv[2][2]);
+			MeshletCullingSystem::ShadowCullRequest dyn_req{
+				.view_proj    = m_light_projs[frame][c] * lv,
+				.light_pos    = -light_dir * 100000.0f,
+				.slot         = c,
+				.lod_bias     = static_cast<int32_t>(c) + 1,
+				.shadow_mode  = ShadowPassMode::DYNAMIC_ONLY,
+			};
+			meshlet_cull.dispatchShadowCulls(cmd, &dyn_req, 1, scene_mgr, frame, true);
+
+			beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad);
+			rebindMeshletState();
 			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 				0, {*m_meshlet_cascade_descriptor_sets[frame][c]}, {});
 			drawMeshletIndirect(c);
@@ -1520,6 +1908,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		}
 	}
 
+	// Point/spot light shadows (already culled with ALL_OBJECTS)
 	for (uint32_t i = 0; i < num_shadow_lights; i++) {
 		uint32_t slot = NUM_CSM_CASCADES + i;
 		beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eClear);

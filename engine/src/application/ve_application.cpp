@@ -363,6 +363,8 @@ void VeApplication::finalizeAsyncLoad() {
 void VeApplication::selectBackend() {
 	auto& gpu_scene = m_scene_resources->getGpuSceneManager();
 	bool gpu_ok = m_ui.gpu_culling_enabled && gpu_scene.hasRegisteredObjects();
+	CullingBackend* prev = m_active_backend;
+
 	if (gpu_ok && m_ui.meshlet_culling_enabled
 		&& m_meshlet_culling_system
 		&& m_pbr_render_system->getMegaBuffer().hasMeshletData())
@@ -371,6 +373,9 @@ void VeApplication::selectBackend() {
 		m_active_backend = m_gpu_backend.get();
 	else
 		m_active_backend = m_cpu_backend.get();
+
+	if (m_active_backend != prev)
+		m_shadow_render_system->forceShadowRerender();
 
 	if (m_meshlet_backend)
 		m_meshlet_backend->setGpuShadowFallback(m_ui.meshlet_gpu_shadow_fallback);

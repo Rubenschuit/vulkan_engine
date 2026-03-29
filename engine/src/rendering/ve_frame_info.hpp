@@ -25,7 +25,7 @@ struct InstanceData {
 	alignas(4)  uint32_t material_index;        // index into MaterialGPU SSBO
 	alignas(4)  uint32_t lod_level;             // for debug visualization
 	alignas(4)  float    depth_offset;          // clip-space Z offset for MASK
-	alignas(4)  uint32_t material_flags;        // material flags for vertex shader (avoids material SSBO read)
+	alignas(4)  uint32_t material_flags;        // see MaterialFlag in ve_config.hpp (avoids material SSBO read in vertex shader)
 };
 static_assert(sizeof(InstanceData) == 128, "InstanceData must be 128 bytes for SSBO alignment");
 

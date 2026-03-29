@@ -49,6 +49,13 @@ constexpr uint32_t POINT_SHADOW_RESOLUTION = 512; // per-light atlas resolution
 constexpr uint32_t SPOT_SHADOW_RESOLUTION = 512;
 constexpr uint32_t MAX_SHADOW_LAYERS = NUM_CSM_CASCADES + MAX_POINT_SHADOW_LIGHTS + MAX_SPOT_SHADOW_LIGHTS;
 
+// Shadow cull pass mode (matches CullParams::is_shadow_pass in shaders)
+enum class ShadowPassMode : uint32_t {
+	ALL_OBJECTS  = 1,
+	STATIC_ONLY  = 2,
+	DYNAMIC_ONLY = 3,
+};
+
 // Clustered forward lighting
 constexpr uint32_t CLUSTER_TILE_SIZE = 64;            // screen-space tile size in pixels
 constexpr uint32_t CLUSTER_Z_SLICES = 24;             // depth slices (logarithmic distribution)
@@ -76,6 +83,22 @@ constexpr uint32_t MIN_PARALLEL_CULL_ENTITIES = 64; // below this, single-thread
 // Bindless textures + Multi-Draw Indirect
 constexpr uint32_t MAX_BINDLESS_TEXTURES = 16384;
 constexpr uint32_t MAX_GPU_MATERIALS = 8192;
+
+// Material flags (bits 0-5, stored in MaterialGPU::material_flags and ObjectDataGPU::material_flags)
+namespace MaterialFlag {
+	constexpr uint32_t ALPHA_MODE_MASK = 0x3;  // bits 0-1: 0=OPAQUE, 1=MASK, 2=BLEND
+	constexpr uint32_t DOUBLE_SIDED    = 0x4;  // bit 2
+	constexpr uint32_t FLIP_TEX_V      = 0x8;  // bit 3
+	constexpr uint32_t SPEC_GLOSS      = 0x10; // bit 4
+	constexpr uint32_t HAS_TEXTURE     = 0x20; // bit 5 (MaterialGPU only: has albedo texture)
+}
+
+// Object flags (per-object rendering behavior, stored in ObjectDataGPU::object_flags)
+namespace ObjectFlag {
+	constexpr uint32_t IS_TRANSPARENT = 0x1; // bit 0: alpha_mode == BLEND
+	constexpr uint32_t NO_SHADOW      = 0x2; // bit 1
+	constexpr uint32_t DYNAMIC        = 0x4; // bit 2
+}
 
 // GPU-driven culling
 constexpr uint32_t MAX_GPU_OBJECTS = 16384*4; // sync with shader

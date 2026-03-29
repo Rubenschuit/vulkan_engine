@@ -26,12 +26,14 @@ struct ObjectDataGPU {
 	glm::vec4 bounding_sphere; // xyz = local-space center, w = radius
 	uint32_t vertex_offset;
 	uint32_t material_index;
-	uint32_t material_flags; // bits 0-1: alpha_mode, bit 2: double_sided, ...
+	uint32_t material_flags; // see MaterialFlag namespace in ve_config.hpp
+	uint32_t object_flags;   // see ObjectFlag namespace in ve_config.hpp
 	uint32_t lod_count;
 	uint32_t lod_draw_group_id[MAX_LOD_LEVELS]; // draw group per LOD; filled by rebuildDrawGroups()
 	uint32_t lod_index_count[MAX_LOD_LEVELS];   // index count per LOD (kept for reference)
+	uint32_t _pad[3];
 };
-static_assert(sizeof(ObjectDataGPU) == 64, "ObjectDataGPU must be 64 bytes");
+static_assert(sizeof(ObjectDataGPU) == 80, "ObjectDataGPU must be 80 bytes (vec4-aligned)");
 
 // GPU-resident per-object transform
 struct TransformGPU {
@@ -49,6 +51,7 @@ struct DrawGroup {
 	int32_t  vertex_offset;
 	uint32_t material_index;
 	uint32_t material_flags;
+	uint32_t object_flags;
 	uint32_t bucket;
 	uint32_t instance_base;  // start index in instance buffer
 	uint32_t max_instances;  // number of objects in this group
@@ -72,6 +75,7 @@ static_assert(sizeof(ActiveIdEntry) == 8, "ActiveIdEntry must be 8 bytes");
 struct CpuLodData {
 	uint32_t vertex_offset;
 	uint32_t material_flags;
+	uint32_t object_flags;
 	uint32_t material_index;
 	uint32_t lod_count;
 	uint32_t first_index[MAX_LOD_LEVELS];
@@ -101,6 +105,11 @@ public:
 	void unregisterObject(Entity entity);
 	void markTransformDirty(Entity entity);
 	void markObjectDataDirty(Entity entity);
+	void setDynamic(Entity entity, bool is_dynamic);
+
+	// Returns true if an entity should be classified as dynamic for shadow purposes.
+	// Currently checks for Dynamic rigidbodies; extend for animations later.
+	static bool isDynamicEntity(const Registry& registry, Entity entity);
 	void updateDirtyTransforms(uint32_t current_frame, const Registry& registry,
 	                           vk::raii::CommandBuffer& cmd);
 
@@ -115,6 +124,13 @@ public:
 	uint32_t getTotalRegisteredCount() const { return m_active_count; }
 	bool hasRegisteredObjects() const { return m_active_count > 0; }
 	uint32_t getDispatchCount() const { return m_next_id; }
+	bool hasDynamicObjects() const { return m_dynamic_object_count > 0; }
+	uint32_t getDynamicObjectCount() const { return m_dynamic_object_count; }
+	bool consumeDynamicClassificationChanged() {
+		bool changed = m_dynamic_classification_changed;
+		m_dynamic_classification_changed = false;
+		return changed;
+	}
 
 	// Buffer accessors for descriptor set creation
 	VeBuffer& getObjectDataBuffer(uint32_t frame) { return *m_object_data_buffers[frame]; }
@@ -164,6 +180,7 @@ private:
 	// GPU Object ID management
 	uint32_t m_next_id = 0;
 	uint32_t m_active_count = 0;
+	uint32_t m_dynamic_object_count = 0;
 	std::vector<uint32_t> m_free_list;
 	std::unordered_map<uint32_t, uint32_t> m_entity_to_gpu_id; // entity_index to gpu_id
 	std::unordered_map<uint32_t, Entity> m_gpu_id_to_entity;   // gpu_id to entity
@@ -207,6 +224,7 @@ private:
 	std::array<bool, MAX_FRAMES_IN_FLIGHT> m_object_data_dirty{};
 	std::array<bool, MAX_FRAMES_IN_FLIGHT> m_template_needs_copy{};
 	bool m_draw_groups_dirty = false;
+	bool m_dynamic_classification_changed = false;
 
 	// Pre-filtered list of entity indices that have transparent/blend materials.
 	// Updated on register/unregister/material-change; consumed by prepareTransparents.
@@ -220,6 +238,7 @@ private:
 	SubscriptionId m_transform_invalidated_sub = 0;
 	SubscriptionId m_mesh_data_changed_sub = 0;
 	SubscriptionId m_mesh_added_sub = 0;
+	SubscriptionId m_rb_changed_sub = 0;
 };
 
 } // namespace ve

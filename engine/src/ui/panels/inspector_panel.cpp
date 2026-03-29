@@ -409,6 +409,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 					rb->setFriction(crb.friction);
 					rb->setRestitution(crb.restitution);
 					rb->setHullTolerance(crb.hull_tolerance);
+					registry->events().emit(RigidbodyChangedEvent{entity});
 				}
 			ImGui::EndPopup();
 		}
@@ -805,6 +806,8 @@ void InspectorPanel::renderRigidbody(RigidbodyComponent& rb, EditorState& state)
 	labeledWidget(label_w, "Motion Type", [&]() {
 		if (ImGui::Combo("##MotionType", &mt, motion_types, 3)) {
 			rb.setMotionType(static_cast<PhysicsMotionType>(mt));
+			if (rb.getRegistry())
+				rb.getRegistry()->events().emit(RigidbodyChangedEvent{rb.getEntity()});
 			if (mt != 0 && rb.getShapeDesc().type == PhysicsShapeType::MeshStatic) {
 				PhysicsShapeDesc d = rb.getShapeDesc();
 				d.type = PhysicsShapeType::Box;

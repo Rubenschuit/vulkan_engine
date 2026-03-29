@@ -99,10 +99,10 @@ void MaterialSSBOManager::writeMaterialGPU(uint32_t index, VeMaterial* mat) {
 
 	bool has_texture = mat->getAlbedoTexture().isValid();
 	uint32_t flags = static_cast<uint32_t>(alpha_props.alpha_mode)
-		| (alpha_props.double_sided ? 4u : 0u)
-		| (mat->getFlipTexCoordV() ? 8u : 0u)
-		| (alpha_props.use_spec_gloss_texture ? 16u : 0u)
-		| (has_texture ? 32u : 0u);
+		| (alpha_props.double_sided ? MaterialFlag::DOUBLE_SIDED : 0u)
+		| (mat->getFlipTexCoordV() ? MaterialFlag::FLIP_TEX_V : 0u)
+		| (alpha_props.use_spec_gloss_texture ? MaterialFlag::SPEC_GLOSS : 0u)
+		| (has_texture ? MaterialFlag::HAS_TEXTURE : 0u);
 
 	MaterialGPU gpu{
 		.base_color_factor = factors.base_color_factor,

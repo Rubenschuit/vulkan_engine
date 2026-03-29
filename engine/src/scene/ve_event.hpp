@@ -47,6 +47,10 @@ struct MeshDataChangedEvent {
 	Entity entity;
 };
 
+struct RigidbodyChangedEvent {
+	Entity entity;
+};
+
 // Deferred deletion request (emitted by UI, processed at safe frame boundary)
 struct DeleteEntityRequest {
 	Entity entity;

@@ -24,7 +24,7 @@ struct MaterialGPU {
 	uint32_t metallic_roughness_index;
 	uint32_t occlusion_index;
 	uint32_t emissive_index;
-	uint32_t material_flags;   // bits 0-1: alpha_mode, bit 2: double_sided, bit 3: flip_tex_v, bit 4: spec_gloss, bit 5: has_texture
+	uint32_t material_flags;   // see MaterialFlag namespace in ve_config.hpp
 	float    alpha_cutoff;
 	uint32_t _pad;
 };

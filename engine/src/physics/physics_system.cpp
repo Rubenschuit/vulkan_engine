@@ -993,6 +993,7 @@ struct PhysicsSystem::Impl {
 			} else if (was_dynamic != is_dynamic) {
 				dynamic_body_count += is_dynamic ? 1 : -1;
 			}
+			registry.events().emit(RigidbodyChangedEvent{entity});
 		}
 	}
 

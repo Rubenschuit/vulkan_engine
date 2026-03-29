@@ -120,6 +120,11 @@ void GpuSceneManager::subscribeToRegistry(Registry& registry) {
 				return;
 			registerObject(event.entity, event.component, *m_mega_buffer, *m_mat_mgr, *m_registry);
 		});
+	m_rb_changed_sub = registry.events().subscribe<RigidbodyChangedEvent>(
+		[this](const RigidbodyChangedEvent& event) {
+			if (hasGpuId(event.entity) && m_registry)
+				setDynamic(event.entity, isDynamicEntity(*m_registry, event.entity));
+		});
 }
 
 uint32_t GpuSceneManager::registerObject(Entity entity, const MeshComponent& mesh,
@@ -136,6 +141,9 @@ uint32_t GpuSceneManager::registerObject(Entity entity, const MeshComponent& mes
 	m_active_count++;
 
 	writeObjectData(gpu_id, mesh, mega_buffer, mat_mgr);
+
+	if (isDynamicEntity(registry, entity))
+		setDynamic(entity, true);
 
 	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++)
 		writeTransform(gpu_id, f, registry, entity);
@@ -154,6 +162,12 @@ void GpuSceneManager::unregisterObject(Entity entity) {
 		return;
 
 	uint32_t gpu_id = it->second;
+
+	// Decrement dynamic object count if this entity was flagged as dynamic
+	if (m_cpu_lod_data[gpu_id].object_flags & ObjectFlag::DYNAMIC)
+		m_dynamic_object_count--;
+	m_cpu_lod_data[gpu_id].material_flags = 0;
+	m_cpu_lod_data[gpu_id].object_flags = 0;
 
 	if (m_is_transparent_by_gpu_id[gpu_id]) {
 		uint32_t entity_idx = entity.index();
@@ -202,9 +216,51 @@ void GpuSceneManager::markObjectDataDirty(Entity entity) {
 	if (!mesh)
 		return;
 	writeObjectData(it->second, *mesh, *m_mega_buffer, *m_mat_mgr);
+	if (isDynamicEntity(*m_registry, entity))
+		setDynamic(entity, true);
 	m_object_data_dirty.fill(true);
 	m_template_needs_copy.fill(true);
 	m_draw_groups_dirty = true;
+}
+
+bool GpuSceneManager::isDynamicEntity(const Registry& registry, Entity entity) {
+	if (!registry.hasComponent<RigidbodyComponent>(entity))
+		return false;
+	const auto* rb = registry.getComponent<RigidbodyComponent>(entity);
+	return rb && rb->getMotionType() == PhysicsMotionType::Dynamic;
+}
+
+void GpuSceneManager::setDynamic(Entity entity, bool is_dynamic) {
+	auto it = m_entity_to_gpu_id.find(entity.index());
+	if (it == m_entity_to_gpu_id.end())
+		return;
+	uint32_t gpu_id = it->second;
+
+	auto& obj_flags = m_cpu_lod_data[gpu_id].object_flags;
+	bool was_dynamic = (obj_flags & ObjectFlag::DYNAMIC) != 0;
+	if (was_dynamic == is_dynamic)
+		return;
+
+	if (is_dynamic) {
+		obj_flags |= ObjectFlag::DYNAMIC;
+		m_dynamic_object_count++;
+	} else {
+		obj_flags &= ~ObjectFlag::DYNAMIC;
+		m_dynamic_object_count--;
+	}
+
+	vk::DeviceSize offset = static_cast<vk::DeviceSize>(gpu_id) * sizeof(ObjectDataGPU);
+	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
+		auto* obj = reinterpret_cast<ObjectDataGPU*>(
+			static_cast<uint8_t*>(m_object_data_staging[f]->getMappedMemory()) + offset);
+		if (is_dynamic)
+			obj->object_flags |= ObjectFlag::DYNAMIC;
+		else
+			obj->object_flags &= ~ObjectFlag::DYNAMIC;
+	}
+	m_object_data_dirty.fill(true);
+	m_draw_groups_dirty = true;
+	m_dynamic_classification_changed = true;
 }
 
 void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Registry& registry,
@@ -363,10 +419,12 @@ void GpuSceneManager::unsubscribeFromRegistry() {
 	events.unsubscribe<TransformInvalidatedEvent>(m_transform_invalidated_sub);
 	events.unsubscribe<MeshDataChangedEvent>(m_mesh_data_changed_sub);
 	events.unsubscribe<ComponentAddedEvent<MeshComponent>>(m_mesh_added_sub);
+	events.unsubscribe<RigidbodyChangedEvent>(m_rb_changed_sub);
 	m_mesh_removed_sub = 0;
 	m_transform_invalidated_sub = 0;
 	m_mesh_data_changed_sub = 0;
 	m_mesh_added_sub = 0;
+	m_rb_changed_sub = 0;
 }
 
 void GpuSceneManager::reset() {
@@ -380,6 +438,7 @@ void GpuSceneManager::reset() {
 	m_active_ids.clear();
 	m_draw_groups.clear();
 	m_total_groups = 0;
+	m_dynamic_object_count = 0;
 	m_transparent_entity_indices.clear();
 	std::fill(m_is_transparent_by_gpu_id.begin(), m_is_transparent_by_gpu_id.end(), false);
 	for (uint32_t b = 0; b < GPU_CULL_BUCKET_COUNT; b++) {
@@ -439,6 +498,7 @@ void GpuSceneManager::rebuildDrawGroups() {
 		uint32_t index_count;
 		uint32_t material_index;
 		uint32_t material_flags;
+		uint32_t object_flags;
 		uint32_t bucket;
 	};
 
@@ -450,9 +510,9 @@ void GpuSceneManager::rebuildDrawGroups() {
 
 	for (auto& [entity_idx, gpu_id] : m_entity_to_gpu_id) {
 		const CpuLodData& cpu = m_cpu_lod_data[gpu_id];
-		bool is_transparent = (cpu.material_flags & 0x20) != 0;
-		bool is_mask = (cpu.material_flags & 0x3) == 1;
-		bool is_double_sided = (cpu.material_flags & 0x4) != 0;
+		bool is_transparent = (cpu.object_flags & ObjectFlag::IS_TRANSPARENT) != 0;
+		bool is_mask = (cpu.material_flags & MaterialFlag::ALPHA_MODE_MASK) == 1;
+		bool is_double_sided = (cpu.material_flags & MaterialFlag::DOUBLE_SIDED) != 0;
 
 		uint32_t bucket;
 		if (is_transparent)
@@ -470,6 +530,7 @@ void GpuSceneManager::rebuildDrawGroups() {
 				.index_count = cpu.index_count[l],
 				.material_index = cpu.material_index,
 				.material_flags = cpu.material_flags,
+				.object_flags = cpu.object_flags,
 				.bucket = bucket,
 			});
 		}
@@ -498,6 +559,7 @@ void GpuSceneManager::rebuildDrawGroups() {
 		group.vertex_offset = static_cast<int32_t>(variants[i].vertex_offset);
 		group.material_index = variants[i].material_index;
 		group.material_flags = variants[i].material_flags;
+		group.object_flags = variants[i].object_flags;
 		group.bucket = variants[i].bucket;
 		group.instance_base = 0;
 		group.max_instances = static_cast<uint32_t>(j - i);
@@ -574,6 +636,7 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 
 	uint32_t mat_index = 0;
 	uint32_t mat_flags = 0;
+	uint32_t obj_flags = 0;
 	bool is_transparent = false;
 	if (mesh.hasMaterial()) {
 		mat_index = mat_mgr.registerMaterial(mesh.getMaterial());
@@ -582,11 +645,11 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 		float transmission = mesh.getMaterial()->getMaterialFactors().transmission_factor;
 		is_transparent = (alpha.alpha_mode == AlphaMode::BLEND) || (transmission > 0.0f);
 		mat_flags = static_cast<uint32_t>(alpha.alpha_mode)
-			| (alpha.double_sided ? 4u : 0u)
-			| (mesh.getMaterial()->getFlipTexCoordV() ? 8u : 0u)
-			| (alpha.use_spec_gloss_texture ? 16u : 0u)
-			| (is_transparent ? 32u : 0u)
-			| (!mesh.has_shadow ? 64u : 0u);
+			| (alpha.double_sided ? MaterialFlag::DOUBLE_SIDED : 0u)
+			| (mesh.getMaterial()->getFlipTexCoordV() ? MaterialFlag::FLIP_TEX_V : 0u)
+			| (alpha.use_spec_gloss_texture ? MaterialFlag::SPEC_GLOSS : 0u);
+		obj_flags = (is_transparent ? ObjectFlag::IS_TRANSPARENT : 0u)
+			| (!mesh.has_shadow ? ObjectFlag::NO_SHADOW : 0u);
 	}
 
 	bool was_transparent = m_is_transparent_by_gpu_id[gpu_id];
@@ -609,6 +672,7 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 	CpuLodData& cpu = m_cpu_lod_data[gpu_id];
 	cpu.vertex_offset = entry->vertex_offset;
 	cpu.material_flags = mat_flags;
+	cpu.object_flags = obj_flags;
 	cpu.material_index = mat_index;
 	cpu.lod_count = static_cast<uint32_t>(entry->lod_entries.size());
 	for (uint32_t l = 0; l < MAX_LOD_LEVELS; l++) {
@@ -624,6 +688,7 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 	obj.vertex_offset = entry->vertex_offset;
 	obj.material_index = mat_index;
 	obj.material_flags = mat_flags;
+	obj.object_flags = obj_flags;
 	obj.lod_count = cpu.lod_count;
 	for (uint32_t l = 0; l < MAX_LOD_LEVELS; l++)
 		obj.lod_index_count[l] = cpu.index_count[l];

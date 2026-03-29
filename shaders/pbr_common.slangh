@@ -78,7 +78,7 @@ VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID)
 	output.frag_tangent_world = tangent;
 	output.frag_bitangent_world = bitangent;
 	float2 tex_coord = input.in_tex_coord;
-	if ((inst.material_flags & 8u) != 0u)  // flip_tex_coord_v (bit 3)
+	if ((inst.material_flags & MAT_FLAG_FLIP_TEX_V) != 0u)
 		tex_coord.y = 1.0f - tex_coord.y;
 	output.frag_tex_coord = tex_coord;
 
@@ -146,7 +146,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	albedo *= mat.base_color_factor;
 
 	// glTF alphaMode: OPAQUE(0)=force alpha 1, MASK(1)=discard below cutoff, BLEND(2)=use texture alpha
-	uint32_t alpha_mode = mat.material_flags & 3u;
+	uint32_t alpha_mode = mat.material_flags & MAT_FLAG_ALPHA_MODE_MASK;
 	if (alpha_mode == 0) {
 		albedo.a = 1.0;
 	} else if (alpha_mode == 1) {
@@ -184,7 +184,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	float metallic;
 	float roughness;
 	float3 F0;
-	if ((mat.material_flags & 16u) != 0u) {
+	if ((mat.material_flags & MAT_FLAG_SPEC_GLOSS) != 0u) {
 		metallic = 0.0;
 		roughness = 1.0 - mr.a * mat.params.y;
 		F0 = mat.extra.xyz * mr.rgb;

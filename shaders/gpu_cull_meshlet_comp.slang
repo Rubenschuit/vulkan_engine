@@ -46,19 +46,24 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 	if (!frustumTest(cull_params, center_world, radius))
 		return;
 
-	// Hi-Z occlusion cull (prev-frame)
-	if (cull_params.hiz_enabled != 0)
+	// Hi-Z occlusion cull
+	if (cull_params.hiz_enabled != 0 && cull_params.is_shadow_pass == 0)
 		if (!hizOcclusionTest(cull_params, hiz_pyramid, hiz_sampler, center_world, radius))
 			return;
 
 	// Skip transparent objects in shadow passes
-	bool is_transparent = (obj.material_flags & 0x20) != 0;
+	bool is_transparent = (obj.object_flags & OBJ_FLAG_IS_TRANSPARENT) != 0;
 	if (is_transparent && cull_params.is_shadow_pass != 0)
 		return;
 
 	// Skip objects marked no_shadow
-	if ((obj.material_flags & 0x40) != 0 && cull_params.is_shadow_pass != 0)
+	if ((obj.object_flags & OBJ_FLAG_NO_SHADOW) != 0 && cull_params.is_shadow_pass != 0)
 		return;
+
+	// Static/dynamic shadow filtering (is_shadow_pass 2 = static only, 3 = dynamic only)
+	bool is_dynamic_obj = (obj.object_flags & OBJ_FLAG_DYNAMIC) != 0;
+	if (cull_params.is_shadow_pass == 2 && is_dynamic_obj) return;
+	if (cull_params.is_shadow_pass == 3 && !is_dynamic_obj) return;
 
 	// LOD selection
 	uint lod = selectLod(cull_params, center_world, radius, obj.lod_count);
@@ -106,7 +111,7 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 	// Write per-object InstanceData at gpu_id index.
 	// Pass-2 draw commands set firstInstance = gpu_id so the vertex shader reads
 	// instance_data[SV_VulkanInstanceIndex] = instance_data[gpu_id].
-	bool is_mask = ((obj.material_flags & 0x3) == 1);
+	bool is_mask = ((obj.material_flags & MAT_FLAG_ALPHA_MODE_MASK) == 1);
 
 	InstanceData inst;
 	inst.transform      = xform.world_transform;

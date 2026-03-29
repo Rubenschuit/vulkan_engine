@@ -156,6 +156,13 @@ private:
 	void copyPreservedRegion(vk::raii::CommandBuffer& cmd, uint32_t cascade);
 	void updateCascadeCache(vk::raii::CommandBuffer& cmd, uint32_t cascade);
 
+	// --- Static/dynamic shadow helpers ---
+
+	// Delegates to GpuSceneManager::isDynamicEntity
+	static bool isDynamicEntity(const Registry& registry, Entity entity);
+	void copyStaticCacheToAtlas(vk::raii::CommandBuffer& cmd, uint32_t cascade);
+	void snapshotAtlasToStaticCache(vk::raii::CommandBuffer& cmd, uint32_t cascade);
+
 	// --- Deferred buffer deletion ---
 
 	void retireBuffer(std::unique_ptr<VeBuffer> buffer);
@@ -166,6 +173,7 @@ private:
 	VeDevice& m_ve_device;
 	VeDescriptorPool& m_descriptor_pool;
 	std::filesystem::path m_shader_path;
+	Registry* m_registry = nullptr;
 
 	std::unique_ptr<VeDescriptorSetLayout> m_shadow_global_set_layout;
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
@@ -190,11 +198,14 @@ private:
 	uint32_t m_shadow_instance_capacity = INITIAL_SHADOW_INSTANCE_CAPACITY;
 	std::vector<std::unique_ptr<VeBuffer>> m_shadow_instance_buffers;
 
-	std::vector<ShadowDrawable> m_shadow_drawables;
-	bool m_shadow_drawables_dirty = true;
+	std::vector<ShadowDrawable> m_static_shadow_drawables;
+	std::vector<ShadowDrawable> m_dynamic_shadow_drawables;
+	bool m_static_drawables_dirty = true;
+	bool m_dynamic_drawables_dirty = true;
 	std::vector<VeMesh*> m_cached_unique_meshes;
-	std::vector<ShadowInstanceGroup> m_shadow_instance_groups;
-	std::vector<ShadowInstanceGroup> m_csm_instance_groups;
+	std::vector<ShadowInstanceGroup> m_shadow_instance_groups;       // point/spot (all objects)
+	std::vector<ShadowInstanceGroup> m_static_csm_instance_groups;
+	std::vector<ShadowInstanceGroup> m_dynamic_csm_instance_groups;
 
 	std::unique_ptr<VeBuffer> m_mega_shadow_vbo;
 	std::unique_ptr<VeBuffer> m_mega_ibo;

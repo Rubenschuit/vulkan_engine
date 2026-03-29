@@ -109,10 +109,9 @@ GpuCullingSystem::GpuCullingSystem(VeDevice& device, const std::filesystem::path
 
 			m_shadow_cull_param_ubos[i][slot] = std::make_unique<VeBuffer>(m_ve_device,
 				sizeof(CullParams), 1,
-				vk::BufferUsageFlagBits::eUniformBuffer,
-				vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+				vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst,
+				vk::MemoryPropertyFlagBits::eDeviceLocal,
 				m_ve_device.getDeviceProperties().limits.minUniformBufferOffsetAlignment);
-			m_shadow_cull_param_ubos[i][slot]->map();
 		}
 	}
 
@@ -575,7 +574,8 @@ void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
                                           uint32_t frame_index,
                                           uint32_t shadow_buf_index,
                                           int32_t lod_bias,
-                                          const VeCamera* camera) {
+                                          const VeCamera* camera,
+                                          ShadowPassMode shadow_mode) {
 	uint32_t object_count = scene_mgr.getObjectCount();
 	if (object_count == 0)
 		return;
@@ -588,7 +588,7 @@ void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
 		params.frustum_planes[i] = cpu_planes[i].plane;
 	params.view_proj = light_view_proj;
 	params.object_count = object_count;
-	params.is_shadow_pass = 1;
+	params.is_shadow_pass = static_cast<uint32_t>(shadow_mode);
 	params.lod_bias = lod_bias;
 
 	// Camera-space Hi-Z occlusion
@@ -606,7 +606,10 @@ void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
 	} else {
 		params.hiz_enabled = 0;
 	}
-	m_shadow_cull_param_ubos[frame_index][shadow_buf_index]->writeToBuffer(&params);
+	// Record UBO data into the command stream so each dispatch sees its own
+	// parameters even when the same slot is reused for static and dynamic passes.
+	cmd.updateBuffer<CullParams>(m_shadow_cull_param_ubos[frame_index][shadow_buf_index]->getBuffer(),
+		vk::DeviceSize{0}, params);
 
 	// Copy pre-filled indirect commands (resets instanceCount to 0)
 	copyIndirectStaging(cmd, scene_mgr, frame_index, *m_shadow_indirect_buffers[frame_index][shadow_buf_index]);

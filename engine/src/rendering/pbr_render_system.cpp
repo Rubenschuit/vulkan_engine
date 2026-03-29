@@ -181,9 +181,9 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		inst.depth_offset = (d.alpha_mode == AlphaMode::MASK) ? MASK_DEPTH_OFFSET : 0.0f;
 		MaterialAlphaProps alpha = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};
 		inst.material_flags = static_cast<uint32_t>(alpha.alpha_mode)
-			| (alpha.double_sided ? 4u : 0u)
-			| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? 8u : 0u)
-			| (alpha.use_spec_gloss_texture ? 16u : 0u);
+			| (alpha.double_sided ? MaterialFlag::DOUBLE_SIDED : 0u)
+			| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? MaterialFlag::FLIP_TEX_V : 0u)
+			| (alpha.use_spec_gloss_texture ? MaterialFlag::SPEC_GLOSS : 0u);
 	}
 
 	// Build indirect draw commands directly into persistent vector.
@@ -272,9 +272,9 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		inst.depth_offset = 0.0f;
 		MaterialAlphaProps alpha = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};
 		inst.material_flags = static_cast<uint32_t>(alpha.alpha_mode)
-			| (alpha.double_sided ? 4u : 0u)
-			| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? 8u : 0u)
-			| (alpha.use_spec_gloss_texture ? 16u : 0u);
+			| (alpha.double_sided ? MaterialFlag::DOUBLE_SIDED : 0u)
+			| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? MaterialFlag::FLIP_TEX_V : 0u)
+			| (alpha.use_spec_gloss_texture ? MaterialFlag::SPEC_GLOSS : 0u);
 	}
 }
 
@@ -338,9 +338,9 @@ void PbrRenderSystem::prepareTransparents(VeFrameInfo& frame_info, MaterialSSBOM
 		inst.depth_offset = 0.0f;
 		MaterialAlphaProps alpha = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};
 		inst.material_flags = static_cast<uint32_t>(alpha.alpha_mode)
-			| (alpha.double_sided ? 4u : 0u)
-			| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? 8u : 0u)
-			| (alpha.use_spec_gloss_texture ? 16u : 0u);
+			| (alpha.double_sided ? MaterialFlag::DOUBLE_SIDED : 0u)
+			| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? MaterialFlag::FLIP_TEX_V : 0u)
+			| (alpha.use_spec_gloss_texture ? MaterialFlag::SPEC_GLOSS : 0u);
 	}
 }
 

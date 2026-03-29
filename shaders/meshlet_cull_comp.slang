@@ -49,7 +49,7 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 		return;
 
 	ObjectDataGPU obj = objects[vis.gpu_id];
-	bool is_double_sided = (obj.material_flags & 0x4) != 0;
+	bool is_double_sided = (obj.material_flags & MAT_FLAG_DOUBLE_SIDED) != 0;
 
 	// Backface cone cull (skip for shadow passes and double-sided objects)
 	if (cull_params.is_shadow_pass == 0 && !is_double_sided && m.cone_axis_cutoff.w < 1.0) {
@@ -68,8 +68,8 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 			return;
 
 	// Determine bucket from object material flags
-	bool is_mask         = ((obj.material_flags & 0x3) == 1);
-	bool is_transparent  = (obj.material_flags & 0x20) != 0;
+	bool is_mask         = ((obj.material_flags & MAT_FLAG_ALPHA_MODE_MASK) == 1);
+	bool is_transparent  = (obj.object_flags & OBJ_FLAG_IS_TRANSPARENT) != 0;
 	uint bucket;
 	if (is_transparent)
 		bucket = 4u + (is_double_sided ? 1u : 0u);
