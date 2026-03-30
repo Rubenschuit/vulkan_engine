@@ -1,9 +1,10 @@
 #!/bin/bash
 
-# usage: ./unixBuild.sh [debug|release|test|leaks|clean]
+# usage: ./unixBuild.sh [debug|release|test|tracy|leaks|clean]
 #  - debug: builds in debug mode and runs the app
 #  - release (default): builds in release mode and runs the app
 #  - test: builds in debug mode with tests enabled, runs all tests via CTest
+#  - tracy: builds in RelWithDebInfo mode with Tracy profiler enabled
 #  - leaks: builds in debug mode, runs the app and checks for memory leaks (macOS only)
 #  - clean: removes the build directory and compiled shader files
 
@@ -30,6 +31,9 @@ case "$MODE" in
 	test)
 		BUILD_TYPE="Debug"
 		echo "Building in debug mode (tests enabled)";;
+	tracy)
+		BUILD_TYPE="RelWithDebInfo"
+		echo "Building in RelWithDebInfo mode (Tracy profiler enabled)";;
 	leaks)
 		BUILD_TYPE="Debug"
 		echo "Building in debug mode (leaks check)";;
@@ -41,6 +45,8 @@ mkdir -p build
 EXTRA_CMAKE_ARGS="-DVE_BUILD_TESTS=OFF"
 if [[ "$MODE" == 'test' ]]; then
 	EXTRA_CMAKE_ARGS="-DVE_BUILD_TESTS=ON"
+elif [[ "$MODE" == 'tracy' ]]; then
+	EXTRA_CMAKE_ARGS="-DVE_BUILD_TESTS=OFF -DVE_ENABLE_TRACY=ON"
 fi
 
 # if windows

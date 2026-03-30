@@ -2,6 +2,7 @@
 
 #include "ve_export.hpp"
 #include "vulkan/ve_device.hpp"
+#include "vulkan/ve_debug_utils.hpp"
 
 struct VmaAllocation_T;
 using VmaAllocation = VmaAllocation_T*;
@@ -31,6 +32,11 @@ public:
 	vk::DeviceSize getAlignmentSize() const { return m_alignment_size; }
 	vk::DeviceSize getBufferSize() const { return m_buffer_size; }
 	vk::DescriptorBufferInfo getDescriptorInfo(vk::DeviceSize size = VK_WHOLE_SIZE, vk::DeviceSize offset = 0) const;
+
+	void setDebugName(const char* name) {
+		ve::setDebugName(m_ve_device, vk::ObjectType::eBuffer,
+			reinterpret_cast<uint64_t>(static_cast<VkBuffer>(m_buffer)), name);
+	}
 
 	void map(vk::DeviceSize size = VK_WHOLE_SIZE, vk::DeviceSize offset = 0);
 	void unmap();

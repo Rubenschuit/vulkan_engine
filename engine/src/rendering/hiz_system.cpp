@@ -2,6 +2,7 @@
 #include "rendering/hiz_system.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_image.hpp"
+#include "vulkan/ve_debug_utils.hpp"
 #include "vulkan/ve_descriptors.hpp"
 #include "vulkan/ve_compute_pipeline.hpp"
 #include "utils/ve_log.hpp"
@@ -88,6 +89,7 @@ void HizSystem::createHizImages(vk::Extent2D extent) {
 			vk::AccessFlagBits2::eShaderRead,
 			vk::PipelineStageFlagBits2::eTopOfPipe,
 			vk::PipelineStageFlagBits2::eComputeShader);
+		m_hiz_images[i]->setDebugName(("Hi-Z [" + std::to_string(i) + "]").c_str());
 	}
 }
 
@@ -110,6 +112,8 @@ void HizSystem::createMipViews() {
 				},
 			};
 			m_hiz_mip_views[f].emplace_back(m_ve_device.getDevice(), view_info);
+			auto name = "Hi-Z Mip " + std::to_string(mip) + " [" + std::to_string(f) + "]";
+			setDebugName(m_ve_device, m_hiz_mip_views[f].back(), name.c_str());
 		}
 	}
 }
@@ -143,6 +147,7 @@ void HizSystem::createDummyImage() {
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		vk::ImageAspectFlagBits::eColor,
 		false, 1);
+	m_dummy_image->setDebugName("Hi-Z Dummy");
 	m_dummy_image->transitionImageLayout(
 		vk::ImageLayout::eUndefined,
 		vk::ImageLayout::eGeneral,
@@ -248,10 +253,11 @@ void HizSystem::generate(vk::raii::CommandBuffer& cmd, uint32_t frame_index) {
 	vk::Image hiz_image = m_hiz_images[frame_index]->getImage();
 
 	// Transition all Hi-Z mips to eGeneral for storage writes
+	// srcStage=eNone: cross-queue sync handled by timeline semaphore
 	{
 		vk::ImageMemoryBarrier2 barrier{
-			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
+			.srcStageMask = vk::PipelineStageFlagBits2::eNone,
+			.srcAccessMask = vk::AccessFlagBits2::eNone,
 			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 			.dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
 			.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
@@ -330,12 +336,13 @@ void HizSystem::generate(vk::raii::CommandBuffer& cmd, uint32_t frame_index) {
 	}
 
 	// Final barrier: all Hi-Z mips eGeneral -> eShaderReadOnlyOptimal
+	// dstStage=eNone: GPU culling reads on graphics queue next frame, semaphore handles sync
 	{
 		vk::ImageMemoryBarrier2 barrier{
 			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 			.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-			.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+			.dstStageMask = vk::PipelineStageFlagBits2::eNone,
+			.dstAccessMask = vk::AccessFlagBits2::eNone,
 			.oldLayout = vk::ImageLayout::eGeneral,
 			.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,

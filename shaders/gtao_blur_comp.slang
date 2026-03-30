@@ -1,5 +1,5 @@
-// Bilateral blur for GTAO — depth-aware separable H/V.
-// Dispatched twice: once horizontal (direction=1,0), once vertical (direction=0,1).
+// Bilateral blur for GTAO
+// Dispatched twice: once horizontal, once vertical.
 // Preserves edges using depth-based weights to avoid blurring across geometry boundaries.
 
 #include "ve_constants.slangh"
@@ -8,7 +8,7 @@
 [vk::binding(0, 0)]
 Texture2D<float> depth_texture;
 [vk::binding(1, 0)]
-Texture2D<float> ao_input;
+RWTexture2D<float> ao_input;
 [vk::binding(2, 0)]
 RWTexture2D<float> ao_output;
 
@@ -49,7 +49,7 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	float2 uv = (float2(coord) + 0.5) / push.image_size;
 	int2 depth_coord = int2(uv * push.depth_size);
 
-	float center_ao = ao_input.Load(int3(coord, 0));
+	float center_ao = ao_input[coord];
 	float center_depth = fetchDepthLinear(depth_coord);
 
 	// Skip sky pixels
@@ -69,7 +69,7 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 			int2 sample_coord = coord + dir * i;
 			int2 sample_depth_coord = depth_coord + dir * i;
 			sample_coord = clamp(sample_coord, int2(0), int2(push.image_size) - 1);
-			float sample_ao = ao_input.Load(int3(sample_coord, 0));
+			float sample_ao = ao_input[sample_coord];
 			float sample_depth = fetchDepthLinear(sample_depth_coord);
 
 			// Depth-aware weight: reduce contribution when depth difference is large
@@ -87,7 +87,7 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 			int2 sample_coord = coord - dir * i;
 			int2 sample_depth_coord = depth_coord - dir * i;
 			sample_coord = clamp(sample_coord, int2(0), int2(push.image_size) - 1);
-			float sample_ao = ao_input.Load(int3(sample_coord, 0));
+			float sample_ao = ao_input[sample_coord];
 			float sample_depth = fetchDepthLinear(sample_depth_coord);
 
 			float depth_diff = abs(center_depth - sample_depth);

@@ -210,6 +210,7 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 		vk::ImageLayout::eUndefined, vk::ImageLayout::eShaderReadOnlyOptimal,
 		vk::AccessFlagBits2::eNone, vk::AccessFlagBits2::eShaderRead,
 		vk::PipelineStageFlagBits2::eTopOfPipe, vk::PipelineStageFlagBits2::eComputeShader);
+	m_dummy_image->setDebugName("Meshlet Cull Dummy Hi-Z");
 
 	vk::SamplerCreateInfo sampler_info{
 		.magFilter = vk::Filter::eNearest,

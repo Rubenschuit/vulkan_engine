@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "vulkan/ve_device.hpp"
+#include "vulkan/ve_debug_utils.hpp"
 
 #define VMA_STATIC_VULKAN_FUNCTIONS 1
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
@@ -199,6 +200,9 @@ void VeDevice::createCommandPools() {
 		.queueFamilyIndex = m_compute_queue_index
 	};
 	m_command_pool_compute = vk::raii::CommandPool(m_device, pool_info_compute);
+	setDebugName(*this, m_command_pool, "Device Graphics Pool");
+	setDebugName(*this, m_command_pool_transfer, "Device Transfer Pool");
+	setDebugName(*this, m_command_pool_compute, "Device Compute Pool");
 }
 
 void VeDevice::createSurface() {
@@ -313,6 +317,16 @@ void VeDevice::createLogicalDevice() {
 	m_queue_family_indices = findAllQueueFamilies(m_physical_device);
 	assert(m_queue_family_indices.isComplete() && "Failed to find all required queue families");
 
+	// Check if the compute queue family is a dedicated async compute engine
+	// (compute without graphics), meaning real parallel overlap is possible.
+	auto qf_props = m_physical_device.getQueueFamilyProperties();
+	auto compute_flags = qf_props[m_queue_family_indices.computeFamily].queueFlags;
+	m_has_dedicated_compute = (compute_flags & vk::QueueFlagBits::eCompute) != vk::QueueFlags{}
+		&& (compute_flags & vk::QueueFlagBits::eGraphics) == vk::QueueFlags{};
+	VE_LOGI("Dedicated async compute: " << (m_has_dedicated_compute ? "yes" : "no")
+		<< " (compute family " << m_queue_family_indices.computeFamily
+		<< " flags: " << vk::to_string(compute_flags) << ")");
+
 	m_queue_index          = m_queue_family_indices.graphicsFamily;
 	m_compute_queue_index  = m_queue_family_indices.computeFamily;
 	m_transfer_queue_index = m_queue_family_indices.transferFamily;
@@ -397,6 +411,9 @@ void VeDevice::createLogicalDevice() {
 	m_queue          = vk::raii::Queue(m_device, m_queue_index, 0);
 	m_compute_queue  = vk::raii::Queue(m_device, m_compute_queue_index, 0);
 	m_transfer_queue = vk::raii::Queue(m_device, m_transfer_queue_index, 0);
+	setDebugName(*this, m_queue, "Graphics Queue");
+	setDebugName(*this, m_compute_queue, "Compute Queue");
+	setDebugName(*this, m_transfer_queue, "Transfer Queue");
 }
 
 // Finds separate queue families for graphics+present, async compute, and async transfer.

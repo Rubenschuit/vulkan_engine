@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "rendering/ve_renderer.hpp"
 #include "rendering/ve_frame_info.hpp"
+#include "vulkan/ve_debug_utils.hpp"
 #include "ve_tracy.hpp"
 
 #include <stdexcept>
@@ -81,6 +82,14 @@ vk::raii::CommandBuffer& VeRenderer::getCurrentComputeCommandBuffer() {
 	assert(m_is_frame_started && "Frame is not in progress");
 	return m_command_manager.getComputePrimary(m_ve_swap_chain->getCurrentFrame());
 }
+vk::raii::CommandBuffer& VeRenderer::getCurrentGraphics2CommandBuffer() {
+	assert(m_is_frame_started && "Frame is not in progress");
+	return m_command_manager.getGraphics2Primary(m_ve_swap_chain->getCurrentFrame());
+}
+vk::raii::CommandBuffer& VeRenderer::getCurrentCompute2CommandBuffer() {
+	assert(m_is_frame_started && "Frame is not in progress");
+	return m_command_manager.getCompute2Primary(m_ve_swap_chain->getCurrentFrame());
+}
 vk::raii::CommandBuffer& VeRenderer::getCurrentUICommandBuffer() {
 	assert(m_is_frame_started && "Frame is not in progress");
 	return m_command_manager.getUIPrimary(m_ve_swap_chain->getCurrentFrame());
@@ -155,7 +164,7 @@ bool VeRenderer::beginFrame() {
 	// frame acquired
 	m_is_frame_started = true;
 	m_ve_swap_chain->resetCurrentFence();
-	m_ve_swap_chain->updateTimelineValues();
+	m_ve_swap_chain->beginTimelineFrame();
 
 	// Begin command buffer for recording commands
 	auto& command_buffer = getCurrentCommandBuffer();
@@ -172,9 +181,12 @@ bool VeRenderer::beginFrame() {
 	};
 	command_buffer.begin(info);
 
-	// Also begin compute and UI command buffers
+	// Also begin compute, phase-2 CBs, and UI command buffers
 	auto& compute_command_buffer = getCurrentComputeCommandBuffer();
 	compute_command_buffer.begin(info);
+
+	getCurrentGraphics2CommandBuffer().begin(info);
+	getCurrentCompute2CommandBuffer().begin(info);
 
 	auto& ui_command_buffer = getCurrentUICommandBuffer();
 	ui_command_buffer.begin(info);
@@ -194,20 +206,30 @@ bool VeRenderer::beginFrame() {
 void VeRenderer::endFrame() {
 	assert(m_is_frame_started && "Can't call endFrame while frame is not in progress");
 
-	auto& scene_cb = getCurrentCommandBuffer();
 	auto& ui_cb = getCurrentUICommandBuffer();
-
-	// End scene CB with graphics end timestamp
-	m_profiler.endGpuTimer(scene_cb, ProfileTimer::FRAME_TOTAL);
-	scene_cb.end();
 
 	// Finalize UI CB: transition swapchain to present, then end
 	transitionToPresent(ui_cb);
+	endDebugLabel(ui_cb);
 	ui_cb.end();
 
-	// Submit both CBs in order, then present
-	ZoneScopedN("Submit + Present");
-	auto result = m_ve_swap_chain->submitAndPresent(*scene_cb, *ui_cb, &m_current_image_index);
+	vk::Result result;
+	{
+		ZoneScopedN("Submit + Present");
+		if (m_split_active) {
+			// Split path: graphics CB 1 already submitted. End graphics2 CB and present.
+			auto& gfx2_cb = getCurrentGraphics2CommandBuffer();
+			m_profiler.endGpuTimer(gfx2_cb, ProfileTimer::FRAME_TOTAL);
+			gfx2_cb.end();
+			result = m_ve_swap_chain->submitGraphicsPhase2AndPresent(*gfx2_cb, *ui_cb, &m_current_image_index);
+		} else {
+			// Non-split path: end graphics CB 1 and present normally.
+			auto& scene_cb = getCurrentCommandBuffer();
+			m_profiler.endGpuTimer(scene_cb, ProfileTimer::FRAME_TOTAL);
+			scene_cb.end();
+			result = m_ve_swap_chain->submitAndPresent(*scene_cb, *ui_cb, &m_current_image_index);
+		}
+	}
 
 	if (result == vk::Result::eErrorOutOfDateKHR) {
 		VE_LOGD("Result of present is eErrorOutOfDateKHR, setting flag.");
@@ -224,6 +246,7 @@ void VeRenderer::endFrame() {
 	if (result == vk::Result::eSuccess)
 		m_ve_swap_chain->advanceFrame();
 	m_is_frame_started = false;
+	m_split_active = false;
 	FrameMark;
 }
 
@@ -232,6 +255,7 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer,
 	assert(m_is_frame_started && "Can't begin depth pre-pass while frame is not in progress");
 	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin depth pre-pass on command buffer from a different frame");
 
+	beginDebugLabel(command_buffer, "Depth Prepass", {0.3f, 0.3f, 1.0f, 1.0f});
 	auto extent = getExtent();
 
 	vk::RenderingAttachmentInfo depth_attachment_info = {
@@ -313,14 +337,17 @@ void VeRenderer::endDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
 		.pMemoryBarriers = &depth_barrier
 	};
 	command_buffer.pipelineBarrier2(dep_info);
+	endDebugLabel(command_buffer);
 }
 
 // Transitions the resolve target to color_attachment_optimal. Begins dynamic rendering.
 void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer,
 	bool load_depth, bool secondary_contents, bool resolve_msaa) {
 	assert(m_is_frame_started && "Can't call beginRender while frame is not in progress");
-	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin render on command buffer from a different frame");
+	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer())
+		&& "Can't begin render on command buffer from a different frame");
 
+	beginDebugLabel(command_buffer, "Scene Render", {0.2f, 0.8f, 0.2f, 1.0f});
 	auto extent = getExtent();
 
 	// Transition resolve target to eColorAttachmentOptimal
@@ -405,7 +432,8 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer,
 
 void VeRenderer::endSceneRender(vk::raii::CommandBuffer& command_buffer) {
 	assert(m_is_frame_started && "Can't call endRender while frame is not in progress");
-	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end render on command buffer from a different frame");
+	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer())
+		&& "Can't end render on command buffer from a different frame");
 
 	command_buffer.endRendering();
 
@@ -419,10 +447,12 @@ void VeRenderer::endSceneRender(vk::raii::CommandBuffer& command_buffer) {
 		vk::PipelineStageFlagBits2::eColorAttachmentOutput,
 		vk::PipelineStageFlagBits2::eFragmentShader
 	);
+	endDebugLabel(command_buffer);
 }
 
 void VeRenderer::beginWboitRender(vk::raii::CommandBuffer& command_buffer) {
 	assert(m_is_frame_started && "Can't begin WBOIT render while frame is not in progress");
+	beginDebugLabel(command_buffer, "WBOIT Geometry", {0.8f, 0.6f, 0.2f, 1.0f});
 	auto extent = getExtent();
 
 	// Transition resolved depth to read-only, WBOIT images to color attachment
@@ -547,9 +577,11 @@ void VeRenderer::endWboitRender(vk::raii::CommandBuffer& command_buffer) {
 		.pImageMemoryBarriers = barriers.data()
 	};
 	command_buffer.pipelineBarrier2(dep);
+	endDebugLabel(command_buffer);
 }
 
 void VeRenderer::beginWboitComposite(vk::raii::CommandBuffer& command_buffer) {
+	beginDebugLabel(command_buffer, "WBOIT Composite", {0.8f, 0.6f, 0.2f, 1.0f});
 	auto extent = getExtent();
 
 	// Transition resolve target back to color attachment for compositing
@@ -616,12 +648,15 @@ void VeRenderer::endWboitComposite(vk::raii::CommandBuffer& command_buffer) {
 	};
 	vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_barrier};
 	command_buffer.pipelineBarrier2(dep);
+	endDebugLabel(command_buffer);
 }
 
 void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode) {
 	assert(m_is_frame_started && "Can't call beginPostProcessRender while frame is not in progress");
-	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin post-process on command buffer from a different frame");
+	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer())
+		&& "Can't begin post-process on command buffer from a different frame");
 
+	beginDebugLabel(command_buffer, "Post Process", {0.8f, 0.2f, 0.8f, 1.0f});
 	if (editor_mode && m_viewport_image) {
 		// Editor mode: render to viewport image
 		auto vp_extent = m_viewport_image->getExtent2D();
@@ -704,7 +739,8 @@ void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer,
 
 void VeRenderer::endPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode) {
 	assert(m_is_frame_started && "Can't call endPostProcessRender while frame is not in progress");
-	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end post-process on command buffer from a different frame");
+	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer())
+		&& "Can't end post-process on command buffer from a different frame");
 
 	command_buffer.endRendering();
 
@@ -720,12 +756,14 @@ void VeRenderer::endPostProcessRender(vk::raii::CommandBuffer& command_buffer, b
 			vk::PipelineStageFlagBits2::eFragmentShader
 		);
 	}
+	endDebugLabel(command_buffer);
 }
 
 void VeRenderer::beginUIRecording(bool editor_mode) {
 	assert(m_is_frame_started && "Can't call beginUIRecording while frame is not in progress");
 
 	auto& ui_cb = getCurrentUICommandBuffer();
+	beginDebugLabel(ui_cb, "UI", {0.9f, 0.9f, 0.2f, 1.0f});
 
 	if (editor_mode) {
 		// Editor mode: scene rendered to viewport image, swapchain is untouched.
@@ -799,6 +837,9 @@ void VeRenderer::recreateWboitImages() {
 		vk::PipelineStageFlagBits2::eTopOfPipe,
 		vk::PipelineStageFlagBits2::eFragmentShader
 	);
+
+	m_wboit_accum->setDebugName("WBOIT Accum");
+	m_wboit_revealage->setDebugName("WBOIT Revealage");
 }
 
 void VeRenderer::createViewportResources() {
@@ -828,6 +869,7 @@ void VeRenderer::createViewportResources() {
 		vk::PipelineStageFlagBits2::eTopOfPipe,
 		vk::PipelineStageFlagBits2::eFragmentShader
 	);
+	m_viewport_image->setDebugName("Viewport Image");
 
 	if (!*m_viewport_sampler) {
 		vk::SamplerCreateInfo sampler_info{
@@ -904,6 +946,7 @@ void VeRenderer::resizeViewportImage(uint32_t width, uint32_t height) {
 		vk::PipelineStageFlagBits2::eTopOfPipe,
 		vk::PipelineStageFlagBits2::eFragmentShader
 	);
+	m_viewport_image->setDebugName("Viewport Image");
 }
 
 void VeRenderer::transitionToPresent(vk::raii::CommandBuffer& command_buffer) {
@@ -931,6 +974,28 @@ void VeRenderer::submitCompute(vk::raii::CommandBuffer& compute_command_buffer) 
 	compute_command_buffer.end();
 
 	m_ve_swap_chain->submitComputeWork(*compute_command_buffer);
+}
+
+void VeRenderer::submitGraphicsPhase1() {
+	assert(m_is_frame_started && "Can't call submitGraphicsPhase1 while frame is not in progress");
+
+	auto& gfx1_cb = getCurrentCommandBuffer();
+	gfx1_cb.end();
+
+	m_ve_swap_chain->activateSplitTimeline();
+	m_ve_swap_chain->submitGraphicsPhase1(*gfx1_cb);
+	m_split_active = true;
+}
+
+void VeRenderer::submitComputePhase2(vk::raii::CommandBuffer& compute2_cb) {
+	assert(m_is_frame_started && "Can't call submitComputePhase2 while frame is not in progress");
+
+	compute2_cb.end();
+	m_ve_swap_chain->submitComputePhase2(*compute2_cb);
+}
+
+void VeRenderer::setSplitActive(bool active) {
+	m_split_active = active;
 }
 
 // --- App-facing wrappers ---

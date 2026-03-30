@@ -351,6 +351,7 @@ bool VeTexture::uploadKtxTexture(void* k_texture_ptr, vk::Format format_hint) {
 		vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
 		vk::AccessFlagBits2::eTransferWrite, vk::AccessFlagBits2::eShaderRead,
 		vk::PipelineStageFlagBits2::eTransfer, vk::PipelineStageFlagBits2::eFragmentShader);
+	m_texture_image->setDebugName(m_resource_id.c_str());
 
 	ktxTexture_Destroy(k_texture);
 	return true;
@@ -399,6 +400,7 @@ void VeTexture::createTextureImageFromPixels(uint32_t width, uint32_t height, co
 		vk::AccessFlagBits2::eShaderRead,
 		vk::PipelineStageFlagBits2::eTransfer,
 		vk::PipelineStageFlagBits2::eFragmentShader);
+	m_texture_image->setDebugName(m_resource_id.c_str());
 }
 
 // Loads a texture from a file using stb_image.

@@ -96,6 +96,7 @@ public:
 #endif
 
 	const vk::PhysicalDeviceProperties getDeviceProperties() const { return m_physical_device.getProperties(); }
+	bool hasDedicatedComputeQueue() const { return m_has_dedicated_compute; }
 	vk::SampleCountFlagBits getSampleCount() const { return m_max_msaa_samples; };
 	bool hasHdrColorSpaceExtension() const { return m_has_hdr_instance_extension; }
 	bool supportsBC() const { return m_supports_bc; }
@@ -153,6 +154,7 @@ private:
 	bool m_supports_etc2 = false;
 	bool m_supports_draw_indirect_count = false;
 	bool m_supports_calibrated_timestamps = false;
+	bool m_has_dedicated_compute = false;
 
 	VmaAllocator m_allocator = nullptr;
 

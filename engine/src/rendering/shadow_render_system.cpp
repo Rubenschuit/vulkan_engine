@@ -282,6 +282,7 @@ void ShadowRenderSystem::createShadowResources() {
 		vk::PipelineStageFlagBits2::eTopOfPipe,
 		vk::PipelineStageFlagBits2::eFragmentShader
 	);
+	m_shadow_atlas->setDebugName("Shadow Atlas");
 
 	for (uint32_t c = 0; c < NUM_CSM_CASCADES; c++) {
 		uint32_t res = CSM_CASCADE_RESOLUTIONS[c];
@@ -300,6 +301,7 @@ void ShadowRenderSystem::createShadowResources() {
 			vk::AccessFlagBits2::eTransferRead,
 			vk::PipelineStageFlagBits2::eTopOfPipe,
 			vk::PipelineStageFlagBits2::eTransfer);
+		m_cascade_cache[c]->setDebugName(("CSM Cascade Cache " + std::to_string(c)).c_str());
 	}
 
 	m_shadow_sampler = VeTexture::createDepthCompareSampler(m_ve_device);

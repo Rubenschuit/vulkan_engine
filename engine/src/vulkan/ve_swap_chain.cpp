@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "vulkan/ve_swap_chain.hpp"
+#include "vulkan/ve_debug_utils.hpp"
 
 #include <array>
 #include <limits>
@@ -38,6 +39,22 @@ void VeSwapChain::init() {
 	createColorResources();
 	createDepthResources();
 	createSyncObjects();
+
+	// Naming for debugging
+	for (size_t i = 0; i < m_swap_chain_images.size(); ++i) {
+		auto name = "SwapChain Image " + std::to_string(i);
+		setDebugName(m_ve_device, vk::ObjectType::eImage,
+			reinterpret_cast<uint64_t>(static_cast<VkImage>(m_swap_chain_images[i])), name.c_str());
+		setDebugName(m_ve_device, m_swap_chain_image_views[i], name.c_str());
+	}
+	if (m_depth_image)
+		m_depth_image->setDebugName("Depth Image");
+	if (m_color_image)
+		m_color_image->setDebugName("MSAA Color Image");
+	if (m_resolve_target_image)
+		m_resolve_target_image->setDebugName("Resolve Target");
+	if (m_resolved_depth_image)
+		m_resolved_depth_image->setDebugName("Resolved Depth");
 }
 
 vk::Result VeSwapChain::acquireNextImage(uint32_t* image_index) {
@@ -54,7 +71,7 @@ vk::Result VeSwapChain::acquireNextImage(uint32_t* image_index) {
 
 void VeSwapChain::submitComputeWork(vk::CommandBuffer command_buffer) {
 	// Wait for the previous frame's compute work to finish
-	uint64_t wait_value = m_compute_signal_value - 1;
+	uint64_t wait_value = m_compute1_signal_value - 1;
 	bool has_previous = wait_value > 0;
 	vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eComputeShader;
 
@@ -64,17 +81,17 @@ void VeSwapChain::submitComputeWork(vk::CommandBuffer command_buffer) {
 		.waitSemaphoreValueCount = has_previous ? 1u : 0u,
 		.pWaitSemaphoreValues = has_previous ? &wait_value : nullptr,
 		.signalSemaphoreValueCount = 1,
-		.pSignalSemaphoreValues = &m_compute_signal_value,
+		.pSignalSemaphoreValues = &m_compute1_signal_value,
 	};
 	vk::SubmitInfo submit_info{
 		.pNext = &timeline_info,
 		.waitSemaphoreCount = has_previous ? 1u : 0u,
-		.pWaitSemaphores = has_previous ? &*m_compute_timeline : nullptr,
+		.pWaitSemaphores = has_previous ? &*m_frame_timeline : nullptr,
 		.pWaitDstStageMask = has_previous ? &wait_stage : nullptr,
 		.commandBufferCount = 1,
 		.pCommandBuffers = &command_buffer,
 		.signalSemaphoreCount = 1,
-		.pSignalSemaphores = &*m_compute_timeline,
+		.pSignalSemaphores = &*m_frame_timeline,
 	};
 
 	m_ve_device.getComputeQueue().submit(submit_info, nullptr);
@@ -87,7 +104,8 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer scene_cb, vk::Command
 		vk::PipelineStageFlagBits::eFragmentShader,
 	};
 
-	std::array<uint64_t, 2> wait_values{ uint64_t{0}, m_graphics_wait_value };
+	uint64_t graphics_wait = m_split_active ? m_compute2_signal_value : m_compute1_signal_value;
+	std::array<uint64_t, 2> wait_values{ uint64_t{0}, graphics_wait };
 	uint64_t signal_value{0};
 
 	vk::TimelineSemaphoreSubmitInfo timeline_info{
@@ -99,7 +117,7 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer scene_cb, vk::Command
 		.pSignalSemaphoreValues = &signal_value,
 	};
 
-	std::array<vk::Semaphore, 2> wait_sems{ *m_image_available_semaphores[m_current_frame], *m_compute_timeline };
+	std::array<vk::Semaphore, 2> wait_sems{ *m_image_available_semaphores[m_current_frame], *m_frame_timeline };
 	vk::Semaphore render_finished = *m_render_finished_semaphores[*image_index];
 	std::array<vk::CommandBuffer, 2> cbs = {scene_cb, ui_cb};
 	vk::SubmitInfo submit_info{
@@ -324,14 +342,17 @@ void VeSwapChain::createSyncObjects() {
 		.initialValue = 0
 	};
 	vk::SemaphoreCreateInfo timeline_sem_ci{ .pNext = &semaphore_type };
-	m_compute_timeline = vk::raii::Semaphore(m_ve_device.getDevice(), timeline_sem_ci);
-	m_compute_timeline_value = 0;
+	m_frame_timeline = vk::raii::Semaphore(m_ve_device.getDevice(), timeline_sem_ci);
+	m_frame_timeline_value = 0;
+	setDebugName(m_ve_device, m_frame_timeline, "Frame Timeline Semaphore");
 
 	// fences
 	m_in_flight_fences.clear();
 	vk::FenceCreateInfo fence_info{ .flags = vk::FenceCreateFlagBits::eSignaled };
 	for (size_t i = 0; i < ve::MAX_FRAMES_IN_FLIGHT; i++) {
 		m_in_flight_fences.emplace_back(m_ve_device.getDevice(), fence_info);
+		auto name = "In-Flight Fence [" + std::to_string(i) + "]";
+		setDebugName(m_ve_device, m_in_flight_fences.back(), name.c_str());
 	}
 
 	// Create per-swapchain-image binary render-finished semaphores used by present
@@ -340,6 +361,8 @@ void VeSwapChain::createSyncObjects() {
 	vk::SemaphoreCreateInfo sem_ci{}; // binary semaphore by default
 	for (size_t i = 0; i < m_swap_chain_images.size(); ++i) {
 		m_render_finished_semaphores.emplace_back(m_ve_device.getDevice(), sem_ci);
+		auto name = "Render Finished Semaphore [" + std::to_string(i) + "]";
+		setDebugName(m_ve_device, m_render_finished_semaphores.back(), name.c_str());
 	}
 
 	// Create per-frame binary image-available semaphores used by acquire
@@ -347,6 +370,8 @@ void VeSwapChain::createSyncObjects() {
 	m_image_available_semaphores.reserve(ve::MAX_FRAMES_IN_FLIGHT);
 	for (size_t i = 0; i < ve::MAX_FRAMES_IN_FLIGHT; ++i) {
 		m_image_available_semaphores.emplace_back(m_ve_device.getDevice(), sem_ci);
+		auto name = "Image Available Semaphore [" + std::to_string(i) + "]";
+		setDebugName(m_ve_device, m_image_available_semaphores.back(), name.c_str());
 	}
 }
 
@@ -440,7 +465,7 @@ void VeSwapChain::waitForCurrentFence() {
             *m_in_flight_fences[m_current_frame], vk::True, timeout_ns))
            == vk::Result::eTimeout) {
         VE_LOGW("Fence wait timeout on frame " << m_current_frame
-                 << " (timeline=" << m_compute_timeline_value << ")");
+                 << " (timeline=" << m_frame_timeline_value << ")");
     }
 }
 
@@ -453,9 +478,119 @@ void VeSwapChain::advanceFrame() {
 	m_current_frame = (m_current_frame + 1) % ve::MAX_FRAMES_IN_FLIGHT;
 }
 
-void VeSwapChain::updateTimelineValues() {
-	m_compute_signal_value = ++m_compute_timeline_value;
-	m_graphics_wait_value  = m_compute_signal_value;
+void VeSwapChain::beginTimelineFrame() {
+	m_compute1_signal_value = ++m_frame_timeline_value;
+	m_split_active = false;
+}
+
+void VeSwapChain::activateSplitTimeline() {
+	m_graphics1_signal_value = ++m_frame_timeline_value;
+	m_compute2_signal_value = ++m_frame_timeline_value;
+	m_split_active = true;
+}
+
+void VeSwapChain::submitGraphicsPhase1(vk::CommandBuffer cb) {
+	// Waits: image_available (binary) + compute1 (timeline)
+	// Signals: graphics1 (timeline), no fence
+	vk::PipelineStageFlags wait_stages[2] = {
+		vk::PipelineStageFlagBits::eColorAttachmentOutput,
+		vk::PipelineStageFlagBits::eFragmentShader,
+	};
+
+	std::array<uint64_t, 2> wait_values{ uint64_t{0}, m_compute1_signal_value };
+	vk::TimelineSemaphoreSubmitInfo timeline_info{
+		.waitSemaphoreValueCount = static_cast<uint32_t>(wait_values.size()),
+		.pWaitSemaphoreValues = wait_values.data(),
+		.signalSemaphoreValueCount = 1,
+		.pSignalSemaphoreValues = &m_graphics1_signal_value,
+	};
+
+	std::array<vk::Semaphore, 2> wait_sems{ *m_image_available_semaphores[m_current_frame], *m_frame_timeline };
+	vk::SubmitInfo submit_info{
+		.pNext = &timeline_info,
+		.waitSemaphoreCount = static_cast<uint32_t>(wait_sems.size()),
+		.pWaitSemaphores = wait_sems.data(),
+		.pWaitDstStageMask = wait_stages,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &cb,
+		.signalSemaphoreCount = 1,
+		.pSignalSemaphores = &*m_frame_timeline,
+	};
+
+	m_ve_device.getQueue().submit(submit_info, nullptr);
+}
+
+void VeSwapChain::submitComputePhase2(vk::CommandBuffer cb) {
+	// Waits: graphics1 (timeline)
+	// Signals: compute2 (timeline), no fence
+	vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eComputeShader;
+
+	vk::TimelineSemaphoreSubmitInfo timeline_info{
+		.waitSemaphoreValueCount = 1,
+		.pWaitSemaphoreValues = &m_graphics1_signal_value,
+		.signalSemaphoreValueCount = 1,
+		.pSignalSemaphoreValues = &m_compute2_signal_value,
+	};
+
+	vk::SubmitInfo submit_info{
+		.pNext = &timeline_info,
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &*m_frame_timeline,
+		.pWaitDstStageMask = &wait_stage,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &cb,
+		.signalSemaphoreCount = 1,
+		.pSignalSemaphores = &*m_frame_timeline,
+	};
+
+	m_ve_device.getComputeQueue().submit(submit_info, nullptr);
+}
+
+vk::Result VeSwapChain::submitGraphicsPhase2AndPresent(
+	vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* image_index) {
+	// Waits: compute2 (timeline) at fragment shader stage
+	// Signals: render_finished (binary), fence
+	vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eFragmentShader;
+
+	uint64_t wait_value = m_compute2_signal_value;
+	uint64_t signal_value{0};
+	vk::TimelineSemaphoreSubmitInfo timeline_info{
+		.waitSemaphoreValueCount = 1,
+		.pWaitSemaphoreValues = &wait_value,
+		.signalSemaphoreValueCount = 1,
+		.pSignalSemaphoreValues = &signal_value,
+	};
+
+	vk::Semaphore render_finished = *m_render_finished_semaphores[*image_index];
+	std::array<vk::CommandBuffer, 2> cbs = {scene_cb, ui_cb};
+	vk::SubmitInfo submit_info{
+		.pNext = &timeline_info,
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &*m_frame_timeline,
+		.pWaitDstStageMask = &wait_stage,
+		.commandBufferCount = static_cast<uint32_t>(cbs.size()),
+		.pCommandBuffers = cbs.data(),
+		.signalSemaphoreCount = 1,
+		.pSignalSemaphores = &render_finished,
+	};
+
+	m_ve_device.getQueue().submit(submit_info, *m_in_flight_fences[m_current_frame]);
+
+	std::array<vk::Semaphore, 1> present_waits{ render_finished };
+	const vk::PresentInfoKHR present_info{
+		.waitSemaphoreCount = static_cast<uint32_t>(present_waits.size()),
+		.pWaitSemaphores = present_waits.data(),
+		.swapchainCount = 1,
+		.pSwapchains = &*m_swap_chain,
+		.pImageIndices = image_index,
+	};
+
+	try {
+		return m_ve_device.getQueue().presentKHR(present_info);
+	} catch (const vk::OutOfDateKHRError& e) {
+		VE_LOGD("PresentKHR threw eErrorOutOfDateKHR" << e.what());
+		return vk::Result::eErrorOutOfDateKHR;
+	}
 }
 
 // Transition the image layout of the given swap chain image using
@@ -538,6 +673,14 @@ void VeSwapChain::resizeOffscreenResources(vk::Extent2D extent) {
 	m_offscreen_extent = extent;
 	createColorResources();
 	createDepthResources();
+	if (m_depth_image)
+		m_depth_image->setDebugName("Depth Image");
+	if (m_color_image)
+		m_color_image->setDebugName("MSAA Color Image");
+	if (m_resolve_target_image)
+		m_resolve_target_image->setDebugName("Resolve Target");
+	if (m_resolved_depth_image)
+		m_resolved_depth_image->setDebugName("Resolved Depth");
 	VE_LOGI("Offscreen resources resized to " << extent.width << "x" << extent.height);
 }
 

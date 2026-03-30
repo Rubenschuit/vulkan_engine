@@ -45,9 +45,10 @@ public:
 	GtaoSystem(const GtaoSystem&) = delete;
 	GtaoSystem& operator=(const GtaoSystem&) = delete;
 
-	// Record GTAO compute + bilateral blur on the GRAPHICS command buffer.
+	// Record GTAO compute + bilateral blur.
 	// Must be called AFTER depth pre-pass, BEFORE beginSceneRender.
-	void dispatch(VeFrameInfo& frame_info);
+	// cmd: the command buffer to record on (may be graphics or compute queue).
+	void dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd);
 
 	// Recreate AO images when swapchain resizes or resolution toggle changes.
 	void recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D ao_extent,
@@ -85,8 +86,8 @@ private:
 	vk::Extent2D m_extent{};         // AO resolution (may be half-res)
 	vk::Extent2D m_depth_extent{};   // depth buffer resolution
 
-	float m_radius = 0.5f;
-	float m_intensity = 1.5f;
+	float m_radius = 0.25f;
+	float m_intensity = 0.5f;
 
 	// Per-frame AO images: raw GTAO output + blur intermediate.
 	// After H+V blur, final result lives in m_ao_raw_images[frame].

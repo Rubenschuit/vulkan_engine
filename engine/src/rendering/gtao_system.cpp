@@ -77,7 +77,8 @@ GtaoSystem::GtaoSystem(
 GtaoSystem::~GtaoSystem() = default;
 
 void GtaoSystem::createAoImages(vk::Extent2D extent) {
-	auto make_image = [&]() {
+	auto make_ao_image = [&](vk::ImageLayout initial_layout,
+		vk::AccessFlagBits2 dst_access, vk::PipelineStageFlagBits2 dst_stage) {
 		auto img = std::make_unique<VeImage>(
 			m_ve_device,
 			extent.width,
@@ -91,18 +92,25 @@ void GtaoSystem::createAoImages(vk::Extent2D extent) {
 			false, 1
 		);
 		img->transitionImageLayout(
-			vk::ImageLayout::eUndefined,
-			vk::ImageLayout::eShaderReadOnlyOptimal,
-			vk::AccessFlagBits2::eNone,
-			vk::AccessFlagBits2::eShaderRead,
-			vk::PipelineStageFlagBits2::eTopOfPipe,
-			vk::PipelineStageFlagBits2::eFragmentShader
+			vk::ImageLayout::eUndefined, initial_layout,
+			vk::AccessFlagBits2::eNone, dst_access,
+			vk::PipelineStageFlagBits2::eTopOfPipe, dst_stage
 		);
 		return img;
 	};
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-		m_ao_raw_images[i] = make_image();
-		m_ao_blur_images[i] = make_image();
+		// ao_raw rests in eShaderReadOnlyOptimal (read by fragment shader between frames)
+		m_ao_raw_images[i] = make_ao_image(
+			vk::ImageLayout::eShaderReadOnlyOptimal,
+			vk::AccessFlagBits2::eShaderRead,
+			vk::PipelineStageFlagBits2::eFragmentShader);
+		m_ao_raw_images[i]->setDebugName(("GTAO Raw [" + std::to_string(i) + "]").c_str());
+		// ao_blur stays permanently in eGeneral (only used as storage during blur)
+		m_ao_blur_images[i] = make_ao_image(
+			vk::ImageLayout::eGeneral,
+			vk::AccessFlagBits2::eShaderStorageWrite,
+			vk::PipelineStageFlagBits2::eComputeShader);
+		m_ao_blur_images[i]->setDebugName(("GTAO Blur [" + std::to_string(i) + "]").c_str());
 	}
 }
 
@@ -116,7 +124,7 @@ void GtaoSystem::createComputeSetLayout() {
 void GtaoSystem::createBlurSetLayout() {
 	m_blur_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // depth
-		.addBinding(1, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // AO input
+		.addBinding(1, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute) // AO input (storage)
 		.addBinding(2, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute) // AO output
 		.build();
 }
@@ -253,10 +261,6 @@ void GtaoSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 			.imageView = *m_ao_blur_images[frame]->getImageView(),
 			.imageLayout = vk::ImageLayout::eGeneral,
 		};
-		vk::DescriptorImageInfo ao_blur_sampled_info{
-			.imageView = *m_ao_blur_images[frame]->getImageView(),
-			.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-		};
 
 		// GTAO compute: depth + raw AO storage
 		VeDescriptorWriter(*m_compute_set_layout, descriptor_pool)
@@ -264,17 +268,17 @@ void GtaoSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 			.writeImage(1, &ao_raw_storage_info)
 			.build(m_compute_descriptor_sets[frame]);
 
-		// Blur H: depth + raw AO (sampled read) + blur AO (storage write)
+		// Blur H: depth + raw AO (storage read, eGeneral) + blur AO (storage write)
 		VeDescriptorWriter(*m_blur_set_layout, descriptor_pool)
 			.writeImage(0, &depth_info)
-			.writeImage(1, &ao_raw_sampled_info)
+			.writeImage(1, &ao_raw_storage_info)
 			.writeImage(2, &ao_blur_storage_info)
 			.build(m_blur_h_descriptor_sets[frame]);
 
-		// Blur V: depth + blur AO (sampled read) + raw AO (storage write back)
+		// Blur V: depth + blur AO (storage read, eGeneral) + raw AO (storage write back)
 		VeDescriptorWriter(*m_blur_set_layout, descriptor_pool)
 			.writeImage(0, &depth_info)
-			.writeImage(1, &ao_blur_sampled_info)
+			.writeImage(1, &ao_blur_storage_info)
 			.writeImage(2, &ao_raw_storage_info)
 			.build(m_blur_v_descriptor_sets[frame]);
 
@@ -296,16 +300,16 @@ void GtaoSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 		.build(m_dummy_output_descriptor_set);
 }
 
-void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
-	auto& cmd = frame_info.cmd();
+void GtaoSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd) {
 	uint32_t frame = frame_info.current_frame;
 
 	// ===== Pre-GTAO barrier =====
 	// Depth is already in eDepthStencilReadOnlyOptimal (caller handles batched transition)
 	// AO raw: eShaderReadOnlyOptimal -> eGeneral for storage write
+	// srcStage=eNone: cross-queue sync handled by timeline semaphore
 	vk::ImageMemoryBarrier2 ao_raw_to_general{
-		.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
-		.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
+		.srcStageMask = vk::PipelineStageFlagBits2::eNone,
+		.srcAccessMask = vk::AccessFlagBits2::eNone,
 		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
 		.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
@@ -355,39 +359,16 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 	uint32_t groups_y = (m_extent.height + 15) / 16;
 	cmd.dispatch(groups_x, groups_y, 1);
 
-	// ===== Pre-blur-H barriers =====
-	// ao_raw: eGeneral -> eShaderReadOnlyOptimal (compute read)
-	vk::ImageMemoryBarrier2 ao_raw_to_read{
-		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.oldLayout = vk::ImageLayout::eGeneral,
-		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_ao_raw_images[frame]->getImage(),
-		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
-	};
-	// ao_blur: -> eGeneral for storage write
-	vk::ImageMemoryBarrier2 ao_blur_to_general{
-		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-		.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-		.newLayout = vk::ImageLayout::eGeneral,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_ao_blur_images[frame]->getImage(),
-		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
-	};
+	// ===== Pre-blur-H barrier =====
+	// Both images stay in eGeneral; only need memory dependency (no layout transition)
 	{
-		std::array barriers = {ao_raw_to_read, ao_blur_to_general};
-		vk::DependencyInfo dep{
-			.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size()),
-			.pImageMemoryBarriers = barriers.data(),
+		vk::MemoryBarrier2 mem{
+			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.dstAccessMask = vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eShaderStorageWrite,
 		};
+		vk::DependencyInfo dep{.memoryBarrierCount = 1, .pMemoryBarriers = &mem};
 		cmd.pipelineBarrier2(dep);
 	}
 
@@ -411,39 +392,16 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 		vk::ArrayProxy<const uint8_t>(sizeof(BlurPushConstant), reinterpret_cast<const uint8_t*>(&blur_push_h)));
 	cmd.dispatch(groups_x, groups_y, 1);
 
-	// ===== Pre-blur-V barriers =====
-	// ao_blur: eGeneral -> eShaderReadOnlyOptimal
-	vk::ImageMemoryBarrier2 ao_blur_to_read{
-		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.oldLayout = vk::ImageLayout::eGeneral,
-		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_ao_blur_images[frame]->getImage(),
-		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
-	};
-	// ao_raw: -> eGeneral for storage write (blur V output)
-	vk::ImageMemoryBarrier2 ao_raw_to_general2{
-		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-		.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-		.newLayout = vk::ImageLayout::eGeneral,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_ao_raw_images[frame]->getImage(),
-		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
-	};
+	// ===== Pre-blur-V barrier =====
+	// Both images stay in eGeneral; only need memory dependency
 	{
-		std::array barriers = {ao_blur_to_read, ao_raw_to_general2};
-		vk::DependencyInfo dep{
-			.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size()),
-			.pImageMemoryBarriers = barriers.data(),
+		vk::MemoryBarrier2 mem{
+			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.dstAccessMask = vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eShaderStorageWrite,
 		};
+		vk::DependencyInfo dep{.memoryBarrierCount = 1, .pMemoryBarriers = &mem};
 		cmd.pipelineBarrier2(dep);
 	}
 
@@ -468,12 +426,11 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info) {
 
 	// ===== Post-blur barriers =====
 	// ao_raw: eGeneral -> eShaderReadOnlyOptimal (fragment reads final blurred AO)
-	// Depth restoration is handled by the caller (batched transition)
 	vk::ImageMemoryBarrier2 ao_final_to_read{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
 		.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+		.dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
 		.oldLayout = vk::ImageLayout::eGeneral,
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,

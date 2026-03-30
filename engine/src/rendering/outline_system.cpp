@@ -114,8 +114,11 @@ void OutlineSystem::createImages(vk::Extent2D extent) {
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		m_mask_images[i] = make_mask();
+		m_mask_images[i]->setDebugName(("Outline Mask [" + std::to_string(i) + "]").c_str());
 		m_jfa_images_a[i] = make_jfa();
+		m_jfa_images_a[i]->setDebugName(("JFA A [" + std::to_string(i) + "]").c_str());
 		m_jfa_images_b[i] = make_jfa();
+		m_jfa_images_b[i]->setDebugName(("JFA B [" + std::to_string(i) + "]").c_str());
 	}
 }
 

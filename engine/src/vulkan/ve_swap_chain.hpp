@@ -61,13 +61,16 @@ public:
 	vk::Result submitAndPresent(vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* imageIndex);
 
 	// Split-submission for async depth consumers
+	void activateSplitTimeline();
 	void submitGraphicsPhase1(vk::CommandBuffer cb);
 	void submitComputePhase2(vk::CommandBuffer cb);
 	vk::Result submitGraphicsPhase2AndPresent(vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* imageIndex);
+	bool isSplitActive() const { return m_split_active; }
+
 	void waitForCurrentFence();
 	void resetCurrentFence();
 	void advanceFrame();
-	void updateTimelineValues();
+	void beginTimelineFrame();
 	void transitionImageLayout(
 		vk::raii::CommandBuffer& command_buffer,
 		uint32_t image_index,
@@ -117,11 +120,13 @@ private:
 	vk::SampleCountFlagBits m_desired_num_samples;
 	bool m_hdr_enabled;
 
-	// Timeline semaphore: only compute signals, graphics waits.
-	vk::raii::Semaphore m_compute_timeline{nullptr};
-	uint64_t m_compute_timeline_value = 0;
-	uint64_t m_compute_signal_value;
-	uint64_t m_graphics_wait_value;
+	// Timeline semaphore shared by compute and graphics for async synchronization.
+	vk::raii::Semaphore m_frame_timeline{nullptr};
+	uint64_t m_frame_timeline_value = 0;
+	uint64_t m_compute1_signal_value;
+	uint64_t m_graphics1_signal_value = 0;  // only valid when split active
+	uint64_t m_compute2_signal_value = 0;   // only valid when split active
+	bool m_split_active = false;
 	std::vector<vk::raii::Fence> m_in_flight_fences;
 	// Per-swapchain-image binary semaphores signaled by graphics submit and waited by present
 	std::vector<vk::raii::Semaphore> m_render_finished_semaphores;

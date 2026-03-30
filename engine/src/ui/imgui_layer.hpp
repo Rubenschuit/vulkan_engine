@@ -20,7 +20,6 @@ struct EditorState;
 struct VENGINE_API UIContext {
 	// general
 	bool visible = false;
-	bool show_performance = true;
 	bool show_controls = true;
 	bool show_axes = false;
 	bool show_aabb_debug = false;

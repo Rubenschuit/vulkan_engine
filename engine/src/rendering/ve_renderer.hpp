@@ -42,6 +42,8 @@ public:
 	uint32_t getCurrentImageIndex() const { assert(m_is_frame_started); return m_current_image_index; }
 	vk::raii::CommandBuffer& getCurrentCommandBuffer();
 	vk::raii::CommandBuffer& getCurrentComputeCommandBuffer();
+	vk::raii::CommandBuffer& getCurrentGraphics2CommandBuffer();
+	vk::raii::CommandBuffer& getCurrentCompute2CommandBuffer();
 	vk::raii::CommandBuffer& getCurrentUICommandBuffer();
 	const vk::raii::ImageView& getSwapChainImageView(size_t index) const { return m_ve_swap_chain->getSwapChainImageViews()[index]; }
 	const vk::raii::ImageView& getResolveTargetImageView() const { return m_ve_swap_chain->getResolveTargetImageView(); }
@@ -96,6 +98,11 @@ public:
 
 	// End scene + UI command buffers, submit both, present, and advance the frame.
 	void endFrame();
+
+	// Split async submission
+	void submitGraphicsPhase1();
+	void submitComputePhase2(vk::raii::CommandBuffer& compute2_cb);
+	void setSplitActive(bool active);
 
 	// only max or none MSAA supported for now
 	void setMSAAEnabled(bool enabled) { m_msaa_enabled = enabled; m_desired_num_samples = enabled ? m_ve_device.getSampleCount() : vk::SampleCountFlagBits::e1; m_swap_chain_needs_recreation = true; }
@@ -159,6 +166,7 @@ private:
 	uint32_t m_current_image_index;
 	bool m_is_frame_started = false;
 	bool m_swap_chain_needs_recreation = false;
+	bool m_split_active = false;
 
 	bool m_msaa_enabled = false;
 	bool m_hdr_enabled = false;

@@ -82,6 +82,7 @@ void ShadowMaskSystem::createShadowMaskImage(vk::Extent2D extent) {
 		vk::PipelineStageFlagBits2::eTopOfPipe,
 		vk::PipelineStageFlagBits2::eFragmentShader
 	);
+	m_shadow_mask_image->setDebugName("Shadow Mask");
 }
 
 void ShadowMaskSystem::createComputeSetLayout() {

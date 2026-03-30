@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "vulkan/ve_compute_pipeline.hpp"
 #include "vulkan/ve_device.hpp"
+#include "vulkan/ve_debug_utils.hpp"
 #include "platform/ve_file_system.hpp"
 
 
@@ -32,6 +33,7 @@ void VeComputePipeline::createComputePipeline(const std::filesystem::path& comp_
 	};
 
 	m_pipeline = vk::raii::Pipeline{m_ve_device.getDevice(), nullptr, pipeline_info};
+	setDebugName(m_ve_device, m_pipeline, comp_spv_path.stem().string().c_str());
 }
 
 } // namespace ve

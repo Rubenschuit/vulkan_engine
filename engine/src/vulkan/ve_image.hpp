@@ -1,6 +1,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "vulkan/ve_device.hpp"
+#include "vulkan/ve_debug_utils.hpp"
 #include "utils/ve_log.hpp"
 
 struct VmaAllocation_T;
@@ -38,6 +39,12 @@ public:
 	vk::ImageAspectFlags getAspectFlags() const { return m_aspect_flags; }
 	uint32_t getArrayLayers() const { return m_array_layers; }
 	vk::Extent2D getExtent2D() const { return vk::Extent2D{ m_width, m_height }; }
+
+	void setDebugName(const char* name) {
+		ve::setDebugName(m_ve_device, vk::ObjectType::eImage,
+			reinterpret_cast<uint64_t>(static_cast<VkImage>(m_image)), name);
+		ve::setDebugName(m_ve_device, m_image_view, name);
+	}
 
 	vk::raii::ImageView createLayerImageView(uint32_t layer, vk::ComponentMapping components = {}) const;
 	vk::raii::ImageView createMultiLayerImageView(uint32_t base_layer, uint32_t layer_count) const;

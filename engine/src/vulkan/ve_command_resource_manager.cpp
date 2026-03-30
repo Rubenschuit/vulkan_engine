@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "vulkan/ve_command_resource_manager.hpp"
 #include "vulkan/ve_device.hpp"
+#include "vulkan/ve_debug_utils.hpp"
 
 namespace ve {
 
@@ -50,12 +51,40 @@ void CommandResourceManager::createPrimaryResources() {
 	};
 	m_compute_primaries = vk::raii::CommandBuffers(dev, comp_alloc);
 
+	// Graphics phase 2 CBs (for split async path)
+	vk::CommandBufferAllocateInfo gfx2_alloc{
+		.commandPool = *m_graphics_pool,
+		.level = vk::CommandBufferLevel::ePrimary,
+		.commandBufferCount = MAX_FRAMES_IN_FLIGHT
+	};
+	m_graphics2_primaries = vk::raii::CommandBuffers(dev, gfx2_alloc);
+
+	// Compute phase 2 CBs (for split async path)
+	vk::CommandBufferAllocateInfo comp2_alloc{
+		.commandPool = *m_compute_pool,
+		.level = vk::CommandBufferLevel::ePrimary,
+		.commandBufferCount = MAX_FRAMES_IN_FLIGHT
+	};
+	m_compute2_primaries = vk::raii::CommandBuffers(dev, comp2_alloc);
+
 	vk::CommandBufferAllocateInfo ui_alloc{
 		.commandPool = *m_ui_pool,
 		.level = vk::CommandBufferLevel::ePrimary,
 		.commandBufferCount = MAX_FRAMES_IN_FLIGHT
 	};
 	m_ui_primaries = vk::raii::CommandBuffers(dev, ui_alloc);
+
+	setDebugName(m_device, m_graphics_pool, "Graphics Primary Pool");
+	setDebugName(m_device, m_compute_pool, "Compute Primary Pool");
+	setDebugName(m_device, m_ui_pool, "UI Pool");
+	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+		auto idx = std::to_string(i);
+		setDebugName(m_device, m_graphics_primaries[i], ("Graphics CB [" + idx + "]").c_str());
+		setDebugName(m_device, m_graphics2_primaries[i], ("Graphics2 CB [" + idx + "]").c_str());
+		setDebugName(m_device, m_compute_primaries[i], ("Compute CB [" + idx + "]").c_str());
+		setDebugName(m_device, m_compute2_primaries[i], ("Compute2 CB [" + idx + "]").c_str());
+		setDebugName(m_device, m_ui_primaries[i], ("UI CB [" + idx + "]").c_str());
+	}
 }
 
 vk::raii::CommandBuffer& CommandResourceManager::getGraphicsPrimary(uint32_t frame_index) {
@@ -63,9 +92,19 @@ vk::raii::CommandBuffer& CommandResourceManager::getGraphicsPrimary(uint32_t fra
 	return m_graphics_primaries[frame_index];
 }
 
+vk::raii::CommandBuffer& CommandResourceManager::getGraphics2Primary(uint32_t frame_index) {
+	assert(frame_index < MAX_FRAMES_IN_FLIGHT);
+	return m_graphics2_primaries[frame_index];
+}
+
 vk::raii::CommandBuffer& CommandResourceManager::getComputePrimary(uint32_t frame_index) {
 	assert(frame_index < MAX_FRAMES_IN_FLIGHT);
 	return m_compute_primaries[frame_index];
+}
+
+vk::raii::CommandBuffer& CommandResourceManager::getCompute2Primary(uint32_t frame_index) {
+	assert(frame_index < MAX_FRAMES_IN_FLIGHT);
+	return m_compute2_primaries[frame_index];
 }
 
 vk::raii::CommandBuffer& CommandResourceManager::getUIPrimary(uint32_t frame_index) {
@@ -76,7 +115,9 @@ vk::raii::CommandBuffer& CommandResourceManager::getUIPrimary(uint32_t frame_ind
 void CommandResourceManager::resetPrimaries(uint32_t frame_index) {
 	assert(frame_index < MAX_FRAMES_IN_FLIGHT);
 	m_graphics_primaries[frame_index].reset();
+	m_graphics2_primaries[frame_index].reset();
 	m_compute_primaries[frame_index].reset();
+	m_compute2_primaries[frame_index].reset();
 	m_ui_primaries[frame_index].reset();
 }
 

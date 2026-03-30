@@ -114,6 +114,7 @@ void IblSystem::createDummyResources() {
 		vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
 		vk::AccessFlagBits2::eTransferWrite, vk::AccessFlagBits2::eShaderRead,
 		vk::PipelineStageFlagBits2::eTransfer, vk::PipelineStageFlagBits2::eFragmentShader);
+	m_dummy_cubemap->setDebugName("IBL Dummy Cubemap");
 
 	// 4x4 black 2D texture (dummy BRDF LUT)
 	m_dummy_2d = std::make_unique<VeImage>(
@@ -141,6 +142,7 @@ void IblSystem::createDummyResources() {
 		vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
 		vk::AccessFlagBits2::eTransferWrite, vk::AccessFlagBits2::eShaderRead,
 		vk::PipelineStageFlagBits2::eTransfer, vk::PipelineStageFlagBits2::eFragmentShader);
+	m_dummy_2d->setDebugName("IBL Dummy BRDF LUT");
 
 	// Build dummy descriptor set
 	writeDescriptorSet(m_dummy_descriptor_set,

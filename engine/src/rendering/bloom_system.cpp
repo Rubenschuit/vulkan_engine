@@ -111,6 +111,7 @@ void BloomSystem::createMipChain(vk::Extent2D extent) {
 			vk::PipelineStageFlagBits2::eTopOfPipe,
 			vk::PipelineStageFlagBits2::eFragmentShader
 		);
+		mip.image->setDebugName(("Bloom Mip " + std::to_string(i)).c_str());
 
 		vk::DescriptorImageInfo image_info{
 			.sampler = **m_sampler,
