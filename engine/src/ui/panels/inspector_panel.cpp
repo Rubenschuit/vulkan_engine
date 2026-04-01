@@ -267,7 +267,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
 		ImGui::PushID("remove_mesh");
 		if (ImGui::SmallButton("X"))
-			registry->queueComponentRemoval(entity, ComponentType::Mesh);
+			registry->queueComponentRemoval<MeshComponent>(entity);
 		ImGui::PopID();
 		if (open && registry->hasComponent<MeshComponent>(entity))
 			renderMesh(*registry->getComponent<MeshComponent>(entity));
@@ -302,7 +302,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
 		ImGui::PushID("remove_pl");
 		if (ImGui::SmallButton("X"))
-			registry->queueComponentRemoval(entity, ComponentType::PointLight);
+			registry->queueComponentRemoval<PointLightComponent>(entity);
 		ImGui::PopID();
 		if (open && registry->hasComponent<PointLightComponent>(entity))
 			renderPointLight(*registry->getComponent<PointLightComponent>(entity));
@@ -341,7 +341,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
 		ImGui::PushID("remove_sl");
 		if (ImGui::SmallButton("X"))
-			registry->queueComponentRemoval(entity, ComponentType::SpotLight);
+			registry->queueComponentRemoval<SpotLightComponent>(entity);
 		ImGui::PopID();
 		if (open && registry->hasComponent<SpotLightComponent>(entity))
 			renderSpotLight(*registry->getComponent<SpotLightComponent>(entity));
@@ -376,7 +376,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
 		ImGui::PushID("remove_dl");
 		if (ImGui::SmallButton("X"))
-			registry->queueComponentRemoval(entity, ComponentType::DirectionalLight);
+			registry->queueComponentRemoval<DirectionalLightComponent>(entity);
 		ImGui::PopID();
 		if (open && registry->hasComponent<DirectionalLightComponent>(entity))
 			renderDirectionalLight(*registry->getComponent<DirectionalLightComponent>(entity));
@@ -415,7 +415,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
 		ImGui::PushID("remove_rb");
 		if (ImGui::SmallButton("X"))
-			registry->queueComponentRemoval(entity, ComponentType::Rigidbody);
+			registry->queueComponentRemoval<RigidbodyComponent>(entity);
 		ImGui::PopID();
 		if (open && registry->hasComponent<RigidbodyComponent>(entity))
 			renderRigidbody(*registry->getComponent<RigidbodyComponent>(entity), state);

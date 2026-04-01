@@ -13,6 +13,7 @@
 
 #include <glm/glm.hpp>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace ve {
@@ -44,12 +45,22 @@ struct WorldTransformCache {
 	bool normal_dirty    = true;
 };
 
+class Registry;
+
 // Deferred component removal (processed alongside entity deletions at safe frame boundary)
-enum class ComponentType : uint8_t { Mesh, PointLight, DirectionalLight, SpotLight, Rigidbody };
 struct PendingComponentRemoval {
 	Entity entity;
-	ComponentType type;
+	void (*remove_fn)(Registry&, Entity);
 };
+
+using ComponentPools = std::tuple<
+	ComponentPool<TransformComponent>,
+	ComponentPool<MeshComponent>,
+	ComponentPool<PointLightComponent>,
+	ComponentPool<DirectionalLightComponent>,
+	ComponentPool<SpotLightComponent>,
+	ComponentPool<RigidbodyComponent>
+>;
 
 class VENGINE_API Registry {
 public:
@@ -73,7 +84,7 @@ public:
 	LightSource getLightSource(Entity e) const;
 	void setLightSource(Entity e, LightSource source);
 
-	// Component access (typed, dispatched via if-constexpr)
+	// Component access
 	template <typename T, typename... Args>
 	T& addComponent(Entity e, Args&&... args);
 
@@ -91,31 +102,31 @@ public:
 
 	// Generic pool accessor
 	template <typename T>
-	ComponentPool<T>& pool();
+	ComponentPool<T>& pool() { return std::get<ComponentPool<T>>(m_pools); }
 	template <typename T>
-	const ComponentPool<T>& pool() const;
+	const ComponentPool<T>& pool() const { return std::get<ComponentPool<T>>(m_pools); }
 
 	// Direct pool access (for system iteration)
-	ComponentPool<TransformComponent>& transforms() { return m_transforms; }
-	const ComponentPool<TransformComponent>& transforms() const { return m_transforms; }
+	ComponentPool<TransformComponent>& transforms() { return pool<TransformComponent>(); }
+	const ComponentPool<TransformComponent>& transforms() const { return pool<TransformComponent>(); }
 
-	ComponentPool<MeshComponent>& meshes() { return m_meshes; }
-	const ComponentPool<MeshComponent>& meshes() const { return m_meshes; }
+	ComponentPool<MeshComponent>& meshes() { return pool<MeshComponent>(); }
+	const ComponentPool<MeshComponent>& meshes() const { return pool<MeshComponent>(); }
 
-	ComponentPool<PointLightComponent>& pointLights() { return m_point_lights; }
-	const ComponentPool<PointLightComponent>& pointLights() const { return m_point_lights; }
+	ComponentPool<PointLightComponent>& pointLights() { return pool<PointLightComponent>(); }
+	const ComponentPool<PointLightComponent>& pointLights() const { return pool<PointLightComponent>(); }
 	uint32_t activePointLightCount() const;
 
-	ComponentPool<DirectionalLightComponent>& directionalLights() { return m_directional_lights; }
-	const ComponentPool<DirectionalLightComponent>& directionalLights() const { return m_directional_lights; }
+	ComponentPool<DirectionalLightComponent>& directionalLights() { return pool<DirectionalLightComponent>(); }
+	const ComponentPool<DirectionalLightComponent>& directionalLights() const { return pool<DirectionalLightComponent>(); }
 	uint32_t activeDirectionalLightCount() const;
 
-	ComponentPool<SpotLightComponent>& spotLights() { return m_spot_lights; }
-	const ComponentPool<SpotLightComponent>& spotLights() const { return m_spot_lights; }
+	ComponentPool<SpotLightComponent>& spotLights() { return pool<SpotLightComponent>(); }
+	const ComponentPool<SpotLightComponent>& spotLights() const { return pool<SpotLightComponent>(); }
 	uint32_t activeSpotLightCount() const;
 
-	ComponentPool<RigidbodyComponent>& rigidbodies() { return m_rigidbodies; }
-	const ComponentPool<RigidbodyComponent>& rigidbodies() const { return m_rigidbodies; }
+	ComponentPool<RigidbodyComponent>& rigidbodies() { return pool<RigidbodyComponent>(); }
+	const ComponentPool<RigidbodyComponent>& rigidbodies() const { return pool<RigidbodyComponent>(); }
 
 	// Fast active check (skips generation validation)
 	bool isActiveAtIndex(uint32_t index) const {
@@ -163,7 +174,13 @@ public:
 	void processPendingDeletions();
 
 	// Deferred component removal
-	void queueComponentRemoval(Entity entity, ComponentType type);
+	template <typename T>
+	void queueComponentRemoval(Entity entity) {
+		m_pending_component_removals.push_back({entity, [](Registry& reg, Entity e) {
+			if (reg.hasComponent<T>(e))
+				reg.removeComponent<T>(e);
+		}});
+	}
 
 	// Entity for a given raw entity index (reconstructs with current generation)
 	Entity entityFromIndex(uint32_t index) const;
@@ -185,23 +202,30 @@ private:
 		}
 	}
 
+	template <typename F>
+	void forEachPool(F&& fn) {
+		std::apply([&](auto&... pools) { (fn(pools), ...); }, m_pools);
+	}
+
+	template <typename F>
+	void forEachPool(F&& fn) const {
+		std::apply([&](const auto&... pools) { (fn(pools), ...); }, m_pools);
+	}
+
+	template <typename F>
+	void forEachComponentType(F&& fn) {
+		std::apply([&](auto&... pools) {
+			(fn.template operator()<typename std::decay_t<decltype(pools)>::value_type>(), ...);
+		}, m_pools);
+	}
+
 	// Entity management
 	std::vector<EntityMeta> m_meta;
 	std::vector<uint32_t> m_free_indices;
 	uint32_t m_alive_count = 0;
 
 	// Component pools
-	ComponentPool<TransformComponent>        m_transforms;
-	ComponentPool<MeshComponent>             m_meshes;
-	ComponentPool<PointLightComponent>       m_point_lights;
-	ComponentPool<DirectionalLightComponent> m_directional_lights;
-	ComponentPool<SpotLightComponent>        m_spot_lights;
-	ComponentPool<RigidbodyComponent>        m_rigidbodies;
-
-	// Active light counters (maintained by setActive / addComponent / removeComponent)
-	uint32_t m_active_point_lights = 0;
-	uint32_t m_active_directional_lights = 0;
-	uint32_t m_active_spot_lights = 0;
+	ComponentPools m_pools;
 
 	// Hierarchy (indexed by entity index)
 	std::vector<HierarchyEntry> m_hierarchy;
@@ -216,148 +240,38 @@ private:
 
 // ── Template implementations ────────────────────────────────────────────────
 
-template <typename T>
-ComponentPool<T>& Registry::pool() {
-	if constexpr (std::is_same_v<T, TransformComponent>)            return m_transforms;
-	else if constexpr (std::is_same_v<T, MeshComponent>)            return m_meshes;
-	else if constexpr (std::is_same_v<T, PointLightComponent>)      return m_point_lights;
-	else if constexpr (std::is_same_v<T, DirectionalLightComponent>) return m_directional_lights;
-	else if constexpr (std::is_same_v<T, SpotLightComponent>)       return m_spot_lights;
-	else if constexpr (std::is_same_v<T, RigidbodyComponent>)      return m_rigidbodies;
-	else static_assert(sizeof(T) == 0, "Unknown component type");
-}
-
-template <typename T>
-const ComponentPool<T>& Registry::pool() const {
-	if constexpr (std::is_same_v<T, TransformComponent>)            return m_transforms;
-	else if constexpr (std::is_same_v<T, MeshComponent>)            return m_meshes;
-	else if constexpr (std::is_same_v<T, PointLightComponent>)      return m_point_lights;
-	else if constexpr (std::is_same_v<T, DirectionalLightComponent>) return m_directional_lights;
-	else if constexpr (std::is_same_v<T, SpotLightComponent>)       return m_spot_lights;
-	else if constexpr (std::is_same_v<T, RigidbodyComponent>)      return m_rigidbodies;
-	else static_assert(sizeof(T) == 0, "Unknown component type");
-}
-
 template <typename T, typename... Args>
 T& Registry::addComponent(Entity e, Args&&... args) {
 	assert(isAlive(e) && "Entity is not alive");
-	uint32_t idx = e.index();
-	T* comp = nullptr;
-	if constexpr (std::is_same_v<T, TransformComponent>) {
-		comp = &m_transforms.emplace(idx, std::forward<Args>(args)...);
-	} else if constexpr (std::is_same_v<T, MeshComponent>) {
-		comp = &m_meshes.emplace(idx, std::forward<Args>(args)...);
-	} else if constexpr (std::is_same_v<T, PointLightComponent>) {
-		comp = &m_point_lights.emplace(idx, std::forward<Args>(args)...);
-		if (m_meta[idx].active) m_active_point_lights++;
-	} else if constexpr (std::is_same_v<T, DirectionalLightComponent>) {
-		comp = &m_directional_lights.emplace(idx, std::forward<Args>(args)...);
-		if (m_meta[idx].active) m_active_directional_lights++;
-	} else if constexpr (std::is_same_v<T, SpotLightComponent>) {
-		comp = &m_spot_lights.emplace(idx, std::forward<Args>(args)...);
-		if (m_meta[idx].active) m_active_spot_lights++;
-	} else if constexpr (std::is_same_v<T, RigidbodyComponent>) {
-		comp = &m_rigidbodies.emplace(idx, std::forward<Args>(args)...);
-	} else {
-		static_assert(sizeof(T) == 0, "Unknown component type");
-	}
-	comp->setContext(e, this);
-	m_events.emit(ComponentAddedEvent<T>{e, *comp});
-	return *comp;
+	auto& comp = pool<T>().emplace(e.index(), std::forward<Args>(args)...);
+	comp.setContext(e, this);
+	m_events.emit(ComponentAddedEvent<T>{e, comp});
+	return comp;
 }
 
 template <typename T>
 void Registry::removeComponent(Entity e) {
 	assert(isAlive(e) && "Entity is not alive");
 	m_events.emit(ComponentRemovedEvent<T>{e});
-	uint32_t idx = e.index();
-	if constexpr (std::is_same_v<T, TransformComponent>) {
-		m_transforms.remove(idx);
-	} else if constexpr (std::is_same_v<T, MeshComponent>) {
-		m_meshes.remove(idx);
-	} else if constexpr (std::is_same_v<T, PointLightComponent>) {
-		if (m_meta[idx].active) 
-			m_active_point_lights--;
-		m_point_lights.remove(idx);
-	} else if constexpr (std::is_same_v<T, DirectionalLightComponent>) {
-		if (m_meta[idx].active)
-			m_active_directional_lights--;
-		m_directional_lights.remove(idx);
-	} else if constexpr (std::is_same_v<T, SpotLightComponent>) {
-		if (m_meta[idx].active)
-			m_active_spot_lights--;
-		m_spot_lights.remove(idx);
-	} else if constexpr (std::is_same_v<T, RigidbodyComponent>) {
-		m_rigidbodies.remove(idx);
-	} else {
-		static_assert(sizeof(T) == 0, "Unknown component type");
-	}
+	pool<T>().remove(e.index());
 }
 
 template <typename T>
 T* Registry::getComponent(Entity e) {
 	if (!isAlive(e)) return nullptr;
-	uint32_t idx = e.index();
-	if constexpr (std::is_same_v<T, TransformComponent>) {
-		return m_transforms.get(idx);
-	} else if constexpr (std::is_same_v<T, MeshComponent>) {
-		return m_meshes.get(idx);
-	} else if constexpr (std::is_same_v<T, PointLightComponent>) {
-		return m_point_lights.get(idx);
-	} else if constexpr (std::is_same_v<T, DirectionalLightComponent>) {
-		return m_directional_lights.get(idx);
-	} else if constexpr (std::is_same_v<T, SpotLightComponent>) {
-		return m_spot_lights.get(idx);
-	} else if constexpr (std::is_same_v<T, RigidbodyComponent>) {
-		return m_rigidbodies.get(idx);
-	} else {
-		static_assert(sizeof(T) == 0, "Unknown component type");
-		return nullptr;
-	}
+	return pool<T>().get(e.index());
 }
 
 template <typename T>
 const T* Registry::getComponent(Entity e) const {
 	if (!isAlive(e)) return nullptr;
-	uint32_t idx = e.index();
-	if constexpr (std::is_same_v<T, TransformComponent>) {
-		return m_transforms.get(idx);
-	} else if constexpr (std::is_same_v<T, MeshComponent>) {
-		return m_meshes.get(idx);
-	} else if constexpr (std::is_same_v<T, PointLightComponent>) {
-		return m_point_lights.get(idx);
-	} else if constexpr (std::is_same_v<T, DirectionalLightComponent>) {
-		return m_directional_lights.get(idx);
-	} else if constexpr (std::is_same_v<T, SpotLightComponent>) {
-		return m_spot_lights.get(idx);
-	} else if constexpr (std::is_same_v<T, RigidbodyComponent>) {
-		return m_rigidbodies.get(idx);
-	} else {
-		static_assert(sizeof(T) == 0, "Unknown component type");
-		return nullptr;
-	}
+	return pool<T>().get(e.index());
 }
 
 template <typename T>
 bool Registry::hasComponent(Entity e) const {
 	if (!isAlive(e)) return false;
-	uint32_t idx = e.index();
-	if constexpr (std::is_same_v<T, TransformComponent>) {
-		return m_transforms.has(idx);
-	} else if constexpr (std::is_same_v<T, MeshComponent>) {
-		return m_meshes.has(idx);
-	} else if constexpr (std::is_same_v<T, PointLightComponent>) {
-		return m_point_lights.has(idx);
-	} else if constexpr (std::is_same_v<T, DirectionalLightComponent>) {
-		return m_directional_lights.has(idx);
-	} else if constexpr (std::is_same_v<T, SpotLightComponent>) {
-		return m_spot_lights.has(idx);
-	} else if constexpr (std::is_same_v<T, RigidbodyComponent>) {
-		return m_rigidbodies.has(idx);
-	} else {
-		static_assert(sizeof(T) == 0, "Unknown component type");
-		return false;
-	}
+	return pool<T>().has(e.index());
 }
 
 } // namespace ve

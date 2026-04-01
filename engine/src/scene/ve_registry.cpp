@@ -49,40 +49,17 @@ void Registry::destroyEntity(Entity e) {
 
 	// Emit events before teardown so subscribers can still inspect the entity
 	m_events.emit(EntityDestroyedEvent{e});
-	if (m_meshes.has(idx))
-		m_events.emit(ComponentRemovedEvent<MeshComponent>{e});
-	if (m_point_lights.has(idx))
-		m_events.emit(ComponentRemovedEvent<PointLightComponent>{e});
-	if (m_directional_lights.has(idx))
-		m_events.emit(ComponentRemovedEvent<DirectionalLightComponent>{e});
-	if (m_spot_lights.has(idx))
-		m_events.emit(ComponentRemovedEvent<SpotLightComponent>{e});
-	if (m_rigidbodies.has(idx))
-		m_events.emit(ComponentRemovedEvent<RigidbodyComponent>{e});
-
-	// Adjust active light counters before removing components
-	if (m_meta[idx].active) {
-		if (m_point_lights.has(idx))
-			m_active_point_lights--;
-		if (m_directional_lights.has(idx))
-			m_active_directional_lights--;
-		if (m_spot_lights.has(idx))
-			m_active_spot_lights--;
-	}
+	forEachPool([&](auto& p) {
+		using Comp = typename std::decay_t<decltype(p)>::value_type;
+		if (p.has(idx))
+			m_events.emit(ComponentRemovedEvent<Comp>{e});
+	});
 
 	// Remove all components
-	if (m_transforms.has(idx))
-		m_transforms.remove(idx);
-	if (m_meshes.has(idx))
-		m_meshes.remove(idx);
-	if (m_point_lights.has(idx))
-		m_point_lights.remove(idx);
-	if (m_directional_lights.has(idx))
-		m_directional_lights.remove(idx);
-	if (m_spot_lights.has(idx))
-		m_spot_lights.remove(idx);
-	if (m_rigidbodies.has(idx))
-		m_rigidbodies.remove(idx);
+	forEachPool([&](auto& p) {
+		if (p.has(idx))
+			p.remove(idx);
+	});
 
 	// Detach from hierarchy: unlink from parent's child list
 	auto& h = m_hierarchy[idx];
@@ -172,10 +149,6 @@ void Registry::processPendingDeletions() {
 	}
 }
 
-void Registry::queueComponentRemoval(Entity entity, ComponentType type) {
-	m_pending_component_removals.push_back({entity, type});
-}
-
 void Registry::processPendingComponentRemovals() {
 	if (m_pending_component_removals.empty())
 		return;
@@ -184,28 +157,7 @@ void Registry::processPendingComponentRemovals() {
 	for (auto& r : removals) {
 		if (!isAlive(r.entity))
 			continue;
-		switch (r.type) {
-			case ComponentType::Mesh:
-				if (hasComponent<MeshComponent>(r.entity))
-					removeComponent<MeshComponent>(r.entity);
-				break;
-			case ComponentType::PointLight:
-				if (hasComponent<PointLightComponent>(r.entity))
-					removeComponent<PointLightComponent>(r.entity);
-				break;
-			case ComponentType::DirectionalLight:
-				if (hasComponent<DirectionalLightComponent>(r.entity))
-					removeComponent<DirectionalLightComponent>(r.entity);
-				break;
-			case ComponentType::SpotLight:
-				if (hasComponent<SpotLightComponent>(r.entity))
-					removeComponent<SpotLightComponent>(r.entity);
-				break;
-			case ComponentType::Rigidbody:
-				if (hasComponent<RigidbodyComponent>(r.entity))
-					removeComponent<RigidbodyComponent>(r.entity);
-				break;
-		}
+		r.remove_fn(*this, r.entity);
 	}
 }
 
@@ -244,22 +196,35 @@ bool Registry::isActive(Entity e) const {
 
 void Registry::setActive(Entity e, bool active) {
 	assert(isAlive(e));
-	uint32_t idx = e.index();
-	bool was_active = m_meta[idx].active;
-	m_meta[idx].active = active;
-	if (was_active != active) {
-		if (m_point_lights.has(idx))
-			active ? m_active_point_lights++ : m_active_point_lights--;
-		else if (m_directional_lights.has(idx))
-			active ? m_active_directional_lights++ : m_active_directional_lights--;
-		else if (m_spot_lights.has(idx))
-			active ? m_active_spot_lights++ : m_active_spot_lights--;
-	}
+	m_meta[e.index()].active = active;
 }
 
-uint32_t Registry::activePointLightCount() const { return m_active_point_lights; }
-uint32_t Registry::activeDirectionalLightCount() const { return m_active_directional_lights; }
-uint32_t Registry::activeSpotLightCount() const { return m_active_spot_lights; }
+uint32_t Registry::activePointLightCount() const {
+	uint32_t count = 0;
+	auto& p = pool<PointLightComponent>();
+	for (uint32_t i = 0; i < p.size(); ++i)
+		if (m_meta[p.entityAt(i)].active)
+			++count;
+	return count;
+}
+
+uint32_t Registry::activeDirectionalLightCount() const {
+	uint32_t count = 0;
+	auto& p = pool<DirectionalLightComponent>();
+	for (uint32_t i = 0; i < p.size(); ++i)
+		if (m_meta[p.entityAt(i)].active)
+			++count;
+	return count;
+}
+
+uint32_t Registry::activeSpotLightCount() const {
+	uint32_t count = 0;
+	auto& p = pool<SpotLightComponent>();
+	for (uint32_t i = 0; i < p.size(); ++i)
+		if (m_meta[p.entityAt(i)].active)
+			++count;
+	return count;
+}
 
 LightSource Registry::getLightSource(Entity e) const {
 	assert(isAlive(e));
@@ -374,7 +339,7 @@ const glm::mat4& Registry::getWorldTransform(Entity e) const {
 	auto& cache = m_world_cache[idx];
 
 	if (cache.transform_dirty) {
-		const auto* tc = m_transforms.get(idx);
+		const auto* tc = pool<TransformComponent>().get(idx);
 		assert(tc && "Entity must have TransformComponent for world transform");
 		const glm::mat4& local = tc->getTransform();
 
@@ -401,7 +366,7 @@ const glm::mat3& Registry::getWorldNormal(Entity e) const {
 			const glm::mat4& world = getWorldTransform(e);
 			cache.world_normal = glm::mat3(glm::inverse(glm::transpose(world)));
 		} else {
-			const auto* tc = m_transforms.get(idx);
+			const auto* tc = pool<TransformComponent>().get(idx);
 			assert(tc);
 			cache.world_normal = tc->getNormalTransform();
 		}
@@ -433,7 +398,7 @@ void Registry::invalidateWorldTransform(Entity e) {
 
 void Registry::invalidateMeshWorldAABBs(Entity e) {
 	uint32_t idx = e.index();
-	auto* mesh = m_meshes.get(idx);
+	auto* mesh = pool<MeshComponent>().get(idx);
 	if (mesh) {
 		mesh->invalidateWorldAABB();
 	}
@@ -450,13 +415,10 @@ Entity Registry::cloneEntity(Entity source) {
 	// Copy metadata
 	m_meta[clone.index()].light_source = m_meta[src_idx].light_source;
 
-	// Copy all components via their copy constructors.
-	cloneComponentIfPresent<TransformComponent>(source, clone);
-	cloneComponentIfPresent<MeshComponent>(source, clone);
-	cloneComponentIfPresent<PointLightComponent>(source, clone);
-	cloneComponentIfPresent<DirectionalLightComponent>(source, clone);
-	cloneComponentIfPresent<SpotLightComponent>(source, clone);
-	cloneComponentIfPresent<RigidbodyComponent>(source, clone);
+	// Copy all components via their copy constructors
+	forEachComponentType([&]<typename T>() {
+		cloneComponentIfPresent<T>(source, clone);
+	});
 
 	// Match active state
 	if (!m_meta[src_idx].active)
@@ -473,7 +435,8 @@ Entity Registry::cloneEntity(Entity source) {
 Entity Registry::cloneEntityRecursive(Entity source) {
 	assert(isAlive(source) && "Cannot clone dead entity");
 
-	// BFS over source subtree, cloning each entity with correct parent links
+	// BFS over source subtree, cloning each entity with correct parent links.
+	// Events are suppressed during cloning
 	struct CloneEntry {
 		Entity source;
 		Entity clone_parent;
@@ -482,10 +445,14 @@ Entity Registry::cloneEntityRecursive(Entity source) {
 	queue.push_back({source, m_hierarchy[source.index()].parent});
 
 	Entity root_clone = Entity::null();
+	std::vector<Entity> cloned_entities;
+
+	m_events.beginBatch();
 
 	for (size_t i = 0; i < queue.size(); ++i) {
 		auto [src, clone_parent] = queue[i];
 		Entity clone = cloneEntity(src);
+		cloned_entities.push_back(clone);
 
 		if (i == 0) {
 			root_clone = clone;
@@ -499,6 +466,16 @@ Entity Registry::cloneEntityRecursive(Entity source) {
 			queue.push_back({child, clone});
 			child = nextSibling(child);
 		}
+	}
+
+	m_events.endBatch();
+
+	// Replay ComponentAddedEvents now that the full hierarchy exists
+	for (Entity clone : cloned_entities) {
+		forEachComponentType([&]<typename T>() {
+			if (auto* comp = getComponent<T>(clone))
+				m_events.emit(ComponentAddedEvent<T>{clone, *comp});
+		});
 	}
 
 	return root_clone;
@@ -556,20 +533,12 @@ Entity Registry::createSpotLight(float intensity, float radius, glm::vec3 color,
 // ── Bulk operations ─────────────────────────────────────────────────────────
 
 void Registry::clear() {
-	m_transforms.clear();
-	m_meshes.clear();
-	m_point_lights.clear();
-	m_directional_lights.clear();
-	m_spot_lights.clear();
-	m_rigidbodies.clear();
+	forEachPool([](auto& p) { p.clear(); });
 	m_meta.clear();
 	m_hierarchy.clear();
 	m_world_cache.clear();
 	m_free_indices.clear();
 	m_alive_count = 0;
-	m_active_point_lights = 0;
-	m_active_directional_lights = 0;
-	m_active_spot_lights = 0;
 }
 
 Entity Registry::entityFromIndex(uint32_t index) const {

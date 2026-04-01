@@ -252,6 +252,32 @@ struct PhysicsShapeDesc {
 
 class VENGINE_API RigidbodyComponent : public Component {
 public:
+	RigidbodyComponent() = default;
+
+	RigidbodyComponent(const RigidbodyComponent& other)
+		: Component(other)
+		, m_motion_type(other.m_motion_type)
+		, m_shape(other.m_shape)
+		, m_mass(other.m_mass)
+		, m_friction(other.m_friction)
+		, m_restitution(other.m_restitution)
+		, m_hull_tolerance(other.m_hull_tolerance)
+		, m_body_id(UINT32_MAX)
+		, m_dirty(false) {}
+
+	RigidbodyComponent& operator=(const RigidbodyComponent& other) {
+		if (this != &other) {
+			Component::operator=(other);
+			m_motion_type = other.m_motion_type;
+			m_shape = other.m_shape;
+			m_mass = other.m_mass;
+			m_friction = other.m_friction;
+			m_restitution = other.m_restitution;
+			m_hull_tolerance = other.m_hull_tolerance;
+		}
+		return *this;
+	}
+
 	PhysicsMotionType getMotionType() const { return m_motion_type; }
 	void setMotionType(PhysicsMotionType t);
 

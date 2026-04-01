@@ -15,6 +15,7 @@ namespace ve {
 template <typename T>
 class ComponentPool {
 public:
+	using value_type = T;
 	static constexpr uint32_t INVALID = UINT32_MAX;
 
 	void reserve(uint32_t capacity) {
