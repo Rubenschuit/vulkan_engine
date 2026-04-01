@@ -20,6 +20,9 @@ enum class ProfileTimer : uint32_t {
 	SCENE_RENDER,
 	BLOOM,
 	POST_PROCESS,
+	HIZ,
+	SHADOW_MASK,
+	OUTLINE,
 	COMPUTE_TOTAL,
 	PHYSICS,
 	COUNT
@@ -35,6 +38,9 @@ inline const char* profileTimerName(ProfileTimer timer) {
 		case ProfileTimer::SCENE_RENDER:   return "Scene";
 		case ProfileTimer::BLOOM:          return "Bloom";
 		case ProfileTimer::POST_PROCESS:   return "Post Process";
+		case ProfileTimer::HIZ:            return "Hi-Z";
+		case ProfileTimer::SHADOW_MASK:    return "Shadow Mask";
+		case ProfileTimer::OUTLINE:        return "Outline";
 		case ProfileTimer::COMPUTE_TOTAL:  return "Compute Total";
 		case ProfileTimer::PHYSICS:        return "Physics";
 		default:                           return "Unknown";

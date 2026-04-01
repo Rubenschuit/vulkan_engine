@@ -37,6 +37,7 @@ public:
 
 	vk::raii::CommandBuffer& getGraphicsPrimary(uint32_t frame_index);
 	vk::raii::CommandBuffer& getGraphics2Primary(uint32_t frame_index);
+	vk::raii::CommandBuffer& getGraphics3Primary(uint32_t frame_index);
 	vk::raii::CommandBuffer& getComputePrimary(uint32_t frame_index);
 	vk::raii::CommandBuffer& getCompute2Primary(uint32_t frame_index);
 	vk::raii::CommandBuffer& getUIPrimary(uint32_t frame_index);
@@ -90,6 +91,7 @@ private:
 	vk::raii::CommandPool m_ui_pool{nullptr};
 	std::vector<vk::raii::CommandBuffer> m_graphics_primaries;
 	std::vector<vk::raii::CommandBuffer> m_graphics2_primaries;
+	std::vector<vk::raii::CommandBuffer> m_graphics3_primaries;
 	std::vector<vk::raii::CommandBuffer> m_compute_primaries;
 	std::vector<vk::raii::CommandBuffer> m_compute2_primaries;
 	std::vector<vk::raii::CommandBuffer> m_ui_primaries;

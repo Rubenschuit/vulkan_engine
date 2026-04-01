@@ -43,6 +43,7 @@ public:
 	vk::raii::CommandBuffer& getCurrentCommandBuffer();
 	vk::raii::CommandBuffer& getCurrentComputeCommandBuffer();
 	vk::raii::CommandBuffer& getCurrentGraphics2CommandBuffer();
+	vk::raii::CommandBuffer& getCurrentGraphics3CommandBuffer();
 	vk::raii::CommandBuffer& getCurrentCompute2CommandBuffer();
 	vk::raii::CommandBuffer& getCurrentUICommandBuffer();
 	const vk::raii::ImageView& getSwapChainImageView(size_t index) const { return m_ve_swap_chain->getSwapChainImageViews()[index]; }
@@ -101,6 +102,7 @@ public:
 
 	// Split async submission
 	void submitGraphicsPhase1();
+	void submitShadowPhase(vk::raii::CommandBuffer& shadow_cb);
 	void submitComputePhase2(vk::raii::CommandBuffer& compute2_cb);
 	void setSplitActive(bool active);
 

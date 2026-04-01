@@ -47,7 +47,7 @@ private:
 	int m_graph_frames = 0;
 
 	// Per-system breakdown
-	static constexpr int BREAKDOWN_COUNT = 8;
+	static constexpr int BREAKDOWN_COUNT = 11;
 	float m_gpu_breakdown_ms[BREAKDOWN_COUNT] = {};
 	float m_gpu_breakdown_sum[BREAKDOWN_COUNT] = {};
 	float m_cpu_breakdown_ms[BREAKDOWN_COUNT] = {};

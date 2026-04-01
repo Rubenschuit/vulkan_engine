@@ -54,15 +54,19 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 	// Per-system breakdown accumulation
 	const float gpu_src[] = {
-		context.stats.gpu_culling, context.stats.gpu_shadow_maps, context.stats.gpu_depth_prepass,
-		context.stats.gpu_gtao, context.stats.gpu_scene_render,
+		context.stats.gpu_culling, context.stats.gpu_depth_prepass,
+		context.stats.gpu_hiz, context.stats.gpu_shadow_maps,
+		context.stats.gpu_shadow_mask, context.stats.gpu_gtao,
+		context.stats.gpu_scene_render, context.stats.gpu_outline,
 		context.stats.gpu_bloom, context.stats.gpu_post_process, 0.0f
 	};
 	const float cpu_src[] = {
-		context.stats.cpu_culling, context.stats.cpu_shadow_maps,
-		context.stats.cpu_depth_prepass, context.stats.cpu_gtao,
-		context.stats.cpu_scene_render, context.stats.cpu_bloom,
-		context.stats.cpu_post_process, context.stats.cpu_physics
+		context.stats.cpu_culling, context.stats.cpu_depth_prepass,
+		context.stats.cpu_hiz, context.stats.cpu_shadow_maps,
+		context.stats.cpu_shadow_mask, context.stats.cpu_gtao,
+		context.stats.cpu_scene_render, context.stats.cpu_outline,
+		context.stats.cpu_bloom, context.stats.cpu_post_process,
+		context.stats.cpu_physics
 	};
 	for (int i = 0; i < BREAKDOWN_COUNT; i++) {
 		m_gpu_breakdown_sum[i] += gpu_src[i];
@@ -287,7 +291,8 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 	// --- Per-system breakdown table ---
 	static const char* breakdown_labels[] = {
-		"Culling", "Shadows", "Depth Pass", "GTAO", "Scene", "Bloom", "Post Process", "Physics"
+		"Culling", "Depth Pass", "Hi-Z", "Shadows", "Shadow Mask", "GTAO",
+		"Scene", "Outline", "Bloom", "Post Process", "Physics"
 	};
 
 	if (ImGui::BeginTable("##Breakdown", 3, ImGuiTableFlags_None)) {

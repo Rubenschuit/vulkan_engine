@@ -63,6 +63,7 @@ public:
 	// Split-submission for async depth consumers
 	void activateSplitTimeline();
 	void submitGraphicsPhase1(vk::CommandBuffer cb);
+	void submitShadowPhase(vk::CommandBuffer cb);
 	void submitComputePhase2(vk::CommandBuffer cb);
 	vk::Result submitGraphicsPhase2AndPresent(vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* imageIndex);
 	bool isSplitActive() const { return m_split_active; }

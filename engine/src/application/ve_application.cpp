@@ -608,8 +608,15 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		profiler.endCpuTimer(ProfileTimer::DEPTH_PREPASS);
 	}
 
-	// Shadow pass
-	if (m_ui.shadow_mode != ShadowMode::DISABLED) {
+	// Depth read-only consumers: Shadow Mask, GTAO + Hi-Z
+	bool shadows_enabled = m_ui.shadow_mode != ShadowMode::DISABLED;
+	bool any_depth_consumer = m_ui.depth_prepass_enabled
+		&& (hiz_active || fi.shadow_mask_active || gtao_active);
+	bool any_async_consumer = m_ve_device.hasDedicatedComputeQueue()
+		&& (gtao_active || hiz_active);
+
+	// Non-async path: shadows run on graphics primary before depth consumers
+	if (shadows_enabled && !any_async_consumer) {
 		ScopedDebugLabel label(command_buffer, "Shadow Maps", {0.5f, 0.2f, 0.2f, 1.0f});
 		ZoneScopedN("Shadow Maps");
 		TracyVkZone(tracy_gfx, *command_buffer, "Shadow Maps");
@@ -621,14 +628,8 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		profiler.endCpuTimer(ProfileTimer::SHADOW_MAPS);
 	}
 
-	// Depth read-only consumers: Shadow Mask (graphics CB 1), GTAO + Hi-Z (async compute CB 2)
-	bool any_depth_consumer = m_ui.depth_prepass_enabled
-		&& (hiz_active || fi.shadow_mask_active || gtao_active);
-	bool any_async_consumer = m_ve_device.hasDedicatedComputeQueue()
-		&& (gtao_active || hiz_active);
-
 	if (any_depth_consumer) {
-		// Depth attachment -> read-only on graphics CB 1
+		// Depth attachment -> read-only
 		vk::ImageMemoryBarrier2 depth_to_read{
 			.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
 			.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
@@ -644,19 +645,11 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_read};
 		command_buffer.pipelineBarrier2(dep);
 
-		// Shadow mask runs on graphics CB 1 (reads depth + shadow atlas, both available here)
-		if (fi.shadow_mask_active) {
-			ScopedDebugLabel label(command_buffer, "Shadow Mask", {0.5f, 0.3f, 0.5f, 1.0f});
-			TracyVkZone(tracy_gfx, *command_buffer, "Shadow Mask");
-			m_shadow_mask_system->dispatch(fi);
-			fi.shadow_mask_descriptor_set = &m_shadow_mask_system->getOutputDescriptorSet(fi.current_frame);
-		}
-
 		if (any_async_consumer) {
-			// Submit graphics CB 1 (shadows + shadow mask done), begin async compute
+			// Submit depth-only on graphics CB 1 (no shadows yet)
 			m_ve_renderer.submitGraphicsPhase1();
 
-			// Record GTAO + Hi-Z on compute CB 2
+			// Record GTAO + Hi-Z on compute CB 2 (waits depth_done via semaphore)
 			auto& compute2_cb = *fi.compute2_command_buffer;
 
 			if (gtao_active) {
@@ -674,21 +667,57 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 			if (hiz_active) {
 				ScopedDebugLabel label(compute2_cb, "Hi-Z", {0.4f, 0.4f, 0.8f, 1.0f});
 				TracyVkZone(tracy_compute, *compute2_cb, "Hi-Z (async)");
+				profiler.beginCpuTimer(ProfileTimer::HIZ);
+				profiler.beginGpuTimer(compute2_cb, ProfileTimer::HIZ);
 				m_hiz_system->generate(compute2_cb, fi.current_frame);
+				profiler.endGpuTimer(compute2_cb, ProfileTimer::HIZ);
+				profiler.endCpuTimer(ProfileTimer::HIZ);
 			}
 
-			// Submit compute CB 2 (waits graphics1, signals compute2)
-			m_ve_renderer.submitComputePhase2(compute2_cb);
-
-			// Switch fi to graphics CB 2 for the rest of the frame
+			// Record shadows + shadow mask on graphics CB 2
 			auto& gfx2_cb = m_ve_renderer.getCurrentGraphics2CommandBuffer();
 			fi.command_buffer = &gfx2_cb;
 
-			// Depth read-only -> attachment on graphics CB 2
-			// Semaphore guarantees all prior depth reads (GTAO, HiZ) are complete
+			if (shadows_enabled) {
+				ScopedDebugLabel label(gfx2_cb, "Shadow Maps", {0.5f, 0.2f, 0.2f, 1.0f});
+				ZoneScopedN("Shadow Maps");
+				TracyVkZone(tracy_gfx, *gfx2_cb, "Shadow Maps");
+				profiler.beginCpuTimer(ProfileTimer::SHADOW_MAPS);
+				profiler.beginGpuTimer(gfx2_cb, ProfileTimer::SHADOW_MAPS);
+				m_active_backend->renderShadows(fi, *m_shadow_render_system,
+					m_scene_resources->getMegaBuffer(), gpu_scene);
+				profiler.endGpuTimer(gfx2_cb, ProfileTimer::SHADOW_MAPS);
+				profiler.endCpuTimer(ProfileTimer::SHADOW_MAPS);
+			}
+
+			if (fi.shadow_mask_active) {
+				ScopedDebugLabel label(gfx2_cb, "Shadow Mask", {0.5f, 0.3f, 0.5f, 1.0f});
+				TracyVkZone(tracy_gfx, *gfx2_cb, "Shadow Mask");
+				profiler.beginCpuTimer(ProfileTimer::SHADOW_MASK);
+				profiler.beginGpuTimer(gfx2_cb, ProfileTimer::SHADOW_MASK);
+				m_shadow_mask_system->dispatch(fi);
+				profiler.endGpuTimer(gfx2_cb, ProfileTimer::SHADOW_MASK);
+				profiler.endCpuTimer(ProfileTimer::SHADOW_MASK);
+				fi.shadow_mask_descriptor_set = &m_shadow_mask_system->getOutputDescriptorSet(fi.current_frame);
+			}
+
+			// Submit shadow CB 2 (no semaphore, same-queue ordering after depth CB 1)
+			m_ve_renderer.submitShadowPhase(gfx2_cb);
+
+			// Submit compute CB 2 (waits graphics1/depth, signals compute2)
+			m_ve_renderer.submitComputePhase2(compute2_cb);
+
+			// Switch to graphics CB 3 for scene render (waits compute2 at eFragmentShader)
+			// Same queue guarantees shadows+mask (CB 2) are complete
+			auto& gfx3_cb = m_ve_renderer.getCurrentGraphics3CommandBuffer();
+			fi.command_buffer = &gfx3_cb;
+
+			// Depth read-only -> attachment on graphics CB 3
+			// Within-queue sync: shadow mask (CB 2) read complete (same-queue ordering)
+			// Cross-queue sync (GTAO/Hi-Z): semaphore wait at eFragmentShader
 			vk::ImageMemoryBarrier2 depth_to_attach{
-				.srcStageMask = vk::PipelineStageFlagBits2::eNone,
-				.srcAccessMask = vk::AccessFlagBits2::eNone,
+				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+				.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
 				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
 				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
 					| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
@@ -700,9 +729,20 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
 			};
 			vk::DependencyInfo dep2{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_attach};
-			gfx2_cb.pipelineBarrier2(dep2);
+			gfx3_cb.pipelineBarrier2(dep2);
 		} else {
-			// No async split: run GTAO + HiZ on graphics CB 1
+			// No async split: shadow mask, GTAO, Hi-Z all on graphics CB 1
+			if (fi.shadow_mask_active) {
+				ScopedDebugLabel label(command_buffer, "Shadow Mask", {0.5f, 0.3f, 0.5f, 1.0f});
+				TracyVkZone(tracy_gfx, *command_buffer, "Shadow Mask");
+				profiler.beginCpuTimer(ProfileTimer::SHADOW_MASK);
+				profiler.beginGpuTimer(command_buffer, ProfileTimer::SHADOW_MASK);
+				m_shadow_mask_system->dispatch(fi);
+				profiler.endGpuTimer(command_buffer, ProfileTimer::SHADOW_MASK);
+				profiler.endCpuTimer(ProfileTimer::SHADOW_MASK);
+				fi.shadow_mask_descriptor_set = &m_shadow_mask_system->getOutputDescriptorSet(fi.current_frame);
+			}
+
 			if (gtao_active) {
 				ScopedDebugLabel label(command_buffer, "GTAO", {0.2f, 0.7f, 0.7f, 1.0f});
 				ZoneScopedN("GTAO");
@@ -718,7 +758,11 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 			if (hiz_active) {
 				ScopedDebugLabel label(command_buffer, "Hi-Z", {0.4f, 0.4f, 0.8f, 1.0f});
 				TracyVkZone(tracy_gfx, *command_buffer, "Hi-Z Build");
+				profiler.beginCpuTimer(ProfileTimer::HIZ);
+				profiler.beginGpuTimer(command_buffer, ProfileTimer::HIZ);
 				m_hiz_system->generate(command_buffer, fi.current_frame);
+				profiler.endGpuTimer(command_buffer, ProfileTimer::HIZ);
+				profiler.endCpuTimer(ProfileTimer::HIZ);
 			}
 
 			vk::ImageMemoryBarrier2 depth_to_attach{
@@ -780,9 +824,13 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 	bool outline_active = editor_state.outline_enabled && !fi.selected_entity.isNull();
 	if (outline_active) {
 		ScopedDebugLabel label(active_cb, "Selection Outline", {1.0f, 0.5f, 0.0f, 1.0f});
+		profiler.beginCpuTimer(ProfileTimer::OUTLINE);
+		profiler.beginGpuTimer(active_cb, ProfileTimer::OUTLINE);
 		m_outline_system->renderMask(fi, *fi.registry, fi.selected_entity);
 		if (m_outline_system->hasOutline())
 			m_outline_system->dispatchJFA(fi, editor_state.outline_width);
+		profiler.endGpuTimer(active_cb, ProfileTimer::OUTLINE);
+		profiler.endCpuTimer(ProfileTimer::OUTLINE);
 	}
 
 	// Bloom
@@ -843,6 +891,9 @@ void VeApplication::collectStats(const VeFrameInfo& fi) {
 	m_ui.stats.gpu_scene_render = results.gpu(ProfileTimer::SCENE_RENDER);
 	m_ui.stats.gpu_bloom = results.gpu(ProfileTimer::BLOOM);
 	m_ui.stats.gpu_post_process = results.gpu(ProfileTimer::POST_PROCESS);
+	m_ui.stats.gpu_hiz = results.gpu(ProfileTimer::HIZ);
+	m_ui.stats.gpu_shadow_mask = results.gpu(ProfileTimer::SHADOW_MASK);
+	m_ui.stats.gpu_outline = results.gpu(ProfileTimer::OUTLINE);
 
 	// Per-system CPU breakdown
 	m_ui.stats.cpu_culling = results.cpu(ProfileTimer::CULLING);
@@ -852,6 +903,9 @@ void VeApplication::collectStats(const VeFrameInfo& fi) {
 	m_ui.stats.cpu_scene_render = results.cpu(ProfileTimer::SCENE_RENDER);
 	m_ui.stats.cpu_bloom = results.cpu(ProfileTimer::BLOOM);
 	m_ui.stats.cpu_post_process = results.cpu(ProfileTimer::POST_PROCESS);
+	m_ui.stats.cpu_hiz = results.cpu(ProfileTimer::HIZ);
+	m_ui.stats.cpu_shadow_mask = results.cpu(ProfileTimer::SHADOW_MASK);
+	m_ui.stats.cpu_outline = results.cpu(ProfileTimer::OUTLINE);
 	m_ui.stats.cpu_physics = results.cpu(ProfileTimer::PHYSICS);
 }
 
@@ -1035,9 +1089,9 @@ void VeApplication::initSystems() {
 	// Register engine-level input actions
 	m_input_controller.setEventBus(m_event_bus.get());
 	m_input_controller.registerAction({
-		.name = "Toggle Performance UI", 
+		.name = "Toggle Performance UI",
 		.key = GLFW_KEY_P,
-		.trigger = TriggerType::OnPress, 
+		.trigger = TriggerType::OnPress,
 		.context = InputContext::Always,
 		.description = "Toggle performance panel"
 	});

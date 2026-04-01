@@ -70,6 +70,9 @@ struct VENGINE_API UIContext {
 		float gpu_scene_render = 0.0f;
 		float gpu_bloom = 0.0f;
 		float gpu_post_process = 0.0f;
+		float gpu_hiz = 0.0f;
+		float gpu_shadow_mask = 0.0f;
+		float gpu_outline = 0.0f;
 
 		// Per-system CPU breakdown
 		float cpu_culling = 0.0f;
@@ -79,6 +82,9 @@ struct VENGINE_API UIContext {
 		float cpu_scene_render = 0.0f;
 		float cpu_bloom = 0.0f;
 		float cpu_post_process = 0.0f;
+		float cpu_hiz = 0.0f;
+		float cpu_shadow_mask = 0.0f;
+		float cpu_outline = 0.0f;
 		float cpu_physics = 0.0f;
 
 		uint32_t cull_total_objects = 0;

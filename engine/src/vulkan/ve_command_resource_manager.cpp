@@ -51,13 +51,21 @@ void CommandResourceManager::createPrimaryResources() {
 	};
 	m_compute_primaries = vk::raii::CommandBuffers(dev, comp_alloc);
 
-	// Graphics phase 2 CBs (for split async path)
+	// Graphics phase 2 CBs (shadows in split async path)
 	vk::CommandBufferAllocateInfo gfx2_alloc{
 		.commandPool = *m_graphics_pool,
 		.level = vk::CommandBufferLevel::ePrimary,
 		.commandBufferCount = MAX_FRAMES_IN_FLIGHT
 	};
 	m_graphics2_primaries = vk::raii::CommandBuffers(dev, gfx2_alloc);
+
+	// Graphics phase 3 CBs (scene render in split async path)
+	vk::CommandBufferAllocateInfo gfx3_alloc{
+		.commandPool = *m_graphics_pool,
+		.level = vk::CommandBufferLevel::ePrimary,
+		.commandBufferCount = MAX_FRAMES_IN_FLIGHT
+	};
+	m_graphics3_primaries = vk::raii::CommandBuffers(dev, gfx3_alloc);
 
 	// Compute phase 2 CBs (for split async path)
 	vk::CommandBufferAllocateInfo comp2_alloc{
@@ -81,6 +89,7 @@ void CommandResourceManager::createPrimaryResources() {
 		auto idx = std::to_string(i);
 		setDebugName(m_device, m_graphics_primaries[i], ("Graphics CB [" + idx + "]").c_str());
 		setDebugName(m_device, m_graphics2_primaries[i], ("Graphics2 CB [" + idx + "]").c_str());
+		setDebugName(m_device, m_graphics3_primaries[i], ("Graphics3 CB [" + idx + "]").c_str());
 		setDebugName(m_device, m_compute_primaries[i], ("Compute CB [" + idx + "]").c_str());
 		setDebugName(m_device, m_compute2_primaries[i], ("Compute2 CB [" + idx + "]").c_str());
 		setDebugName(m_device, m_ui_primaries[i], ("UI CB [" + idx + "]").c_str());
@@ -95,6 +104,11 @@ vk::raii::CommandBuffer& CommandResourceManager::getGraphicsPrimary(uint32_t fra
 vk::raii::CommandBuffer& CommandResourceManager::getGraphics2Primary(uint32_t frame_index) {
 	assert(frame_index < MAX_FRAMES_IN_FLIGHT);
 	return m_graphics2_primaries[frame_index];
+}
+
+vk::raii::CommandBuffer& CommandResourceManager::getGraphics3Primary(uint32_t frame_index) {
+	assert(frame_index < MAX_FRAMES_IN_FLIGHT);
+	return m_graphics3_primaries[frame_index];
 }
 
 vk::raii::CommandBuffer& CommandResourceManager::getComputePrimary(uint32_t frame_index) {
@@ -116,6 +130,7 @@ void CommandResourceManager::resetPrimaries(uint32_t frame_index) {
 	assert(frame_index < MAX_FRAMES_IN_FLIGHT);
 	m_graphics_primaries[frame_index].reset();
 	m_graphics2_primaries[frame_index].reset();
+	m_graphics3_primaries[frame_index].reset();
 	m_compute_primaries[frame_index].reset();
 	m_compute2_primaries[frame_index].reset();
 	m_ui_primaries[frame_index].reset();

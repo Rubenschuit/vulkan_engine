@@ -425,12 +425,13 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd)
 	cmd.dispatch(groups_x, groups_y, 1);
 
 	// ===== Post-blur barriers =====
-	// ao_raw: eGeneral -> eShaderReadOnlyOptimal (fragment reads final blurred AO)
+	// ao_raw: eGeneral -> eShaderReadOnlyOptimal
+	// dstStage=eNone: fragment shader reads on graphics queue, semaphore handles cross-queue sync
 	vk::ImageMemoryBarrier2 ao_final_to_read{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
+		.dstStageMask = vk::PipelineStageFlagBits2::eNone,
+		.dstAccessMask = vk::AccessFlagBits2::eNone,
 		.oldLayout = vk::ImageLayout::eGeneral,
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,

@@ -520,6 +520,15 @@ void VeSwapChain::submitGraphicsPhase1(vk::CommandBuffer cb) {
 	m_ve_device.getQueue().submit(submit_info, nullptr);
 }
 
+void VeSwapChain::submitShadowPhase(vk::CommandBuffer cb) {
+	// Same-queue ordering guarantees execution after graphics phase 1 and before phase 2.
+	vk::SubmitInfo submit_info{
+		.commandBufferCount = 1,
+		.pCommandBuffers = &cb,
+	};
+	m_ve_device.getQueue().submit(submit_info, nullptr);
+}
+
 void VeSwapChain::submitComputePhase2(vk::CommandBuffer cb) {
 	// Waits: graphics1 (timeline)
 	// Signals: compute2 (timeline), no fence

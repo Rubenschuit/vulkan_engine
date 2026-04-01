@@ -86,6 +86,10 @@ vk::raii::CommandBuffer& VeRenderer::getCurrentGraphics2CommandBuffer() {
 	assert(m_is_frame_started && "Frame is not in progress");
 	return m_command_manager.getGraphics2Primary(m_ve_swap_chain->getCurrentFrame());
 }
+vk::raii::CommandBuffer& VeRenderer::getCurrentGraphics3CommandBuffer() {
+	assert(m_is_frame_started && "Frame is not in progress");
+	return m_command_manager.getGraphics3Primary(m_ve_swap_chain->getCurrentFrame());
+}
 vk::raii::CommandBuffer& VeRenderer::getCurrentCompute2CommandBuffer() {
 	assert(m_is_frame_started && "Frame is not in progress");
 	return m_command_manager.getCompute2Primary(m_ve_swap_chain->getCurrentFrame());
@@ -186,6 +190,7 @@ bool VeRenderer::beginFrame() {
 	compute_command_buffer.begin(info);
 
 	getCurrentGraphics2CommandBuffer().begin(info);
+	getCurrentGraphics3CommandBuffer().begin(info);
 	getCurrentCompute2CommandBuffer().begin(info);
 
 	auto& ui_command_buffer = getCurrentUICommandBuffer();
@@ -217,11 +222,11 @@ void VeRenderer::endFrame() {
 	{
 		ZoneScopedN("Submit + Present");
 		if (m_split_active) {
-			// Split path: graphics CB 1 already submitted. End graphics2 CB and present.
-			auto& gfx2_cb = getCurrentGraphics2CommandBuffer();
-			m_profiler.endGpuTimer(gfx2_cb, ProfileTimer::FRAME_TOTAL);
-			gfx2_cb.end();
-			result = m_ve_swap_chain->submitGraphicsPhase2AndPresent(*gfx2_cb, *ui_cb, &m_current_image_index);
+			// Split path: CB1 (depth) + CB2 (shadows) already submitted. End CB3 and present.
+			auto& gfx3_cb = getCurrentGraphics3CommandBuffer();
+			m_profiler.endGpuTimer(gfx3_cb, ProfileTimer::FRAME_TOTAL);
+			gfx3_cb.end();
+			result = m_ve_swap_chain->submitGraphicsPhase2AndPresent(*gfx3_cb, *ui_cb, &m_current_image_index);
 		} else {
 			// Non-split path: end graphics CB 1 and present normally.
 			auto& scene_cb = getCurrentCommandBuffer();
@@ -344,7 +349,7 @@ void VeRenderer::endDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
 void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer,
 	bool load_depth, bool secondary_contents, bool resolve_msaa) {
 	assert(m_is_frame_started && "Can't call beginRender while frame is not in progress");
-	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer())
+	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer() || &command_buffer == &getCurrentGraphics3CommandBuffer())
 		&& "Can't begin render on command buffer from a different frame");
 
 	beginDebugLabel(command_buffer, "Scene Render", {0.2f, 0.8f, 0.2f, 1.0f});
@@ -432,7 +437,7 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer,
 
 void VeRenderer::endSceneRender(vk::raii::CommandBuffer& command_buffer) {
 	assert(m_is_frame_started && "Can't call endRender while frame is not in progress");
-	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer())
+	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer() || &command_buffer == &getCurrentGraphics3CommandBuffer())
 		&& "Can't end render on command buffer from a different frame");
 
 	command_buffer.endRendering();
@@ -653,7 +658,7 @@ void VeRenderer::endWboitComposite(vk::raii::CommandBuffer& command_buffer) {
 
 void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode) {
 	assert(m_is_frame_started && "Can't call beginPostProcessRender while frame is not in progress");
-	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer())
+	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer() || &command_buffer == &getCurrentGraphics3CommandBuffer())
 		&& "Can't begin post-process on command buffer from a different frame");
 
 	beginDebugLabel(command_buffer, "Post Process", {0.8f, 0.2f, 0.8f, 1.0f});
@@ -739,7 +744,7 @@ void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer,
 
 void VeRenderer::endPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode) {
 	assert(m_is_frame_started && "Can't call endPostProcessRender while frame is not in progress");
-	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer())
+	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer() || &command_buffer == &getCurrentGraphics3CommandBuffer())
 		&& "Can't end post-process on command buffer from a different frame");
 
 	command_buffer.endRendering();
@@ -985,6 +990,13 @@ void VeRenderer::submitGraphicsPhase1() {
 	m_ve_swap_chain->activateSplitTimeline();
 	m_ve_swap_chain->submitGraphicsPhase1(*gfx1_cb);
 	m_split_active = true;
+}
+
+void VeRenderer::submitShadowPhase(vk::raii::CommandBuffer& shadow_cb) {
+	assert(m_is_frame_started && "Can't call submitShadowPhase while frame is not in progress");
+
+	shadow_cb.end();
+	m_ve_swap_chain->submitShadowPhase(*shadow_cb);
 }
 
 void VeRenderer::submitComputePhase2(vk::raii::CommandBuffer& compute2_cb) {
