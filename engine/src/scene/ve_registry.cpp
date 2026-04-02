@@ -236,6 +236,16 @@ void Registry::setLightSource(Entity e, LightSource source) {
 	m_meta[e.index()].light_source = source;
 }
 
+bool Registry::isAnimated(Entity e) const {
+	if (!isAlive(e)) return false;
+	return m_meta[e.index()].animated;
+}
+
+void Registry::setAnimated(Entity e, bool animated) {
+	assert(isAlive(e));
+	m_meta[e.index()].animated = animated;
+}
+
 // ── Hierarchy ───────────────────────────────────────────────────────────────
 
 void Registry::setParent(Entity child, Entity parent) {
@@ -446,6 +456,7 @@ Entity Registry::cloneEntityRecursive(Entity source) {
 
 	Entity root_clone = Entity::null();
 	std::vector<Entity> cloned_entities;
+	std::unordered_map<uint32_t, Entity> old_to_new;
 
 	m_events.beginBatch();
 
@@ -453,6 +464,7 @@ Entity Registry::cloneEntityRecursive(Entity source) {
 		auto [src, clone_parent] = queue[i];
 		Entity clone = cloneEntity(src);
 		cloned_entities.push_back(clone);
+		old_to_new[src.index()] = clone;
 
 		if (i == 0) {
 			root_clone = clone;
@@ -467,6 +479,10 @@ Entity Registry::cloneEntityRecursive(Entity source) {
 			child = nextSibling(child);
 		}
 	}
+
+	// Remap AnimatorComponent entity references so the clone drives its own children
+	if (auto* anim = getComponent<AnimatorComponent>(root_clone))
+		anim->remapEntities(old_to_new);
 
 	m_events.endBatch();
 

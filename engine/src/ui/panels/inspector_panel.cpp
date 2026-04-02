@@ -421,6 +421,13 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 			renderRigidbody(*registry->getComponent<RigidbodyComponent>(entity), state);
 	}
 
+	// Animator
+	if (registry->hasComponent<AnimatorComponent>(entity)) {
+		bool open = ImGui::CollapsingHeader("Animator", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		if (open && registry->hasComponent<AnimatorComponent>(entity))
+			renderAnimator(*registry->getComponent<AnimatorComponent>(entity));
+	}
+
 	// Add Component
 	ImGui::Spacing();
 	ImGui::Separator();
@@ -866,6 +873,53 @@ void InspectorPanel::renderRigidbody(RigidbodyComponent& rb, EditorState& state)
 		ImGui::Checkbox("Show Collision Shape", &state.show_collision_shape);
 	} else {
 		ImGui::TextDisabled("No physics body");
+	}
+}
+
+void InspectorPanel::renderAnimator(AnimatorComponent& animator) {
+	const auto& clips = animator.getClipBindings();
+	ImGui::Text("Clips: %zu", clips.size());
+
+	for (uint32_t i = 0; i < static_cast<uint32_t>(clips.size()); i++) {
+		const auto& binding = clips[i];
+		if (!binding.clip)
+			continue;
+
+		ImGui::PushID(static_cast<int>(i));
+
+		const char* clip_name = binding.clip->name.empty() ? "Unnamed" : binding.clip->name.c_str();
+		if (ImGui::TreeNodeEx(clip_name, ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::TextDisabled("Duration: %.2fs  Channels: %zu", binding.clip->duration, binding.clip->channels.size());
+
+			float time = binding.current_time;
+			if (ImGui::SliderFloat("Time", &time, 0.0f, binding.clip->duration, "%.2fs"))
+				animator.setTime(i, time);
+
+			float speed = binding.speed;
+			if (ImGui::DragFloat("Speed", &speed, 0.01f, -10.0f, 10.0f, "%.2f"))
+				animator.setSpeed(i, speed);
+
+			bool playing = binding.playing;
+			if (ImGui::Checkbox("Playing", &playing)) {
+				if (playing)
+					animator.play(i);
+				else
+					animator.pause(i);
+			}
+
+			ImGui::SameLine();
+			bool loop = binding.loop;
+			if (ImGui::Checkbox("Loop", &loop))
+				animator.setLoop(i, loop);
+
+			ImGui::SameLine();
+			if (ImGui::Button("Reset"))
+				animator.stop(i);
+
+			ImGui::TreePop();
+		}
+
+		ImGui::PopID();
 	}
 }
 

@@ -8,6 +8,7 @@
 #include "vulkan/ve_descriptors.hpp"
 #include "resources/ve_resource_manager.hpp"
 #include "resources/ve_mesh.hpp"
+#include "resources/ve_animation_clip.hpp"
 #include "scene/ve_registry.hpp"
 #include <atomic>
 #include <filesystem>
@@ -119,6 +120,7 @@ private:
 	std::vector<ExtractedLight> m_punctual_lights;
 	std::vector<ExtractedLight> m_emissive_lights;
 	std::unordered_map<int, uint32_t> m_gltf_to_loaded_idx;
+	std::vector<std::shared_ptr<VeAnimationClip>> m_animation_clips;
 };
 
 } // namespace ve

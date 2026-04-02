@@ -13,6 +13,7 @@ class PointLightComponent;
 class DirectionalLightComponent;
 class SpotLightComponent;
 class RigidbodyComponent;
+class AnimatorComponent;
 class VeTexture;
 class TextureInspector;
 
@@ -33,6 +34,7 @@ private:
 	void renderDirectionalLight(DirectionalLightComponent& light);
 	void renderSpotLight(SpotLightComponent& light);
 	void renderRigidbody(RigidbodyComponent& rb, EditorState& state);
+	void renderAnimator(AnimatorComponent& animator);
 
 	// Texture thumbnail cache
 	struct TextureCacheEntry {

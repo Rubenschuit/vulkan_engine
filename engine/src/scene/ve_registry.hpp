@@ -28,6 +28,7 @@ struct EntityMeta {
 	std::string name;
 	bool active = true;
 	bool alive = false;
+	bool animated = false;
 	uint16_t generation = 0;
 	LightSource light_source = LightSource::Manual;
 };
@@ -59,7 +60,8 @@ using ComponentPools = std::tuple<
 	ComponentPool<PointLightComponent>,
 	ComponentPool<DirectionalLightComponent>,
 	ComponentPool<SpotLightComponent>,
-	ComponentPool<RigidbodyComponent>
+	ComponentPool<RigidbodyComponent>,
+	ComponentPool<AnimatorComponent>
 >;
 
 class VENGINE_API Registry {
@@ -83,6 +85,8 @@ public:
 	void setActive(Entity e, bool active);
 	LightSource getLightSource(Entity e) const;
 	void setLightSource(Entity e, LightSource source);
+	bool isAnimated(Entity e) const;
+	void setAnimated(Entity e, bool animated);
 
 	// Component access
 	template <typename T, typename... Args>
@@ -127,6 +131,9 @@ public:
 
 	ComponentPool<RigidbodyComponent>& rigidbodies() { return pool<RigidbodyComponent>(); }
 	const ComponentPool<RigidbodyComponent>& rigidbodies() const { return pool<RigidbodyComponent>(); }
+
+	ComponentPool<AnimatorComponent>& animators() { return pool<AnimatorComponent>(); }
+	const ComponentPool<AnimatorComponent>& animators() const { return pool<AnimatorComponent>(); }
 
 	// Fast active check (skips generation validation)
 	bool isActiveAtIndex(uint32_t index) const {

@@ -125,6 +125,31 @@ void GpuSceneManager::subscribeToRegistry(Registry& registry) {
 			if (hasGpuId(event.entity) && m_registry)
 				setDynamic(event.entity, isDynamicEntity(*m_registry, event.entity));
 		});
+	m_anim_state_changed_sub = registry.events().subscribe<AnimationStateChangedEvent>(
+		[this](const AnimationStateChangedEvent& event) {
+			if (!m_registry)
+				return;
+			auto* animator = m_registry->getComponent<AnimatorComponent>(event.entity);
+			if (!animator)
+				return;
+			for (Entity target : animator->getAnimatedEntities()) {
+				if (hasGpuId(target))
+					setDynamic(target, isDynamicEntity(*m_registry, target));
+			}
+		});
+	m_anim_removed_sub = registry.events().subscribe<ComponentRemovedEvent<AnimatorComponent>>(
+		[this](const ComponentRemovedEvent<AnimatorComponent>& event) {
+			if (!m_registry)
+				return;
+			auto* animator = m_registry->getComponent<AnimatorComponent>(event.entity);
+			if (!animator)
+				return;
+			for (Entity target : animator->getAnimatedEntities()) {
+				m_registry->setAnimated(target, false);
+				if (hasGpuId(target))
+					setDynamic(target, isDynamicEntity(*m_registry, target));
+			}
+		});
 }
 
 uint32_t GpuSceneManager::registerObject(Entity entity, const MeshComponent& mesh,
@@ -224,8 +249,8 @@ void GpuSceneManager::markObjectDataDirty(Entity entity) {
 }
 
 bool GpuSceneManager::isDynamicEntity(const Registry& registry, Entity entity) {
-	if (!registry.hasComponent<RigidbodyComponent>(entity))
-		return false;
+	if (registry.isAnimated(entity))
+		return true;
 	const auto* rb = registry.getComponent<RigidbodyComponent>(entity);
 	return rb && rb->getMotionType() == PhysicsMotionType::Dynamic;
 }

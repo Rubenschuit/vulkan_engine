@@ -40,6 +40,10 @@ void VeScene::addModel(const std::filesystem::path& gltf_path) {
 }
 
 void VeScene::update(float dt) {
+	// Update animations
+	for (auto& animator : m_registry.animators())
+		animator.update(dt);
+
 	for (auto [entity, pl, tc] : m_registry.view<PointLightComponent, TransformComponent>()) {
 		if (!pl.getRotates())
 			continue;

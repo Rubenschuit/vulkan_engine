@@ -55,6 +55,10 @@ struct LightDataChangedEvent {
 	Entity entity;
 };
 
+struct AnimationStateChangedEvent {
+	Entity entity;
+};
+
 // Deferred deletion request (emitted by UI, processed at safe frame boundary)
 struct DeleteEntityRequest {
 	Entity entity;

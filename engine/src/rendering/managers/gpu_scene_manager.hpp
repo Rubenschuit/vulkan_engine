@@ -240,6 +240,8 @@ private:
 	SubscriptionId m_mesh_data_changed_sub = 0;
 	SubscriptionId m_mesh_added_sub = 0;
 	SubscriptionId m_rb_changed_sub = 0;
+	SubscriptionId m_anim_state_changed_sub = 0;
+	SubscriptionId m_anim_removed_sub = 0;
 };
 
 } // namespace ve

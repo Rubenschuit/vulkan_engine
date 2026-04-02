@@ -7,6 +7,7 @@
 #include "resources/ve_resource_manager.hpp"
 #include "resources/ve_mesh.hpp"
 #include "resources/ve_material.hpp"
+#include "resources/ve_animation_clip.hpp"
 
 #include <glm/glm.hpp>
 #include <memory>
@@ -314,6 +315,45 @@ private:
 	bool m_dirty = false;
 };
 
+// ---------------------------------------------------------------------------
+// AnimatorComponent
+// ---------------------------------------------------------------------------
+struct ClipBinding {
+	std::shared_ptr<VeAnimationClip> clip;
+	float current_time = 0.0f;
+	float speed = 1.0f;
+	bool playing = true;
+	bool loop = true;
+};
+
+class VENGINE_API AnimatorComponent : public Component {
+public:
+	void update(float delta_time) override;
+
+	uint32_t addClip(std::shared_ptr<VeAnimationClip> clip, bool auto_play = true, bool loop = true);
+	void play(uint32_t clip_index);
+	void pause(uint32_t clip_index);
+	void stop(uint32_t clip_index);
+	void setSpeed(uint32_t clip_index, float speed);
+	void setLoop(uint32_t clip_index, bool loop);
+	void setTime(uint32_t clip_index, float time);
+
+	void setNodeToEntityMap(std::vector<Entity> map) { m_node_to_entity = std::move(map); }
+	void remapEntities(const std::unordered_map<uint32_t, Entity>& old_to_new);
+
+	bool hasPlayingClips() const;
+	std::vector<Entity> getAnimatedEntities() const;
+
+	const std::vector<ClipBinding>& getClipBindings() const { return m_clip_bindings; }
+	const std::vector<Entity>& getNodeToEntityMap() const { return m_node_to_entity; }
+
+private:
+	void updateAnimatedFlags();
+
+	std::vector<ClipBinding> m_clip_bindings;
+	std::vector<Entity> m_node_to_entity;
+};
+
 // suppress implicit instantiation
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<TransformComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<PointLightComponent>();
@@ -321,5 +361,6 @@ extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<DirectionalL
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MeshComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SpotLightComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<RigidbodyComponent>();
+extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<AnimatorComponent>();
 
 } // namespace ve

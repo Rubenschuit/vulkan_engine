@@ -8,6 +8,7 @@
 #include "resources/ve_texture.hpp"
 #include "resources/ve_material_properties.hpp"
 #include "resources/ve_model.hpp"
+#include "resources/ve_animation_clip.hpp"
 #include "rendering/culling/meshlet_data.hpp"
 
 #include <glm/glm.hpp>
@@ -73,6 +74,7 @@ struct VENGINE_API LoadedAssetData {
 	std::vector<VeModel::ExtractedLight> punctual_lights;
 	std::vector<VeModel::ExtractedLight> emissive_lights;
 	std::unordered_map<int, uint32_t> gltf_to_loaded_idx;
+	std::vector<VeAnimationClip> animation_clips;
 	std::unordered_map<int, std::pair<glm::vec3, float>> geometry_center_extent;
 
 	LoadedAssetData() = default;

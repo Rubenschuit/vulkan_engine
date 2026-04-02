@@ -389,6 +389,7 @@ void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_
 
 	// Write instance data for all mesh entities into the instance buffer
 	uint32_t mask_instance_start = fi.instance_count;
+	uint32_t mask_entity_count = 0;
 	for (Entity e : mesh_entities) {
 		if (fi.instance_count >= fi.instance_capacity)
 			break;
@@ -398,6 +399,7 @@ void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_
 		fi.instance_data[idx].normal_transform[0] = glm::vec4(0.0f);
 		fi.instance_data[idx].normal_transform[1] = glm::vec4(0.0f);
 		fi.instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
+		mask_entity_count++;
 	}
 
 	auto& cmd = fi.cmd();
@@ -452,7 +454,8 @@ void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_
 
 	uint32_t instance_idx = mask_instance_start;
 	VeMesh* bound_mesh = nullptr;
-	for (Entity e : mesh_entities) {
+	for (uint32_t i = 0; i < mask_entity_count; i++) {
+		Entity e = mesh_entities[i];
 		auto* mc = registry.getComponent<MeshComponent>(e);
 		VeMesh* mesh = mc->getMesh();
 		if (!mesh) {

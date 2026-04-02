@@ -688,6 +688,18 @@ void ShadowRenderSystem::subscribeToRegistry(Registry& registry) {
 			m_dynamic_drawables_dirty = true;
 			m_force_full_rerender = true;
 		});
+	registry.events().subscribe<AnimationStateChangedEvent>(
+		[this](const AnimationStateChangedEvent&) {
+			m_static_drawables_dirty = true;
+			m_dynamic_drawables_dirty = true;
+			m_force_full_rerender = true;
+		});
+	registry.events().subscribe<ComponentRemovedEvent<AnimatorComponent>>(
+		[this](const ComponentRemovedEvent<AnimatorComponent>&) {
+			m_static_drawables_dirty = true;
+			m_dynamic_drawables_dirty = true;
+			m_force_full_rerender = true;
+		});
 	registry.events().subscribe<EntityDestroyedEvent>(
 		[this](const EntityDestroyedEvent&) {
 			m_static_drawables_dirty = true;

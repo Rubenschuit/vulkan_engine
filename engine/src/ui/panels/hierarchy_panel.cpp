@@ -157,6 +157,7 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 	bool has_pl = registry.hasComponent<PointLightComponent>(entity);
 	bool has_sl = registry.hasComponent<SpotLightComponent>(entity);
 	bool has_dl = registry.hasComponent<DirectionalLightComponent>(entity);
+	bool has_anim = registry.hasComponent<AnimatorComponent>(entity);
 
 	// Check if has visible children
 	bool has_visible_children = false;
@@ -202,10 +203,14 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 		ImGui::PopStyleColor();
 
 	// Component badges on the same line
-	if (has_mesh || has_pl || has_sl || has_dl) {
+	if (has_mesh || has_pl || has_sl || has_dl || has_anim) {
 		ImGui::SameLine();
 		if (has_mesh) {
 			ImGui::TextColored(ImVec4(0.5f, 0.8f, 0.5f, 1.0f), "[M]");
+			if (has_pl || has_sl || has_dl || has_anim) ImGui::SameLine();
+		}
+		if (has_anim) {
+			ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "[A]");
 			if (has_pl || has_sl || has_dl) ImGui::SameLine();
 		}
 		if (has_pl) {
