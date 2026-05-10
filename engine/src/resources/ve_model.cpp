@@ -853,9 +853,10 @@ static ProcessedMesh processPrimitive(
 	const tinygltf::BufferView* index_bv = index_accessor ? &m.bufferViews[static_cast<size_t>(index_accessor->bufferView)] : nullptr;
 	const tinygltf::Buffer* index_buf = index_bv ? &m.buffers[static_cast<size_t>(index_bv->buffer)] : nullptr;
 
-	const tinygltf::Accessor& normal_accessor = m.accessors[static_cast<size_t>(primitive.attributes.at("NORMAL"))];
-	const tinygltf::BufferView& normal_bv = m.bufferViews[static_cast<size_t>(normal_accessor.bufferView)];
-	const tinygltf::Buffer& normal_buf = m.buffers[static_cast<size_t>(normal_bv.buffer)];
+	bool has_normals = primitive.attributes.find("NORMAL") != primitive.attributes.end();
+	const tinygltf::Accessor* normal_acc = has_normals ? &m.accessors[static_cast<size_t>(primitive.attributes.at("NORMAL"))] : nullptr;
+	const tinygltf::BufferView* normal_bv = has_normals ? &m.bufferViews[static_cast<size_t>(normal_acc->bufferView)] : nullptr;
+	const tinygltf::Buffer* normal_buf = has_normals ? &m.buffers[static_cast<size_t>(normal_bv->buffer)] : nullptr;
 
 	bool has_tangents = primitive.attributes.find("TANGENT") != primitive.attributes.end();
 	const tinygltf::Accessor* tangent_acc = has_tangents ? &m.accessors[static_cast<size_t>(primitive.attributes.at("TANGENT"))] : nullptr;
@@ -869,8 +870,8 @@ static ProcessedMesh processPrimitive(
 
 	int pos_stride_val = pos_accessor.ByteStride(pos_bv);
 	const size_t pos_stride = pos_stride_val > 0 ? static_cast<size_t>(pos_stride_val) : gltfComponentSize(pos_accessor.componentType) * 3;
-	int normal_stride_val = normal_accessor.ByteStride(normal_bv);
-	const size_t normal_stride = normal_stride_val > 0 ? static_cast<size_t>(normal_stride_val) : gltfComponentSize(normal_accessor.componentType) * 3;
+	int normal_stride_val = has_normals ? normal_acc->ByteStride(*normal_bv) : 0;
+	const size_t normal_stride = normal_stride_val > 0 ? static_cast<size_t>(normal_stride_val) : (has_normals ? gltfComponentSize(normal_acc->componentType) * 3 : size_t{12});
 	size_t tex_stride = 8;
 	if (has_tex_coords) {
 		int ts = tex_acc->ByteStride(*tex_bv);
@@ -894,7 +895,7 @@ static ProcessedMesh processPrimitive(
 	}
 
 	const size_t pos_comp_size = gltfComponentSize(pos_accessor.componentType);
-	const size_t normal_comp_size = gltfComponentSize(normal_accessor.componentType);
+	const size_t normal_comp_size = has_normals ? gltfComponentSize(normal_acc->componentType) : 4;
 	const size_t tangent_comp_size = has_tangents ? gltfComponentSize(tangent_acc->componentType) : 4;
 	const size_t tex_comp_size = has_tex_coords ? gltfComponentSize(tex_acc->componentType) : 4;
 
@@ -908,15 +909,19 @@ static ProcessedMesh processPrimitive(
 		float pz = readGltfComponent(pos_base + 2 * pos_comp_size, pos_accessor.componentType, pos_accessor.normalized);
 		vertex.pos = {px, -pz, py};
 
-		const uint8_t* normal_base = &normal_buf.data[normal_bv.byteOffset + normal_accessor.byteOffset + i * normal_stride];
-		float nx = readGltfComponent(normal_base + 0 * normal_comp_size, normal_accessor.componentType, normal_accessor.normalized);
-		float ny = readGltfComponent(normal_base + 1 * normal_comp_size, normal_accessor.componentType, normal_accessor.normalized);
-		float nz = readGltfComponent(normal_base + 2 * normal_comp_size, normal_accessor.componentType, normal_accessor.normalized);
-		vertex.normal = {nx, -nz, ny};
-		if (normal_accessor.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT) {
-			float len = glm::length(vertex.normal);
-			if (len > 1e-6f)
-				vertex.normal /= len;
+		if (has_normals) {
+			const uint8_t* normal_base = &normal_buf->data[normal_bv->byteOffset + normal_acc->byteOffset + i * normal_stride];
+			float nx = readGltfComponent(normal_base + 0 * normal_comp_size, normal_acc->componentType, normal_acc->normalized);
+			float ny = readGltfComponent(normal_base + 1 * normal_comp_size, normal_acc->componentType, normal_acc->normalized);
+			float nz = readGltfComponent(normal_base + 2 * normal_comp_size, normal_acc->componentType, normal_acc->normalized);
+			vertex.normal = {nx, -nz, ny};
+			if (normal_acc->componentType != TINYGLTF_COMPONENT_TYPE_FLOAT) {
+				float len = glm::length(vertex.normal);
+				if (len > 1e-6f)
+					vertex.normal /= len;
+			}
+		} else {
+			vertex.normal = {0, 0, 0};
 		}
 
 		if (has_tex_coords && tex_stride > 0) {
@@ -975,6 +980,36 @@ static ProcessedMesh processPrimitive(
 	} else {
 		for (uint32_t j = 0; j < vertex_count; j++)
 			indices.push_back(j);
+	}
+
+	if (!has_normals && indices.size() >= 3 && (indices.size() % 3) == 0) {
+		for (auto& v : vertices)
+			v.normal = glm::vec3(0.0f);
+		for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+			const glm::vec3& p0 = vertices[indices[i + 0]].pos;
+			const glm::vec3& p1 = vertices[indices[i + 1]].pos;
+			const glm::vec3& p2 = vertices[indices[i + 2]].pos;
+			glm::vec3 face_n = glm::cross(p1 - p0, p2 - p0);
+			vertices[indices[i + 0]].normal += face_n;
+			vertices[indices[i + 1]].normal += face_n;
+			vertices[indices[i + 2]].normal += face_n;
+		}
+		for (auto& v : vertices) {
+			float len = glm::length(v.normal);
+			if (len > 1e-6f)
+				v.normal /= len;
+			else
+				v.normal = glm::vec3(0, 0, 1);
+		}
+	}
+
+	if (!has_tangents && !has_tex_coords) {
+		for (auto& v : vertices) {
+			glm::vec3 n = v.normal;
+			glm::vec3 ref = std::abs(n.z) < 0.999f ? glm::vec3(0, 0, 1) : glm::vec3(1, 0, 0);
+			glm::vec3 t = glm::normalize(glm::cross(ref, n));
+			v.tangent = glm::vec4(t, 1.0f);
+		}
 	}
 
 	// Stage 2: MikkTSpace tangents
@@ -1170,8 +1205,6 @@ static void processNodeCpu(
 			if (ctx.progress.cancelled.load())
 				return;
 			const auto& primitive = mesh.primitives[prim_idx];
-			if (primitive.attributes.find("NORMAL") == primitive.attributes.end())
-				continue;
 			size_t mat_idx = (primitive.material >= 0 && static_cast<size_t>(primitive.material) < ctx.materials.size())
 			                    ? static_cast<size_t>(primitive.material) : 0;
 			std::string key = geometryKey(primitive, mat_idx);
