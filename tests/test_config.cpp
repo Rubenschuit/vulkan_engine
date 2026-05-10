@@ -15,8 +15,8 @@ TEST_CASE("ve_config basic constants and lists", "[config]") {
     }
     REQUIRE(hasSwapchain);
 
-    // Instance extensions list non-empty on portability setups
-    REQUIRE_FALSE(ve::REQUIRED_INSTANCE_EXTENSIONS.empty());
+    // REQUIRED_INSTANCE_EXTENSIONS may be empty: GLFW-required extensions and
+    // VK_KHR_portability_enumeration are added at runtime in VeDevice.
 
     // Validation layers include Khronos validation layer
     bool hasValidation = false;
@@ -42,13 +42,8 @@ TEST_CASE("ve_config lighting and shadow constants", "[config]") {
 
 TEST_CASE("ve_config portability extensions on macOS", "[config]") {
 #ifdef __APPLE__
-    bool hasPortability = false;
     for (auto* ext : ve::REQUIRED_DEVICE_EXTENSIONS) {
-        if (std::string(ext) == VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME) {
-            hasPortability = true;
-            break;
-        }
+        REQUIRE(std::string(ext) != VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
     }
-    REQUIRE(hasPortability);
 #endif
 }
