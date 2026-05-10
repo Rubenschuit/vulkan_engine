@@ -149,6 +149,7 @@ private:
 	vk::SampleCountFlagBits m_max_msaa_samples = vk::SampleCountFlagBits::e1; // set in pickPhysicalDevice
 
 	bool m_has_hdr_instance_extension = false;
+	bool m_has_portability_enumeration = false;
 	bool m_supports_bc = false;
 	bool m_supports_astc = false;
 	bool m_supports_etc2 = false;

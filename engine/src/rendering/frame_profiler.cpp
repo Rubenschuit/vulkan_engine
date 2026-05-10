@@ -5,16 +5,22 @@
 namespace ve {
 
 FrameProfiler::FrameProfiler(VeDevice& device) : m_device(device) {
-	vk::QueryPoolCreateInfo pool_info{
-		.sType = vk::StructureType::eQueryPoolCreateInfo,
-		.queryType = vk::QueryType::eTimestamp,
-		.queryCount = QUERIES_PER_FRAME * MAX_FRAMES_IN_FLIGHT
-	};
-	m_query_pool = vk::raii::QueryPool(m_device.getDevice(), pool_info);
+	auto props = m_device.getDeviceProperties();
+	auto queue_props = m_device.getPhysicalDevice().getQueueFamilyProperties();
+	m_timestamps_supported = !queue_props.empty() && queue_props[0].timestampValidBits > 0;
 
-	auto limits = m_device.getDeviceProperties().limits;
-	m_ticks_to_ms = limits.timestampPeriod / 1000000.0f;
-	m_timestamp_cross_queue = limits.timestampComputeAndGraphics;
+	if (m_timestamps_supported) {
+		vk::QueryPoolCreateInfo pool_info{
+			.sType = vk::StructureType::eQueryPoolCreateInfo,
+			.queryType = vk::QueryType::eTimestamp,
+			.queryCount = QUERIES_PER_FRAME * MAX_FRAMES_IN_FLIGHT
+		};
+		m_query_pool = vk::raii::QueryPool(m_device.getDevice(), pool_info);
+		m_ticks_to_ms = props.limits.timestampPeriod / 1000000.0f;
+		m_timestamp_cross_queue = props.limits.timestampComputeAndGraphics;
+	} else {
+		VE_LOGW("GPU timestamps not supported (timestampValidBits == 0), GPU profiling disabled.");
+	}
 }
 
 void FrameProfiler::beginFrame(uint32_t frame_index) {
@@ -22,7 +28,7 @@ void FrameProfiler::beginFrame(uint32_t frame_index) {
 
 	// Resolve GPU results from the previous use of this frame slot
 	// Total timers are always active; individual timers only when profiling is enabled
-	if (m_frame_active[frame_index]) {
+	if (m_timestamps_supported && m_frame_active[frame_index]) {
 		uint32_t base = frame_index * QUERIES_PER_FRAME;
 
 		std::array<uint64_t, QUERIES_PER_FRAME * 2> raw{};
@@ -92,6 +98,8 @@ void FrameProfiler::beginFrame(uint32_t frame_index) {
 }
 
 void FrameProfiler::beginGpuTimer(vk::raii::CommandBuffer& cmd, ProfileTimer timer) {
+	if (!m_timestamps_supported)
+		return;
 	if (!m_gpu_enabled && !isTotalTimer(timer))
 		return;
 	uint32_t idx = queryIndex(m_current_frame, timer, false);
@@ -100,6 +108,8 @@ void FrameProfiler::beginGpuTimer(vk::raii::CommandBuffer& cmd, ProfileTimer tim
 }
 
 void FrameProfiler::endGpuTimer(vk::raii::CommandBuffer& cmd, ProfileTimer timer) {
+	if (!m_timestamps_supported)
+		return;
 	if (!m_gpu_enabled && !isTotalTimer(timer))
 		return;
 	uint32_t idx = queryIndex(m_current_frame, timer, true);
@@ -120,6 +130,8 @@ void FrameProfiler::endCpuTimer(ProfileTimer timer) {
 void FrameProfiler::resetAllQueries(vk::raii::CommandBuffer& graphics_cmd,
 									 vk::raii::CommandBuffer& compute_cmd,
 									 uint32_t frame_index) {
+	if (!m_timestamps_supported)
+		return;
 	static constexpr uint32_t GRAPHICS_TIMER_COUNT = static_cast<uint32_t>(ProfileTimer::COMPUTE_TOTAL);
 	static constexpr uint32_t COMPUTE_TIMER_COUNT = TIMER_COUNT - GRAPHICS_TIMER_COUNT;
 

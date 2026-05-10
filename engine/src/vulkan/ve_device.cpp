@@ -148,7 +148,7 @@ void VeDevice::createInstance() {
 	}
 
 	vk::InstanceCreateInfo createInfo{
-		.flags = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR,
+		.flags = m_has_portability_enumeration ? vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR : vk::InstanceCreateFlags{},
 		.pApplicationInfo = &appInfo,
 		.enabledLayerCount = static_cast<uint32_t>(required_layers.size()),
 		.ppEnabledLayerNames = required_layers.data(),
@@ -390,14 +390,15 @@ void VeDevice::createLogicalDevice() {
 		VE_LOGI("Enabled optional extension: " << VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME);
 	}
 
-#if defined(__APPLE__)
-	VkPhysicalDevicePortabilitySubsetFeaturesKHR portability_features{
-		.sType = static_cast<VkStructureType>(1000163000),
-		.pNext = nullptr,
-		.imageViewFormatSwizzle = VK_TRUE,
-	};
-	feature_chain.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().pNext = &portability_features;
-#endif
+	// MoltenVK exposes VK_KHR_portability_subset, KosmicKrisp does not (fully compliant)
+	VkPhysicalDevicePortabilitySubsetFeaturesKHR portability_features{};
+	if (hasExtension(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME)) {
+		enabled_extensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+		portability_features.sType = static_cast<VkStructureType>(1000163000);
+		portability_features.imageViewFormatSwizzle = VK_TRUE;
+		feature_chain.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().pNext = &portability_features;
+		VE_LOGI("Portability: VK_KHR_portability_subset enabled (MoltenVK).");
+	}
 
 	vk::DeviceCreateInfo device_create_info {
 		.pNext = &feature_chain.get<vk::PhysicalDeviceFeatures2>(),
@@ -502,14 +503,18 @@ std::vector<const char *> VeDevice::getRequiredInstanceExtensions() {
 	// add configured instance extensions
 	extensions.insert(extensions.end(), ve::REQUIRED_INSTANCE_EXTENSIONS.begin(), ve::REQUIRED_INSTANCE_EXTENSIONS.end());
 
-	// check for optional HDR instance extension
+	// check for optional instance extensions
 	auto available_extensions = m_context.enumerateInstanceExtensionProperties();
 	for (const auto& ext : available_extensions) {
 		if (strcmp(ext.extensionName, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME) == 0) {
 			extensions.push_back(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
 			m_has_hdr_instance_extension = true;
 			VE_LOGI("HDR Support: VK_EXT_swapchain_colorspace found at Instance level.");
-			break;
+		}
+		if (strcmp(ext.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0) {
+			extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+			m_has_portability_enumeration = true;
+			VE_LOGI("Portability: VK_KHR_portability_enumeration enabled.");
 		}
 	}
 

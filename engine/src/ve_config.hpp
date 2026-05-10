@@ -135,9 +135,7 @@ inline const std::vector<const char*> REQUIRED_DEVICE_EXTENSIONS = {
 	//VK_KHR_SPIRV_1_4_EXTENSION_NAME, promoted to core in Vulkan 1.2
 	//VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, promoted to core in Vulkan 1.3
 	//VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, promoted to core in Vulkan 1.3
-#if defined(__APPLE__)
-	VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME, // required for portability on macOS
-#endif
+	// VK_KHR_portability_subset is added at runtime if required (MoltenVK)
 #if ENABLE_RAY_TRACING
 	VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
 	VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
@@ -153,7 +151,6 @@ inline const std::vector<const char*> REQUIRED_DEVICE_EXTENSIONS = {
 
 // Central list of required Vulkan instance extensions (GLFW-required are added at runtime)
 inline const std::vector<const char*> REQUIRED_INSTANCE_EXTENSIONS = {
-	VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
 };
 
 // Central list of validation layers

@@ -103,6 +103,7 @@ private:
 	float m_ticks_to_ms = 0.0f;
 	bool m_timestamp_cross_queue = false;
 	bool m_gpu_enabled = false;
+	bool m_timestamps_supported = false;
 
 	std::array<bool, MAX_FRAMES_IN_FLIGHT> m_frame_active{};
 	std::array<std::array<bool, TIMER_COUNT>, MAX_FRAMES_IN_FLIGHT> m_gpu_active{};
