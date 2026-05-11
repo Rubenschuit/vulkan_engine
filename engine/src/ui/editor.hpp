@@ -9,6 +9,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "ui/editor_state.hpp"
+#include "ui/editor_camera_controller.hpp"
 #include "ui/panels/viewport_panel.hpp"
 #include "ui/panels/hierarchy_panel.hpp"
 #include "ui/panels/inspector_panel.hpp"
@@ -31,7 +32,7 @@ class AssetLoadingSystem;
 class ImGuiLayer;
 class InputController;
 class VeRenderer;
-class VeCamera;
+struct CameraView;
 class Registry;
 class VeScene;
 class SkyboxRenderSystem;
@@ -64,8 +65,9 @@ public:
 	void setAppUICallback(std::function<void()> cb) { m_app_ui_callback = std::move(cb); }
 	void setSceneRegistry(const std::vector<SceneEntry>* entries, int* current_index, SceneLoadRequest* request);
 
-	// Camera access for gizmo rendering
-	void setCamera(VeCamera* camera);
+	// Per-frame camera view used by gizmo, raycast, and debug overlays.
+	// Pointer must remain valid for the lifetime of the editor.
+	void setCameraView(const CameraView* camera_view);
 
 	// Skybox system access for environment panel
 	void setSkyboxSystem(SkyboxRenderSystem* skybox);
@@ -88,6 +90,9 @@ public:
 	InspectorPanel& getInspectorPanel() { return m_inspector_panel; }
 	PerformancePanel& getPerformancePanel() { return *m_performance_panel; }
 
+	EditorCameraController& editorCamera() { return m_camera_controller; }
+	const EditorCameraController& editorCamera() const { return m_camera_controller; }
+
 private:
 	bool handleModeTransition();
 	bool handleViewportResize();
@@ -100,6 +105,8 @@ private:
 
 	EditorState m_state;
 	bool m_was_editor_mode = false;
+
+	EditorCameraController m_camera_controller;
 
 	ViewportPanel m_viewport_panel;
 	HierarchyPanel m_hierarchy_panel;

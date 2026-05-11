@@ -39,7 +39,7 @@ public:
 	uint32_t uploadLightData(VeFrameInfo& frame_info);
 
 	// Record the cluster assignment compute dispatch on the compute command buffer.
-	void dispatch(VeFrameInfo& frame_info, const VeCamera& camera, vk::Extent2D screen_extent);
+	void dispatch(VeFrameInfo& frame_info, vk::Extent2D screen_extent);
 
 	void recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D screen_extent);
 

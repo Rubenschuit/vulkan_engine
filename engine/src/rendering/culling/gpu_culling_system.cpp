@@ -4,7 +4,7 @@
 #include "rendering/hiz_system.hpp"
 #include "rendering/ve_frame_info.hpp"
 #include "vulkan/ve_image.hpp"
-#include "scene/ve_camera.hpp"
+#include "scene/camera_view.hpp"
 #include "utils/ve_frustum.hpp"
 #include "utils/ve_log.hpp"
 #include "events/event_bus.hpp"
@@ -417,17 +417,18 @@ void GpuCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame
 	uint32_t frame = frame_info.current_frame;
 
 	// Update cull params UBO
-	glm::mat4 vp = frame_info.camera.getProj() * frame_info.camera.getView();
+	const CameraView& cv = frame_info.camera_view;
+	glm::mat4 vp = cv.proj * cv.view;
 	FrustumPlane cpu_planes[6];
 	extractFrustumPlanes(vp, cpu_planes);
 
-	const glm::mat4& proj = frame_info.camera.getProj();
+	const glm::mat4& proj = cv.proj;
 
 	CullParams params{};
 	for (int i = 0; i < 6; i++)
 		params.frustum_planes[i] = cpu_planes[i].plane;
 	params.view_proj = vp;
-	params.view = frame_info.camera.getView();
+	params.view = cv.view;
 	params.prev_view = m_frame_views[(frame + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT];
 	params.p00 = proj[0][0];
 	params.p11 = proj[1][1];
@@ -577,7 +578,7 @@ void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
                                           uint32_t frame_index,
                                           uint32_t shadow_buf_index,
                                           int32_t lod_bias,
-                                          const VeCamera* camera,
+                                          const CameraView* camera_view,
                                           ShadowPassMode shadow_mode) {
 	uint32_t object_count = scene_mgr.getObjectCount();
 	if (object_count == 0)
@@ -595,11 +596,11 @@ void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
 	params.lod_bias = lod_bias;
 
 	// Camera-space Hi-Z occlusion
-	if (camera != nullptr && m_hiz_enabled) {
+	if (camera_view != nullptr && m_hiz_enabled) {
 		params.hiz_enabled = 1;
-		params.view = camera->getView();
+		params.view = camera_view->view;
 		params.prev_view = m_frame_views[(frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT];
-		const glm::mat4& proj = camera->getProj();
+		const glm::mat4& proj = camera_view->proj;
 		params.p00 = proj[0][0];
 		params.p11 = proj[1][1];
 		params.p22 = proj[2][2];

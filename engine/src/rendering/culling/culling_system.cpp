@@ -11,10 +11,6 @@
 
 namespace ve {
 
-CullingSystem::CullingSystem(VeCamera& camera)
-	: m_camera(&camera) {
-}
-
 // Thread-safe: each worker processes a disjoint range of dense indices,
 // so writes to mesh.cached_lod touch distinct MeshComponent objects.
 void CullingSystem::processEntity(const CullParams& params, uint32_t dense_idx,
@@ -69,10 +65,10 @@ void CullingSystem::cullObjects(VeFrameInfo& frame_info, VeThreadPool* thread_po
 	m_last_total_mesh_objects = 0;
 	m_last_visible_count = 0;
 
+	const CameraView& cv = frame_info.camera_view;
 	FrustumPlane planes[6];
 	if (m_culling_enabled) {
-		m_camera->updateIfDirty();
-		const glm::mat4 view_proj = m_camera->getProj() * m_camera->getView();
+		const glm::mat4 view_proj = cv.proj * cv.view;
 		extractFrustumPlanes(view_proj, planes);
 	}
 
@@ -84,8 +80,8 @@ void CullingSystem::cullObjects(VeFrameInfo& frame_info, VeThreadPool* thread_po
 		.registry = &registry,
 		.entity_indices = mesh_pool.entityIndexData(),
 		.planes = planes,
-		.cam_pos = m_camera->getPosition(),
-		.half_tan_fov = std::tan(m_camera->getFovY() * 0.5f),
+		.cam_pos = cv.position,
+		.half_tan_fov = std::tan(cv.fov_y_radians * 0.5f),
 	};
 
 	uint32_t N = thread_pool ? thread_pool->workerCount() : 0;

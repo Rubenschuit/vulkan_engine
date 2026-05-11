@@ -6,7 +6,6 @@
 #include "vulkan/ve_buffer.hpp"
 #include "input/input_controller.hpp"
 #include "input/input_action.hpp"
-#include "scene/ve_camera.hpp"
 #include "scene/ve_scene.hpp"
 #include "scene/gltf_scene.hpp"
 #include "utils/ve_log.hpp"
@@ -63,7 +62,6 @@ VeApplication::VeApplication(const EngineConfig& config)
 	: m_ve_window(WIDTH, HEIGHT, APP_NAME),
 	  m_ve_device(m_ve_window),
 	  m_ve_renderer(m_ve_device, m_ve_window),
-	  m_camera(glm::vec3{20.0f, 20.0f, 20.0f}, glm::vec3{0.0f, 0.0f, 1.0f}),
 	  m_input_controller(m_ve_window),
 	  m_config(config) {
 
@@ -75,8 +73,6 @@ VeApplication::VeApplication(const EngineConfig& config)
 	createDescriptors();
 	initSystems();
 	initEditor();
-
-	m_camera.setPerspective(m_fov, m_last_aspect, m_near_plane, m_far_plane);
 }
 
 VeApplication::~VeApplication() {
@@ -117,9 +113,10 @@ void VeApplication::run() {
 		m_total_time += m_frame_time;
 
 		// Process input and camera
-		m_input_controller.processInput(m_frame_time, m_camera);
+		m_input_controller.processInput(m_frame_time);
 		m_ui.visible = m_input_controller.isEditorMode();
 		m_editor->getState().editor_mode = m_input_controller.isEditorMode();
+		m_editor->editorCamera().tick(m_input_controller.getActions(), m_frame_time);
 		updateCamera(glm::radians(m_ui.fov));
 
 		// Process pending entity deletions at a safe point
@@ -389,7 +386,7 @@ VeFrameInfo VeApplication::buildFrameInfo() {
 		.command_buffer = &command_buffer,
 		.compute_command_buffer = compute_command_buffer,
 		.compute2_command_buffer = &compute2_command_buffer,
-		.camera = m_camera,
+		.camera_view = m_current_camera_view,
 		.registry = &m_active_scene->getRegistry(),
 		.visible_objects = m_culling_system->getVisibleObjectsRef(),
 		.frame_time = m_frame_time,
@@ -531,7 +528,7 @@ void VeApplication::populateUBO(VeFrameInfo& fi) {
 		&& m_ui.shadow_mode != ShadowMode::DISABLED;
 	ubo.screen_size = glm::vec2(static_cast<float>(extent.width), static_cast<float>(extent.height));
 
-	updateUniformBuffer(current_frame, ubo);
+	updateUniformBuffer(current_frame, fi.camera_view, ubo);
 
 	// Store shadow mask active flag for render
 	fi.shadow_mask_active = shadow_mask_active;
@@ -564,7 +561,7 @@ void VeApplication::dispatchCompute(VeFrameInfo& fi) {
 		m_fireworks_system->recordComputeCommands(fi);
 		m_particle_system->recordComputeCommands(fi);
 		if (m_cluster_light_system->isEnabled())
-			m_cluster_light_system->dispatch(fi, m_camera, extent);
+			m_cluster_light_system->dispatch(fi, extent);
 	}
 
 	m_ve_renderer.submitCompute(fi.compute_command_buffer);
@@ -1118,7 +1115,7 @@ void VeApplication::initSystems() {
 			m_editor->getState().show_performance = !m_editor->getState().show_performance;
 	});
 
-	m_culling_system = std::make_unique<CullingSystem>(m_camera);
+	m_culling_system = std::make_unique<CullingSystem>();
 
 	m_shadow_render_system = std::make_unique<ShadowRenderSystem>(
 		m_ve_device, *m_global_pool,
@@ -1345,8 +1342,14 @@ void VeApplication::initEditor() {
 	m_editor->setShadowRenderSystem(m_shadow_render_system.get());
 	m_editor->setPhysicsSystem(m_physics_system.get());
 	m_editor->setAssetLoader(m_asset_loader.get());
-	m_editor->setCamera(&m_camera);
+	m_editor->setCameraView(&m_current_camera_view);
 	m_editor->setInputController(&m_input_controller);
+
+	auto& editor_cam = m_editor->editorCamera();
+	editor_cam.setPosition(glm::vec3{20.0f, 20.0f, 20.0f});
+	editor_cam.setFov(m_fov);
+	editor_cam.setNearFar(m_near_plane, m_far_plane);
+	editor_cam.lookAt(glm::vec3{0.0f, 0.0f, 5.0f});
 
 	m_ui.hdr_enabled = m_ve_renderer.hasHdrSupport() && m_ve_renderer.isHdrEnabled();
 	m_ui.fov = glm::degrees(m_fov);
@@ -1357,25 +1360,31 @@ void VeApplication::initEditor() {
 // ─── Camera ──────────────────────────────────────────────────────────────────
 
 void VeApplication::updateCamera(float fov_radians) {
-	m_camera.updateIfDirty();
 	float aspect = m_ve_renderer.getExtentAspectRatio();
-	bool aspect_changed = aspect > 0.0f && std::abs(aspect - m_last_aspect) > std::numeric_limits<float>::epsilon();
-	bool fov_changed = std::abs(fov_radians - m_fov) > 1e-4f;
-	if (aspect_changed || fov_changed) {
+	if (aspect > 0.0f)
 		m_last_aspect = aspect;
-		m_fov = fov_radians;
-		m_camera.setPerspective(m_fov, m_last_aspect, m_near_plane, m_far_plane);
-	}
+	m_fov = fov_radians;
+
+	auto& editor_cam = m_editor->editorCamera();
+	editor_cam.setFov(m_fov);
+	editor_cam.setNearFar(m_near_plane, m_far_plane);
+
+	Entity vp_cam = m_editor->getState().viewport_camera;
+	Registry* reg = m_active_scene ? &m_active_scene->getRegistry() : nullptr;
+	if (!vp_cam.isNull() && reg && reg->isAlive(vp_cam) && reg->hasComponent<CameraComponent>(vp_cam))
+		m_current_camera_view = buildCameraView(*reg, vp_cam, m_last_aspect);
+	else
+		m_current_camera_view = editor_cam.buildView(m_last_aspect);
 }
 
-void VeApplication::updateUniformBuffer(uint32_t current_frame, UniformBufferObject& ubo) {
-	ubo.view = m_camera.getView();
-	ubo.proj = m_camera.getProj();
+void VeApplication::updateUniformBuffer(uint32_t current_frame, const CameraView& view, UniformBufferObject& ubo) {
+	ubo.view = view.view;
+	ubo.proj = view.proj;
 	ubo.projection_view = ubo.proj * ubo.view;
 	ubo.inverse_projection_view = glm::inverse(ubo.projection_view);
 	ubo.prev_projection_view = m_prev_projection_view;
 	m_prev_projection_view = ubo.projection_view;
-	ubo.camera_position = glm::vec4{m_camera.getPosition(), 1.0f};
+	ubo.camera_position = glm::vec4{view.position, 1.0f};
 	m_uniform_buffers[current_frame]->writeToBuffer(&ubo);
 }
 

@@ -28,6 +28,18 @@ struct ActionBinding {
 	uint32_t value = 0;
 };
 
+struct InputActions {
+	float move_forward = 0.0f;
+	float move_right = 0.0f;
+	float move_up = 0.0f;
+	float look_yaw = 0.0f;
+	float look_pitch = 0.0f;
+	float mouse_dx = 0.0f;
+	float mouse_dy = 0.0f;
+	bool  sprint = false;
+	bool  mouse_look_enabled = true;
+};
+
 VENGINE_API std::string keyDisplayName(int glfw_key);
 
 } // namespace ve

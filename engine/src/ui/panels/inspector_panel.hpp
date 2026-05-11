@@ -15,6 +15,7 @@ class SpotLightComponent;
 class RigidbodyComponent;
 class AnimatorComponent;
 class SkinComponent;
+class CameraComponent;
 class VeTexture;
 class TextureInspector;
 
@@ -37,6 +38,7 @@ private:
 	void renderRigidbody(RigidbodyComponent& rb, EditorState& state);
 	void renderAnimator(AnimatorComponent& animator);
 	void renderSkin(Registry& registry, SkinComponent& skin, EditorState& state);
+	void renderCamera(CameraComponent& camera);
 
 	// Texture thumbnail cache
 	struct TextureCacheEntry {

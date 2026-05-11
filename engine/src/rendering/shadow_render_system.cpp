@@ -1505,7 +1505,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 	uint32_t csm_count = frame_info.csm_data.active_cascade_count;
 	uint32_t num_shadow_lights = static_cast<uint32_t>(light_views.size()) - csm_count;
 
-	const VeCamera* cam_for_hiz = gpu_cull_system.isHizEnabled() ? &frame_info.camera : nullptr;
+	const CameraView* cam_for_hiz = gpu_cull_system.isHizEnabled() ? &frame_info.camera_view : nullptr;
 
 	// If an object changed between static and dynamic, force a full re-render
 	if (scene_mgr.consumeDynamicClassificationChanged()) {

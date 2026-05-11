@@ -62,7 +62,8 @@ using ComponentPools = std::tuple<
 	ComponentPool<SpotLightComponent>,
 	ComponentPool<RigidbodyComponent>,
 	ComponentPool<AnimatorComponent>,
-	ComponentPool<SkinComponent>
+	ComponentPool<SkinComponent>,
+	ComponentPool<CameraComponent>
 >;
 
 class VENGINE_API Registry {
@@ -138,6 +139,9 @@ public:
 
 	ComponentPool<SkinComponent>& skins() { return pool<SkinComponent>(); }
 	const ComponentPool<SkinComponent>& skins() const { return pool<SkinComponent>(); }
+
+	ComponentPool<CameraComponent>& cameras() { return pool<CameraComponent>(); }
+	const ComponentPool<CameraComponent>& cameras() const { return pool<CameraComponent>(); }
 
 	// Fast active check (skips generation validation)
 	bool isActiveAtIndex(uint32_t index) const {

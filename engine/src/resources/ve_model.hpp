@@ -97,6 +97,19 @@ public:
 	const std::vector<ExtractedLight>& getPunctualLights() const { return m_punctual_lights; }
 	const std::vector<ExtractedLight>& getEmissiveLights() const { return m_emissive_lights; }
 
+	// Cameras extracted from glTF (perspective or orthographic). Applied when addToScene is used
+	// by attaching a CameraComponent to the entity created for the source glTF node.
+	struct ExtractedCamera {
+		bool perspective = true;
+		float yfov_radians = glm::radians(55.0f);
+		float ortho_size = 10.0f;
+		float znear = 0.1f;
+		float zfar = 1000.0f;
+		std::string name;
+		int node_idx = -1;
+	};
+	const std::vector<ExtractedCamera>& getCameras() const { return m_cameras; }
+
 	// CPU-only glTF loading: parses, decodes textures, processes meshes.
 	// No vulkan calls; it is thread-safe.
 	static LoadedAssetData loadFromGltfCpu(
@@ -126,6 +139,7 @@ private:
 	std::vector<ResourceHandle<VeMaterial>> m_material_handles;
 	std::vector<ExtractedLight> m_punctual_lights;
 	std::vector<ExtractedLight> m_emissive_lights;
+	std::vector<ExtractedCamera> m_cameras;
 	std::unordered_map<int, uint32_t> m_gltf_to_loaded_idx;
 	std::vector<std::shared_ptr<VeAnimationClip>> m_animation_clips;
 	std::vector<ModelSkin> m_skins;

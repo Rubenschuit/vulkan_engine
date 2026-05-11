@@ -97,11 +97,12 @@ void Sandbox::registerInputActions() {
 	m_input_sub = eventBus().subscribe<InputActionEvent>(
 		[this](const InputActionEvent& e) {
 			auto& ps = getParticleSystem();
+			const auto& cv = m_current_camera_view;
 			if (e.name == "Reset Particles") {
-				ps.setOrigin(m_camera.getForward() * 100.0f + m_camera.getPosition());
+				ps.setOrigin(cv.forward * 100.0f + cv.position);
 				ps.resetPoint();
 			} else if (e.name == "Reset Disc") {
-				ps.setOrigin(m_camera.getForward() * 100.0f + m_camera.getPosition());
+				ps.setOrigin(cv.forward * 100.0f + cv.position);
 				ps.resetDisc();
 			} else if (e.name == "Launch Firework") {
 				getFireworksSystem().launchRocket();

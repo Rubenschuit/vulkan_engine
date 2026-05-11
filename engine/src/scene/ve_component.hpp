@@ -355,6 +355,44 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// CameraComponent
+// ---------------------------------------------------------------------------
+class VENGINE_API CameraComponent : public Component {
+public:
+	enum class ProjectionType : uint8_t { Perspective, Orthographic };
+
+	ProjectionType getProjection() const { return m_projection; }
+	void setProjection(ProjectionType t) { m_projection = t; }
+
+	float getFovY() const { return m_fov_y_radians; }
+	void setFovY(float radians) { m_fov_y_radians = radians; }
+
+	float getOrthoSize() const { return m_ortho_size; }
+	void setOrthoSize(float half_height) { m_ortho_size = half_height; }
+
+	float getNear() const { return m_near_plane; }
+	void setNear(float v) { m_near_plane = v; }
+
+	float getFar() const { return m_far_plane; }
+	void setFar(float v) { m_far_plane = v; }
+
+	bool isActive() const { return m_active; }
+	void setActive(bool v) { m_active = v; }
+
+	int getPriority() const { return m_priority; }
+	void setPriority(int v) { m_priority = v; }
+
+private:
+	ProjectionType m_projection = ProjectionType::Perspective;
+	float m_fov_y_radians = glm::radians(55.0f);
+	float m_ortho_size = 10.0f;
+	float m_near_plane = 0.1f;
+	float m_far_plane = 1000.0f;
+	bool  m_active = true;
+	int   m_priority = 0;
+};
+
+// ---------------------------------------------------------------------------
 // SkinComponent
 // ---------------------------------------------------------------------------
 class VENGINE_API SkinComponent : public Component {
@@ -389,5 +427,6 @@ extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SpotLightCom
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<RigidbodyComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<AnimatorComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SkinComponent>();
+extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<CameraComponent>();
 
 } // namespace ve

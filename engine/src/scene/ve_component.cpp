@@ -26,6 +26,7 @@ template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SpotLightComponent>
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<RigidbodyComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<AnimatorComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SkinComponent>();
+template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<CameraComponent>();
 
 
 // ---------------------------------------------------------------------------

@@ -75,6 +75,7 @@ struct VENGINE_API LoadedAssetData {
 	std::unordered_set<uint32_t> root_indices;
 	std::vector<VeModel::ExtractedLight> punctual_lights;
 	std::vector<VeModel::ExtractedLight> emissive_lights;
+	std::vector<VeModel::ExtractedCamera> cameras;
 	std::unordered_map<int, uint32_t> gltf_to_loaded_idx;
 	std::vector<VeAnimationClip> animation_clips;
 	std::vector<ModelSkin> skins;

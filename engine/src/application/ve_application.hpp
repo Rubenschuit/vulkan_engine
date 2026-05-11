@@ -8,7 +8,7 @@
 #include "vulkan/ve_buffer.hpp"
 #include "vulkan/ve_descriptors.hpp"
 #include "input/input_controller.hpp"
-#include "scene/ve_camera.hpp"
+#include "scene/camera_view.hpp"
 #include "rendering/ve_frame_info.hpp"
 #include "resources/ve_resource_manager.hpp"
 #include "resources/ve_texture.hpp"
@@ -139,7 +139,7 @@ protected:
 	VeWindow m_ve_window;
 	VeDevice m_ve_device;
 	VeRenderer m_ve_renderer;
-	VeCamera m_camera;
+	CameraView m_current_camera_view;
 	InputController m_input_controller;
 
 private:
@@ -165,7 +165,7 @@ private:
 
 	// --- Camera ---
 	void updateCamera(float fov_radians);
-	void updateUniformBuffer(uint32_t current_frame, UniformBufferObject& ubo);
+	void updateUniformBuffer(uint32_t current_frame, const CameraView& view, UniformBufferObject& ubo);
 	void updateFrameTime();
 
 	UIContext m_ui;

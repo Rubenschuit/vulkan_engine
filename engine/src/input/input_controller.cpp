@@ -31,7 +31,7 @@ bool InputController::isEditorMode() const {
 	return !m_mouse_look_enabled;
 }
 
-void InputController::processInput(float delta_time, VeCamera& camera) {
+void InputController::processInput(float /*delta_time*/) {
 	// Tab toggle between game mode and editor mode
 	{
 		int cur_btn = glfwGetKey(m_window, m_key_mappings.toggle_mouse_look);
@@ -68,46 +68,49 @@ void InputController::processInput(float delta_time, VeCamera& camera) {
 		m_prev_escape_state = cur_escape;
 	}
 
-	// Keyboard look
-	m_yaw_delta = 0.0f;
-	m_pitch_delta = 0.0f;
-	if (glfwGetKey(m_window, m_key_mappings.look_left) == GLFW_PRESS)
-		m_yaw_delta -= m_look_speed * delta_time;
-	if (glfwGetKey(m_window, m_key_mappings.look_right) == GLFW_PRESS)
-		m_yaw_delta += m_look_speed * delta_time;
-	if (glfwGetKey(m_window, m_key_mappings.look_up) == GLFW_PRESS)
-		m_pitch_delta += m_look_speed * delta_time;
-	if (glfwGetKey(m_window, m_key_mappings.look_down) == GLFW_PRESS)
-		m_pitch_delta -= m_look_speed * delta_time;
+	InputActions actions{};
+	actions.mouse_look_enabled = m_mouse_look_enabled;
 
-	// Mouse look (only in game mode)
+	if (glfwGetKey(m_window, m_key_mappings.look_left) == GLFW_PRESS)
+		actions.look_yaw -= 1.0f;
+	if (glfwGetKey(m_window, m_key_mappings.look_right) == GLFW_PRESS)
+		actions.look_yaw += 1.0f;
+	if (glfwGetKey(m_window, m_key_mappings.look_up) == GLFW_PRESS)
+		actions.look_pitch += 1.0f;
+	if (glfwGetKey(m_window, m_key_mappings.look_down) == GLFW_PRESS)
+		actions.look_pitch -= 1.0f;
+
 	if (m_mouse_look_enabled) {
 		double xpos, ypos;
 		glfwGetCursorPos(m_window, &xpos, &ypos);
-		processMouseMovement(xpos, ypos);
+		// First-frame guard so mouse_dx/dy stays at zero before m_last_* is initialized.
+		if (m_last_x == 0.0 && m_last_y == 0.0) {
+			m_last_x = xpos;
+			m_last_y = ypos;
+		}
+		actions.mouse_dx = static_cast<float>(xpos - m_last_x);
+		actions.mouse_dy = static_cast<float>(m_last_y - ypos);
+		m_last_x = xpos;
+		m_last_y = ypos;
 	}
-	camera.yawBy(m_yaw_delta);
-	camera.pitchBy(m_pitch_delta);
-	camera.updateIfDirty();
 
-	// WASD movement
-	if (glfwGetKey(m_window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
-		m_movement_speed = SPRINT_SPEED;
-	else
-		m_movement_speed = NORMAL_SPEED;
-	auto movement_delta = m_movement_speed * delta_time;
+	actions.sprint = (glfwGetKey(m_window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
+
 	if (glfwGetKey(m_window, m_key_mappings.move_forward) == GLFW_PRESS)
-		camera.moveForward(movement_delta);
+		actions.move_forward += 1.0f;
 	if (glfwGetKey(m_window, m_key_mappings.move_backward) == GLFW_PRESS)
-		camera.moveForward(-movement_delta);
+		actions.move_forward -= 1.0f;
 	if (glfwGetKey(m_window, m_key_mappings.move_left) == GLFW_PRESS)
-		camera.moveRight(-movement_delta);
+		actions.move_right -= 1.0f;
 	if (glfwGetKey(m_window, m_key_mappings.move_right) == GLFW_PRESS)
-		camera.moveRight(movement_delta);
+		actions.move_right += 1.0f;
+	// Preserves the legacy mapping where C reduces world-Z and SPACE raises it.
 	if (glfwGetKey(m_window, m_key_mappings.move_up) == GLFW_PRESS)
-		camera.moveUpWorld(-movement_delta);
+		actions.move_up -= 1.0f;
 	if (glfwGetKey(m_window, m_key_mappings.move_down) == GLFW_PRESS)
-		camera.moveUpWorld(movement_delta);
+		actions.move_up += 1.0f;
+
+	m_current_actions = actions;
 
 	// Registered actions
 	for (auto& action : m_actions) {
@@ -127,25 +130,6 @@ void InputController::processInput(float delta_time, VeCamera& camera) {
 		if (fire && m_event_bus)
 			m_event_bus->emitImmediate(InputActionEvent{action.binding.name, action.binding.value});
 	}
-}
-
-void InputController::processMouseMovement(double xpos, double ypos) {
-	if (m_last_x == 0.0 && m_last_y == 0.0) {
-		m_last_x = xpos;
-		m_last_y = ypos;
-	}
-
-	float xoffset = static_cast<float>(xpos - m_last_x);
-	float yoffset = static_cast<float>(m_last_y - ypos);
-
-	m_last_x = xpos;
-	m_last_y = ypos;
-
-	xoffset *= m_mouse_sensitivity;
-	yoffset *= m_mouse_sensitivity;
-
-	m_yaw_delta += glm::radians(xoffset);
-	m_pitch_delta += glm::radians(yoffset);
 }
 
 } // namespace ve

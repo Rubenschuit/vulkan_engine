@@ -336,7 +336,7 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd)
 	};
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_gtao_pipeline_layout, 0, gtao_sets, {});
 
-	const auto& proj = frame_info.camera.getProj();
+	const auto& proj = frame_info.camera_view.proj;
 	GtaoPushConstant gtao_push{
 		.ao_size = glm::vec2(static_cast<float>(m_extent.width), static_cast<float>(m_extent.height)),
 		.depth_size = glm::vec2(static_cast<float>(m_depth_extent.width), static_cast<float>(m_depth_extent.height)),

@@ -169,8 +169,8 @@ void Editor::setSceneRegistry(const std::vector<SceneEntry>* entries, int* curre
 	m_hierarchy_panel.setSceneRegistry(entries, current_index, request);
 }
 
-void Editor::setCamera(VeCamera* camera) {
-	m_viewport_panel.setCamera(camera);
+void Editor::setCameraView(const CameraView* camera_view) {
+	m_viewport_panel.setCameraView(camera_view);
 }
 
 void Editor::setSkyboxSystem(SkyboxRenderSystem* skybox) {

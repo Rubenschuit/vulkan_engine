@@ -203,16 +203,17 @@ uint32_t ClusterLightSystem::uploadLightData(VeFrameInfo& frame_info) {
 	return count;
 }
 
-void ClusterLightSystem::dispatch(VeFrameInfo& frame_info, const VeCamera& camera, vk::Extent2D screen_extent) {
+void ClusterLightSystem::dispatch(VeFrameInfo& frame_info, vk::Extent2D screen_extent) {
 	uint32_t frame = frame_info.current_frame;
 	auto& cmd = frame_info.compute_command_buffer;
 
 	// Update cluster params UBO
+	const CameraView& cv = frame_info.camera_view;
 	ClusterParams params{};
-	params.inv_proj = glm::inverse(camera.getProj());
-	params.view = camera.getView();
-	params.z_near = camera.getNear();
-	params.z_far = camera.getFar();
+	params.inv_proj = glm::inverse(cv.proj);
+	params.view = cv.view;
+	params.z_near = cv.z_near;
+	params.z_far = cv.z_far;
 	params.log_depth_ratio = std::log(params.z_far / params.z_near);
 	params.num_lights = m_last_light_count;
 	params.screen_size = glm::uvec2(screen_extent.width, screen_extent.height);

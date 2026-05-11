@@ -52,7 +52,17 @@ struct CopiedRigidbody {
 	float hull_tolerance{0.05f};
 };
 
-using ComponentClipboard = std::variant<CopiedTransform, CopiedPointLight, CopiedDirectionalLight, CopiedSpotLight, CopiedRigidbody>;
+struct CopiedCamera {
+	uint8_t projection{0};
+	float fov_y_radians{glm::radians(55.0f)};
+	float ortho_size{10.0f};
+	float near_plane{0.1f};
+	float far_plane{1000.0f};
+	bool active{true};
+	int priority{0};
+};
+
+using ComponentClipboard = std::variant<CopiedTransform, CopiedPointLight, CopiedDirectionalLight, CopiedSpotLight, CopiedRigidbody, CopiedCamera>;
 
 enum class GizmoOperation : int {
 	Translate = 0,
@@ -72,6 +82,11 @@ struct VENGINE_API EditorState {
 	// Selection
 	Entity selected_entity = Entity::null();
 	bool selection_changed = false;
+
+	// Camera the viewport renders through. Null = editor camera; otherwise an entity with
+	// CameraComponent. The application falls back to the editor camera if the entity becomes
+	// invalid.
+	Entity viewport_camera = Entity::null();
 
 	// Panel visibility
 	bool show_hierarchy = true;

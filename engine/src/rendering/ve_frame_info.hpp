@@ -6,7 +6,7 @@ for each frame in the rendering process. */
 #include "scene/ve_registry.hpp"
 #include "scene/ve_scene.hpp"
 #include "ve_config.hpp"
-#include "scene/ve_camera.hpp"
+#include "scene/camera_view.hpp"
 
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
@@ -230,7 +230,7 @@ struct VeFrameInfo {
 		assert(command_buffer && "command_buffer is null");
 		return *command_buffer;
 	}
-	ve::VeCamera& camera;
+	CameraView camera_view;
 	Registry* registry = nullptr;
 	std::vector<VisibleObject>& visible_objects;
 	float frame_time;

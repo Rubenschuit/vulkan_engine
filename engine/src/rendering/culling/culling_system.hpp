@@ -1,6 +1,5 @@
 #pragma once
 #include "ve_export.hpp"
-#include "scene/ve_camera.hpp"
 #include "rendering/ve_frame_info.hpp"
 #include <vector>
 
@@ -11,8 +10,7 @@ class VeThreadPool;
 
 class VENGINE_API CullingSystem {
 public:
-	explicit CullingSystem(VeCamera& camera);
-	void setCamera(VeCamera& camera) { m_camera = &camera; }
+	CullingSystem() = default;
 	void setCullingEnabled(bool enabled) { m_culling_enabled = enabled; }
 	bool isCullingEnabled() const { return m_culling_enabled; }
 	void setForceLodLevel(int level) { m_force_lod = level; }
@@ -38,7 +36,6 @@ private:
 	void processEntity(const CullParams& params, uint32_t dense_idx,
 		std::vector<VisibleObject>& out, uint32_t& mesh_count);
 
-	VeCamera* m_camera;
 	bool m_culling_enabled = true;
 	int m_force_lod = -1;
 	float m_lod_thresholds[3] = {0.3f, 0.15f, 0.05f};

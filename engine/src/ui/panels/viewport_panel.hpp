@@ -5,13 +5,13 @@
 
 namespace ve {
 
-class VeCamera;
+struct CameraView;
 class PhysicsSystem;
 
 class VENGINE_API ViewportPanel : public EditorPanel {
 public:
 	void setTextureID(VkDescriptorSet texture_id) { m_texture_id = texture_id; }
-	void setCamera(VeCamera* camera) { m_camera = camera; }
+	void setCameraView(const CameraView* camera_view) { m_camera_view = camera_view; }
 	void setPhysicsSystem(PhysicsSystem* ps) { m_physics_system = ps; }
 
 	void render(Registry* registry, EditorState& state, UIContext& context) override;
@@ -19,11 +19,12 @@ public:
 
 private:
 	void renderGizmoToolbar(EditorState& state);
+	void renderCameraSelector(Registry* registry, EditorState& state);
 	void renderGizmo(Registry* registry, EditorState& state, float img_x, float img_y, float img_w, float img_h);
 	void renderCollisionShape(Registry* registry, EditorState& state, float img_x, float img_y, float img_w, float img_h);
 
 	VkDescriptorSet m_texture_id = VK_NULL_HANDLE;
-	VeCamera* m_camera = nullptr;
+	const CameraView* m_camera_view = nullptr;
 	PhysicsSystem* m_physics_system = nullptr;
 	Entity m_frozen_entity = Entity::null();
 	bool m_was_gizmo_active = false;

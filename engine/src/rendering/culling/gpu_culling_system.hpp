@@ -13,12 +13,12 @@
 namespace ve {
 
 class VeDevice;
-class VeCamera;
 class VeImage;
 class GpuSceneManager;
 class HizSystem;
 class EventBus;
 struct VeFrameInfo;
+struct CameraView;
 
 struct CullParams {
 	alignas(16) glm::vec4 frustum_planes[6];
@@ -71,14 +71,14 @@ public:
 	// Dispatches shadow culling for one independent shadow buffer slot (no WAR barrier needed).
 	// Call for every shadow layer (cascades 0..csm_count-1, then lights at NUM_CSM_CASCADES+i).
 	// lod_bias offsets LOD selection (cascade_index for CSM, 1 for point/spot lights).
-	// If camera is provided and Hi-Z is enabled, camera-space occlusion culling is applied.
+	// If camera_view is provided and Hi-Z is enabled, camera-space occlusion culling is applied.
 	void dispatchShadowCull(vk::raii::CommandBuffer& cmd,
 	                        const glm::mat4& light_view_proj,
 	                        GpuSceneManager& scene_mgr,
 	                        uint32_t frame_index,
 	                        uint32_t shadow_buf_index,
 	                        int32_t lod_bias,
-	                        const VeCamera* camera = nullptr,
+	                        const CameraView* camera_view = nullptr,
 	                        ShadowPassMode shadow_mode = ShadowPassMode::ALL_OBJECTS);
 
 	// Single global compute→draw barrier covering all shadow buffer slots.

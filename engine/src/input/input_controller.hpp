@@ -1,8 +1,8 @@
-// Handles camera movement and dispatches registered input actions via EventBus.
+// Maps raw GLFW input to a per-frame InputActions snapshot and dispatches 
+// registered actions via EventBus.
 #pragma once
 #include "ve_export.hpp"
 #include "platform/ve_window.hpp"
-#include "scene/ve_camera.hpp"
 #include "input/input_action.hpp"
 
 #include <deque>
@@ -40,7 +40,8 @@ public:
 	InputController(const InputController&) = delete;
 	InputController& operator=(const InputController&) = delete;
 
-	void processInput(float delta_time, VeCamera& camera);
+	void processInput(float delta_time);
+	const InputActions& getActions() const { return m_current_actions; }
 
 	void setEventBus(EventBus* bus);
 	void registerAction(ActionBinding&& binding);
@@ -48,20 +49,11 @@ public:
 	bool isEditorMode() const;
 
 private:
-	void processMouseMovement(double xpos, double ypos);
-
 	GLFWwindow* m_window{nullptr};
 
 	KeyMappings m_key_mappings{};
 	double m_last_x = 0.0;
 	double m_last_y = 0.0;
-	const float NORMAL_SPEED = 5.0f;
-	const float SPRINT_SPEED = 60.0f;
-	float m_movement_speed = NORMAL_SPEED;
-	float m_look_speed = 2.0f;
-	float m_mouse_sensitivity = 0.2f;
-	float m_yaw_delta = 0.0f;
-	float m_pitch_delta = 0.0f;
 
 	bool m_mouse_look_enabled = true;
 	int m_prev_toggle_state = GLFW_RELEASE;
@@ -69,6 +61,7 @@ private:
 
 	EventBus* m_event_bus = nullptr;
 	std::deque<RegisteredAction> m_actions;
+	InputActions m_current_actions{};
 };
 
 } // namespace ve

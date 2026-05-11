@@ -131,8 +131,8 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 	m_opaque_drawables.reserve(std::max(visible_count, m_opaque_drawables.capacity()));
 	m_transparent_drawables.reserve(std::max(visible_count, m_transparent_drawables.capacity()));
 
-	const glm::vec3 camera_pos = frame_info.camera.getPosition();
-	const glm::vec3 camera_fwd = frame_info.camera.getForward();
+	const glm::vec3 camera_pos = frame_info.camera_view.position;
+	const glm::vec3 camera_fwd = frame_info.camera_view.forward;
 	auto& registry = *frame_info.registry;
 
 	for (auto& entry : frame_info.visible_objects) {
@@ -306,7 +306,7 @@ void PbrRenderSystem::prepareSkinnedFrame(VeFrameInfo& frame_info, MaterialSSBOM
 	auto& registry = *frame_info.registry;
 
 	FrustumPlane planes[6];
-	extractFrustumPlanes(frame_info.camera.getProj() * frame_info.camera.getView(), planes);
+	extractFrustumPlanes(frame_info.camera_view.proj * frame_info.camera_view.view, planes);
 
 	for (auto [entity, mc, sc] : registry.view<MeshComponent, SkinComponent>()) {
 		if (!mc.hasMesh() || !mc.hasMaterial())
@@ -371,10 +371,10 @@ void PbrRenderSystem::prepareTransparents(VeFrameInfo& frame_info, MaterialSSBOM
 
 	auto& registry = *frame_info.registry;
 	FrustumPlane planes[6];
-	extractFrustumPlanes(frame_info.camera.getProj() * frame_info.camera.getView(), planes);
+	extractFrustumPlanes(frame_info.camera_view.proj * frame_info.camera_view.view, planes);
 
-	const glm::vec3 camera_pos = frame_info.camera.getPosition();
-	const glm::vec3 camera_fwd = frame_info.camera.getForward();
+	const glm::vec3 camera_pos = frame_info.camera_view.position;
+	const glm::vec3 camera_fwd = frame_info.camera_view.forward;
 
 	for (uint32_t entity_idx : transparent_entity_indices) {
 		MeshComponent* mesh = registry.meshes().get(entity_idx);

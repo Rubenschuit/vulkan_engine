@@ -1,7 +1,8 @@
 #include "pch.hpp"
 #include "ui/panels/viewport_panel.hpp"
 #include "scene/ve_registry.hpp"
-#include "scene/ve_camera.hpp"
+#include "scene/ve_component.hpp"
+#include "scene/camera_view.hpp"
 #include "utils/ve_ray.hpp"
 #include "physics/physics_system.hpp"
 #include <imgui.h>
@@ -22,6 +23,10 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 		state.viewport_focused = ImGui::IsWindowFocused();
 
 		renderGizmoToolbar(state);
+		ImGui::SameLine();
+		ImGui::TextDisabled("|");
+		ImGui::SameLine();
+		renderCameraSelector(registry, state);
 
 		ImVec2 size = ImGui::GetContentRegionAvail();
 		float dpi_scale = ImGui::GetIO().DisplayFramebufferScale.x;
@@ -45,13 +50,13 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 
 		// Raycast picking (left-click in viewport selects entity)
 		if (state.viewport_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
-		    && !state.gizmo_active && !ImGuizmo::IsOver() && m_camera && registry) {
+		    && !state.gizmo_active && !ImGuizmo::IsOver() && m_camera_view && registry) {
 			ImVec2 mouse = ImGui::GetMousePos();
 			float uv_x = (mouse.x - image_pos.x) / size.x;
 			float uv_y = (mouse.y - image_pos.y) / size.y;
 
 			if (uv_x >= 0.0f && uv_x <= 1.0f && uv_y >= 0.0f && uv_y <= 1.0f) {
-				glm::mat4 inv_vp = glm::inverse(m_camera->getProj() * m_camera->getView());
+				glm::mat4 inv_vp = glm::inverse(m_camera_view->proj * m_camera_view->view);
 				Ray ray = screenToWorldRay(uv_x, uv_y, inv_vp);
 				RayHit hit;
 				if (raycastScene(ray, *registry, hit)) {
@@ -118,6 +123,48 @@ void ViewportPanel::renderGizmoToolbar(EditorState& state) {
 	ImGui::PopStyleVar(2);
 }
 
+void ViewportPanel::renderCameraSelector(Registry* registry, EditorState& state) {
+	bool selection_is_editor = state.viewport_camera.isNull()
+		|| !registry
+		|| !registry->isAlive(state.viewport_camera)
+		|| !registry->hasComponent<CameraComponent>(state.viewport_camera);
+	if (selection_is_editor)
+		state.viewport_camera = Entity::null();
+
+	std::string current_label;
+	if (selection_is_editor) {
+		current_label = "Editor Camera";
+	} else {
+		current_label = registry->getName(state.viewport_camera);
+		if (current_label.empty())
+			current_label = "<unnamed>";
+	}
+
+	ImGui::SetNextItemWidth(180.0f);
+	if (ImGui::BeginCombo("##ViewportCamera", current_label.c_str())) {
+		if (ImGui::Selectable("Editor Camera", selection_is_editor))
+			state.viewport_camera = Entity::null();
+
+		if (registry) {
+			auto& pool = registry->cameras();
+			for (uint32_t i = 0; i < pool.size(); i++) {
+				uint32_t entity_idx = pool.entityIndexData()[i];
+				Entity e = registry->entityFromIndex(entity_idx);
+				if (!registry->isAlive(e))
+					continue;
+				const std::string& name = registry->getName(e);
+				std::string label = name.empty() ? std::string{"<unnamed>"} : name;
+				bool selected = (e == state.viewport_camera);
+				ImGui::PushID(static_cast<int>(e.id()));
+				if (ImGui::Selectable(label.c_str(), selected))
+					state.viewport_camera = e;
+				ImGui::PopID();
+			}
+		}
+		ImGui::EndCombo();
+	}
+}
+
 void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float img_x, float img_y, float img_w, float img_h) {
 	state.gizmo_active = false;
 
@@ -130,7 +177,7 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 		m_was_gizmo_active = state.gizmo_active;
 	};
 
-	if (!m_camera || !registry || state.selected_entity.isNull()) {
+	if (!m_camera_view || !registry || state.selected_entity.isNull()) {
 		unfreezeIfNeeded();
 		return;
 	}
@@ -176,7 +223,7 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 	// Get world transform
 	const glm::mat4& world = registry->getWorldTransform(state.selected_entity);
 	glm::mat4 model = world;
-	const glm::mat4& view = m_camera->getView();
+	const glm::mat4& view = m_camera_view->view;
 
 	glm::vec3 aabb_offset = state.cached_aabb_offset;
 
@@ -186,8 +233,8 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 
 	// ImGuizmo expects a standard forward-Z projection
 	// Build one from camera parameters since our actual proj is infinite reverse-Z.
-	glm::mat4 gizmo_proj = glm::perspective(m_camera->getFovY(), m_camera->getAspect(),
-	                                         m_camera->getNear(), m_camera->getFar());
+	glm::mat4 gizmo_proj = glm::perspective(m_camera_view->fov_y_radians, m_camera_view->aspect,
+	                                         m_camera_view->z_near, m_camera_view->z_far);
 
 	if (ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(gizmo_proj),
 	                         op, mode, glm::value_ptr(model), nullptr, snap_ptr)) {
@@ -338,14 +385,14 @@ static void drawWireCapsule(ImDrawList* dl, const glm::vec3& center, const glm::
 
 void ViewportPanel::renderCollisionShape(Registry* registry, EditorState& state,
 	float img_x, float img_y, float img_w, float img_h) {
-	if (!m_physics_system || !m_camera || !registry || state.selected_entity.isNull())
+	if (!m_physics_system || !m_camera_view || !registry || state.selected_entity.isNull())
 		return;
 
 	auto shape = m_physics_system->getDebugShape(state.selected_entity, *registry);
 	if (!shape)
 		return;
 
-	glm::mat4 vp = m_camera->getProj() * m_camera->getView();
+	glm::mat4 vp = m_camera_view->proj * m_camera_view->view;
 	ImDrawList* dl = ImGui::GetWindowDrawList();
 
 	ImU32 col = shape->is_dynamic ? IM_COL32(0, 255, 100, 200) : IM_COL32(0, 150, 255, 200);

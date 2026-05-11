@@ -358,17 +358,18 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 	uint32_t frame = frame_info.current_frame;
 
 	// Update cull params UBO
-	glm::mat4 vp = frame_info.camera.getProj() * frame_info.camera.getView();
+	const CameraView& cv = frame_info.camera_view;
+	glm::mat4 vp = cv.proj * cv.view;
 	FrustumPlane cpu_planes[6];
 	extractFrustumPlanes(vp, cpu_planes);
 
-	const glm::mat4& proj = frame_info.camera.getProj();
+	const glm::mat4& proj = cv.proj;
 
 	CullParams params{};
 	for (int i = 0; i < 6; i++)
 		params.frustum_planes[i] = cpu_planes[i].plane;
 	params.view_proj      = vp;
-	params.view           = frame_info.camera.getView();
+	params.view           = cv.view;
 	params.prev_view      = m_frame_views[(frame + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT];
 	params.p00            = proj[0][0];
 	params.p11            = proj[1][1];
@@ -380,7 +381,7 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 	params.lod_bias       = 0;
 	params.max_meshlet_draws = MAX_MESHLET_DRAWS;
 	params.bucket_count      = MESHLET_BUCKET_COUNT;
-	params.camera_pos     = glm::vec4(frame_info.camera.getPosition(), 0.0f);
+	params.camera_pos     = glm::vec4(cv.position, 0.0f);
 	if (m_hiz_enabled) {
 		params.hiz_size      = m_hiz_size;
 		params.hiz_mip_count = m_hiz_mip_count;

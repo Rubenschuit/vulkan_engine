@@ -419,8 +419,8 @@ void ParticleSystem::recordComputeCommands(VeFrameInfo& frame_info) {
 	params.wind_direction = m_wind_direction;
 
 	// Calculate Frustum Planes from Camera
-	glm::mat4 view = frame_info.camera.getView();
-	glm::mat4 proj = frame_info.camera.getProj();
+	glm::mat4 view = frame_info.camera_view.view;
+	glm::mat4 proj = frame_info.camera_view.proj;
 	glm::mat4 m = proj * view;
 	glm::mat4 mt = glm::transpose(m);
 

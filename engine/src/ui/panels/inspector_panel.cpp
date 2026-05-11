@@ -438,6 +438,45 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 			renderSkin(*registry, *registry->getComponent<SkinComponent>(entity), state);
 	}
 
+	// Camera
+	if (registry->hasComponent<CameraComponent>(entity)) {
+		bool open = ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		if (ImGui::BeginPopupContextItem("cam_ctx")) {
+			if (ImGui::MenuItem("Copy")) {
+				auto* cc = registry->getComponent<CameraComponent>(entity);
+				CopiedCamera ccp;
+				ccp.projection = static_cast<uint8_t>(cc->getProjection());
+				ccp.fov_y_radians = cc->getFovY();
+				ccp.ortho_size = cc->getOrthoSize();
+				ccp.near_plane = cc->getNear();
+				ccp.far_plane = cc->getFar();
+				ccp.active = cc->isActive();
+				ccp.priority = cc->getPriority();
+				state.component_clipboard = ccp;
+			}
+			if (state.component_clipboard && std::holds_alternative<CopiedCamera>(*state.component_clipboard))
+				if (ImGui::MenuItem("Paste")) {
+					auto* cc = registry->getComponent<CameraComponent>(entity);
+					auto& ccp = std::get<CopiedCamera>(*state.component_clipboard);
+					cc->setProjection(static_cast<CameraComponent::ProjectionType>(ccp.projection));
+					cc->setFovY(ccp.fov_y_radians);
+					cc->setOrthoSize(ccp.ortho_size);
+					cc->setNear(ccp.near_plane);
+					cc->setFar(ccp.far_plane);
+					cc->setActive(ccp.active);
+					cc->setPriority(ccp.priority);
+				}
+			ImGui::EndPopup();
+		}
+		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
+		ImGui::PushID("remove_cam");
+		if (ImGui::SmallButton("X"))
+			registry->queueComponentRemoval<CameraComponent>(entity);
+		ImGui::PopID();
+		if (open && registry->hasComponent<CameraComponent>(entity))
+			renderCamera(*registry->getComponent<CameraComponent>(entity));
+	}
+
 	// Add Component
 	ImGui::Spacing();
 	ImGui::Separator();
@@ -463,6 +502,10 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		if (!registry->hasComponent<RigidbodyComponent>(entity))
 			if (ImGui::MenuItem("Rigidbody"))
 				registry->addComponent<RigidbodyComponent>(entity);
+
+		if (!registry->hasComponent<CameraComponent>(entity))
+			if (ImGui::MenuItem("Camera"))
+				registry->addComponent<CameraComponent>(entity);
 
 		if (!registry->hasComponent<MeshComponent>(entity)) {
 			ImGui::BeginDisabled(true);
@@ -963,6 +1006,53 @@ void InspectorPanel::renderSkin(Registry& registry, SkinComponent& skin, EditorS
 		}
 		ImGui::TreePop();
 	}
+}
+
+void InspectorPanel::renderCamera(CameraComponent& camera) {
+	constexpr float label_w = 110.0f;
+
+	int proj = static_cast<int>(camera.getProjection());
+	labeledWidget(label_w, "Projection", [&]() {
+		const char* items[] = {"Perspective", "Orthographic"};
+		if (ImGui::Combo("##Projection", &proj, items, 2))
+			camera.setProjection(static_cast<CameraComponent::ProjectionType>(proj));
+	});
+
+	if (camera.getProjection() == CameraComponent::ProjectionType::Perspective) {
+		float fov_deg = glm::degrees(camera.getFovY());
+		labeledWidget(label_w, "FOV (deg)", [&]() {
+			if (ImGui::SliderFloat("##FOV", &fov_deg, 1.0f, 170.0f, "%.1f"))
+				camera.setFovY(glm::radians(fov_deg));
+		}, [&]() { camera.setFovY(glm::radians(55.0f)); });
+	} else {
+		float ortho = camera.getOrthoSize();
+		labeledWidget(label_w, "Ortho Size", [&]() {
+			if (ImGui::DragFloat("##Ortho", &ortho, 0.1f, 0.01f, 10000.0f, "%.2f"))
+				camera.setOrthoSize(ortho);
+		}, [&]() { camera.setOrthoSize(10.0f); });
+	}
+
+	float near_p = camera.getNear();
+	labeledWidget(label_w, "Near", [&]() {
+		if (ImGui::DragFloat("##Near", &near_p, 0.01f, 0.001f, 100.0f, "%.3f"))
+			camera.setNear(near_p);
+	}, [&]() { camera.setNear(0.1f); });
+
+	float far_p = camera.getFar();
+	labeledWidget(label_w, "Far", [&]() {
+		if (ImGui::DragFloat("##Far", &far_p, 1.0f, 0.1f, 1000000.0f, "%.1f"))
+			camera.setFar(far_p);
+	}, [&]() { camera.setFar(1000.0f); });
+
+	bool active = camera.isActive();
+	if (ImGui::Checkbox("Active##Camera", &active))
+		camera.setActive(active);
+
+	int priority = camera.getPriority();
+	labeledWidget(label_w, "Priority", [&]() {
+		if (ImGui::DragInt("##Priority", &priority, 1.0f, -1000, 1000))
+			camera.setPriority(priority);
+	}, [&]() { camera.setPriority(0); });
 }
 
 } // namespace ve

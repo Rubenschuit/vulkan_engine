@@ -679,6 +679,36 @@ static std::vector<glm::vec3> clusterVertices(
 	return centroids;
 }
 
+// Extract cameras from glTF nodes. Each node with node.camera >= 0 produces an
+// ExtractedCamera bound to that node, applied by addToScene as a CameraComponent.
+static std::vector<VeModel::ExtractedCamera> extractCameras(const tinygltf::Model& gltf) {
+	std::vector<VeModel::ExtractedCamera> out;
+	for (size_t node_idx = 0; node_idx < gltf.nodes.size(); node_idx++) {
+		const auto& node = gltf.nodes[node_idx];
+		if (node.camera < 0 || node.camera >= static_cast<int>(gltf.cameras.size()))
+			continue;
+		const auto& src = gltf.cameras[static_cast<size_t>(node.camera)];
+		VeModel::ExtractedCamera cam;
+		cam.node_idx = static_cast<int>(node_idx);
+		cam.name = src.name.empty() ? node.name : src.name;
+		if (src.type == "orthographic") {
+			cam.perspective = false;
+			cam.ortho_size = static_cast<float>(src.orthographic.ymag);
+			cam.znear = static_cast<float>(src.orthographic.znear);
+			cam.zfar  = static_cast<float>(src.orthographic.zfar);
+		} else {
+			cam.perspective = true;
+			cam.yfov_radians = static_cast<float>(src.perspective.yfov);
+			cam.znear = static_cast<float>(src.perspective.znear);
+			// zfar is optional in glTF
+			cam.zfar = src.perspective.zfar > 0.0 ? static_cast<float>(src.perspective.zfar) : 1000.0f;
+		}
+		VE_LOGI("Extracted camera " << cam.name << " from node " << node.name);
+		out.push_back(std::move(cam));
+	}
+	return out;
+}
+
 // Extract KHR_lights_punctual lights from glTF extension data
 static std::vector<VeModel::ExtractedLight> extractPunctualLights(
     const tinygltf::Model& gltf,
@@ -1965,6 +1995,8 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 			light_pos_dedup.insert(quantize(L.position));
 	}
 
+	m_cameras = extractCameras(gltf);
+
 	// Process node hierarchy and build meshes (reuse CPU-only path)
 	std::vector<ProcessedMaterial> dummy_materials(m_material_handles.size());
 	LoadProgress no_progress;
@@ -2099,6 +2131,8 @@ LoadedAssetData VeModel::loadFromGltfCpu(
 			light_pos_dedup.insert(quantize(L.position));
 	}
 
+	result.cameras = extractCameras(gltf);
+
 	// Process node hierarchy and build meshes (CPU only)
 	std::unordered_map<std::string, int> geometry_mesh_cache;
 	GeometryCenterExtent geometry_center_extent;
@@ -2161,6 +2195,7 @@ std::unique_ptr<VeModel> VeModel::fromLoadedData(
 	model->m_material_handles = material_handles;
 	model->m_punctual_lights = std::move(data.punctual_lights);
 	model->m_emissive_lights = std::move(data.emissive_lights);
+	model->m_cameras = std::move(data.cameras);
 	model->m_parent_links = std::move(data.parent_links);
 	model->m_root_indices = std::move(data.root_indices);
 	model->m_gltf_to_loaded_idx = std::move(data.gltf_to_loaded_idx);
@@ -2439,6 +2474,38 @@ void VeModel::addToScene(Registry& registry,
 			registry.setActive(light, false);  // default OFF
 		}
 	}
+
+	// Cameras: attach a CameraComponent to the entity that owns the source node.
+	int unnamed_perspective = 0;
+	int unnamed_orthographic = 0;
+	for (const ExtractedCamera& C : m_cameras) {
+		auto it = m_gltf_to_loaded_idx.find(C.node_idx);
+		if (it == m_gltf_to_loaded_idx.end() || it->second >= index_to_entity.size())
+			continue;
+		Entity e = index_to_entity[it->second];
+		if (e.isNull() || registry.hasComponent<CameraComponent>(e))
+			continue;
+		auto& cc = registry.addComponent<CameraComponent>(e);
+		cc.setProjection(C.perspective ? CameraComponent::ProjectionType::Perspective
+		                               : CameraComponent::ProjectionType::Orthographic);
+		cc.setFovY(C.yfov_radians);
+		cc.setOrthoSize(C.ortho_size);
+		cc.setNear(C.znear);
+		cc.setFar(C.zfar);
+		if (registry.getName(e).empty()) {
+			if (!C.name.empty()) {
+				registry.setName(e, C.name);
+			} else {
+				int& counter = C.perspective ? unnamed_perspective : unnamed_orthographic;
+				std::string label = C.perspective ? "Camera (perspective)" : "Camera (orthographic)";
+				if (counter > 0)
+					label += " " + std::to_string(counter);
+				registry.setName(e, label);
+				counter++;
+			}
+		}
+	}
+
 	m_gltf_to_loaded_idx.clear();
 }
 

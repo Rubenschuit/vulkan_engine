@@ -164,7 +164,7 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 	}
 
 	// Celestial billboards for directional lights (sun/moon)
-	glm::vec3 cam_pos = frame_info.camera.getPosition();
+	glm::vec3 cam_pos = frame_info.camera_view.position;
 	for (auto [entity, dl] : registry.view<DirectionalLightComponent>()) {
 		glm::vec3 celestial_pos = cam_pos - glm::normalize(dl.getDirection()) * CELESTIAL_DISTANCE;
 
@@ -265,14 +265,14 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 
 		// CSM for the first shadow-casting directional light
 		if (dl.getCastsShadow() && !csm_assigned) {
-			const auto& cam = frame_info.camera;
-			float shadow_near = std::max(cam.getNear(), 0.5f); // CSM near floor: avoid wasting cascade 0 on tiny near plane
-			float shadow_far = std::min(cam.getFar(), DIR_SHADOW_MAX_DISTANCE);
-			float tan_half_fov = std::tan(cam.getFovY() * 0.5f);
+			const CameraView& cv = frame_info.camera_view;
+			float shadow_near = std::max(cv.z_near, 0.5f); // CSM near floor: avoid wasting cascade 0 on tiny near plane
+			float shadow_far = std::min(cv.z_far, DIR_SHADOW_MAX_DISTANCE);
+			float tan_half_fov = std::tan(cv.fov_y_radians * 0.5f);
 
-			glm::vec3 cam_fwd = cam.getForward();
-			glm::vec3 cam_right = cam.getRight();
-			glm::vec3 cam_up = cam.getUp();
+			glm::vec3 cam_fwd = cv.forward;
+			glm::vec3 cam_right = cv.right;
+			glm::vec3 cam_up = cv.up;
 
 			// Compute cascade split distances
 			float splits[NUM_CSM_CASCADES];
@@ -291,11 +291,11 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 
 				// Frustum slice corners
 				float nh = near_split * tan_half_fov;
-				float nw = nh * cam.getAspect();
+				float nw = nh * cv.aspect;
 				float fh = far_split * tan_half_fov;
-				float fw = fh * cam.getAspect();
-				glm::vec3 nc = cam.getPosition() + cam_fwd * near_split;
-				glm::vec3 fc = cam.getPosition() + cam_fwd * far_split;
+				float fw = fh * cv.aspect;
+				glm::vec3 nc = cv.position + cam_fwd * near_split;
+				glm::vec3 fc = cv.position + cam_fwd * far_split;
 
 				glm::vec3 corners[8] = {
 					nc - cam_up * nh - cam_right * nw,
