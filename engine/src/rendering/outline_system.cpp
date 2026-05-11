@@ -11,6 +11,7 @@
 #include "utils/ve_log.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
+#include "rendering/skinning_pre_pass.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -474,12 +475,27 @@ void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_
 			*m_mask_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
 			vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
 
-		if (mesh != bound_mesh) {
-			bound_mesh = mesh;
-			mesh->bindShadowVertexBuffer(cmd);
-			mesh->bindLodIndexBuffer(cmd, 0);
+		// Skinned entities have to use their per-frame post-skin position buffer
+		// or the outline traces the bind pose
+		VeBuffer* skin_pos = nullptr;
+		if (fi.skinning_pre_pass && registry.hasComponent<SkinComponent>(e))
+			skin_pos = fi.skinning_pre_pass->getOutputPositionBuffer(e, fi.current_frame);
+
+		if (skin_pos) {
+			vk::Buffer vbos[] = {skin_pos->getBuffer()};
+			vk::DeviceSize offsets[] = {0};
+			cmd.bindVertexBuffers(0, vbos, offsets);
+			cmd.bindIndexBuffer(mesh->getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
+			cmd.drawIndexed(mesh->getIndexCount(), 1, 0, 0, 0);
+			bound_mesh = nullptr;  // force rebind on next static mesh
+		} else {
+			if (mesh != bound_mesh) {
+				bound_mesh = mesh;
+				mesh->bindShadowVertexBuffer(cmd);
+				mesh->bindLodIndexBuffer(cmd, 0);
+			}
+			mesh->drawIndexedLod(cmd, 0, 1, 0);
 		}
-		mesh->drawIndexedLod(cmd, 0, 1, 0);
 		instance_idx++;
 	}
 

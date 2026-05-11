@@ -21,6 +21,7 @@ namespace ve {
 	class VeDescriptorSetLayout;
 	class VeDescriptorPool;
 	class EventBus;
+	class SkinningPrePass;
 }
 
 namespace ve {
@@ -63,6 +64,10 @@ public:
 	                                   const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 	void renderTransparent(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
 	                       const vk::raii::DescriptorSet* global_set_override = nullptr) const;
+
+	void prepareSkinnedFrame(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr) const;
+	void renderSkinned(VeFrameInfo& frame_info, const SkinningPrePass& pre_pass,
+	                   const vk::raii::DescriptorSet& bindless_set) const;
 
 	// WBOIT: GPU-driven transparent rendering
 	void initWboit(const vk::raii::ImageView& accum_view, const vk::raii::ImageView& revealage_view,
@@ -121,6 +126,19 @@ public:
 	const uint32_t* getDepthBucketCounts() const { return m_bucket_counts; }
 	const VeBuffer& getIndirectBuffer(uint32_t frame) const { return *m_indirect_buffers[frame]; }
 
+	struct Drawable {
+		Entity entity;
+		MeshComponent* mesh = nullptr;
+		VeMesh* mesh_ptr = nullptr;
+		VeMaterial* material_ptr = nullptr;
+		float dist_sq = 0.0f;
+		AlphaMode alpha_mode = AlphaMode::ALPHA_OPAQUE;
+		bool double_sided = false;
+		uint32_t ssbo_index = 0;
+		uint32_t lod_level = 0;
+	};
+	const std::vector<Drawable>& getSkinnedDrawables() const { return m_skinned_drawables; }
+
 private:
 	bool m_depth_prepass_active = true;
 	void createPipelineLayout(
@@ -173,19 +191,11 @@ private:
 	// Persistent scratch vectors (avoid per-frame heap allocation)
 	mutable std::vector<VkDrawIndexedIndirectCommand> m_indirect_cmds;
 
-	struct Drawable {
-		Entity entity;
-		MeshComponent* mesh = nullptr;
-		VeMesh* mesh_ptr = nullptr;
-		VeMaterial* material_ptr = nullptr;
-		float dist_sq = 0.0f;
-		AlphaMode alpha_mode = AlphaMode::ALPHA_OPAQUE;
-		bool double_sided = false;
-		uint32_t ssbo_index = 0;
-		uint32_t lod_level = 0;
-	};
 	mutable std::vector<Drawable> m_opaque_drawables;
 	mutable std::vector<Drawable> m_transparent_drawables;
+	mutable std::vector<Drawable> m_skinned_drawables;
+
+	mutable bool m_warned_skinned_blend = false;
 };
 
 } // namespace ve

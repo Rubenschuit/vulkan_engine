@@ -512,6 +512,42 @@ static std::vector<VeAnimationClip> parseAnimations(
 	return clips;
 }
 
+// Parse glTF skins into ModelSkin array. IBMs are converted from Y-up to Z-up
+static std::vector<ModelSkin> parseSkins(const tinygltf::Model& gltf) {
+	std::vector<ModelSkin> skins;
+	skins.reserve(gltf.skins.size());
+	for (size_t s = 0; s < gltf.skins.size(); s++) {
+		const auto& gs = gltf.skins[s];
+		ModelSkin skin;
+		skin.joint_node_indices.assign(gs.joints.begin(), gs.joints.end());
+		skin.skeleton_root_node = gs.skeleton;
+
+		size_t joint_count = skin.joint_node_indices.size();
+		if (gs.inverseBindMatrices >= 0) {
+			std::vector<float> raw = readAccessorFloats(gltf, gs.inverseBindMatrices, 16);
+			size_t mat_count = raw.size() / 16;
+			skin.inverse_bind_matrices.reserve(mat_count);
+			for (size_t j = 0; j < mat_count; j++) {
+				glm::mat4 ibm_gltf(1.0f);
+				for (int col = 0; col < 4; col++)
+					for (int row = 0; row < 4; row++)
+						ibm_gltf[col][row] = raw[j * 16 + static_cast<size_t>(col * 4 + row)];
+				skin.inverse_bind_matrices.push_back(YUP_TO_ZUP * ibm_gltf * ZUP_TO_YUP);
+			}
+		}
+		if (skin.inverse_bind_matrices.size() < joint_count)
+			skin.inverse_bind_matrices.resize(joint_count, glm::mat4(1.0f));
+
+		std::ostringstream det_log;
+		for (size_t j = 0; j < skin.inverse_bind_matrices.size(); j++)
+			det_log << ", IBM[" << j << "] det=" << glm::determinant(skin.inverse_bind_matrices[j]);
+		VE_LOGD("[Skin " << s << "] " << joint_count << " joints" << det_log.str());
+
+		skins.push_back(std::move(skin));
+	}
+	return skins;
+}
+
 // Position dedup: quantize positions to 1cm grid to avoid duplicate lights
 struct PosKey {
 	int32_t x, y, z;
@@ -959,6 +995,65 @@ static ProcessedMesh processPrimitive(
 		vertices.push_back(vertex);
 	}
 
+	std::vector<VeMesh::SkinVertex> skin_vertices;
+	auto joints_it = primitive.attributes.find("JOINTS_0");
+	auto weights_it = primitive.attributes.find("WEIGHTS_0");
+	if (joints_it != primitive.attributes.end() && weights_it != primitive.attributes.end()) {
+		const tinygltf::Accessor& joints_acc = m.accessors[static_cast<size_t>(joints_it->second)];
+		const tinygltf::BufferView& joints_bv = m.bufferViews[static_cast<size_t>(joints_acc.bufferView)];
+		const tinygltf::Buffer& joints_buf = m.buffers[static_cast<size_t>(joints_bv.buffer)];
+		const size_t joints_comp_size = gltfComponentSize(joints_acc.componentType);
+		int joints_stride_val = joints_acc.ByteStride(joints_bv);
+		const size_t joints_stride = joints_stride_val > 0 ? static_cast<size_t>(joints_stride_val) : joints_comp_size * 4;
+
+		const tinygltf::Accessor& weights_acc = m.accessors[static_cast<size_t>(weights_it->second)];
+		const tinygltf::BufferView& weights_bv = m.bufferViews[static_cast<size_t>(weights_acc.bufferView)];
+		const tinygltf::Buffer& weights_buf = m.buffers[static_cast<size_t>(weights_bv.buffer)];
+		const size_t weights_comp_size = gltfComponentSize(weights_acc.componentType);
+		int weights_stride_val = weights_acc.ByteStride(weights_bv);
+		const size_t weights_stride = weights_stride_val > 0 ? static_cast<size_t>(weights_stride_val) : weights_comp_size * 4;
+
+		const size_t source_count = std::min({static_cast<size_t>(joints_acc.count),
+		                                      static_cast<size_t>(weights_acc.count),
+		                                      vertices.size()});
+		skin_vertices.resize(vertices.size(), VeMesh::SkinVertex{{0,0,0,0},{65535,0,0,0}});
+
+		size_t max_joints_per_vertex = 0;
+		size_t weight_sum_violations = 0;
+		for (size_t i = 0; i < source_count; i++) {
+			const uint8_t* j_base = &joints_buf.data[joints_bv.byteOffset + joints_acc.byteOffset + i * joints_stride];
+			const uint8_t* w_base = &weights_buf.data[weights_bv.byteOffset + weights_acc.byteOffset + i * weights_stride];
+
+			VeMesh::SkinVertex sv{};
+			float w[4];
+			for (int c = 0; c < 4; c++) {
+				const uint8_t* jp = j_base + static_cast<size_t>(c) * joints_comp_size;
+				sv.joints[c] = (joints_acc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
+				             ? *jp : *reinterpret_cast<const uint16_t*>(jp);
+				w[c] = readGltfComponent(w_base + static_cast<size_t>(c) * weights_comp_size,
+				                         weights_acc.componentType, weights_acc.normalized);
+				float wn = std::clamp(w[c], 0.0f, 1.0f);
+				sv.weights[c] = static_cast<uint16_t>(wn * 65535.0f + 0.5f);
+			}
+			skin_vertices[i] = sv;
+
+			size_t nonzero = 0;
+			float sum = 0.f;
+			for (int c = 0; c < 4; c++) {
+				if (w[c] > 0.0f)
+					nonzero++;
+				sum += w[c];
+			}
+			if (nonzero > max_joints_per_vertex)
+				max_joints_per_vertex = nonzero;
+			if (std::abs(sum - 1.0f) > 1e-3f)
+				weight_sum_violations++;
+		}
+		VE_LOGD("[Mesh " << mesh_id << "] vertices=" << source_count
+		        << ", max_joints_per_vertex=" << max_joints_per_vertex
+		        << ", weight_sum_violations=" << weight_sum_violations);
+	}
+
 	const size_t vertex_count = vertices.size();
 	if (index_accessor && index_buf) {
 		const unsigned char* index_data = &index_buf->data[index_bv->byteOffset + index_accessor->byteOffset];
@@ -1042,6 +1137,13 @@ static ProcessedMesh processPrimitive(
 	meshopt_remapVertexBuffer(out_vertices.data(), vertices.data(), vertices.size(), sizeof(VeMesh::Vertex), remap.data());
 	meshopt_remapIndexBuffer(out_indices.data(), indices.data(), indices.size(), remap.data());
 
+	std::vector<VeMesh::SkinVertex> out_skin_vertices;
+	if (!skin_vertices.empty()) {
+		out_skin_vertices.resize(unique_count);
+		meshopt_remapVertexBuffer(out_skin_vertices.data(), skin_vertices.data(),
+		                          skin_vertices.size(), sizeof(VeMesh::SkinVertex), remap.data());
+	}
+
 	if (out_center_extent && !out_vertices.empty()) {
 		glm::vec3 mn(out_vertices[0].pos), mx(out_vertices[0].pos);
 		glm::vec3 sum(0.f);
@@ -1052,6 +1154,37 @@ static ProcessedMesh processPrimitive(
 		}
 		out_center_extent->first = sum / static_cast<float>(out_vertices.size());
 		out_center_extent->second = glm::length(mx - mn);
+	}
+
+	// Per-joint mesh-local extents: the AABB of vertices weighted (>0) to each joint.
+	// Used at runtime to compute a tight world AABB for skinned meshes
+	std::vector<VeMesh::AABB> joint_mesh_local_extents;
+	if (!out_skin_vertices.empty()) {
+		uint16_t max_joint = 0;
+		for (const auto& sv : out_skin_vertices)
+			for (int c = 0; c < 4; c++)
+				if (sv.weights[c] > 0)
+					max_joint = std::max(max_joint, sv.joints[c]);
+		joint_mesh_local_extents.resize(static_cast<size_t>(max_joint) + 1,
+			VeMesh::AABB{glm::vec3(std::numeric_limits<float>::max()),
+			             glm::vec3(std::numeric_limits<float>::lowest())});
+		for (size_t v = 0; v < out_vertices.size(); v++) {
+			const auto& sv = out_skin_vertices[v];
+			const glm::vec3& pos = out_vertices[v].pos;
+			for (int c = 0; c < 4; c++) {
+				if (sv.weights[c] == 0)
+					continue;
+				auto& aabb = joint_mesh_local_extents[sv.joints[c]];
+				aabb.min = glm::min(aabb.min, pos);
+				aabb.max = glm::max(aabb.max, pos);
+			}
+		}
+		// Joints with no weighted vertices produces a zero-volume box that contributes
+		// nothing to the union.
+		for (auto& aabb : joint_mesh_local_extents) {
+			if (aabb.min.x > aabb.max.x)
+				aabb = {glm::vec3(0.0f), glm::vec3(0.0f)};
+		}
 	}
 
 	// Stage 4a: optimize
@@ -1126,6 +1259,8 @@ static ProcessedMesh processPrimitive(
 	result.meshlet_data = VeMesh::buildMeshletData(out_vertices, out_indices, lod_indices);
 
 	result.vertices = std::move(out_vertices);
+	result.skin_vertices = std::move(out_skin_vertices);
+	result.joint_mesh_local_extents = std::move(joint_mesh_local_extents);
 	result.indices = std::move(out_indices);
 	result.lod_indices = std::move(lod_indices);
 	return result;
@@ -1191,7 +1326,8 @@ static void processNodeCpu(
 		.name = node.name,
 		.translation = trs.translation,
 		.rotation = trs.rotation,
-		.scale = trs.scale
+		.scale = trs.scale,
+		.skin_idx = node.skin
 	});
 
 	if (parent_node_idx >= 0)
@@ -1233,7 +1369,8 @@ static void processNodeCpu(
 					uint32_t prim_node_idx = static_cast<uint32_t>(nodes.size());
 					nodes.push_back({
 						.mesh_idx = mesh_data_idx,
-						.material_idx = static_cast<int>(mat_idx)
+						.material_idx = static_cast<int>(mat_idx),
+						.skin_idx = node.skin
 					});
 					parent_links.emplace_back(prim_node_idx, node_idx);
 				}
@@ -1274,6 +1411,27 @@ static bool LoadImageDataCpuOnly(tinygltf::Image* image, const int image_idx, st
 	return tinygltf::LoadImageData(image, image_idx, err, warn, req_width, req_height, bytes, size, &opt);
 }
 
+// KHR_materials_* extensions handled by parseSingleMaterial. Used to warn when
+// a model relies on a material extension we silently ignore.
+static const std::unordered_set<std::string> s_supported_khr_materials_extensions = {
+	"KHR_materials_pbrSpecularGlossiness",
+	"KHR_materials_emissive_strength",
+	"KHR_materials_transmission",
+	"KHR_materials_ior",
+};
+
+static void warnUnsupportedMaterialExtensions(const tinygltf::Model& gltf, const std::filesystem::path& model_path) {
+	for (const auto& ext : gltf.extensionsUsed) {
+		if (ext.rfind("KHR_materials_", 0) != 0)
+			continue;
+		if (s_supported_khr_materials_extensions.count(ext))
+			continue;
+		bool required = std::find(gltf.extensionsRequired.begin(), gltf.extensionsRequired.end(), ext) != gltf.extensionsRequired.end();
+		VE_LOGW("glTF '" << model_path.filename().string() << "' uses unsupported material extension '"
+			<< ext << "'" << (required ? " (required)" : "") << "; material data from this extension will be ignored");
+	}
+}
+
 // Load a glTF/GLB file via tinygltf. Returns true on success.
 // When cpu_only is true, uses the lightweight loader that skips external images.
 static bool loadGltfFile(const std::filesystem::path& model_path, tinygltf::Model& gltf, bool cpu_only = false) {
@@ -1304,6 +1462,7 @@ static bool loadGltfFile(const std::filesystem::path& model_path, tinygltf::Mode
 	}
 	if (!warn.empty())
 		VE_LOGW("glTF warning: " << warn);
+	warnUnsupportedMaterialExtensions(gltf, model_path);
 	return true;
 }
 
@@ -1406,8 +1565,11 @@ static void registerEmbeddedImages(tinygltf::Model& gltf, const std::string& mod
 // Determine root node indices from the glTF default scene (or fallback to node 0).
 static std::vector<int> determineRootNodes(const tinygltf::Model& gltf) {
 	std::vector<int> root_nodes;
-	if (!gltf.scenes.empty() && gltf.defaultScene >= 0 && gltf.defaultScene < static_cast<int>(gltf.scenes.size()))
-		root_nodes = gltf.scenes[static_cast<size_t>(gltf.defaultScene)].nodes;
+	if (!gltf.scenes.empty()) {
+		int scene_idx = (gltf.defaultScene >= 0 && gltf.defaultScene < static_cast<int>(gltf.scenes.size()))
+		                ? gltf.defaultScene : 0;
+		root_nodes = gltf.scenes[static_cast<size_t>(scene_idx)].nodes;
+	}
 	if (root_nodes.empty() && !gltf.nodes.empty())
 		root_nodes.push_back(0);
 	return root_nodes;
@@ -1760,6 +1922,7 @@ std::unique_ptr<VeModel> VeModel::load(VeResourceManager& resource_manager,
                                        bool extract_lights,
                                        bool flip_tex_coord_v) {
 	auto model = std::make_unique<VeModel>();
+	VE_LOGI("Loading model from: " << model_path);
 	model->loadFromGltf(model_path, resource_manager, pool, material_layout, extract_lights, flip_tex_coord_v);
 	return model;
 }
@@ -1827,6 +1990,8 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	auto parsed_clips = parseAnimations(gltf, m_gltf_to_loaded_idx);
 	for (auto& c : parsed_clips)
 		m_animation_clips.push_back(std::make_shared<VeAnimationClip>(std::move(c)));
+
+	m_skins = parseSkins(gltf);
 
 	// Extract emissive lights (after mesh processing so node_primitives is populated)
 	if (extract_lights) {
@@ -1952,6 +2117,8 @@ LoadedAssetData VeModel::loadFromGltfCpu(
 	// Parse animations
 	result.animation_clips = parseAnimations(gltf, result.gltf_to_loaded_idx);
 
+	result.skins = parseSkins(gltf);
+
 	// Extract emissive lights
 	if (extract_lights) {
 		result.emissive_lights = extractEmissiveLights(gltf, node_world_engine,
@@ -1999,6 +2166,7 @@ std::unique_ptr<VeModel> VeModel::fromLoadedData(
 	model->m_gltf_to_loaded_idx = std::move(data.gltf_to_loaded_idx);
 	for (auto& c : data.animation_clips)
 		model->m_animation_clips.push_back(std::make_shared<VeAnimationClip>(std::move(c)));
+	model->m_skins = std::move(data.skins);
 	return model;
 }
 
@@ -2062,6 +2230,14 @@ void VeModel::addToScene(Registry& registry,
 	uint32_t dedup_count = 0;
 	Entity last_mesh_entity;  // track last entity with a MeshComponent for post-batch notification
 
+	VE_LOGI("addToScene: nodes=" << m_nodes.size()
+	        << " meshes=" << m_mesh_handles.size()
+	        << " materials=" << m_material_handles.size()
+	        << " skins=" << m_skins.size());
+
+	uint32_t mesh_attached = 0;
+	uint32_t mesh_skipped_invalid = 0;
+
 	// Map node indices to new Entity IDs
 	std::vector<Entity> index_to_entity(m_nodes.size());
 	for (uint32_t i = 0; i < static_cast<uint32_t>(m_nodes.size()); i++) {
@@ -2081,25 +2257,95 @@ void VeModel::addToScene(Registry& registry,
 		    && static_cast<size_t>(node.material_idx) < m_material_handles.size()) {
 			auto& mesh_h = m_mesh_handles[static_cast<size_t>(node.mesh_idx)];
 			auto& mat_h = m_material_handles[static_cast<size_t>(node.material_idx)];
-			glm::vec3 pos(worldTransform(i)[3]);
-			DedupKey key{
-				mesh_h.get(), mat_h.get(),
-				static_cast<int32_t>(std::round(pos.x * 1000.0f)),
-				static_cast<int32_t>(std::round(pos.y * 1000.0f)),
-				static_cast<int32_t>(std::round(pos.z * 1000.0f))
-			};
-			if (mesh_dedup.insert(key).second) {
+			bool skip_dedup = node.skin_idx >= 0;
+			bool add_mesh = skip_dedup;
+			if (!skip_dedup) {
+				glm::vec3 pos(worldTransform(i)[3]);
+				DedupKey key{
+					mesh_h.get(), mat_h.get(),
+					static_cast<int32_t>(std::round(pos.x * 1000.0f)),
+					static_cast<int32_t>(std::round(pos.y * 1000.0f)),
+					static_cast<int32_t>(std::round(pos.z * 1000.0f))
+				};
+				if (mesh_dedup.insert(key).second)
+					add_mesh = true;
+				else
+					dedup_count++;
+			}
+			if (add_mesh) {
 				auto& mc = registry.addComponent<MeshComponent>(entity, mesh_h, mat_h);
 				auto* mat = mat_h.get();
 				mc.has_texture = (mat && mat->hasDescriptorSet()) ? 1.0f : 0.0f;
 				last_mesh_entity = entity;
-			} else {
-				dedup_count++;
+				mesh_attached++;
 			}
+		} else if (node.mesh_idx >= 0 || node.material_idx >= 0) {
+			mesh_skipped_invalid++;
 		}
 	}
 	if (dedup_count > 0)
 		VE_LOGI("addToScene: skipped " << dedup_count << " duplicate mesh instances");
+	VE_LOGI("addToScene: attached " << mesh_attached << " MeshComponents; skipped "
+	        << mesh_skipped_invalid << " nodes with invalid mesh/material idx");
+
+	// Attach SkinComponents. Done as a separate pass because joint entities may
+	// be created at any index in the loop above; joints must already exist when
+	// resolving glTF joint indices to entities.
+	uint32_t skin_attached = 0;
+	for (uint32_t i = 0; i < static_cast<uint32_t>(m_nodes.size()); i++) {
+		const auto& node = m_nodes[i];
+		if (node.skin_idx < 0 || static_cast<size_t>(node.skin_idx) >= m_skins.size())
+			continue;
+		Entity entity = index_to_entity[i];
+		if (entity.isNull() || !registry.isAlive(entity))
+			continue;
+		const ModelSkin& skin = m_skins[static_cast<size_t>(node.skin_idx)];
+
+		std::vector<Entity> joint_entities;
+		joint_entities.reserve(skin.joint_node_indices.size());
+		for (size_t j = 0; j < skin.joint_node_indices.size(); j++) {
+			int gltf_joint_idx = skin.joint_node_indices[j];
+			Entity je = Entity::null();
+			auto it = m_gltf_to_loaded_idx.find(gltf_joint_idx);
+			if (it != m_gltf_to_loaded_idx.end() && it->second < index_to_entity.size())
+				je = index_to_entity[it->second];
+			if (!je.isNull() && registry.isAlive(je) && registry.getName(je).empty())
+				registry.setName(je, "Joint " + std::to_string(j));
+			joint_entities.push_back(je);
+		}
+
+		Entity skeleton_root = Entity::null();
+		if (skin.skeleton_root_node >= 0) {
+			auto it = m_gltf_to_loaded_idx.find(skin.skeleton_root_node);
+			if (it != m_gltf_to_loaded_idx.end() && it->second < index_to_entity.size())
+				skeleton_root = index_to_entity[it->second];
+		}
+
+		auto& sc = registry.addComponent<SkinComponent>(entity);
+		sc.setJointEntities(std::move(joint_entities));
+		sc.setInverseBindMatrices(skin.inverse_bind_matrices);
+		sc.setSkeletonRoot(skeleton_root);
+		skin_attached++;
+
+		// Bake IBM into the per-joint extents so runtime can do (joint_world * extent).
+		auto* mc = registry.getComponent<MeshComponent>(entity);
+		VeMesh* mesh = mc ? mc->getMesh() : nullptr;
+		const auto& mesh_extents = mesh ? mesh->getJointMeshLocalExtents() : std::vector<VeMesh::AABB>{};
+		if (!mesh_extents.empty()) {
+			std::vector<VeMesh::AABB> joint_local;
+			joint_local.reserve(skin.inverse_bind_matrices.size());
+			for (size_t j = 0; j < skin.inverse_bind_matrices.size(); j++) {
+				if (j < mesh_extents.size())
+					joint_local.push_back(transformAABB(mesh_extents[j], skin.inverse_bind_matrices[j]));
+				else
+					joint_local.push_back({glm::vec3(0.0f), glm::vec3(0.0f)});
+			}
+			sc.setJointLocalExtents(std::move(joint_local));
+		}
+	}
+
+	VE_LOGI("addToScene: attached " << skin_attached << " SkinComponents");
+
 	m_nodes.clear();
 	m_mesh_handles.clear();
 
@@ -2114,8 +2360,9 @@ void VeModel::addToScene(Registry& registry,
 	if (!m_animation_clips.empty()) {
 		auto& animator = registry.addComponent<AnimatorComponent>(wrapper);
 		animator.setNodeToEntityMap(index_to_entity);
-		for (auto& clip : m_animation_clips)
-			animator.addClip(clip, true, true);
+		// Only auto-play the first clip.
+		for (size_t i = 0; i < m_animation_clips.size(); i++)
+			animator.addClip(m_animation_clips[i], /*auto_play=*/i == 0, /*loop=*/true);
 	}
 
 	// End batch and notify systems of bulk changes

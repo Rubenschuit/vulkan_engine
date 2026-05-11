@@ -37,6 +37,8 @@ struct DecodedTexture {
 struct ProcessedMesh {
 	std::string resource_id;
 	std::vector<VeMesh::Vertex> vertices;
+	std::vector<VeMesh::SkinVertex> skin_vertices;  // empty if mesh has no JOINTS_0/WEIGHTS_0
+	std::vector<VeMesh::AABB> joint_mesh_local_extents;  // per joint index, in mesh-local space
 	std::vector<uint32_t> indices;
 	std::vector<std::vector<uint32_t>> lod_indices;
 	VeMesh::AABB local_aabb{};
@@ -75,6 +77,7 @@ struct VENGINE_API LoadedAssetData {
 	std::vector<VeModel::ExtractedLight> emissive_lights;
 	std::unordered_map<int, uint32_t> gltf_to_loaded_idx;
 	std::vector<VeAnimationClip> animation_clips;
+	std::vector<ModelSkin> skins;
 	std::unordered_map<int, std::pair<glm::vec3, float>> geometry_center_extent;
 
 	LoadedAssetData() = default;

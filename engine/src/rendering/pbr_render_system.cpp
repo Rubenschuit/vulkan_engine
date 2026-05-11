@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "rendering/pbr_render_system.hpp"
+#include "rendering/skinning_pre_pass.hpp"
 #include "rendering/managers/pbr_mega_buffer.hpp"
 #include "rendering/managers/material_ssbo_manager.hpp"
 #include "vulkan/ve_device.hpp"
@@ -138,6 +139,10 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		MeshComponent* mesh = entry.mesh;
 		if (!mesh || !registry.getComponent<TransformComponent>(entry.entity))
 			continue;
+		// Skinned entities are handled by prepareSkinnedFrame; they must not enter
+		// the static draw path because their mesh lives outside the mega-buffer.
+		if (registry.hasComponent<SkinComponent>(entry.entity))
+			continue;
 		auto* mat = mesh->getMaterial();
 		VeMesh* mesh_ptr = mesh->getMesh();
 		MaterialAlphaProps alpha_props = mat->getAlphaProps();
@@ -205,8 +210,7 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 	}
 
 	// Build indirect draw commands directly into persistent vector.
-	// Drawables are already sorted by (mask, double_sided, ...) which maps to bucket order,
-	// so commands come out in bucket order — no secondary sort needed.
+	// Drawables are already sorted by (mask, double_sided, etc)
 	m_indirect_cmds.clear();
 	for (uint32_t b = 0; b < BUCKET_COUNT; b++) {
 		m_bucket_offsets[b] = 0;
@@ -288,6 +292,69 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		inst.material_index = mat_mgr.registerMaterial(d.material_ptr);
 		inst.lod_level = d.lod_level;
 		inst.depth_offset = 0.0f;
+		MaterialAlphaProps alpha = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};
+		inst.material_flags = static_cast<uint32_t>(alpha.alpha_mode)
+			| (alpha.double_sided ? MaterialFlag::DOUBLE_SIDED : 0u)
+			| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? MaterialFlag::FLIP_TEX_V : 0u)
+			| (alpha.use_spec_gloss_texture ? MaterialFlag::SPEC_GLOSS : 0u);
+	}
+
+}
+
+void PbrRenderSystem::prepareSkinnedFrame(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr) const {
+	m_skinned_drawables.clear();
+	auto& registry = *frame_info.registry;
+
+	FrustumPlane planes[6];
+	extractFrustumPlanes(frame_info.camera.getProj() * frame_info.camera.getView(), planes);
+
+	for (auto [entity, mc, sc] : registry.view<MeshComponent, SkinComponent>()) {
+		if (!mc.hasMesh() || !mc.hasMaterial())
+			continue;
+		if (!registry.transforms().has(entity.index()))
+			continue;
+		if (!isAABBInFrustum(mc.getWorldAABB(), planes))
+			continue;
+		auto* mat = mc.getMaterial();
+		MaterialAlphaProps alpha_props = mat->getAlphaProps();
+		float transmission = mat->getMaterialFactors().transmission_factor;
+		// No WBOIT-skinned path yet
+		if (alpha_props.alpha_mode == AlphaMode::BLEND || transmission > 0.0f) {
+			if (!m_warned_skinned_blend) {
+				VE_LOGW("Skinned mesh with BLEND/transmissive material skipped (no transparent skinned path)");
+				m_warned_skinned_blend = true;
+			}
+			continue;
+		}
+		m_skinned_drawables.push_back({
+			.entity = entity,
+			.mesh = &mc,
+			.mesh_ptr = mc.getMesh(),
+			.material_ptr = mat,
+			.dist_sq = 0.0f,
+			.alpha_mode = alpha_props.alpha_mode,
+			.double_sided = alpha_props.double_sided,
+			.ssbo_index = 0,
+			.lod_level = 0,
+		});
+	}
+
+	for (auto& d : m_skinned_drawables) {
+		if (frame_info.instance_count >= frame_info.instance_capacity) {
+			VE_LOGW("Instance buffer full, skipping remaining skinned objects");
+			break;
+		}
+		uint32_t idx = frame_info.instance_count++;
+		d.ssbo_index = idx;
+		const glm::mat3 nrm = registry.getWorldNormal(d.entity);
+		auto& inst = frame_info.instance_data[idx];
+		inst.transform = registry.getWorldTransform(d.entity);
+		inst.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
+		inst.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
+		inst.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
+		inst.material_index = mat_mgr.registerMaterial(d.material_ptr);
+		inst.lod_level = 0;
+		inst.depth_offset = (d.alpha_mode == AlphaMode::MASK) ? MASK_DEPTH_OFFSET : 0.0f;
 		MaterialAlphaProps alpha = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};
 		inst.material_flags = static_cast<uint32_t>(alpha.alpha_mode)
 			| (alpha.double_sided ? MaterialFlag::DOUBLE_SIDED : 0u)
@@ -538,6 +605,39 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info, const vk::raii::Desc
 			m_bucket_offsets[bucket] * sizeof(VkDrawIndexedIndirectCommand),
 			m_bucket_counts[bucket],
 			sizeof(VkDrawIndexedIndirectCommand));
+	}
+}
+
+// TODO: consider switch to a skinned mega-buffer + drawIndexedIndirect. 
+void PbrRenderSystem::renderSkinned(VeFrameInfo& frame_info, const SkinningPrePass& pre_pass,
+                                    const vk::raii::DescriptorSet& bindless_set) const {
+	if (m_skinned_drawables.empty())
+		return;
+	auto& cmd = frame_info.cmd();
+	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
+	bool mask = frame_info.shadow_mask_active;
+	auto& pipeline = mask ? m_pipelines_mask[mode] : m_pipelines[mode];
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
+	bindPbrResources(frame_info, bindless_set);
+	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
+	cmd.setDepthWriteEnable(VK_TRUE);
+
+	for (const auto& d : m_skinned_drawables) {
+		if (!d.mesh_ptr)
+			continue;
+		VeBuffer* vbo = pre_pass.getOutputFullBuffer(d.entity, frame_info.current_frame);
+		if (!vbo)
+			continue;
+		bool is_mask = (d.alpha_mode == AlphaMode::MASK);
+		cmd.setCullMode(d.double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
+		cmd.setDepthCompareOp(
+			(m_depth_prepass_active || is_mask) ? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
+
+		vk::Buffer vbos[] = {vbo->getBuffer()};
+		vk::DeviceSize offsets[] = {0};
+		cmd.bindVertexBuffers(0, vbos, offsets);
+		cmd.bindIndexBuffer(d.mesh_ptr->getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
+		cmd.drawIndexed(d.mesh_ptr->getIndexCount(), 1, 0, 0, d.ssbo_index);
 	}
 }
 

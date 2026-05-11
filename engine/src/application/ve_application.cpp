@@ -36,6 +36,8 @@
 #include "rendering/culling/gpu_culling_system.hpp"
 #include "rendering/culling/meshlet_culling_system.hpp"
 #include "rendering/hiz_system.hpp"
+#include "rendering/skinning_pre_pass.hpp"
+#include "rendering/skinned_points_render_system.hpp"
 #include "rendering/culling/cpu_culling_backend.hpp"
 #include "rendering/culling/gpu_culling_backend.hpp"
 #include "rendering/culling/meshlet_culling_backend.hpp"
@@ -177,6 +179,10 @@ void VeApplication::run() {
 		{
 			ZoneScopedN("Populate UBO");
 			populateUBO(fi);
+		}
+		if (m_active_scene) {
+			ZoneScopedN("Skinning Palette");
+			m_skinning_pre_pass->updatePalette(m_active_scene->getRegistry(), fi.current_frame);
 		}
 		dispatchCompute(fi);
 		renderFrame(fi);
@@ -415,6 +421,7 @@ VeFrameInfo VeApplication::buildFrameInfo() {
 		.meshlet_culling_active = meshlet_active,
 		.selected_entity = m_editor->getState().selected_entity,
 		.cpu_global_descriptor_set = &m_global_descriptor_sets[current_frame],
+		.skinning_pre_pass = m_skinning_pre_pass.get(),
 	};
 
 	fi.ibl_descriptor_set = &m_ibl_system->getOutputDescriptorSet(current_frame);
@@ -548,6 +555,12 @@ void VeApplication::dispatchCompute(VeFrameInfo& fi) {
 	{
 		ScopedDebugLabel label(fi.compute_command_buffer, "Compute Dispatch", {0.2f, 0.6f, 0.9f, 1.0f});
 		TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Compute");
+		{
+			ZoneScopedN("Skinning Dispatch");
+			ScopedDebugLabel skin_label(fi.compute_command_buffer, "Skinning", {0.9f, 0.6f, 0.9f, 1.0f});
+			TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Skinning");
+			m_skinning_pre_pass->dispatch(fi);
+		}
 		m_fireworks_system->recordComputeCommands(fi);
 		m_particle_system->recordComputeCommands(fi);
 		if (m_cluster_light_system->isEnabled())
@@ -582,6 +595,7 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		else
 			profiler.beginCpuTimer(ProfileTimer::CULLING);
 		m_active_backend->cull(fi, gpu_scene);
+		m_pbr_render_system->prepareSkinnedFrame(fi, material_mgr);
 		if (fi.gpu_culling_active)
 			profiler.endGpuTimer(command_buffer, ProfileTimer::CULLING);
 		else
@@ -603,6 +617,7 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		m_ve_renderer.beginDepthPrePass(command_buffer);
 		m_active_backend->renderDepthPrePass(fi, m_scene_resources->getMegaBuffer(),
 			*m_depth_prepass_system);
+		m_depth_prepass_system->renderSkinned(fi, m_pbr_render_system->getSkinnedDrawables());
 		m_ve_renderer.endDepthPrePass(command_buffer);
 		profiler.endGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
 		profiler.endCpuTimer(ProfileTimer::DEPTH_PREPASS);
@@ -800,6 +815,7 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 		profiler.beginGpuTimer(active_cb, ProfileTimer::SCENE_RENDER);
 		m_ve_renderer.beginSceneRender(active_cb, m_ui.depth_prepass_enabled);
 		m_active_backend->renderOpaque(fi, *m_pbr_render_system, bindless_set);
+		m_pbr_render_system->renderSkinned(fi, *m_skinning_pre_pass, bindless_set);
 		m_skybox_render_system->render(fi);
 		if (!fi.gpu_culling_active)
 			m_pbr_render_system->renderTransparent(fi, bindless_set);
@@ -808,6 +824,8 @@ void VeApplication::renderFrame(VeFrameInfo& fi) {
 			m_axes_render_system->render(fi);
 		if (m_ui.show_aabb_debug)
 			m_aabb_debug_render_system->render(fi);
+		if (m_ui.show_skinned_points)
+			m_skinned_points_render_system->render(fi, *m_skinning_pre_pass);
 		m_light_system->render(fi);
 		m_fireworks_system->render(fi);
 		m_ve_renderer.endSceneRender(active_cb);
@@ -1284,6 +1302,14 @@ void VeApplication::initSystems() {
 	m_meshlet_culling_system->createShadowDescriptorSets(*m_global_pool,
 		gpu_scene, m_scene_resources->getMegaBuffer());
 	m_shadow_render_system->createMeshletShadowDescriptorSets(*m_meshlet_culling_system);
+
+	m_skinning_pre_pass = std::make_unique<SkinningPrePass>(
+		m_ve_device, *m_global_pool, shader("skinning_comp.spv"), *m_event_bus);
+
+	m_skinned_points_render_system = std::make_unique<SkinnedPointsRenderSystem>(
+		m_ve_device, m_global_set_layout->getDescriptorSetLayout(),
+		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
+		shader("skinned_points.spv"), *m_event_bus);
 
 	// Culling backends
 	m_cpu_backend = std::make_unique<CpuCullingBackend>(

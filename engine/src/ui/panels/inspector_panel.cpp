@@ -428,6 +428,16 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 			renderAnimator(*registry->getComponent<AnimatorComponent>(entity));
 	}
 
+	// Skin
+	if (registry->hasComponent<SkinComponent>(entity)) {
+		auto* sc = registry->getComponent<SkinComponent>(entity);
+		char header[64];
+		snprintf(header, sizeof(header), "Skin (%zu joints)", sc->jointCount());
+		bool open = ImGui::CollapsingHeader(header, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		if (open && registry->hasComponent<SkinComponent>(entity))
+			renderSkin(*registry, *registry->getComponent<SkinComponent>(entity), state);
+	}
+
 	// Add Component
 	ImGui::Spacing();
 	ImGui::Separator();
@@ -920,6 +930,38 @@ void InspectorPanel::renderAnimator(AnimatorComponent& animator) {
 		}
 
 		ImGui::PopID();
+	}
+}
+
+void InspectorPanel::renderSkin(Registry& registry, SkinComponent& skin, EditorState& state) {
+	const auto& joints = skin.getJointEntities();
+	const auto& ibms = skin.getInverseBindMatrices();
+	ImGui::Text("Joints: %zu  IBMs: %zu", joints.size(), ibms.size());
+
+	Entity skel_root = skin.getSkeletonRoot();
+	if (!skel_root.isNull() && registry.isAlive(skel_root))
+		ImGui::TextDisabled("Skeleton root: %s", registry.getName(skel_root).c_str());
+	else
+		ImGui::TextDisabled("Skeleton root: (unset)");
+
+	if (ImGui::TreeNodeEx("Joint list", ImGuiTreeNodeFlags_DefaultOpen)) {
+		for (size_t j = 0; j < joints.size(); j++) {
+			Entity je = joints[j];
+			char label[128];
+			if (!je.isNull() && registry.isAlive(je)) {
+				const std::string& nm = registry.getName(je);
+				snprintf(label, sizeof(label), "[%zu] %s", j, nm.empty() ? "(unnamed)" : nm.c_str());
+			} else {
+				snprintf(label, sizeof(label), "[%zu] (missing)", j);
+			}
+			ImGui::PushID(static_cast<int>(j));
+			if (ImGui::Selectable(label) && !je.isNull() && registry.isAlive(je)) {
+				state.selected_entity = je;
+				state.selection_changed = true;
+			}
+			ImGui::PopID();
+		}
+		ImGui::TreePop();
 	}
 }
 

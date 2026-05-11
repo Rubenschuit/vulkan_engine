@@ -65,6 +65,8 @@ class SceneResourceManager;
 class GpuCullingSystem;
 class MeshletCullingSystem;
 class HizSystem;
+class SkinningPrePass;
+class SkinnedPointsRenderSystem;
 class Editor;
 class VeScene;
 class CullingBackend;
@@ -240,6 +242,8 @@ private:
 	std::unique_ptr<GpuCullingSystem> m_gpu_culling_system;
 	std::unique_ptr<MeshletCullingSystem> m_meshlet_culling_system;
 	std::unique_ptr<HizSystem> m_hiz_system;
+	std::unique_ptr<SkinningPrePass> m_skinning_pre_pass;
+	std::unique_ptr<SkinnedPointsRenderSystem> m_skinned_points_render_system;
 
 	// --- Physics ---
 	std::unique_ptr<PhysicsSystem> m_physics_system;

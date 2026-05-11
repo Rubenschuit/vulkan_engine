@@ -4,6 +4,7 @@
 #include "rendering/culling/meshlet_culling_system.hpp"
 #include "rendering/managers/gpu_scene_manager.hpp"
 #include "rendering/managers/pbr_mega_buffer.hpp"
+#include "rendering/skinning_pre_pass.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_pipeline.hpp"
 #include "vulkan/ve_buffer.hpp"
@@ -387,10 +388,12 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBuffer
 
 			if (m_force_full_rerender || !state.valid) {
 				state.dirty = true;
+				/*
 				if (m_force_full_rerender)
 					VE_LOGD("CSM " << cascade << ": FULL (force_full_rerender)");
 				else
 					VE_LOGD("CSM " << cascade << ": FULL (first frame)");
+				*/
 			} else {
 				// Texel shift from snapped projection matrices: prev and current VP
 				// both map the origin to texel-snapped clip space.
@@ -969,6 +972,11 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 		for (auto [entity, mesh, tc] : view) {
 			if (!mesh.getMesh() || !mesh.has_shadow)
 				continue;
+			// Skinned meshes go through the per-instance skinned shadow path; their
+			// vertex data lives in SkinningPrePass output buffers, not the static
+			// shadow mega-buffer.
+			if (registry.hasComponent<SkinComponent>(entity))
+				continue;
 			uint32_t shadow_lod = std::min(std::max(1u, mesh.cached_lod + 1),
 			                               mesh.getMesh()->getLodCount() - 1);
 			ShadowDrawable drawable{entity, &mesh, shadow_lod};
@@ -1097,6 +1105,34 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 	populateInstanceGroups(m_static_shadow_drawables, m_shadow_instance_groups, nullptr);
 	populateInstanceGroups(m_dynamic_shadow_drawables, m_shadow_instance_groups, nullptr);
 
+	// Skinned shadow casters: write one shadow InstanceData slot per entity. Cull
+	// against the outer CSM cascade
+	m_skinned_shadow_drawables.clear();
+	FrustumPlane skin_cull_planes[6];
+	bool have_skin_cull_planes = false;
+	if (csm_count > 0) {
+		glm::mat4 outer_vp = m_light_projs[frame_info.current_frame][csm_count - 1]
+		                   * m_light_views[frame_info.current_frame][csm_count - 1];
+		extractFrustumPlanes(outer_vp, skin_cull_planes);
+		have_skin_cull_planes = true;
+	}
+	for (auto [entity, mc, sc] : registry.view<MeshComponent, SkinComponent>()) {
+		if (!mc.has_shadow || !mc.hasMesh() || !mc.hasMaterial())
+			continue;
+		if (have_skin_cull_planes && !isAABBInFrustum(mc.getWorldAABB(), skin_cull_planes))
+			continue;
+		if (shadow_instance_count >= m_shadow_instance_capacity) {
+			VE_LOGW("Shadow instance buffer full (skinned)");
+			break;
+		}
+		uint32_t idx = shadow_instance_count++;
+		shadow_instance_data[idx].transform = registry.getWorldTransform(entity);
+		shadow_instance_data[idx].normal_transform[0] = glm::vec4(0.0f);
+		shadow_instance_data[idx].normal_transform[1] = glm::vec4(0.0f);
+		shadow_instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
+		m_skinned_shadow_drawables.push_back({entity, mc.getMesh(), idx});
+	}
+
 	auto& command_buffer = frame_info.cmd();
 
 	transitionAtlasForRendering(command_buffer, csm_count);
@@ -1110,8 +1146,9 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 	}
 
 	bool has_dynamics = !m_dynamic_csm_instance_groups.empty();
+	bool has_skinned = !m_skinned_shadow_drawables.empty();
 
-	if (csm_count > 0 && (!m_static_csm_instance_groups.empty() || has_dynamics)) {
+	if (csm_count > 0 && (!m_static_csm_instance_groups.empty() || has_dynamics || has_skinned)) {
 		for (uint32_t c = 0; c < csm_count; c++) {
 			auto& region = m_atlas_regions[c];
 			auto& state = m_cascade_state[c];
@@ -1246,8 +1283,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 					vk::ImageMemoryBarrier2 post_barriers[] = {cache_back, atlas_back};
 					command_buffer.pipelineBarrier2({.imageMemoryBarrierCount = 2, .pImageMemoryBarriers = post_barriers});
 				}
-			} else if (has_dynamics) {
-				// Static cache is clean but we need it in the atlas for the dynamic overlay
+			} else if (has_dynamics || has_skinned) {
+				// Static cache is clean but we need it in the atlas for the dynamic/skinned overlay
 				vk::ImageMemoryBarrier2 atlas_to_dst{
 					.sType = vk::StructureType::eImageMemoryBarrier2,
 					.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
@@ -1282,29 +1319,29 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 				};
 				command_buffer.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &atlas_back});
 			} else {
-				// Static cache is clean AND no dynamics: skip cascade entirely
+				// Static cache is clean AND nothing to overlay: skip cascade entirely
 				continue;
 			}
 
-			// Render dynamic objects on top using the full cascade VP (loadOp = eLoad)
-			if (has_dynamics) {
+			// Render dynamic + skinned objects on top using the full cascade VP (loadOp = eLoad)
+			if (has_dynamics || has_skinned) {
 				beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eLoad);
 				command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 				command_buffer.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
-				renderShadowMap(frame_info, c, m_dynamic_csm_instance_groups);
+				renderShadowMap(frame_info, c, m_dynamic_csm_instance_groups, /*include_skinned=*/true);
 				command_buffer.endRendering();
 			}
 		}
 	}
 
 	// Point/spot light shadows
-	if (!m_shadow_instance_groups.empty()) {
+	if (!m_shadow_instance_groups.empty() || has_skinned) {
 		for (size_t i = csm_count; i < light_views.size(); i++) {
 			uint32_t layer = NUM_CSM_CASCADES + static_cast<uint32_t>(i - csm_count);
 			assert(layer < MAX_SHADOW_LAYERS);
 			auto& region = m_atlas_regions[layer];
 			beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eClear);
-			renderShadowMap(frame_info, layer, m_shadow_instance_groups);
+			renderShadowMap(frame_info, layer, m_shadow_instance_groups, /*include_skinned=*/true);
 			command_buffer.endRendering();
 		}
 	}
@@ -1313,11 +1350,13 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 }
 
 void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light_index,
-                                          const std::vector<ShadowInstanceGroup>& instance_groups) const {
+                                          const std::vector<ShadowInstanceGroup>& instance_groups,
+                                          bool include_skinned) const {
 
 	const vk::raii::DescriptorSet& shadow_global_set = m_shadow_global_descriptor_sets[frame_info.current_frame][light_index];
+	auto& cmd = frame_info.cmd();
 
-	frame_info.cmd().bindDescriptorSets(
+	cmd.bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,
 		0,
@@ -1326,8 +1365,8 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 	);
 
 	if (m_mega_shadow_vbo && m_mega_ibo && !m_mega_entries.empty()) {
-			frame_info.cmd().bindVertexBuffers(0, {m_mega_shadow_vbo->getBuffer()}, {vk::DeviceSize{0}});
-		frame_info.cmd().bindIndexBuffer(m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
+		cmd.bindVertexBuffers(0, {m_mega_shadow_vbo->getBuffer()}, {vk::DeviceSize{0}});
+		cmd.bindIndexBuffer(m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
 
 		for (const auto& group : instance_groups) {
 			auto it = m_mega_entries.find(group.mesh);
@@ -1339,16 +1378,39 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 
 			ShadowPushConstantData push{};
 			push.instance_offset = group.first_instance;
-			frame_info.cmd().pushConstants(
+			cmd.pushConstants(
 				*m_pipeline_layout,
 				vk::ShaderStageFlagBits::eVertex,
 				0,
 				vk::ArrayProxy<const uint8_t>(sizeof(ShadowPushConstantData), reinterpret_cast<const uint8_t*>(&push))
 			);
 
-			frame_info.cmd().drawIndexed(
+			cmd.drawIndexed(
 				lod_entry.index_count, group.instance_count,
 				lod_entry.first_index, static_cast<int32_t>(mega.vertex_offset), 0);
+		}
+	}
+
+	if (include_skinned && !m_skinned_shadow_drawables.empty() && frame_info.skinning_pre_pass) {
+		for (const auto& sd : m_skinned_shadow_drawables) {
+			if (!sd.mesh)
+				continue;
+			VeBuffer* pos_buf = frame_info.skinning_pre_pass->getOutputPositionBuffer(
+				sd.entity, frame_info.current_frame);
+			if (!pos_buf)
+				continue;
+			cmd.bindVertexBuffers(0, {pos_buf->getBuffer()}, {vk::DeviceSize{0}});
+			cmd.bindIndexBuffer(sd.mesh->getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
+
+			ShadowPushConstantData push{};
+			push.instance_offset = sd.instance_offset;
+			cmd.pushConstants(
+				*m_pipeline_layout,
+				vk::ShaderStageFlagBits::eVertex,
+				0,
+				vk::ArrayProxy<const uint8_t>(sizeof(ShadowPushConstantData), reinterpret_cast<const uint8_t*>(&push))
+			);
+			cmd.drawIndexed(sd.mesh->getIndexCount(), 1, 0, 0, 0);
 		}
 	}
 }

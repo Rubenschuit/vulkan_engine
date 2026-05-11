@@ -62,6 +62,8 @@ private:
 	bool m_scroll_to_selected = false;
 	bool m_show_lights_in_tree = false;
 
+	std::unordered_set<uint32_t> m_joint_entity_ids;
+
 	// Search
 	char m_search_buf[256]{};
 	bool m_search_active = false;

@@ -23,6 +23,7 @@ struct VENGINE_API UIContext {
 	bool show_controls = true;
 	bool show_axes = false;
 	bool show_aabb_debug = false;
+	bool show_skinned_points = false;
 
 	// graphics settings
 	float fov = 75.0f;

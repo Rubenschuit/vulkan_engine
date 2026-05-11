@@ -116,9 +116,29 @@ void GpuSceneManager::subscribeToRegistry(Registry& registry) {
 				return;
 			if (!event.component.hasMesh())
 				return;
+			if (m_registry->hasComponent<SkinComponent>(event.entity))
+				return;
 			if (!m_mega_buffer->getEntry(event.component.getMesh()))
 				return;
 			registerObject(event.entity, event.component, *m_mega_buffer, *m_mat_mgr, *m_registry);
+		});
+
+	// SkinComponent governs whether an entity participates in the static GPU pipeline.
+	m_skin_added_sub = registry.events().subscribe<ComponentAddedEvent<SkinComponent>>(
+		[this](const ComponentAddedEvent<SkinComponent>& event) {
+			if (hasGpuId(event.entity))
+				unregisterObject(event.entity);
+		});
+	m_skin_removed_sub = registry.events().subscribe<ComponentRemovedEvent<SkinComponent>>(
+		[this](const ComponentRemovedEvent<SkinComponent>& event) {
+			if (!m_mega_buffer || !m_mat_mgr || !m_registry)
+				return;
+			auto* mc = m_registry->getComponent<MeshComponent>(event.entity);
+			if (!mc || !mc->hasMesh())
+				return;
+			if (!m_mega_buffer->getEntry(mc->getMesh()))
+				return;
+			registerObject(event.entity, *mc, *m_mega_buffer, *m_mat_mgr, *m_registry);
 		});
 	m_rb_changed_sub = registry.events().subscribe<RigidbodyChangedEvent>(
 		[this](const RigidbodyChangedEvent& event) {
@@ -145,6 +165,8 @@ void GpuSceneManager::subscribeToRegistry(Registry& registry) {
 			if (!animator)
 				return;
 			for (Entity target : animator->getAnimatedEntities()) {
+				if (!m_registry->isAlive(target))
+					continue;
 				m_registry->setAnimated(target, false);
 				if (hasGpuId(target))
 					setDynamic(target, isDynamicEntity(*m_registry, target));
@@ -429,6 +451,8 @@ void GpuSceneManager::registerAllObjects(Registry& registry, const PbrMegaBuffer
 		auto& mesh = mesh_pool.data()[i];
 		if (!mesh.hasMesh())
 			continue;
+		if (registry.hasComponent<SkinComponent>(entity))
+			continue;
 		if (!mega_buffer.getEntry(mesh.getMesh()))
 			continue;
 		registerObject(entity, mesh, mega_buffer, mat_mgr, registry);
@@ -445,11 +469,15 @@ void GpuSceneManager::unsubscribeFromRegistry() {
 	events.unsubscribe<MeshDataChangedEvent>(m_mesh_data_changed_sub);
 	events.unsubscribe<ComponentAddedEvent<MeshComponent>>(m_mesh_added_sub);
 	events.unsubscribe<RigidbodyChangedEvent>(m_rb_changed_sub);
+	events.unsubscribe<ComponentAddedEvent<SkinComponent>>(m_skin_added_sub);
+	events.unsubscribe<ComponentRemovedEvent<SkinComponent>>(m_skin_removed_sub);
 	m_mesh_removed_sub = 0;
 	m_transform_invalidated_sub = 0;
 	m_mesh_data_changed_sub = 0;
 	m_mesh_added_sub = 0;
 	m_rb_changed_sub = 0;
+	m_skin_added_sub = 0;
+	m_skin_removed_sub = 0;
 }
 
 void GpuSceneManager::reset() {

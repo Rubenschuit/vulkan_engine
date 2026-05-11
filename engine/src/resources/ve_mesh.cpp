@@ -60,15 +60,19 @@ VeMesh::VeMesh(VeDevice& device, const std::string& resource_id,
 VeMesh::VeMesh(VeDevice& device, const ProcessedMesh& data)
 	: Resource(data.resource_id), m_ve_device(device) {
 	m_local_aabb = data.local_aabb;
-	createVertexBuffers(data.vertices);
+	const bool has_skin = !data.skin_vertices.empty();
+	createVertexBuffers(data.vertices, has_skin);
 	createShadowVertexBuffer(data.vertices);
 	createIndexBuffers(data.indices);
+	if (has_skin)
+		createSkinVertexBuffer(data.skin_vertices);
 	for (const auto& lod : data.lod_indices)
 		createLodIndexBuffer(lod);
 	m_cpu_positions = data.cpu_positions;
 	m_cpu_indices = data.cpu_indices;
 	if (data.meshlet_data)
 		m_meshlet_data = std::make_unique<CpuMeshletData>(*data.meshlet_data);
+	m_joint_mesh_local_extents = data.joint_mesh_local_extents;
 	setLoaded(true);
 }
 
@@ -150,6 +154,7 @@ bool VeMesh::doLoad() {
 void VeMesh::doUnload() {
 	m_vertex_buffer.reset();
 	m_shadow_vertex_buffer.reset();
+	m_skin_vertex_buffer.reset();
 	m_index_buffer.reset();
 	m_lod_levels.clear();
 	m_cpu_positions.clear();
@@ -175,7 +180,7 @@ void VeMesh::computeLocalAABB(const std::vector<Vertex>& vertices) {
 	m_local_aabb = {min_v, max_v};
 }
 
-void VeMesh::createVertexBuffers(const std::vector<Vertex>& vertices) {
+void VeMesh::createVertexBuffers(const std::vector<Vertex>& vertices, bool needs_storage_usage) {
 	m_vertex_count = static_cast<uint32_t>(vertices.size());
 	assert(m_vertex_count >= 3 && "Vertex count must be at least 3");
 
@@ -189,11 +194,16 @@ void VeMesh::createVertexBuffers(const std::vector<Vertex>& vertices) {
 	staging_buffer.map();
 	staging_buffer.writeToBuffer(vertices.data());
 
+	vk::BufferUsageFlags usage = vk::BufferUsageFlagBits::eVertexBuffer
+		| vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc;
+	if (needs_storage_usage)
+		usage |= vk::BufferUsageFlagBits::eStorageBuffer;
+
 	m_vertex_buffer = std::make_unique<VeBuffer>(
 		m_ve_device,
 		sizeof(vertices[0]),
 		m_vertex_count,
-		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc,
+		usage,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		1
 	);
@@ -228,6 +238,31 @@ void VeMesh::createShadowVertexBuffer(const std::vector<Vertex>& vertices) {
 	);
 	m_ve_device.copyBuffer(staging_buffer.getBuffer(), m_shadow_vertex_buffer->getBuffer(),
 	                       sizeof(glm::vec3) * m_vertex_count);
+}
+
+void VeMesh::createSkinVertexBuffer(const std::vector<SkinVertex>& skin_vertices) {
+	assert(skin_vertices.size() == m_vertex_count && "skin vertex count must match base vertex count");
+
+	VeBuffer staging_buffer(
+		m_ve_device,
+		sizeof(SkinVertex),
+		m_vertex_count,
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+	);
+	staging_buffer.map();
+	staging_buffer.writeToBuffer(skin_vertices.data());
+
+	m_skin_vertex_buffer = std::make_unique<VeBuffer>(
+		m_ve_device,
+		sizeof(SkinVertex),
+		m_vertex_count,
+		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		1
+	);
+	m_ve_device.copyBuffer(staging_buffer.getBuffer(), m_skin_vertex_buffer->getBuffer(),
+	                       sizeof(SkinVertex) * m_vertex_count);
 }
 
 void VeMesh::createIndexBuffers(const std::vector<uint32_t>& indices) {

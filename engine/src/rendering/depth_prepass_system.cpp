@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "rendering/depth_prepass_system.hpp"
 #include "rendering/managers/pbr_mega_buffer.hpp"
+#include "rendering/skinning_pre_pass.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_pipeline.hpp"
 #include "vulkan/ve_buffer.hpp"
@@ -132,6 +133,34 @@ void DepthPrePassSystem::renderGpuCulled(
 				indirect_buffer.getBuffer(), offset,
 				bucket_group_counts[bucket], sizeof(VkDrawIndexedIndirectCommand));
 		}
+	}
+}
+
+void DepthPrePassSystem::renderSkinned(
+	VeFrameInfo& frame_info,
+	const std::vector<PbrRenderSystem::Drawable>& skinned_drawables) const {
+
+	if (skinned_drawables.empty() || !frame_info.skinning_pre_pass)
+		return;
+
+	auto& cmd = frame_info.cmd();
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		0, {*frame_info.global_descriptor_set}, {});
+
+	for (const auto& d : skinned_drawables) {
+		if (!d.mesh_ptr)
+			continue;
+		VeBuffer* pos_buf = frame_info.skinning_pre_pass->getOutputPositionBuffer(
+			d.entity, frame_info.current_frame);
+		if (!pos_buf)
+			continue;
+		cmd.setCullMode(d.double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
+		vk::Buffer vbos[] = {pos_buf->getBuffer()};
+		vk::DeviceSize offsets[] = {0};
+		cmd.bindVertexBuffers(0, vbos, offsets);
+		cmd.bindIndexBuffer(d.mesh_ptr->getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
+		cmd.drawIndexed(d.mesh_ptr->getIndexCount(), 1, 0, 0, d.ssbo_index);
 	}
 }
 

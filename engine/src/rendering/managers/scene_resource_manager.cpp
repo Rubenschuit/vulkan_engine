@@ -77,10 +77,16 @@ void SceneResourceManager::rebuildForModelAdd(Registry& registry) {
 	m_gpu_scene_manager->registerAllObjects(registry, *m_mega_buffer, *m_material_ssbo_manager);
 }
 
+// Skinned meshes are excluded: their vertices come from per-instance post-skin
+// buffers owned by SkinningPrePass, not the shared mega-buffer.
 std::vector<VeMesh*> SceneResourceManager::collectUniqueMeshes(Registry& registry) {
 	std::vector<VeMesh*> meshes;
-	for (auto& mc : registry.meshes()) {
-		VeMesh* m = mc.getMesh();
+	auto& mesh_pool = registry.meshes();
+	for (uint32_t i = 0; i < mesh_pool.size(); i++) {
+		Entity entity = registry.entityFromIndex(mesh_pool.entityAt(i));
+		if (registry.hasComponent<SkinComponent>(entity))
+			continue;
+		VeMesh* m = mesh_pool.data()[i].getMesh();
 		if (m && std::find(meshes.begin(), meshes.end(), m) == meshes.end())
 			meshes.push_back(m);
 	}

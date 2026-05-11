@@ -354,6 +354,32 @@ private:
 	std::vector<Entity> m_node_to_entity;
 };
 
+// ---------------------------------------------------------------------------
+// SkinComponent
+// ---------------------------------------------------------------------------
+class VENGINE_API SkinComponent : public Component {
+public:
+	const std::vector<Entity>& getJointEntities() const { return m_joint_entities; }
+	const std::vector<glm::mat4>& getInverseBindMatrices() const { return m_inverse_bind_matrices; }
+	const std::vector<VeMesh::AABB>& getJointLocalExtents() const { return m_joint_local_extents; }
+	Entity getSkeletonRoot() const { return m_skeleton_root; }
+	uint32_t getPaletteOffset() const { return m_palette_offset_cache; }
+	size_t jointCount() const { return m_joint_entities.size(); }
+
+	void setJointEntities(std::vector<Entity> joints) { m_joint_entities = std::move(joints); }
+	void setInverseBindMatrices(std::vector<glm::mat4> ibms) { m_inverse_bind_matrices = std::move(ibms); }
+	void setJointLocalExtents(std::vector<VeMesh::AABB> extents) { m_joint_local_extents = std::move(extents); }
+	void setSkeletonRoot(Entity e) { m_skeleton_root = e; }
+	void setPaletteOffset(uint32_t off) { m_palette_offset_cache = off; }
+
+private:
+	std::vector<Entity> m_joint_entities;
+	std::vector<glm::mat4> m_inverse_bind_matrices;
+	std::vector<VeMesh::AABB> m_joint_local_extents;  // joint-local space, IBM applied
+	Entity m_skeleton_root;
+	uint32_t m_palette_offset_cache = 0;
+};
+
 // suppress implicit instantiation
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<TransformComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<PointLightComponent>();
@@ -362,5 +388,6 @@ extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MeshComponen
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SpotLightComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<RigidbodyComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<AnimatorComponent>();
+extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SkinComponent>();
 
 } // namespace ve

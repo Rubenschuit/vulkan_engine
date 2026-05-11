@@ -242,6 +242,8 @@ private:
 	SubscriptionId m_rb_changed_sub = 0;
 	SubscriptionId m_anim_state_changed_sub = 0;
 	SubscriptionId m_anim_removed_sub = 0;
+	SubscriptionId m_skin_added_sub = 0;
+	SubscriptionId m_skin_removed_sub = 0;
 };
 
 } // namespace ve

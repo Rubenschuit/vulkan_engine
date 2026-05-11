@@ -52,6 +52,12 @@ public:
 		uint32_t index_count = 0;
 	};
 
+	struct VENGINE_API SkinVertex {
+		uint16_t joints[4];
+		uint16_t weights[4]; // normalized
+	};
+	static_assert(sizeof(SkinVertex) == 16, "SkinVertex must be 16 bytes");
+
 	// Create mesh from vertices and indices, extracted from glTF model for example.
 	VeMesh(VeDevice& device, const std::string& resource_id,
 	       const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
@@ -85,7 +91,11 @@ public:
 	VeBuffer& getShadowVertexBuffer() const { return *m_shadow_vertex_buffer; }
 	VeBuffer& getIndexBuffer() const { return *m_index_buffer; }
 
+	bool hasSkinning() const { return m_skin_vertex_buffer != nullptr; }
+	VeBuffer& getSkinVertexBuffer() const { return *m_skin_vertex_buffer; }
+
 	AABB getLocalAABB() const { return m_local_aabb; }
+	const std::vector<AABB>& getJointMeshLocalExtents() const { return m_joint_mesh_local_extents; }
 
 	const std::vector<glm::vec3>& getCpuPositions() const { return m_cpu_positions; }
 	const std::vector<uint32_t>& getCpuIndices() const { return m_cpu_indices; }
@@ -105,8 +115,9 @@ protected:
 	void doUnload() override;
 
 private:
-	void createVertexBuffers(const std::vector<Vertex>& vertices);
+	void createVertexBuffers(const std::vector<Vertex>& vertices, bool needs_storage_usage = false);
 	void createShadowVertexBuffer(const std::vector<Vertex>& vertices);
+	void createSkinVertexBuffer(const std::vector<SkinVertex>& skin_vertices);
 	void createIndexBuffers(const std::vector<uint32_t>& indices);
 	void createLodIndexBuffer(const std::vector<uint32_t>& indices);
 	void computeLocalAABB(const std::vector<Vertex>& vertices);
@@ -114,6 +125,7 @@ private:
 	VeDevice& m_ve_device;
 	std::unique_ptr<VeBuffer> m_vertex_buffer;
 	std::unique_ptr<VeBuffer> m_shadow_vertex_buffer;
+	std::unique_ptr<VeBuffer> m_skin_vertex_buffer;
 	std::unique_ptr<VeBuffer> m_index_buffer;
 	std::vector<LodLevel> m_lod_levels;  // LODs 1+ (LOD 0 is m_index_buffer)
 	uint32_t m_vertex_count{0};
@@ -122,6 +134,7 @@ private:
 	std::vector<glm::vec3> m_cpu_positions;
 	std::vector<uint32_t> m_cpu_indices;
 	std::unique_ptr<CpuMeshletData> m_meshlet_data;
+	std::vector<AABB> m_joint_mesh_local_extents;
 };
 
 // Transform AABB by model matrix (transform 8 corners, take min/max of result).

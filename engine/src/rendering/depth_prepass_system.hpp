@@ -1,6 +1,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "rendering/ve_frame_info.hpp"
+#include "rendering/pbr_render_system.hpp"
 
 #include <memory>
 #include <vector>
@@ -52,6 +53,10 @@ public:
 	                              const VeBuffer& meshlet_indirect, const VeBuffer& draw_counts,
 	                              const uint32_t* cpu_draw_counts = nullptr,
 	                              const vk::raii::DescriptorSet* global_set_override = nullptr) const;
+
+	// Per-instance depth prepass for skinned meshes.
+	void renderSkinned(VeFrameInfo& frame_info,
+	                   const std::vector<PbrRenderSystem::Drawable>& skinned_drawables) const;
 
 	void recreatePipeline(vk::SampleCountFlagBits sample_count) {
 		m_ve_pipeline.reset();

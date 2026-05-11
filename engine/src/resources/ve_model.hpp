@@ -34,6 +34,13 @@ struct ModelNode {
 	glm::vec3 scale{1.f};
 	int mesh_idx = -1;
 	int material_idx = -1;
+	int skin_idx = -1;
+};
+
+struct ModelSkin {
+	std::vector<int> joint_node_indices;
+	std::vector<glm::mat4> inverse_bind_matrices;
+	int skeleton_root_node = -1;
 };
 
 class VENGINE_API VeModel {
@@ -121,6 +128,7 @@ private:
 	std::vector<ExtractedLight> m_emissive_lights;
 	std::unordered_map<int, uint32_t> m_gltf_to_loaded_idx;
 	std::vector<std::shared_ptr<VeAnimationClip>> m_animation_clips;
+	std::vector<ModelSkin> m_skins;
 };
 
 } // namespace ve

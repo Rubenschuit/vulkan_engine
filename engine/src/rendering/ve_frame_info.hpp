@@ -275,6 +275,8 @@ struct VeFrameInfo {
 	bool meshlet_culling_active = false;
 	Entity selected_entity = Entity::null();
 	vk::raii::DescriptorSet* cpu_global_descriptor_set = nullptr;
+
+	const class SkinningPrePass* skinning_pre_pass = nullptr;
 };
 
 }

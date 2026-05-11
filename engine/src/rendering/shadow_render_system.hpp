@@ -107,6 +107,12 @@ private:
 		uint32_t lod_level = 0;
 	};
 
+	struct SkinnedShadowDrawable {
+		Entity entity;
+		VeMesh* mesh = nullptr;
+		uint32_t instance_offset = 0;
+	};
+
 	struct ShadowInstanceGroup {
 		VeMesh* mesh = nullptr;
 		uint32_t lod_level = 0;
@@ -144,7 +150,8 @@ private:
 		vk::AttachmentLoadOp load_op,
 		const StripRegion* strip_clear = nullptr);
 	void renderShadowMap(VeFrameInfo& frame_info, uint32_t light_index,
-		const std::vector<ShadowInstanceGroup>& instance_groups) const;
+		const std::vector<ShadowInstanceGroup>& instance_groups,
+		bool include_skinned = false) const;
 
 	// --- CPU-path mega-buffer ---
 
@@ -202,6 +209,7 @@ private:
 
 	std::vector<ShadowDrawable> m_static_shadow_drawables;
 	std::vector<ShadowDrawable> m_dynamic_shadow_drawables;
+	std::vector<SkinnedShadowDrawable> m_skinned_shadow_drawables;
 	bool m_static_drawables_dirty = true;
 	bool m_dynamic_drawables_dirty = true;
 	std::vector<VeMesh*> m_cached_unique_meshes;

@@ -64,6 +64,9 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 	ImGui::Checkbox("Show AABB outlines", &ctx.show_aabb_debug);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Display wireframe bounding boxes for visible objects");
+	ImGui::Checkbox("Show skinned points", &ctx.show_skinned_points);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Draw post-skin mesh vertices as a colored point cloud.");
 	ImGui::Text("Topology:");
 	ImGui::SameLine();
 	int topology_int = static_cast<int>(ctx.topology);

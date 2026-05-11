@@ -65,6 +65,15 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 		m_last_registry = registry;
 	}
 
+	m_joint_entity_ids.clear();
+	const auto& skin_pool = registry->skins();
+	for (uint32_t i = 0; i < skin_pool.size(); i++) {
+		const SkinComponent& sc = skin_pool.data()[i];
+		for (Entity je : sc.getJointEntities())
+			if (!je.isNull())
+				m_joint_entity_ids.insert(je.id());
+	}
+
 	// Auto-expand ancestors when selection changes
 	if (state.selection_changed && !state.selected_entity.isNull()) {
 		m_force_open_entities.clear();
@@ -158,6 +167,8 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 	bool has_sl = registry.hasComponent<SpotLightComponent>(entity);
 	bool has_dl = registry.hasComponent<DirectionalLightComponent>(entity);
 	bool has_anim = registry.hasComponent<AnimatorComponent>(entity);
+	bool has_skin = registry.hasComponent<SkinComponent>(entity);
+	bool is_joint = m_joint_entity_ids.count(entity.id()) != 0;
 
 	// Check if has visible children
 	bool has_visible_children = false;
@@ -203,14 +214,22 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 		ImGui::PopStyleColor();
 
 	// Component badges on the same line
-	if (has_mesh || has_pl || has_sl || has_dl || has_anim) {
+	if (has_mesh || has_pl || has_sl || has_dl || has_anim || has_skin || is_joint) {
 		ImGui::SameLine();
 		if (has_mesh) {
 			ImGui::TextColored(ImVec4(0.5f, 0.8f, 0.5f, 1.0f), "[M]");
-			if (has_pl || has_sl || has_dl || has_anim) ImGui::SameLine();
+			if (has_pl || has_sl || has_dl || has_anim || has_skin || is_joint) ImGui::SameLine();
 		}
 		if (has_anim) {
 			ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "[A]");
+			if (has_pl || has_sl || has_dl || has_skin || is_joint) ImGui::SameLine();
+		}
+		if (has_skin) {
+			ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.9f, 1.0f), "[S]");
+			if (has_pl || has_sl || has_dl || is_joint) ImGui::SameLine();
+		}
+		if (is_joint) {
+			ImGui::TextColored(ImVec4(0.7f, 0.5f, 0.9f, 1.0f), "[J]");
 			if (has_pl || has_sl || has_dl) ImGui::SameLine();
 		}
 		if (has_pl) {

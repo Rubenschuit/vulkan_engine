@@ -25,6 +25,7 @@ template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MeshComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SpotLightComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<RigidbodyComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<AnimatorComponent>();
+template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SkinComponent>();
 
 
 // ---------------------------------------------------------------------------
@@ -162,6 +163,31 @@ void MeshComponent::invalidateWorldAABB() {
 
 void MeshComponent::updateWorldAABB() const {
 	assert(m_registry && "MeshComponent must have Registry context for world AABB");
+	const auto* skin = m_registry->getComponent<SkinComponent>(m_entity);
+	const auto& joint_local = skin ? skin->getJointLocalExtents() : std::vector<VeMesh::AABB>{};
+	const auto& joints = skin ? skin->getJointEntities() : std::vector<Entity>{};
+	if (skin && !joint_local.empty() && joint_local.size() == joints.size()) {
+		bool first = true;
+		for (size_t j = 0; j < joints.size(); j++) {
+			Entity je = joints[j];
+			if (je.isNull() || !m_registry->isAlive(je))
+				continue;
+			VeMesh::AABB world_j = transformAABB(joint_local[j], m_registry->getWorldTransform(je));
+			if (first) {
+				m_cached_world_aabb = world_j;
+				first = false;
+			} else {
+				m_cached_world_aabb.min = glm::min(m_cached_world_aabb.min, world_j.min);
+				m_cached_world_aabb.max = glm::max(m_cached_world_aabb.max, world_j.max);
+			}
+		}
+		if (first) {
+			// No joints contributed; fall through to static path
+		} else {
+			m_world_aabb_dirty = false;
+			return;
+		}
+	}
 	const glm::mat4& model = m_registry->getWorldTransform(m_entity);
 	m_cached_world_aabb = transformAABB(getMesh()->getLocalAABB(), model);
 	m_world_aabb_dirty = false;
