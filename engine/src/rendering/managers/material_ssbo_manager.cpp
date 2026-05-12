@@ -108,10 +108,10 @@ void MaterialSSBOManager::writeMaterialGPU(uint32_t index, VeMaterial* mat) {
 
 	MaterialGPU gpu{
 		.base_color_factor = factors.base_color_factor,
-		.emissive_pad = glm::vec4(factors.emissive_factor, 0.0f),
-		.params = glm::vec4(factors.metallic_factor, factors.roughness_factor,
-		                    factors.emissive_strength, factors.transmission_factor),
-		.extra = glm::vec4(factors.specular_factor, factors.ior),
+		.emissive_factor = glm::vec4(factors.emissive_factor, 0.0f),
+		.pbr_params = glm::vec4(factors.metallic_factor, factors.roughness_factor,
+		                        factors.emissive_strength, factors.transmission_factor),
+		.specular_color_ior = glm::vec4(factors.specular_factor, factors.ior),
 		.albedo_index = getIdx(mat->getAlbedoTexture(), TextureType::ALBEDO),
 		.normal_index = getIdx(mat->getNormalTexture(), TextureType::NORMAL),
 		.metallic_roughness_index = getIdx(mat->getMetallicRoughnessTexture(), TextureType::METALLIC_ROUGHNESS),
@@ -119,7 +119,11 @@ void MaterialSSBOManager::writeMaterialGPU(uint32_t index, VeMaterial* mat) {
 		.emissive_index = getIdx(mat->getEmissiveTexture(), TextureType::EMISSIVE),
 		.material_flags = flags,
 		.alpha_cutoff = (alpha_props.alpha_mode == AlphaMode::MASK) ? alpha_props.alpha_cutoff : 0.0f,
-		._pad = 0,
+		.specular_index = getIdx(mat->getSpecularTexture(), TextureType::SPECULAR),
+		.specular_color_index = getIdx(mat->getSpecularColorTexture(), TextureType::SPECULAR_COLOR),
+		.specular_strength = factors.specular_strength,
+		._pad0 = 0,
+		._pad1 = 0,
 	};
 
 	m_staging_buffer->writeToBuffer(&gpu, sizeof(MaterialGPU),

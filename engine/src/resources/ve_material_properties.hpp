@@ -26,7 +26,8 @@ struct MaterialFactors {
 	float emissive_strength = 0.00058f;  // Engine default: attenuates emissive to prevent over-bright surfaces when KHR_materials_emissive_strength is absent
 	float transmission_factor = 0.0f;
 	float ior = 1.5f;  // KHR_materials_ior: index of refraction (default 1.5 gives F0 ≈ 0.04)
-	glm::vec3 specular_factor{0.04f, 0.04f, 0.04f};  // Dielectric F0: from KHR_materials_pbrSpecularGlossiness.specularFactor or derived from ior.
+	glm::vec3 specular_factor{1.0f, 1.0f, 1.0f};  // KHR_materials_specular.specularColorFactor (also raw F0 for KHR_materials_pbrSpecularGlossiness)
+	float specular_strength = 1.0f;  // KHR_materials_specular.specularFactor
 };
 
 // Must match shader's MaterialConstants struct (4 × float4 = 64 bytes).

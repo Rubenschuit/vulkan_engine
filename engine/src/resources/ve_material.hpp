@@ -29,6 +29,8 @@ public:
 	           const std::filesystem::path& metallic_roughness_path,
 	           const std::filesystem::path& occlusion_path,
 	           const std::filesystem::path& emissive_path,
+	           const std::filesystem::path& specular_path,
+	           const std::filesystem::path& specular_color_path,
 	           MaterialAlphaProps alpha_props,
 	           MaterialFactors factors,
 	           VeDescriptorPool* pool, VeDescriptorSetLayout* layout,
@@ -55,6 +57,8 @@ public:
 	const ResourceHandle<VeTexture>& getMetallicRoughnessTexture() const { return m_metallic_roughness_texture; }
 	const ResourceHandle<VeTexture>& getOcclusionTexture() const { return m_occlusion_texture; }
 	const ResourceHandle<VeTexture>& getEmissiveTexture() const { return m_emissive_texture; }
+	const ResourceHandle<VeTexture>& getSpecularTexture() const { return m_specular_texture; }
+	const ResourceHandle<VeTexture>& getSpecularColorTexture() const { return m_specular_color_texture; }
 
 protected:
 	bool doLoad() override;
@@ -67,6 +71,8 @@ private:
 	std::filesystem::path m_metallic_roughness_path;
 	std::filesystem::path m_occlusion_path;
 	std::filesystem::path m_emissive_path;
+	std::filesystem::path m_specular_path;
+	std::filesystem::path m_specular_color_path;
 	MaterialAlphaProps m_alpha_props;
 	MaterialFactors m_factors;
 	VeDescriptorPool* m_pool;
@@ -78,6 +84,8 @@ private:
 	ResourceHandle<VeTexture> m_metallic_roughness_texture;
 	ResourceHandle<VeTexture> m_occlusion_texture;
 	ResourceHandle<VeTexture> m_emissive_texture;
+	ResourceHandle<VeTexture> m_specular_texture;
+	ResourceHandle<VeTexture> m_specular_color_texture;
 	std::unique_ptr<VeBuffer> m_material_ubo;
 	std::optional<vk::raii::DescriptorSet> m_descriptor_set;
 };

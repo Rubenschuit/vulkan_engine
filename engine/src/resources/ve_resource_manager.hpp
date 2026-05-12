@@ -98,6 +98,8 @@ public:
 	                                         const std::filesystem::path& metallic_roughness_path,
 	                                         const std::filesystem::path& occlusion_path,
 	                                         const std::filesystem::path& emissive_path,
+	                                         const std::filesystem::path& specular_path,
+	                                         const std::filesystem::path& specular_color_path,
 	                                         MaterialAlphaProps alpha_props,
 	                                         MaterialFactors factors,
 	                                         class VeDescriptorPool* pool = nullptr,

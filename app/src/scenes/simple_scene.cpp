@@ -79,6 +79,8 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 			"default_mr_unit.png",
 			"default_occlusion.png",
 			"default_emissive.png",
+			"default_specular.png",
+			"default_specular_color.png",
 			MaterialAlphaProps{
 				.alpha_mode = AlphaMode::ALPHA_OPAQUE,
 				.alpha_cutoff = 0.5f,
@@ -107,6 +109,8 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 				default_dir / "default_metallic_roughness.png",
 				default_dir / "default_occlusion.png",
 				default_dir / "default_emissive.png",
+				default_dir / "default_specular.png",
+				default_dir / "default_specular_color.png",
 				MaterialAlphaProps{AlphaMode::MASK, 0.5f, true}, MaterialFactors{}, &m_pool, &m_material_layout);
 
 			Entity quad_entity = m_registry.createEntity("tex_quad");
@@ -155,6 +159,8 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 					"default_mr_unit.png",
 					"default_occlusion.png",
 					"default_emissive.png",
+					"default_specular.png",
+					"default_specular_color.png",
 					MaterialAlphaProps{
 						.alpha_mode = AlphaMode::ALPHA_OPAQUE,
 						.alpha_cutoff = 0.5f,

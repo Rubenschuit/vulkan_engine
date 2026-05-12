@@ -574,6 +574,51 @@ void AnimatorComponent::setTime(uint32_t clip_index, float time) {
 		m_clip_bindings[clip_index].current_time = time;
 }
 
+void AnimatorComponent::playAll() {
+	bool changed = false;
+	for (auto& b : m_clip_bindings) {
+		if (b.clip && !b.playing) {
+			b.playing = true;
+			changed = true;
+		}
+	}
+	if (changed && m_registry) {
+		updateAnimatedFlags();
+		m_registry->events().emit(AnimationStateChangedEvent{m_entity});
+	}
+}
+
+void AnimatorComponent::pauseAll() {
+	bool changed = false;
+	for (auto& b : m_clip_bindings) {
+		if (b.clip && b.playing) {
+			b.playing = false;
+			changed = true;
+		}
+	}
+	if (changed && m_registry) {
+		updateAnimatedFlags();
+		m_registry->events().emit(AnimationStateChangedEvent{m_entity});
+	}
+}
+
+void AnimatorComponent::stopAll() {
+	bool state_changed = false;
+	for (auto& b : m_clip_bindings) {
+		if (!b.clip)
+			continue;
+		if (b.playing) {
+			b.playing = false;
+			state_changed = true;
+		}
+		b.current_time = 0.0f;
+	}
+	if (state_changed && m_registry) {
+		updateAnimatedFlags();
+		m_registry->events().emit(AnimationStateChangedEvent{m_entity});
+	}
+}
+
 void AnimatorComponent::remapEntities(const std::unordered_map<uint32_t, Entity>& old_to_new) {
 	for (auto& entity : m_node_to_entity) {
 		auto it = old_to_new.find(entity.index());

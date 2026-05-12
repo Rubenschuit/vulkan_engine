@@ -142,7 +142,8 @@ void AssetLoadingSystem::tick(VeDescriptorPool* pool, VeDescriptorSetLayout* lay
 
 				bool has_textured = false;
 				for (int idx : {pm.albedo_tex_idx, pm.normal_tex_idx, pm.metallic_roughness_tex_idx,
-				                pm.occlusion_tex_idx, pm.emissive_tex_idx}) {
+				                pm.occlusion_tex_idx, pm.emissive_tex_idx,
+				                pm.specular_tex_idx, pm.specular_color_tex_idx}) {
 					if (idx >= 0 && static_cast<size_t>(idx) < m_asset_data.textures.size()
 					    && !m_asset_data.textures[static_cast<size_t>(idx)].is_default)
 						has_textured = true;
@@ -155,6 +156,8 @@ void AssetLoadingSystem::tick(VeDescriptorPool* pool, VeDescriptorSetLayout* lay
 					getTexPath(pm.metallic_roughness_tex_idx),
 					getTexPath(pm.occlusion_tex_idx),
 					getTexPath(pm.emissive_tex_idx),
+					getTexPath(pm.specular_tex_idx),
+					getTexPath(pm.specular_color_tex_idx),
 					pm.alpha_props, pm.factors,
 					has_textured ? pool : nullptr,
 					has_textured ? layout : nullptr,

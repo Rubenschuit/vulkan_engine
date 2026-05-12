@@ -338,6 +338,10 @@ public:
 	void setLoop(uint32_t clip_index, bool loop);
 	void setTime(uint32_t clip_index, float time);
 
+	void playAll();
+	void pauseAll();
+	void stopAll();
+
 	void setNodeToEntityMap(std::vector<Entity> map) { m_node_to_entity = std::move(map); }
 	void remapEntities(const std::unordered_map<uint32_t, Entity>& old_to_new);
 

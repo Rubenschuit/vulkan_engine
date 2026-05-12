@@ -69,6 +69,7 @@ ResourceHandle<VeTexture> VeTexture::loadOrDefault(VeResourceManager& resource_m
 	auto fn = path.filename().string();
 	bool is_default = (fn == "default_albedo.png" || fn == "default_normal.png" || fn == "default_metallic_roughness.png" ||
 	                   fn == "default_occlusion.png" || fn == "default_emissive.png" || fn == "default_mr_unit.png" ||
+	                   fn == "default_specular.png" || fn == "default_specular_color.png" ||
 	                   fn == "white.png" || fn == "black.png");
 	if (is_default || (!std::filesystem::exists(path) && !hasEmbedded(key))) {
 		if (fn == "default_mr_unit.png")
@@ -78,6 +79,8 @@ ResourceHandle<VeTexture> VeTexture::loadOrDefault(VeResourceManager& resource_m
 		else if (fallback_type == TextureType::NORMAL) default_id = "default_normal";
 		else if (fallback_type == TextureType::OCCLUSION) default_id = "default_occlusion";
 		else if (fallback_type == TextureType::EMISSIVE) default_id = "default_emissive";
+		else if (fallback_type == TextureType::SPECULAR) default_id = "default_specular";
+		else if (fallback_type == TextureType::SPECULAR_COLOR) default_id = "default_specular_color";
 		return resource_manager.load<VeTexture>(default_id);
 	}
 	const char* suffix = "|mr";
@@ -85,6 +88,8 @@ ResourceHandle<VeTexture> VeTexture::loadOrDefault(VeResourceManager& resource_m
 	else if (fallback_type == TextureType::NORMAL) suffix = "|normal";
 	else if (fallback_type == TextureType::OCCLUSION) suffix = "|occlusion";
 	else if (fallback_type == TextureType::EMISSIVE) suffix = "|emissive";
+	else if (fallback_type == TextureType::SPECULAR) suffix = "|specular";
+	else if (fallback_type == TextureType::SPECULAR_COLOR) suffix = "|specular_color";
 	return resource_manager.load<VeTexture>(key + suffix);
 }
 
@@ -117,6 +122,8 @@ bool VeTexture::doLoad() {
 		{"default_mr_unit",             TextureType::METALLIC_ROUGHNESS,  vk::Format::eR8G8B8A8Unorm},
 		{"default_occlusion",           TextureType::OCCLUSION,           vk::Format::eR8G8B8A8Unorm},
 		{"default_emissive",            TextureType::EMISSIVE,            vk::Format::eR8G8B8A8Unorm},
+		{"default_specular",            TextureType::SPECULAR,            vk::Format::eR8G8B8A8Unorm},
+		{"default_specular_color",      TextureType::SPECULAR_COLOR,      vk::Format::eR8G8B8A8Srgb},
 	};
 	for (const auto& def : defaults) {
 		if (m_resource_id != def.id)
@@ -147,7 +154,7 @@ bool VeTexture::doLoad() {
 	if (pipe != std::string::npos) {
 		std::string suffix = path_str.substr(pipe + 1);
 		path_str = path_str.substr(0, pipe);
-		if (suffix == "normal" || suffix == "mr" || suffix == "occlusion" || suffix == "emissive")
+		if (suffix == "normal" || suffix == "mr" || suffix == "occlusion" || suffix == "emissive" || suffix == "specular")
 			format = vk::Format::eR8G8B8A8Unorm;
 	}
 
@@ -542,6 +549,10 @@ stbi_uc* VeTexture::generateDefaultTexture(int width, int height, TextureType ty
 
             case TextureType::EMISSIVE:
                 // White: emissive factor alone controls emission (glTF spec)
+            case TextureType::SPECULAR:
+                // KHR_materials_specular default
+            case TextureType::SPECULAR_COLOR:
+                // KHR_materials_specular default
                 pixels[i * 4 + 0] = 255;
                 pixels[i * 4 + 1] = 255;
                 pixels[i * 4 + 2] = 255;

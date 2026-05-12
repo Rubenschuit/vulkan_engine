@@ -53,6 +53,8 @@ private:
 	uint32_t m_default_mr_index = 0;
 	uint32_t m_default_occlusion_index = 0;
 	uint32_t m_default_emissive_index = 0;
+	uint32_t m_default_specular_index = 0;
+	uint32_t m_default_specular_color_index = 0;
 
 	// Default textures (kept alive)
 	std::shared_ptr<VeTexture> m_default_albedo;
@@ -60,6 +62,8 @@ private:
 	std::shared_ptr<VeTexture> m_default_mr;
 	std::shared_ptr<VeTexture> m_default_occlusion;
 	std::shared_ptr<VeTexture> m_default_emissive;
+	std::shared_ptr<VeTexture> m_default_specular;
+	std::shared_ptr<VeTexture> m_default_specular_color;
 };
 
 } // namespace ve

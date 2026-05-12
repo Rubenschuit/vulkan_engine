@@ -57,6 +57,9 @@ private:
 	void renderTextureSlot(const char* label, const std::string& id, const VeTexture* texture, float thumb_size = 48.0f);
 
 	TextureInspector* m_texture_inspector = nullptr;
+
+	std::string m_animation_filter;
+	bool m_animation_playing_only = false;
 };
 
 } // namespace ve

@@ -258,7 +258,8 @@ struct ParsedMaterial {
 	MaterialAlphaProps alpha_props;
 	MaterialFactors factors;
 	std::filesystem::path albedo_path, normal_path, metallic_roughness_path,
-	                      occlusion_path, emissive_path;
+	                      occlusion_path, emissive_path,
+	                      specular_path, specular_color_path;
 	bool has_textures = false;
 };
 
@@ -1441,13 +1442,13 @@ static bool LoadImageDataCpuOnly(tinygltf::Image* image, const int image_idx, st
 	return tinygltf::LoadImageData(image, image_idx, err, warn, req_width, req_height, bytes, size, &opt);
 }
 
-// KHR_materials_* extensions handled by parseSingleMaterial. Used to warn when
-// a model relies on a material extension we silently ignore.
+// KHR_materials_... extensions handled by parseSingleMaterial
 static const std::unordered_set<std::string> s_supported_khr_materials_extensions = {
 	"KHR_materials_pbrSpecularGlossiness",
 	"KHR_materials_emissive_strength",
 	"KHR_materials_transmission",
 	"KHR_materials_ior",
+	"KHR_materials_specular",
 };
 
 static void warnUnsupportedMaterialExtensions(const tinygltf::Model& gltf, const std::filesystem::path& model_path) {
@@ -1674,7 +1675,8 @@ static ParsedMaterial parseSingleMaterial(
     float emissive_scale,
     const std::filesystem::path& default_albedo, const std::filesystem::path& default_normal,
     const std::filesystem::path& default_metallic_roughness,
-    const std::filesystem::path& default_occlusion, const std::filesystem::path& default_emissive) {
+    const std::filesystem::path& default_occlusion, const std::filesystem::path& default_emissive,
+    const std::filesystem::path& default_specular, const std::filesystem::path& default_specular_color) {
 	ParsedMaterial result;
 
 	// Check for textures
@@ -1765,12 +1767,23 @@ static ParsedMaterial parseSingleMaterial(
 				factors.specular_factor.y = static_cast<float>(sf.Get(1).Get<double>());
 				factors.specular_factor.z = static_cast<float>(sf.Get(2).Get<double>());
 			}
-		} else {
-			factors.specular_factor = glm::vec3(1.0f, 1.0f, 1.0f);
 		}
-	} else {
-		float f0 = ((factors.ior - 1.0f) / (factors.ior + 1.0f)) * ((factors.ior - 1.0f) / (factors.ior + 1.0f));
-		factors.specular_factor = glm::vec3(f0, f0, f0);
+	}
+
+	// KHR_materials_specular (factors only, textures resolved below alongside other tex paths)
+	auto it_spec = mat.extensions.find("KHR_materials_specular");
+	if (it_spec != mat.extensions.end()) {
+		const tinygltf::Value& ext = it_spec->second;
+		if (ext.Has("specularFactor") && ext.Get("specularFactor").IsNumber())
+			factors.specular_strength = static_cast<float>(ext.Get("specularFactor").Get<double>());
+		if (ext.Has("specularColorFactor") && ext.Get("specularColorFactor").IsArray()) {
+			const auto& scf = ext.Get("specularColorFactor");
+			if (scf.Size() >= 3) {
+				factors.specular_factor.x = static_cast<float>(scf.Get(0).Get<double>());
+				factors.specular_factor.y = static_cast<float>(scf.Get(1).Get<double>());
+				factors.specular_factor.z = static_cast<float>(scf.Get(2).Get<double>());
+			}
+		}
 	}
 
 	// Material name heuristics
@@ -1870,6 +1883,21 @@ static ParsedMaterial parseSingleMaterial(
 	else
 		result.emissive_path = default_emissive;
 
+	// KHR_materials_specular textures
+	result.specular_path = default_specular;
+	result.specular_color_path = default_specular_color;
+	if (it_spec != mat.extensions.end()) {
+		const tinygltf::Value& ext = it_spec->second;
+		if (ext.Has("specularTexture") && ext.Get("specularTexture").Has("index")) {
+			int tex_idx = ext.Get("specularTexture").Get("index").Get<int>();
+			result.specular_path = resolveTexturePath(gltf, static_cast<size_t>(tex_idx), model_dir, model_path_str, default_specular);
+		}
+		if (ext.Has("specularColorTexture") && ext.Get("specularColorTexture").Has("index")) {
+			int tex_idx = ext.Get("specularColorTexture").Get("index").Get<int>();
+			result.specular_color_path = resolveTexturePath(gltf, static_cast<size_t>(tex_idx), model_dir, model_path_str, default_specular_color);
+		}
+	}
+
 	// Filename-based fallbacks
 	applyTexturePathFallbacks(result, mat, gltf, model_dir,
 		default_albedo, default_normal, default_metallic_roughness);
@@ -1886,13 +1914,16 @@ static std::vector<ParsedMaterial> parseAllMaterials(
 	const std::filesystem::path default_metallic_roughness = model_dir / "default_metallic_roughness.png";
 	const std::filesystem::path default_occlusion = model_dir / "default_occlusion.png";
 	const std::filesystem::path default_emissive = model_dir / "default_emissive.png";
+	const std::filesystem::path default_specular = model_dir / "default_specular.png";
+	const std::filesystem::path default_specular_color = model_dir / "default_specular_color.png";
 
 	std::vector<ParsedMaterial> results;
 	if (!gltf.materials.empty()) {
 		results.reserve(gltf.materials.size());
 		for (const auto& mat : gltf.materials)
 			results.push_back(parseSingleMaterial(mat, gltf, model_dir, model_path_str, emissive_scale,
-				default_albedo, default_normal, default_metallic_roughness, default_occlusion, default_emissive));
+				default_albedo, default_normal, default_metallic_roughness, default_occlusion, default_emissive,
+				default_specular, default_specular_color));
 	} else {
 		ParsedMaterial default_mat;
 		default_mat.albedo_path = default_albedo;
@@ -1900,6 +1931,8 @@ static std::vector<ParsedMaterial> parseAllMaterials(
 		default_mat.metallic_roughness_path = default_metallic_roughness;
 		default_mat.occlusion_path = default_occlusion;
 		default_mat.emissive_path = default_emissive;
+		default_mat.specular_path = default_specular;
+		default_mat.specular_color_path = default_specular_color;
 		results.push_back(std::move(default_mat));
 	}
 	return results;
@@ -1921,6 +1954,7 @@ static void createMaterialResources(
 		std::string mat_id = model_path.generic_string() + "::material_" + std::to_string(i);
 		auto mat_handle = resource_manager.createMaterial(mat_id, pm.albedo_path, pm.normal_path,
 		                                                  pm.metallic_roughness_path, pm.occlusion_path, pm.emissive_path,
+		                                                  pm.specular_path, pm.specular_color_path,
 		                                                  pm.alpha_props, pm.factors, mat_pool, mat_layout,
 		                                                  flip_tex_coord_v);
 		if (!mat_handle.isValid()) {
@@ -2098,6 +2132,8 @@ LoadedAssetData VeModel::loadFromGltfCpu(
 		pmat.metallic_roughness_tex_idx = addTexRef(pm.metallic_roughness_path, TextureType::METALLIC_ROUGHNESS);
 		pmat.occlusion_tex_idx = addTexRef(pm.occlusion_path, TextureType::OCCLUSION);
 		pmat.emissive_tex_idx = addTexRef(pm.emissive_path, TextureType::EMISSIVE);
+		pmat.specular_tex_idx = addTexRef(pm.specular_path, TextureType::SPECULAR);
+		pmat.specular_color_tex_idx = addTexRef(pm.specular_color_path, TextureType::SPECULAR_COLOR);
 		result.materials.push_back(std::move(pmat));
 	}
 

@@ -122,9 +122,9 @@ StructuredBuffer<InstanceData> instances;
 
 struct MaterialGPU {
 	float4 base_color_factor;
-	float4 emissive_pad;
-	float4 params;
-	float4 extra;
+	float4 emissive_factor;
+	float4 pbr_params;            // metallic, roughness, emissive_strength, transmission
+	float4 specular_color_ior;    // specularColorFactor.xyz, ior
 	uint   albedo_index;
 	uint   normal_index;
 	uint   metallic_roughness_index;
@@ -132,7 +132,11 @@ struct MaterialGPU {
 	uint   emissive_index;
 	uint   material_flags;
 	float  alpha_cutoff;
-	uint   _pad;
+	uint   specular_index;
+	uint   specular_color_index;
+	float  specular_strength;
+	uint   _pad0;
+	uint   _pad1;
 };
 [vk::binding(2, 0)]
 StructuredBuffer<MaterialGPU> materials;

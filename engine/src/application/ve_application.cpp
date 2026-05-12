@@ -112,12 +112,11 @@ void VeApplication::run() {
 		updateFrameTime();
 		m_total_time += m_frame_time;
 
-		// Process input and camera
+		// Process input and tick the editor camera controller.
 		m_input_controller.processInput(m_frame_time);
 		m_ui.visible = m_input_controller.isEditorMode();
 		m_editor->getState().editor_mode = m_input_controller.isEditorMode();
 		m_editor->editorCamera().tick(m_input_controller.getActions(), m_frame_time);
-		updateCamera(glm::radians(m_ui.fov));
 
 		// Process pending entity deletions at a safe point
 		if (m_active_scene) {
@@ -165,6 +164,7 @@ void VeApplication::run() {
 		emitSettingEvents();
 		if (m_editor->beginFrame())
 			recreateResolutionDependentSystems(); // extent changed
+		updateCamera(glm::radians(m_ui.fov));
 		selectBackend();
 		bool gpu_culling = m_ui.gpu_culling_enabled
 			&& m_scene_resources->getGpuSceneManager().hasRegisteredObjects();

@@ -61,6 +61,8 @@ struct ProcessedMaterial {
 	int metallic_roughness_tex_idx = -1;
 	int occlusion_tex_idx = -1;
 	int emissive_tex_idx = -1;
+	int specular_tex_idx = -1;
+	int specular_color_tex_idx = -1;
 	MaterialAlphaProps alpha_props;
 	MaterialFactors factors;
 	bool flip_tex_coord_v = false;

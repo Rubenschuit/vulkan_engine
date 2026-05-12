@@ -228,6 +228,8 @@ ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& 
                                                              const std::filesystem::path& metallic_roughness_path,
                                                              const std::filesystem::path& occlusion_path,
                                                              const std::filesystem::path& emissive_path,
+                                                             const std::filesystem::path& specular_path,
+                                                             const std::filesystem::path& specular_color_path,
                                                              MaterialAlphaProps alpha_props,
                                                              MaterialFactors factors,
                                                              VeDescriptorPool* pool,
@@ -245,6 +247,7 @@ ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& 
 	auto resource = std::make_shared<VeMaterial>(*this, resource_id,
 	                                            albedo_path, normal_path, metallic_roughness_path,
 	                                            occlusion_path, emissive_path,
+	                                            specular_path, specular_color_path,
 	                                            alpha_props, factors, pool, layout, flip_tex_coord_v);
 	if (!resource->load()) {
 		return ResourceHandle<VeMaterial>();

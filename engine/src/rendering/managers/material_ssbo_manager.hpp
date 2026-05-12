@@ -17,19 +17,23 @@ class EventBus;
 
 struct MaterialGPU {
 	glm::vec4 base_color_factor;
-	glm::vec4 emissive_pad;    // xyz=emissive, w=pad
-	glm::vec4 params;          // metallic, roughness, emissive_strength, transmission
-	glm::vec4 extra;           // specular xyz, ior w
+	glm::vec4 emissive_factor;       // xyz=emissive, w=pad
+	glm::vec4 pbr_params;            // metallic, roughness, emissive_strength, transmission
+	glm::vec4 specular_color_ior;
 	uint32_t albedo_index;
 	uint32_t normal_index;
 	uint32_t metallic_roughness_index;
 	uint32_t occlusion_index;
 	uint32_t emissive_index;
-	uint32_t material_flags;   // see MaterialFlag namespace in ve_config.hpp
+	uint32_t material_flags;         // see MaterialFlag namespace in ve_config.hpp
 	float    alpha_cutoff;
-	uint32_t _pad;
+	uint32_t specular_index;
+	uint32_t specular_color_index;
+	float    specular_strength;
+	uint32_t _pad0;
+	uint32_t _pad1;
 };
-static_assert(sizeof(MaterialGPU) == 96, "MaterialGPU must be 96 bytes for SSBO alignment");
+static_assert(sizeof(MaterialGPU) == 112, "MaterialGPU must be 112 bytes for SSBO alignment");
 
 class VENGINE_API MaterialSSBOManager {
 public:

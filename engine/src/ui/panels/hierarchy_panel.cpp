@@ -542,7 +542,7 @@ void HierarchyPanel::renderSceneSelector() {
 		m_scene_load_request->scene_index = -1;
 		*m_current_scene_index = -1;
 	}
-	ImGui::SameLine();
+
 	if (ImGui::Button("Add Model...")) {
 		auto selection = pfd::open_file(
 			"Add GLTF Model", "",
@@ -555,6 +555,7 @@ void HierarchyPanel::renderSceneSelector() {
 			m_scene_load_request->flip_tex_coord_v = m_flip_tex_coord_v;
 		}
 	}
+	ImGui::SameLine();
 	ImGui::Checkbox("Flip UV vertically", &m_flip_tex_coord_v);
 
 	// Show load time for a few seconds after completion

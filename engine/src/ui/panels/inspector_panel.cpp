@@ -693,11 +693,16 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 			changed = true;
 	}, [&]() { factors.ior = defaults.ior; changed = true; });
 
-	labeledWidget(mat_label_w, "Specular F0", [&]() {
-		if (ImGui::ColorEdit3("##SpecularF0", glm::value_ptr(factors.specular_factor),
+	labeledWidget(mat_label_w, "Specular Color", [&]() {
+		if (ImGui::ColorEdit3("##SpecularColor", glm::value_ptr(factors.specular_factor),
 				ImGuiColorEditFlags_Float))
 			changed = true;
 	}, [&]() { factors.specular_factor = defaults.specular_factor; changed = true; });
+
+	labeledWidget(mat_label_w, "Specular Str", [&]() {
+		if (ImGui::SliderFloat("##SpecularStr", &factors.specular_strength, 0.0f, 1.0f))
+			changed = true;
+	}, [&]() { factors.specular_strength = defaults.specular_strength; changed = true; });
 
 	if (changed) {
 		mat->setMaterialFactors(factors);
@@ -745,6 +750,8 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 			renderTextureSlot("Metal/Rgh", mat->getMetallicRoughnessTexture().getId(), mat->getMetallicRoughnessTexture().get());
 			renderTextureSlot("Occlusion", mat->getOcclusionTexture().getId(), mat->getOcclusionTexture().get());
 			renderTextureSlot("Emissive",  mat->getEmissiveTexture().getId(), mat->getEmissiveTexture().get());
+			renderTextureSlot("Specular",  mat->getSpecularTexture().getId(), mat->getSpecularTexture().get());
+			renderTextureSlot("Spec Color", mat->getSpecularColorTexture().getId(), mat->getSpecularColorTexture().get());
 			ImGui::EndTable();
 		}
 		ImGui::TreePop();
@@ -931,49 +938,106 @@ void InspectorPanel::renderRigidbody(RigidbodyComponent& rb, EditorState& state)
 
 void InspectorPanel::renderAnimator(AnimatorComponent& animator) {
 	const auto& clips = animator.getClipBindings();
-	ImGui::Text("Clips: %zu", clips.size());
+	const size_t total = clips.size();
 
-	for (uint32_t i = 0; i < static_cast<uint32_t>(clips.size()); i++) {
-		const auto& binding = clips[i];
-		if (!binding.clip)
-			continue;
+	size_t playing_count = 0;
+	for (const auto& b : clips)
+		if (b.clip && b.playing)
+			playing_count++;
 
-		ImGui::PushID(static_cast<int>(i));
+	ImGui::Text("Clips: %zu  Playing: %zu", total, playing_count);
 
-		const char* clip_name = binding.clip->name.empty() ? "Unnamed" : binding.clip->name.c_str();
-		if (ImGui::TreeNodeEx(clip_name, ImGuiTreeNodeFlags_DefaultOpen)) {
-			ImGui::TextDisabled("Duration: %.2fs  Channels: %zu", binding.clip->duration, binding.clip->channels.size());
+	if (ImGui::Button("Play All"))
+		animator.playAll();
+	ImGui::SameLine();
+	if (ImGui::Button("Pause All"))
+		animator.pauseAll();
+	ImGui::SameLine();
+	if (ImGui::Button("Stop All"))
+		animator.stopAll();
 
-			float time = binding.current_time;
-			if (ImGui::SliderFloat("Time", &time, 0.0f, binding.clip->duration, "%.2fs"))
-				animator.setTime(i, time);
+	char filter_buf[128];
+	std::snprintf(filter_buf, sizeof(filter_buf), "%s", m_animation_filter.c_str());
+	ImGui::SetNextItemWidth(-FLT_MIN);
+	if (ImGui::InputTextWithHint("##anim_filter", "Filter by name...", filter_buf, sizeof(filter_buf)))
+		m_animation_filter = filter_buf;
 
-			float speed = binding.speed;
-			if (ImGui::DragFloat("Speed", &speed, 0.01f, -10.0f, 10.0f, "%.2f"))
-				animator.setSpeed(i, speed);
+	ImGui::Checkbox("Playing only", &m_animation_playing_only);
+
+	std::string filter_lower = m_animation_filter;
+	std::transform(filter_lower.begin(), filter_lower.end(), filter_lower.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+	auto matches_filter = [&](const VeAnimationClip& clip) {
+		if (filter_lower.empty())
+			return true;
+		std::string name = clip.name;
+		std::transform(name.begin(), name.end(), name.begin(),
+			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		return name.find(filter_lower) != std::string::npos;
+	};
+
+	ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, 320.0f));
+	if (ImGui::BeginChild("anim_clip_list", ImVec2(0, 0),
+	                      ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY)) {
+		size_t visible_count = 0;
+		for (uint32_t i = 0; i < static_cast<uint32_t>(clips.size()); i++) {
+			const auto& binding = clips[i];
+			if (!binding.clip)
+				continue;
+			if (m_animation_playing_only && !binding.playing)
+				continue;
+			if (!matches_filter(*binding.clip))
+				continue;
+
+			visible_count++;
+			ImGui::PushID(static_cast<int>(i));
 
 			bool playing = binding.playing;
-			if (ImGui::Checkbox("Playing", &playing)) {
+			if (ImGui::Checkbox("##playing", &playing)) {
 				if (playing)
 					animator.play(i);
 				else
 					animator.pause(i);
 			}
-
 			ImGui::SameLine();
-			bool loop = binding.loop;
-			if (ImGui::Checkbox("Loop", &loop))
-				animator.setLoop(i, loop);
 
+			const char* clip_name = binding.clip->name.empty() ? "(unnamed)" : binding.clip->name.c_str();
+			char header_label[160];
+			std::snprintf(header_label, sizeof(header_label), "[%u] %s", i, clip_name);
+			bool open = ImGui::TreeNodeEx(header_label, ImGuiTreeNodeFlags_SpanAvailWidth);
 			ImGui::SameLine();
-			if (ImGui::Button("Reset"))
-				animator.stop(i);
+			ImGui::TextDisabled("%.2fs", binding.clip->duration);
 
-			ImGui::TreePop();
+			if (open) {
+				ImGui::TextDisabled("Channels: %zu", binding.clip->channels.size());
+
+				float time = binding.current_time;
+				if (ImGui::SliderFloat("Time", &time, 0.0f, binding.clip->duration, "%.2fs"))
+					animator.setTime(i, time);
+
+				float speed = binding.speed;
+				if (ImGui::DragFloat("Speed", &speed, 0.01f, -10.0f, 10.0f, "%.2f"))
+					animator.setSpeed(i, speed);
+
+				bool loop = binding.loop;
+				if (ImGui::Checkbox("Loop", &loop))
+					animator.setLoop(i, loop);
+
+				ImGui::SameLine();
+				if (ImGui::Button("Reset"))
+					animator.stop(i);
+
+				ImGui::TreePop();
+			}
+
+			ImGui::PopID();
 		}
 
-		ImGui::PopID();
+		if (visible_count == 0)
+			ImGui::TextDisabled("(no clips match)");
 	}
+	ImGui::EndChild();
 }
 
 void InspectorPanel::renderSkin(Registry& registry, SkinComponent& skin, EditorState& state) {

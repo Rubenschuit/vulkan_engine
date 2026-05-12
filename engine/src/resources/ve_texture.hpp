@@ -23,6 +23,8 @@ enum class TextureType {
 	METALLIC_ROUGHNESS,
 	OCCLUSION,
 	EMISSIVE,
+	SPECULAR,         // KHR_materials_specular: A = strength
+	SPECULAR_COLOR,   // KHR_materials_specular: RGB = color tint
 };
 
 // Holds decoded pixel data or raw KTX bytes for images embedded in .glb files.

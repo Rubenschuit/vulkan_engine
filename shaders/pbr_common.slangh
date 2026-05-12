@@ -94,10 +94,10 @@ VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID)
 // PBR Helper Functions
 // ============================================================================
 
-float3 fresnelSchlick(float cos_theta, float3 F0) {
+float3 fresnelSchlick(float cos_theta, float3 F0, float3 F90) {
 	float t = clamp(1.0 - cos_theta, 0.0, 1.0);
 	float t2 = t * t;
-	return F0 + (1.0 - F0) * (t2 * t2 * t);
+	return F0 + (F90 - F0) * (t2 * t2 * t);
 }
 
 float distributionGGX(float3 N, float3 H, float roughness) {
@@ -177,26 +177,36 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	float4 occlusion_sample = bindless_textures[NonUniformResourceIndex(mat.occlusion_index)]
 		.Sample(bindless_sampler, tex_coord);
 	float3 emissive_sample = float3(0.0);
-	if (mat.params.z > 0.0)
+	if (mat.pbr_params.z > 0.0)
 		emissive_sample = bindless_textures[NonUniformResourceIndex(mat.emissive_index)]
-			.Sample(bindless_sampler, tex_coord).rgb * mat.emissive_pad.xyz * mat.params.z;
+			.Sample(bindless_sampler, tex_coord).rgb * mat.emissive_factor.xyz * mat.pbr_params.z;
 
 	float metallic;
 	float roughness;
 	float3 F0;
+	float specular_weight;  // KHR_materials_specular dielectric Fresnel scaling
 	if ((mat.material_flags & MAT_FLAG_SPEC_GLOSS) != 0u) {
 		metallic = 0.0;
-		roughness = 1.0 - mr.a * mat.params.y;
-		F0 = mat.extra.xyz * mr.rgb;
+		roughness = 1.0 - mr.a * mat.pbr_params.y;
+		F0 = mat.specular_color_ior.xyz * mr.rgb;
+		specular_weight = 1.0;
 	} else {
-		metallic = mr.b * mat.params.x;
-		roughness = mr.g * mat.params.y;
-		float ior = mat.extra.w;
+		metallic = mr.b * mat.pbr_params.x;
+		roughness = mr.g * mat.pbr_params.y;
+		float ior = mat.specular_color_ior.w;
 		float f0_dielectric = ((ior - 1.0) / (ior + 1.0)) * ((ior - 1.0) / (ior + 1.0));
-		F0 = lerp(float3(f0_dielectric), albedo.rgb, metallic);
+		// KHR_materials_specular dielectric: F0 = min(f0_ior * specColor, 1) * specular, F90 = specular
+		float3 spec_col_tex = bindless_textures[NonUniformResourceIndex(mat.specular_color_index)]
+			.Sample(bindless_sampler, tex_coord).rgb;
+		float spec_tex_alpha = bindless_textures[NonUniformResourceIndex(mat.specular_index)]
+			.Sample(bindless_sampler, tex_coord).a;
+		specular_weight = mat.specular_strength * spec_tex_alpha;
+		float3 dielectric_F0 = min(f0_dielectric * mat.specular_color_ior.xyz * spec_col_tex, float3(1.0)) * specular_weight;
+		F0 = lerp(dielectric_F0, albedo.rgb, metallic);
 	}
 	roughness = max(roughness, 0.045);
-	float transmission = mat.params.w;
+	float transmission = mat.pbr_params.w;
+	float3 F90 = float3(lerp(specular_weight, 1.0, metallic));
 
 	float3 world_normal = N;
 	if (ubo.render_mode == RenderMode::BRDF_MICROFACET || ubo.render_mode == RenderMode::NORMAL_MAP) {
@@ -279,7 +289,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 			float3 H = normalize(view_dir + L);
 			float3 radiance = light.color.xyz * attenuation;
 
-			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0);
+			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0, F90);
 			float D = distributionGGX(world_normal, H, roughness);
 			float G = G1_V * geometrySchlickGGX(NdotL, roughness);
 			float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
@@ -304,7 +314,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 			float attenuation = calculateAttenuation(distance_sq, ubo.point_lights[i].position.w);
 			float3 radiance = ubo.point_lights[i].color.xyz * attenuation;
 
-			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0);
+			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0, F90);
 			float D = distributionGGX(world_normal, H, roughness);
 			float G = G1_V * geometrySchlickGGX(NdotL, roughness);
 			float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
@@ -334,7 +344,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 			float3 H = normalize(view_dir + L);
 			float3 radiance = ubo.spot_lights[i].color.xyz * attenuation;
 
-			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0);
+			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0, F90);
 			float D = distributionGGX(world_normal, H, roughness);
 			float G = G1_V * geometrySchlickGGX(NdotL, roughness);
 			float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
@@ -354,7 +364,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		float3 H = normalize(view_dir + L);
 		float3 radiance = ubo.dir_lights[i].color.xyz;
 
-		float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0);
+		float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0, F90);
 		float D = distributionGGX(world_normal, H, roughness);
 		float G = G1_V * geometrySchlickGGX(NdotL, roughness);
 		float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
@@ -385,9 +395,9 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		float3 prefiltered = ibl_prefiltered.SampleLevel(R_yup, lod).rgb;
 		float2 env_brdf = ibl_brdf_lut.SampleLevel(float2(NdotV, 1.0 - roughness), 0).rg;
 
-		// Multiscatter energy compensation (Fdez-Aguera 2019)
-		float3 Fr = max(F0 * env_brdf.x + env_brdf.y, 0.0);
-		float3 F_avg = F0 + (1.0 - F0) / 21.0;
+		// Multiscatter energy compensation (Fdez-Aguera 2019). env_brdf precomputed assuming F90=1, so scale by F90.
+		float3 Fr = max(F0 * env_brdf.x + F90 * env_brdf.y, 0.0);
+		float3 F_avg = F0 + (F90 - F0) / 21.0;
 		float3 FmsEms = (1.0 - Fr) * F_avg / max(1.0 - F_avg * (1.0 - env_brdf.x - env_brdf.y), 0.001);
 		float3 specular_ibl = prefiltered * (Fr + FmsEms);
 		specular_ibl *= saturate(NdotV * 4.0);

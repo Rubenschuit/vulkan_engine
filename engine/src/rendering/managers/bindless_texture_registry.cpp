@@ -73,6 +73,8 @@ BindlessTextureRegistry::BindlessTextureRegistry(VeDevice& device, uint32_t max_
 	m_default_mr = VeTexture::createDefault(m_ve_device, TextureType::METALLIC_ROUGHNESS);
 	m_default_occlusion = VeTexture::createDefault(m_ve_device, TextureType::OCCLUSION);
 	m_default_emissive = VeTexture::createDefault(m_ve_device, TextureType::EMISSIVE);
+	m_default_specular = VeTexture::createDefault(m_ve_device, TextureType::SPECULAR);
+	m_default_specular_color = VeTexture::createDefault(m_ve_device, TextureType::SPECULAR_COLOR);
 
 	// Populate default indices in the registry so they can be used immediately
 	m_default_albedo_index = registerTexture(m_default_albedo.get());
@@ -80,6 +82,8 @@ BindlessTextureRegistry::BindlessTextureRegistry(VeDevice& device, uint32_t max_
 	m_default_mr_index = registerTexture(m_default_mr.get());
 	m_default_occlusion_index = registerTexture(m_default_occlusion.get());
 	m_default_emissive_index = registerTexture(m_default_emissive.get());
+	m_default_specular_index = registerTexture(m_default_specular.get());
+	m_default_specular_color_index = registerTexture(m_default_specular_color.get());
 
 	VE_LOGI("BindlessTextureRegistry: max=" << max_textures
 		<< ", defaults registered (albedo=" << m_default_albedo_index
@@ -123,7 +127,7 @@ void BindlessTextureRegistry::unregisterTexture(VeTexture* texture) {
 void BindlessTextureRegistry::reset() {
 	// Overwrite all non-default slots with the default albedo texture
 	// so no descriptor points to a destroyed image view.
-	static constexpr uint32_t NUM_DEFAULTS = 5;
+	static constexpr uint32_t NUM_DEFAULTS = 7;
 	for (auto& [tex, index] : m_texture_to_index) {
 		if (index >= NUM_DEFAULTS)
 			writeSlot(index, m_default_albedo.get());
@@ -138,6 +142,8 @@ void BindlessTextureRegistry::reset() {
 	m_texture_to_index[m_default_mr.get()] = m_default_mr_index;
 	m_texture_to_index[m_default_occlusion.get()] = m_default_occlusion_index;
 	m_texture_to_index[m_default_emissive.get()] = m_default_emissive_index;
+	m_texture_to_index[m_default_specular.get()] = m_default_specular_index;
+	m_texture_to_index[m_default_specular_color.get()] = m_default_specular_color_index;
 	m_next_index = NUM_DEFAULTS;
 }
 
@@ -148,6 +154,8 @@ uint32_t BindlessTextureRegistry::getDefaultIndex(TextureType type) const {
 		case TextureType::METALLIC_ROUGHNESS: return m_default_mr_index;
 		case TextureType::OCCLUSION: return m_default_occlusion_index;
 		case TextureType::EMISSIVE: return m_default_emissive_index;
+		case TextureType::SPECULAR: return m_default_specular_index;
+		case TextureType::SPECULAR_COLOR: return m_default_specular_color_index;
 		default: return m_default_albedo_index;
 	}
 }

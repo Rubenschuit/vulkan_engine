@@ -13,6 +13,8 @@ VeMaterial::VeMaterial(VeResourceManager& resource_manager, const std::string& r
                        const std::filesystem::path& metallic_roughness_path,
                        const std::filesystem::path& occlusion_path,
                        const std::filesystem::path& emissive_path,
+                       const std::filesystem::path& specular_path,
+                       const std::filesystem::path& specular_color_path,
                        MaterialAlphaProps alpha_props,
                        MaterialFactors factors,
                        VeDescriptorPool* pool, VeDescriptorSetLayout* layout,
@@ -24,6 +26,8 @@ VeMaterial::VeMaterial(VeResourceManager& resource_manager, const std::string& r
 	  m_metallic_roughness_path(metallic_roughness_path),
 	  m_occlusion_path(occlusion_path),
 	  m_emissive_path(emissive_path),
+	  m_specular_path(specular_path),
+	  m_specular_color_path(specular_color_path),
 	  m_alpha_props(alpha_props),
 	  m_factors(factors),
 	  m_pool(pool),
@@ -40,6 +44,8 @@ bool VeMaterial::doLoad() {
 	m_metallic_roughness_texture = VeTexture::loadOrDefault(*m_resource_manager, m_metallic_roughness_path, TextureType::METALLIC_ROUGHNESS);
 	m_occlusion_texture = VeTexture::loadOrDefault(*m_resource_manager, m_occlusion_path, TextureType::OCCLUSION);
 	m_emissive_texture = VeTexture::loadOrDefault(*m_resource_manager, m_emissive_path, TextureType::EMISSIVE);
+	m_specular_texture = VeTexture::loadOrDefault(*m_resource_manager, m_specular_path, TextureType::SPECULAR);
+	m_specular_color_texture = VeTexture::loadOrDefault(*m_resource_manager, m_specular_color_path, TextureType::SPECULAR_COLOR);
 
 	// If any texture failed to load (e.g. KTX2 decode error), use defaults so the material still works
 	if (!m_albedo_texture.isValid())
@@ -52,8 +58,13 @@ bool VeMaterial::doLoad() {
 		m_occlusion_texture = m_resource_manager->load<VeTexture>("default_occlusion");
 	if (!m_emissive_texture.isValid())
 		m_emissive_texture = m_resource_manager->load<VeTexture>("default_emissive");
+	if (!m_specular_texture.isValid())
+		m_specular_texture = m_resource_manager->load<VeTexture>("default_specular");
+	if (!m_specular_color_texture.isValid())
+		m_specular_color_texture = m_resource_manager->load<VeTexture>("default_specular_color");
 	if (!m_albedo_texture.isValid() || !m_normal_texture.isValid() || !m_metallic_roughness_texture.isValid() ||
-	    !m_occlusion_texture.isValid() || !m_emissive_texture.isValid()) {
+	    !m_occlusion_texture.isValid() || !m_emissive_texture.isValid() ||
+	    !m_specular_texture.isValid() || !m_specular_color_texture.isValid()) {
 		return false;
 	}
 
@@ -97,6 +108,8 @@ void VeMaterial::doUnload() {
 	m_metallic_roughness_texture = ResourceHandle<VeTexture>{};
 	m_occlusion_texture = ResourceHandle<VeTexture>{};
 	m_emissive_texture = ResourceHandle<VeTexture>{};
+	m_specular_texture = ResourceHandle<VeTexture>{};
+	m_specular_color_texture = ResourceHandle<VeTexture>{};
 }
 
 void VeMaterial::setMaterialFactors(const MaterialFactors& factors) {
