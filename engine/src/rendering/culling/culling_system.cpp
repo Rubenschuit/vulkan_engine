@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "rendering/culling/culling_system.hpp"
+#include "rendering/ve_frame_info.hpp"
 #include "scene/ve_component.hpp"
 #include "scene/ve_registry.hpp"
 #include "resources/ve_mesh.hpp"

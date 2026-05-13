@@ -27,6 +27,14 @@ struct BloomMip {
 	vk::raii::DescriptorSet descriptor_set{nullptr};
 };
 
+struct BloomDownsamplePushConstant {
+	int is_first_pass;
+};
+
+struct BloomUpsamplePushConstant {
+	float filter_radius;
+};
+
 class VENGINE_API BloomSystem {
 public:
 	BloomSystem(

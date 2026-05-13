@@ -1,12 +1,11 @@
-/* This file contains definitions of data structures needed
-for each frame in the rendering process. */
 #pragma once
 #include "ve_export.hpp"
+#include "ve_config.hpp"
 #include "scene/ve_entity.hpp"
 #include "scene/ve_registry.hpp"
 #include "scene/ve_scene.hpp"
-#include "ve_config.hpp"
 #include "scene/camera_view.hpp"
+#include "rendering/culling/culling_system.hpp"
 
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
@@ -15,51 +14,7 @@ for each frame in the rendering process. */
 
 namespace ve {
 
-class MeshComponent;
-
-// Per-instance transform data uploaded to the instance SSBO each frame.
-// Indexed by gl_InstanceIndex (SV_InstanceID in Slang) in vertex shaders.
-struct InstanceData {
-	alignas(16) glm::mat4 transform;
-	alignas(16) glm::mat3x4 normal_transform;
-	alignas(4)  uint32_t material_index;        // index into MaterialGPU SSBO
-	alignas(4)  uint32_t lod_level;             // for debug visualization
-	alignas(4)  float    depth_offset;          // clip-space Z offset for MASK
-	alignas(4)  uint32_t material_flags;        // see MaterialFlag in ve_config.hpp (avoids material SSBO read in vertex shader)
-};
-static_assert(sizeof(InstanceData) == 128, "InstanceData must be 128 bytes for SSBO alignment");
-
-// Cached visible object built once per frame by the culling system.
-// Stores Entity + direct MeshComponent* for zero-lookup rendering.
-struct VisibleObject {
-	Entity entity;
-	MeshComponent* mesh = nullptr;
-	uint32_t lod_level = 0;
-};
-
-struct PointLight {
-	alignas(16) glm::vec4 position; // xyz = world position, w = range (0 = infinite)
-	alignas(16) glm::vec4 color;    // xyz = color * intensity, w = intensity
-};
-
-struct DirectionalLight {
-	alignas(16) glm::vec4 direction;  // xyz = direction toward surface, w = unused
-	alignas(16) glm::vec4 color;      // xyz = color * intensity, w = intensity
-};
-
-struct SpotLight {
-	alignas(16) glm::vec4 position;   // xyz = world pos, w = range
-	alignas(16) glm::vec4 direction;  // xyz = normalized dir, w = cos(outerConeAngle)
-	alignas(16) glm::vec4 color;      // xyz = color * intensity, w = cos(innerConeAngle)
-};
-
-struct ShadowLight {
-	alignas(16) glm::mat4 light_view;
-	alignas(16) glm::mat4 light_proj;
-	alignas(16) glm::mat4 shadow_matrix;        // pre-computed bias * light_proj * light_view
-	alignas(16) glm::vec4 light_index_padding;  // x = light_index, y = type (0=point, 1=directional, 2=spot), zw = padding
-	alignas(16) glm::vec4 atlas_bounds;          // xy = min UV, zw = max UV (atlas region bounds for XY clamping)
-};
+// --- Rendering mode enums ---
 
 enum class RenderMode : uint32_t {
 	BRDF = 0,
@@ -81,17 +36,6 @@ enum class ShadowMode : uint32_t {
 	PCSS = 3,
 };
 
-enum class Topology : uint32_t {
-	TRIANGLE_LIST = 0,
-	LINE_LIST = 1,
-};
-
-enum class HDRColorMode : int {
-	SDR = 0,
-	SCRGB = 1,        // Extended sRGB linear (scRGB)
-	HDR10_PQ = 2,     // HDR10 ST2084 (PQ)
-};
-
 enum ToneMapMode : int {
 	TONEMAP_NONE         = 0,
 	TONEMAP_REINHARD     = 1,
@@ -100,25 +44,45 @@ enum ToneMapMode : int {
 	TONEMAP_GT           = 4,
 };
 
-struct PostProcessPushConstant {
-	int blur_radius = 0; // 0 means no blur
-	float blur_strength = 1.0f;
-	float exposure = 1.0f;
-	int color_space = 0; // 0: SRGB, 1: Extended Linear, 2: HDR10 ST2084
-	float bloom_strength = 0.01f;
-	int tone_map_mode = TONEMAP_GT;
-	float hdr_peak_white = 4.0f; // GT tonemap peak brightness in scene-linear units (HDR only)
-	float padding;
-	glm::vec2 texel_size;
+// --- GPU-side light structs (layouts must match shader bindings) ---
+
+struct PointLight {
+	alignas(16) glm::vec4 position; // xyz = world position, w = range (0 = infinite)
+	alignas(16) glm::vec4 color;    // xyz = color * intensity, w = intensity
 };
 
-struct BloomDownsamplePushConstant {
-	int is_first_pass;
+struct DirectionalLight {
+	alignas(16) glm::vec4 direction;  // xyz = direction toward surface, w = unused
+	alignas(16) glm::vec4 color;      // xyz = color * intensity, w = intensity
 };
 
-struct BloomUpsamplePushConstant {
-	float filter_radius;
+struct SpotLight {
+	alignas(16) glm::vec4 position;   // xyz = world pos, w = range
+	alignas(16) glm::vec4 direction;  // xyz = normalized dir, w = cos(outerConeAngle)
+	alignas(16) glm::vec4 color;      // xyz = color * intensity, w = cos(innerConeAngle)
 };
+
+struct ShadowLight {
+	alignas(16) glm::mat4 light_view;
+	alignas(16) glm::mat4 light_proj;
+	alignas(16) glm::mat4 shadow_matrix;        // bias * light_proj * light_view
+	alignas(16) glm::vec4 light_index_padding;  // x = light_index, y = type (0=point, 1=directional, 2=spot)
+	alignas(16) glm::vec4 atlas_bounds;         // xy = min UV, zw = max UV
+};
+
+// --- Per-instance SSBO data uploaded each frame, indexed by gl_InstanceIndex ---
+
+struct InstanceData {
+	alignas(16) glm::mat4 transform;
+	alignas(16) glm::mat3x4 normal_transform;
+	alignas(4)  uint32_t material_index;
+	alignas(4)  uint32_t lod_level;
+	alignas(4)  float    depth_offset;     // clip-space Z offset for MASK
+	alignas(4)  uint32_t material_flags;   // see MaterialFlag in ve_config.hpp
+};
+static_assert(sizeof(InstanceData) == 128, "InstanceData must be 128 bytes for SSBO alignment");
+
+// --- Main UBO bound to every render pass at set 0 ---
 
 struct UniformBufferObject {
 	alignas(16) glm::mat4 view;
@@ -137,146 +101,135 @@ struct UniformBufferObject {
 	alignas(16) DirectionalLight dir_lights[ve::MAX_DIR_LIGHTS];
 
 	// Cascaded shadow maps
-	alignas(16) glm::mat4 csm_shadow_matrices[ve::NUM_CSM_CASCADES]; // bias * proj * view per cascade
-	alignas(16) glm::vec4 csm_split_distances{};  // view-space far-Z for cascades
+	alignas(16) glm::mat4 csm_shadow_matrices[ve::NUM_CSM_CASCADES];
+	alignas(16) glm::vec4 csm_split_distances{};   // view-space far-Z per cascade
 	alignas(4)  uint32_t csm_cascade_count = 0;
-	alignas(4)  uint32_t csm_base_layer = 0; // unused
-	alignas(4)  float csm_shadow_map_size = 4096.0f; // atlas width (set by LightSystem)
-	alignas(4)  uint32_t csm_dir_light_index = 0xFFFFFFFF; // which dir_lights[] index has CSM (0xFFFFFFFF = none)
-	alignas(4)  float pcss_light_size = 0.04f;  // world-space light radius for PCSS penumbra
-	alignas(4)  uint32_t csm_blend_dithered = 0; // 0 = off, 1 = linear, 2 = dithered
-	alignas(4)  float csm_normal_bias = ve::CSM_NORMAL_BIAS;
+	alignas(4)  uint32_t csm_base_layer = 0;
+	alignas(4)  float    csm_shadow_map_size = 4096.0f; // atlas width (set by LightSystem)
+	alignas(4)  uint32_t csm_dir_light_index = 0xFFFFFFFF; // dir_lights[] index that owns CSM (0xFFFFFFFF = none)
+	alignas(4)  float    pcss_light_size = 0.04f;  // world-space light radius for PCSS penumbra
+	alignas(4)  uint32_t csm_blend_dithered = 0;   // 0 = off, 1 = linear, 2 = dithered
+	alignas(4)  float    csm_normal_bias = ve::CSM_NORMAL_BIAS;
 
-	// Screen-space shadow mask
-	alignas(16) glm::mat4 inverse_projection_view{1.0f};  // for depth → world reconstruction
-	alignas(16) glm::mat4 prev_projection_view{1.0f};     // previous frame's proj*view for temporal reprojection
-	alignas(8)  glm::vec2 screen_size{};                   // viewport dimensions in pixels
+	// Screen-space shadow mask reprojection
+	alignas(16) glm::mat4 inverse_projection_view{1.0f};
+	alignas(16) glm::mat4 prev_projection_view{1.0f};
+	alignas(8)  glm::vec2 screen_size{};
 
 	// Spot lights
-	alignas(16) uint32_t num_spot_lights = 0;              // 16-byte aligned (12 bytes implicit padding)
+	alignas(16) uint32_t num_spot_lights = 0;
 	alignas(16) SpotLight spot_lights[ve::MAX_SPOT_LIGHTS];
 
-	// IBL parameters
-	alignas(4) float ibl_diffuse_intensity = 0.0f;
+	// IBL
+	alignas(4) float    ibl_diffuse_intensity = 0.0f;
 	alignas(4) uint32_t prefiltered_mip_levels = 1;
-	alignas(4) float ibl_specular_intensity = 0.0f;
-	alignas(4) float ibl_min_ambient = 0.0f;
+	alignas(4) float    ibl_specular_intensity = 0.0f;
+	alignas(4) float    ibl_min_ambient = 0.0f;
 	alignas(16) glm::vec4 sh_coefficients[9]{};
 };
 static_assert(offsetof(UniformBufferObject, dir_lights) % 16 == 0,
 	"dir_lights must be 16-byte aligned for GPU UBO layout");
 static_assert(offsetof(UniformBufferObject, sh_coefficients) % 16 == 0,
 	"sh_coefficients must be 16-byte aligned for GPU UBO layout");
+
+// --- Push constants ---
+
+struct PostProcessPushConstant {
+	int   blur_radius = 0;       // 0 means no blur
+	float blur_strength = 1.0f;
+	float exposure = 1.0f;
+	int   color_space = 0;       // 0: SRGB, 1: Extended Linear, 2: HDR10 ST2084
+	float bloom_strength = 0.01f;
+	int   tone_map_mode = TONEMAP_GT;
+	float hdr_peak_white = 4.0f; // GT tonemap peak brightness in scene-linear units (HDR only)
+	float padding;
+	glm::vec2 texel_size;
+};
 static_assert(sizeof(PostProcessPushConstant) == 40,
 	"PostProcessPushConstant size must match shader push constant layout");
 
-// Minimal UBO for shadow passes
-struct ShadowPassUBO {
-	alignas(16) glm::mat4 view;
-	alignas(16) glm::mat4 proj;
-	alignas(16) glm::mat4 projection_view;
-};
-static_assert(sizeof(ShadowPassUBO) == 192, "ShadowPassUBO must be 192 bytes");
+// --- CPU-side per-frame structs ---
 
-// Cluster shading parameters — uploaded to GPU as a UBO each frame.
-// Must match the ClusterParams struct in ve_cluster.slangh.
-struct ClusterParams {
-	alignas(16) glm::mat4 inv_proj{1.0f};       // inverse projection for cluster AABB computation
-	alignas(16) glm::mat4 view{1.0f};            // camera view matrix (world → view space for lights)
-	alignas(4)  float z_near = 0.1f;
-	alignas(4)  float z_far = 1000.0f;
-	alignas(4)  float log_depth_ratio = 1.0f;    // log(z_far / z_near)
-	alignas(4)  uint32_t num_lights = 0;
-	alignas(8)  glm::uvec2 screen_size{};        // viewport dimensions in pixels
-	alignas(8)  glm::uvec2 tile_size{};           // pixels per tile (e.g. 64×64)
-	alignas(16) glm::uvec4 grid_dims{};           // xyz = (tiles_x, tiles_y, z_slices), w = total clusters
-	alignas(4)  uint32_t cluster_enabled = 0;     // 0 = brute-force fallback
-	alignas(4)  uint32_t max_lights_per_cluster = ve::MAX_LIGHTS_PER_CLUSTER;
-	alignas(4)  uint32_t num_point_lights = 0;    // how many of num_lights are point lights (rest are spot)
-	alignas(4)  uint32_t _pad1 = 0;
-};
-
-// Shadow atlas region (matching ShadowAtlasRegion in shadow_render_system.hpp)
+// Sub-region of the shadow atlas occupied by one CSM cascade or point/spot light.
 struct FrameAtlasRegion {
 	uint32_t x = 0;
 	uint32_t y = 0;
 	uint32_t resolution = 0;
 };
 
-// CPU-side cascade data passed from LightSystem to ShadowRenderSystem
+// Per-cascade view/proj plus bounding sphere, filled by LightSystem and read by ShadowRenderSystem.
 struct CsmCascadeData {
 	glm::mat4 light_view[ve::NUM_CSM_CASCADES];
 	glm::mat4 light_proj[ve::NUM_CSM_CASCADES];
 	uint32_t  active_cascade_count = 0;
-
-	// Cascade geometry for scroll tracking (set by LightSystem)
-	glm::vec3 center[ve::NUM_CSM_CASCADES]{};   // bounding sphere center (world space)
-	float     radius[ve::NUM_CSM_CASCADES]{};    // rounded radius (world units)
+	glm::vec3 center[ve::NUM_CSM_CASCADES]{};
+	float     radius[ve::NUM_CSM_CASCADES]{};
 };
 
-// TODO: restructure
+// --- Per-frame rendering context passed to every render system ---
+
 struct VeFrameInfo {
-	vk::raii::DescriptorSet& global_descriptor_set;
-	vk::raii::DescriptorSet& texture_descriptor_set;
-	vk::raii::DescriptorSet& material_descriptor_set;
-	VeScene* active_scene = nullptr;  // For per-object descriptor set lookup
-	vk::raii::DescriptorSet& cubemap_descriptor_set;
-	vk::raii::DescriptorSet& shadow_descriptor_set;
+	// Command buffers
 	vk::raii::CommandBuffer* command_buffer;
 	vk::raii::CommandBuffer& compute_command_buffer;
 	vk::raii::CommandBuffer* compute2_command_buffer = nullptr;
+
+	// Descriptor sets bound during scene rendering (sets 0..6)
+	vk::raii::DescriptorSet& global_descriptor_set;                  // set 0
+	vk::raii::DescriptorSet& texture_descriptor_set;                 // set 1 (bindless textures)
+	vk::raii::DescriptorSet& material_descriptor_set;                // set 2 (material SSBO)
+	vk::raii::DescriptorSet* shadow_mask_descriptor_set = nullptr;   // set 3 (null when mask unavailable)
+	vk::raii::DescriptorSet* cluster_descriptor_set = nullptr;       // set 4 (null when clustering disabled)
+	vk::raii::DescriptorSet* ao_descriptor_set = nullptr;            // set 5 (dummy white when AO disabled)
+	vk::raii::DescriptorSet* ibl_descriptor_set = nullptr;           // set 6 (dummy black when IBL unavailable)
+	vk::raii::DescriptorSet& cubemap_descriptor_set;
+	vk::raii::DescriptorSet& shadow_descriptor_set;
+	vk::raii::DescriptorSet* cpu_global_descriptor_set = nullptr;
+
+	// Scene
+	VeScene*   active_scene = nullptr;
+	Registry*  registry = nullptr;
+	CameraView camera_view;
+	Entity     selected_entity = Entity::null();
+
+	// Per-frame state
+	uint32_t current_frame;
+	float    frame_time;
+	float    total_time;
+
+	// CPU culling output
+	std::vector<VisibleObject>& visible_objects;
+
+	// Instance SSBO (persistently mapped, render systems append into it)
+	InstanceData* instance_data = nullptr;
+	uint32_t      instance_count = 0;
+	uint32_t      instance_capacity = 0;
+
+	// Shadow rendering
+	ShadowMode shadow_mode = ShadowMode::REGULAR;
+	float      depth_bias_constant = ve::SHADOW_DEPTH_BIAS_CONSTANT;
+	float      depth_bias_slope = ve::SHADOW_DEPTH_BIAS_SLOPE;
+	float      depth_bias_clamp = 0.0f;
+	CsmCascadeData csm_data;
+	const FrameAtlasRegion* shadow_atlas_regions = nullptr;  // MAX_SHADOW_LAYERS entries
+	uint32_t shadow_atlas_width = 0;
+	uint32_t shadow_atlas_height = 0;
+	bool     shadow_mask_active = false;  // true when mask pipeline variant should be used
+
+	// Post-processing
+	PostProcessPushConstant post_process_push;
+
+	// GPU-driven culling toggles
+	bool gpu_culling_active = false;
+	bool meshlet_culling_active = false;
+
+	// Pre-skinning output (vertices written to a scratch VBO before draws)
+	const class SkinningPrePass* skinning_pre_pass = nullptr;
 
 	vk::raii::CommandBuffer& cmd() const {
 		assert(command_buffer && "command_buffer is null");
 		return *command_buffer;
 	}
-	CameraView camera_view;
-	Registry* registry = nullptr;
-	std::vector<VisibleObject>& visible_objects;
-	float frame_time;
-	float total_time;
-	uint32_t current_frame;
-	PostProcessPushConstant post_process_push;
-	// Instance data SSBO: persistently mapped, render systems append transforms here.
-	InstanceData* instance_data = nullptr;  // mapped pointer to instance buffer
-	uint32_t instance_count = 0;            // current number of instances written this frame
-	uint32_t instance_capacity = 0;         // max instances the buffer can hold
-
-	// Shadow mode for pipeline variant selection (set by application, consumed by render systems)
-	ShadowMode shadow_mode = ShadowMode::REGULAR;
-
-	// depth bias for shadow map rendering
-	float depth_bias_constant = ve::SHADOW_DEPTH_BIAS_CONSTANT;
-	float depth_bias_slope = ve::SHADOW_DEPTH_BIAS_SLOPE;
-	float depth_bias_clamp = 0.0f;
-
-	// Filled by LightSystem, consumed by ShadowRenderSystem
-	CsmCascadeData csm_data;
-
-	// Shadow atlas layout (set by VeApplication from ShadowRenderSystem)
-	const FrameAtlasRegion* shadow_atlas_regions = nullptr; // MAX_SHADOW_LAYERS entries
-	uint32_t shadow_atlas_width = 0;
-	uint32_t shadow_atlas_height = 0;
-
-	// Screen-space shadow mask descriptor set (Set 3, null when mask unavailable)
-	vk::raii::DescriptorSet* shadow_mask_descriptor_set = nullptr;
-	bool shadow_mask_active = false;  // true when mask pipeline variant should be used
-
-	// GTAO ambient occlusion descriptor set (Set 5, dummy white when AO disabled)
-	vk::raii::DescriptorSet* ao_descriptor_set = nullptr;
-
-	// Clustered forward shading descriptor set (Set 4, null when clustering disabled)
-	vk::raii::DescriptorSet* cluster_descriptor_set = nullptr;
-
-	// IBL descriptor set (Set 6, dummy black when IBL unavailable)
-	vk::raii::DescriptorSet* ibl_descriptor_set = nullptr;
-
-	bool gpu_culling_active = false;
-	bool meshlet_culling_active = false;
-	Entity selected_entity = Entity::null();
-	vk::raii::DescriptorSet* cpu_global_descriptor_set = nullptr;
-
-	const class SkinningPrePass* skinning_pre_pass = nullptr;
 };
 
 }

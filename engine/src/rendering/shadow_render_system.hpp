@@ -41,6 +41,13 @@ namespace ve {
 
 namespace ve {
 
+struct ShadowPassUBO {
+	alignas(16) glm::mat4 view;
+	alignas(16) glm::mat4 proj;
+	alignas(16) glm::mat4 projection_view;
+};
+static_assert(sizeof(ShadowPassUBO) == 192, "ShadowPassUBO must be 192 bytes");
+
 class VENGINE_API ShadowRenderSystem {
 public:
 	ShadowRenderSystem(

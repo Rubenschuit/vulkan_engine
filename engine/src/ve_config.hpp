@@ -56,6 +56,12 @@ enum class ShadowPassMode : uint32_t {
 	DYNAMIC_ONLY = 3,
 };
 
+// Primitive topology selection for the main PBR pass (wireframe debug).
+enum class Topology : uint32_t {
+	TRIANGLE_LIST = 0,
+	LINE_LIST = 1,
+};
+
 // Clustered forward lighting
 constexpr uint32_t CLUSTER_TILE_SIZE = 64;            // screen-space tile size in pixels
 constexpr uint32_t CLUSTER_Z_SLICES = 24;             // depth slices (logarithmic distribution)

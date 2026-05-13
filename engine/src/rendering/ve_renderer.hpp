@@ -16,7 +16,11 @@ It manages the swap chain and command buffers. Default present mode is immediate
 
 namespace ve {
 
-enum class HDRColorMode : int;
+enum class HDRColorMode : int {
+	SDR = 0,
+	SCRGB = 1,        // Extended sRGB linear (scRGB)
+	HDR10_PQ = 2,     // HDR10 ST2084 (PQ)
+};
 
 class VENGINE_API VeRenderer {
 public:

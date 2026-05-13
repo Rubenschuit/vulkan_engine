@@ -1,12 +1,25 @@
 #pragma once
 #include "ve_export.hpp"
-#include "rendering/ve_frame_info.hpp"
+#include "ve_config.hpp"
+#include "scene/ve_entity.hpp"
+
+#include <glm/glm.hpp>
 #include <vector>
 
 namespace ve {
 
 struct FrustumPlane;
+struct VeFrameInfo;
 class VeThreadPool;
+class MeshComponent;
+class Registry;
+
+// Cached visible object built once per frame by the culling system.
+struct VisibleObject {
+	Entity entity;
+	MeshComponent* mesh = nullptr;
+	uint32_t lod_level = 0;
+};
 
 class VENGINE_API CullingSystem {
 public:
