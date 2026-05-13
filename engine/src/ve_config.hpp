@@ -41,13 +41,41 @@ constexpr float DIR_SHADOW_MAX_DISTANCE = 300.0f; // Max distance from camera fo
 
 // Cascaded Shadow Maps (CSM) configuration
 constexpr uint32_t NUM_CSM_CASCADES = 3; // keep in sync with shader
-constexpr uint32_t CSM_CASCADE_RESOLUTIONS[NUM_CSM_CASCADES] = {2048, 1024, 1024}; // per-cascade atlas resolution
+constexpr uint32_t CSM_CASCADE_RESOLUTIONS[NUM_CSM_CASCADES] = {2048, 1024, 1024}; // per-cascade atlas resolution (Medium preset defaults)
 constexpr float CSM_SPLIT_LAMBDA = 0.80f; // practical split blend (0=linear, 1=logarithmic)
 constexpr int32_t CSM_SCROLL_THRESHOLD = 256; // max texels per frame before fallback to full re-render
 constexpr float CSM_Z_MARGIN = 150.0f; // depth margin behind cascade sphere for shadow casters
-constexpr uint32_t POINT_SHADOW_RESOLUTION = 512; // per-light atlas resolution
+constexpr uint32_t POINT_SHADOW_RESOLUTION = 512; // per-light atlas resolution (Medium preset default)
 constexpr uint32_t SPOT_SHADOW_RESOLUTION = 512;
 constexpr uint32_t MAX_SHADOW_LAYERS = NUM_CSM_CASCADES + MAX_POINT_SHADOW_LIGHTS + MAX_SPOT_SHADOW_LIGHTS;
+
+enum class ShadowResolutionPreset : uint32_t {
+	LOW    = 0,
+	MEDIUM = 1,
+	HIGH   = 2,
+	ULTRA  = 3,
+};
+constexpr uint32_t SHADOW_RESOLUTION_PRESET_COUNT = 4;
+
+struct ShadowResolutionPresetValues {
+	uint32_t csm[NUM_CSM_CASCADES];
+	uint32_t point;
+	uint32_t spot;
+};
+
+constexpr ShadowResolutionPresetValues SHADOW_RESOLUTION_PRESETS[SHADOW_RESOLUTION_PRESET_COUNT] = {
+	{{1024,  512,  512},  256,  256},
+	{{2048, 1024, 1024},  512,  512},
+	{{4096, 2048, 2048}, 1024, 1024},
+	{{8192, 4096, 4096}, 2048, 2048},
+};
+
+inline const ShadowResolutionPresetValues& getShadowResolutionPreset(ShadowResolutionPreset p) {
+	uint32_t idx = static_cast<uint32_t>(p);
+	if (idx >= SHADOW_RESOLUTION_PRESET_COUNT)
+		idx = static_cast<uint32_t>(ShadowResolutionPreset::MEDIUM);
+	return SHADOW_RESOLUTION_PRESETS[idx];
+}
 
 // Shadow cull pass mode (matches CullParams::is_shadow_pass in shaders)
 enum class ShadowPassMode : uint32_t {

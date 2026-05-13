@@ -28,6 +28,7 @@ struct VENGINE_API UIContext {
 	// graphics settings
 	float fov = 75.0f;
 	ShadowMode shadow_mode = ShadowMode::PCF;
+	ShadowResolutionPreset shadow_resolution_preset = ShadowResolutionPreset::MEDIUM;
 	float pcss_light_size = 0.04f;
 	int pcf_samples = 8; // multiples of 4 between 4 and 64, or 0 to disable PCF
 	int pcss_filter_samples = 16;

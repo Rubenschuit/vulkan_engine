@@ -99,6 +99,10 @@ public:
 	const VeImage* getAtlasImage() const { return m_shadow_atlas.get(); }
 	const vk::raii::Sampler& getRawSampler() const { return m_shadow_raw_sampler; }
 
+	uint32_t getCsmCascadeResolution(uint32_t cascade) const { return m_csm_cascade_resolutions[cascade]; }
+	const uint32_t* getCsmCascadeResolutions() const { return m_csm_cascade_resolutions.data(); }
+	ShadowResolutionPreset getResolutionPreset() const { return m_resolution_preset; }
+
 	// --- Cache management ---
 
 	void invalidateShadowDrawables();
@@ -134,6 +138,7 @@ private:
 	// --- Initialization ---
 
 	void createShadowResources();
+	void resizeShadowAtlas(ShadowResolutionPreset preset, VeDescriptorPool& descriptor_pool);
 	void createPipelineLayout(const vk::raii::DescriptorSetLayout& material_set_layout);
 	void createPipeline(vk::Format depth_format);
 	void computeAtlasLayout();
@@ -203,6 +208,11 @@ private:
 	std::array<FrameAtlasRegion, MAX_SHADOW_LAYERS> m_atlas_regions{};
 	uint32_t m_atlas_width = 0;
 	uint32_t m_atlas_height = 0;
+	ShadowResolutionPreset m_resolution_preset = ShadowResolutionPreset::MEDIUM;
+	std::array<uint32_t, NUM_CSM_CASCADES> m_csm_cascade_resolutions{
+		CSM_CASCADE_RESOLUTIONS[0], CSM_CASCADE_RESOLUTIONS[1], CSM_CASCADE_RESOLUTIONS[2]};
+	uint32_t m_point_shadow_resolution = POINT_SHADOW_RESOLUTION;
+	uint32_t m_spot_shadow_resolution = SPOT_SHADOW_RESOLUTION;
 	std::unique_ptr<VeImage> m_shadow_atlas;
 	vk::raii::Sampler m_shadow_sampler{nullptr};
 	vk::raii::Sampler m_shadow_raw_sampler{nullptr};

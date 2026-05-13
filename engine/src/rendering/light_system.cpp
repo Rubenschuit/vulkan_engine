@@ -318,7 +318,10 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 					radius = std::max(radius, glm::length(c - center));
 
 				// Round radius up to texel boundary for stable sizing (per-cascade resolution)
-				float cascade_res = static_cast<float>(CSM_CASCADE_RESOLUTIONS[cascade]);
+				uint32_t cascade_res_u = frame_info.csm_cascade_resolutions
+					? frame_info.csm_cascade_resolutions[cascade]
+					: CSM_CASCADE_RESOLUTIONS[cascade];
+				float cascade_res = static_cast<float>(cascade_res_u);
 				float texels_per_unit = cascade_res / (2.0f * radius);
 				radius = std::ceil(radius * texels_per_unit) / texels_per_unit;
 
@@ -373,7 +376,7 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 					0.0f, total_depth_range);
 
 				// Texel snapping: eliminates sub-texel jitter
-				applyTexelSnapping(light_proj, light_view, CSM_CASCADE_RESOLUTIONS[cascade]);
+				applyTexelSnapping(light_proj, light_view, cascade_res_u);
 
 				// Atlas bias matrix: maps clip [-1,1] to this cascade's UV region in the atlas
 				glm::mat4 atlas_bias = s_bias_matrix;

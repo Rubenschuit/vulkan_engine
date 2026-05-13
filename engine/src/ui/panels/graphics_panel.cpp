@@ -75,6 +75,26 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "     Contact-hardening soft shadows, highest cost");
 			ImGui::EndTooltip();
 		}
+		if (ctx.shadow_mode != ShadowMode::DISABLED) {
+			int preset_idx = static_cast<int>(ctx.shadow_resolution_preset);
+			if (ImGui::Combo("Shadow Resolution", &preset_idx, "Low\0" "Medium\0" "High\0" "Ultra\0"))
+				ctx.shadow_resolution_preset = static_cast<ShadowResolutionPreset>(
+					std::clamp(preset_idx, 0, static_cast<int>(SHADOW_RESOLUTION_PRESET_COUNT) - 1));
+			if (ImGui::IsItemHovered()) {
+				ImGui::BeginTooltip();
+				ImGui::Text("Shadow Atlas Resolution");
+				ImGui::Separator();
+				for (uint32_t i = 0; i < SHADOW_RESOLUTION_PRESET_COUNT; i++) {
+					const auto& v = SHADOW_RESOLUTION_PRESETS[i];
+					const char* names[] = {"Low", "Medium", "High", "Ultra"};
+					ImGui::Text("%s: CSM %u/%u/%u  Spot/Point %u",
+						names[i], v.csm[0], v.csm[1], v.csm[2], v.point);
+				}
+				ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f),
+					"Changing rebuilds the atlas.");
+				ImGui::EndTooltip();
+			}
+		}
 		if (ctx.shadow_mode == ShadowMode::PCSS) {
 			ImGui::SliderFloat("Light Size", &ctx.pcss_light_size, 0.001f, 0.2f, "%.3f");
 			if (ImGui::IsItemHovered())

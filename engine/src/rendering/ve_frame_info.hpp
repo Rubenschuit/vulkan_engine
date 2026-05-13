@@ -22,7 +22,7 @@ enum class RenderMode : uint32_t {
 	TANGENT_VECTOR = 2,
 	BITANGENT_VECTOR = 3,
 	NORMAL_MAP = 4,
-	BRDF_MICROFACET = 5,
+	BRDF_MICROFACET = 5, // Standard
 	CSM_CASCADE = 6,
 	CLUSTER_HEATMAP = 7,
 	LOD_LEVEL = 8,
@@ -214,6 +214,7 @@ struct VeFrameInfo {
 	const FrameAtlasRegion* shadow_atlas_regions = nullptr;  // MAX_SHADOW_LAYERS entries
 	uint32_t shadow_atlas_width = 0;
 	uint32_t shadow_atlas_height = 0;
+	const uint32_t* csm_cascade_resolutions = nullptr; // NUM_CSM_CASCADES entries
 	bool     shadow_mask_active = false;  // true when mask pipeline variant should be used
 
 	// Post-processing

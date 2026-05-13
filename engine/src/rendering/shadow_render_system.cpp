@@ -50,6 +50,10 @@ ShadowRenderSystem::ShadowRenderSystem(
 	event_bus.subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
 		subscribeToRegistry(*e.registry);
 	});
+	event_bus.subscribe<ShadowAtlasResolutionChangedEvent>(
+		[this](const ShadowAtlasResolutionChangedEvent& e) {
+			resizeShadowAtlas(e.preset, e.pool);
+		});
 
 	m_shadow_ubos.resize(MAX_FRAMES_IN_FLIGHT);
 	m_shadow_global_descriptor_sets.resize(MAX_FRAMES_IN_FLIGHT);
@@ -194,24 +198,24 @@ void ShadowRenderSystem::createShadowPassDescriptorSets(
 
 void ShadowRenderSystem::computeAtlasLayout() {
 	// Pack cascade 0 top-left, remaining cascades stacked right, lights fill remaining space
-	uint32_t c0_res = CSM_CASCADE_RESOLUTIONS[0];
+	uint32_t c0_res = m_csm_cascade_resolutions[0];
 	m_atlas_regions[0] = {0, 0, c0_res};
 
 	uint32_t col1_x = c0_res;
 	uint32_t col1_width = 0;
 	uint32_t stack_y = 0;
 	for (uint32_t c = 1; c < NUM_CSM_CASCADES; c++) {
-		uint32_t res = CSM_CASCADE_RESOLUTIONS[c];
+		uint32_t res = m_csm_cascade_resolutions[c];
 		m_atlas_regions[c] = {col1_x, stack_y, res};
 		col1_width = std::max(col1_width, res);
 		stack_y += res;
 	}
 
 	constexpr uint32_t total_lights = MAX_POINT_SHADOW_LIGHTS + MAX_SPOT_SHADOW_LIGHTS;
-	auto lightRes = [](uint32_t i) -> uint32_t {
-		return (i < MAX_POINT_SHADOW_LIGHTS) ? POINT_SHADOW_RESOLUTION : SPOT_SHADOW_RESOLUTION;
+	auto lightRes = [this](uint32_t i) -> uint32_t {
+		return (i < MAX_POINT_SHADOW_LIGHTS) ? m_point_shadow_resolution : m_spot_shadow_resolution;
 	};
-	uint32_t max_light_res = std::max(POINT_SHADOW_RESOLUTION, SPOT_SHADOW_RESOLUTION);
+	uint32_t max_light_res = std::max(m_point_shadow_resolution, m_spot_shadow_resolution);
 
 	uint32_t placed = 0;
 	if (col1_width >= max_light_res) {
@@ -286,7 +290,7 @@ void ShadowRenderSystem::createShadowResources() {
 	m_shadow_atlas->setDebugName("Shadow Atlas");
 
 	for (uint32_t c = 0; c < NUM_CSM_CASCADES; c++) {
-		uint32_t res = CSM_CASCADE_RESOLUTIONS[c];
+		uint32_t res = m_csm_cascade_resolutions[c];
 		m_cascade_cache[c] = std::make_unique<VeImage>(
 			m_ve_device, res, res,
 			vk::SampleCountFlagBits::e1, m_shadow_depth_format,
@@ -340,6 +344,41 @@ void ShadowRenderSystem::createShadowTextureDescriptorSets(VeDescriptorPool& des
 			.build(set);
 		m_shadow_descriptor_sets.push_back(std::move(set));
 	}
+}
+
+void ShadowRenderSystem::resizeShadowAtlas(ShadowResolutionPreset preset, VeDescriptorPool& descriptor_pool) {
+	const auto& values = getShadowResolutionPreset(preset);
+	bool unchanged =
+		m_resolution_preset == preset
+		&& m_csm_cascade_resolutions[0] == values.csm[0]
+		&& m_csm_cascade_resolutions[1] == values.csm[1]
+		&& m_csm_cascade_resolutions[2] == values.csm[2]
+		&& m_point_shadow_resolution == values.point
+		&& m_spot_shadow_resolution == values.spot;
+	if (unchanged)
+		return;
+
+	m_resolution_preset = preset;
+	for (uint32_t c = 0; c < NUM_CSM_CASCADES; c++)
+		m_csm_cascade_resolutions[c] = values.csm[c];
+	m_point_shadow_resolution = values.point;
+	m_spot_shadow_resolution = values.spot;
+
+	m_shadow_atlas.reset();
+	for (auto& img : m_cascade_cache)
+		img.reset();
+
+	computeAtlasLayout();
+	createShadowResources();
+	createShadowTextureDescriptorSets(descriptor_pool);
+
+	// Force a full re-render.
+	for (auto& state : m_cascade_state) {
+		state.valid = false;
+		state.dirty = true;
+		state.incremental = false;
+	}
+	m_force_full_rerender = true;
 }
 
 void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBufferObject& ubo,
@@ -400,7 +439,7 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBuffer
 				glm::mat4 prev_pv = state.prev_proj * state.prev_view;
 				glm::mat4 cur_pv = cascade_ubo.proj * cascade_ubo.view;
 
-				float half_res = static_cast<float>(CSM_CASCADE_RESOLUTIONS[cascade]) * 0.5f;
+				float half_res = static_cast<float>(m_csm_cascade_resolutions[cascade]) * 0.5f;
 				glm::vec4 prev_origin = prev_pv * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 				glm::vec4 cur_origin = cur_pv * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
 
@@ -434,7 +473,7 @@ void ShadowRenderSystem::updateUniformBuffer(uint32_t frame_index, UniformBuffer
 						cascade_ubo.view[2][2]);
 					float depth_shift = glm::dot(cur_eye - prev_eye, light_fwd);
 					float texel_world = (2.0f * csm_data.radius[cascade])
-						/ static_cast<float>(CSM_CASCADE_RESOLUTIONS[cascade]);
+						/ static_cast<float>(m_csm_cascade_resolutions[cascade]);
 					float depth_threshold = texel_world * 0.5f;
 
 					if (std::abs(depth_shift) > depth_threshold) {

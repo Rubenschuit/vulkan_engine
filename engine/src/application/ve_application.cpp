@@ -405,6 +405,7 @@ VeFrameInfo VeApplication::buildFrameInfo() {
 		.shadow_atlas_regions = m_shadow_render_system->getAtlasRegions().data(),
 		.shadow_atlas_width = m_shadow_render_system->getAtlasWidth(),
 		.shadow_atlas_height = m_shadow_render_system->getAtlasHeight(),
+		.csm_cascade_resolutions = m_shadow_render_system->getCsmCascadeResolutions(),
 		.post_process_push = {
 			m_ui.blur_radius,
 			m_ui.blur_strength,
@@ -443,9 +444,10 @@ void VeApplication::emitSettingEvents() {
 		|| m_ui.pcss_filter_samples != m_pcss_filter_samples;
 	bool shadow_mask_res_changed = m_ui.shadow_mask_half_res != m_shadow_mask_half_res;
 	bool gtao_res_changed = m_ui.gtao_half_res != m_gtao_half_res;
+	bool shadow_atlas_res_changed = m_ui.shadow_resolution_preset != m_shadow_resolution_preset;
 
 	// Batch GPU idle for all settings that require pipeline recreation or resource destruction
-	if (samples_changed || shadow_mask_res_changed || gtao_res_changed)
+	if (samples_changed || shadow_mask_res_changed || gtao_res_changed || shadow_atlas_res_changed)
 		m_ve_device.getDevice().waitIdle();
 
 	if (depth_bias_changed) {
@@ -488,6 +490,14 @@ void VeApplication::emitSettingEvents() {
 			.depth_extent = extent,
 			.depth_image_view = m_ve_renderer.getResolvedDepthImageView(),
 			.depth_image = m_ve_renderer.getResolvedDepthImage()
+		});
+	}
+
+	if (shadow_atlas_res_changed) {
+		m_shadow_resolution_preset = m_ui.shadow_resolution_preset;
+		m_event_bus->emitImmediate(ShadowAtlasResolutionChangedEvent{
+			.pool = *m_global_pool,
+			.preset = m_shadow_resolution_preset
 		});
 	}
 }

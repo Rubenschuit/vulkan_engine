@@ -50,9 +50,9 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 		if ((obj.object_flags & OBJ_FLAG_NO_SHADOW) != 0)
 			return;
 		bool is_dynamic_obj = (obj.object_flags & OBJ_FLAG_DYNAMIC) != 0;
-		if (cull_params.is_shadow_pass == 2 && is_dynamic_obj) 
+		if (cull_params.is_shadow_pass == 2 && is_dynamic_obj)
 			return;
-		if (cull_params.is_shadow_pass == 3 && !is_dynamic_obj) 
+		if (cull_params.is_shadow_pass == 3 && !is_dynamic_obj)
 			return;
 	}
 

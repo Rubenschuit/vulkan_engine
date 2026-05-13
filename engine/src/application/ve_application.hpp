@@ -269,6 +269,7 @@ private:
 
 	bool m_shadow_mask_half_res = false;
 	bool m_gtao_half_res = true;
+	ShadowResolutionPreset m_shadow_resolution_preset = ShadowResolutionPreset::MEDIUM;
 	int m_pcf_samples = 8;
 	int m_pcss_filter_samples = 16;
 	float m_depth_bias_constant = ve::SHADOW_DEPTH_BIAS_CONSTANT;

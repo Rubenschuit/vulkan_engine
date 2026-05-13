@@ -93,6 +93,11 @@ struct GtaoResolutionChangedEvent : ImmediateOnly {
 	vk::Image depth_image;
 };
 
+struct ShadowAtlasResolutionChangedEvent : ImmediateOnly {
+	VeDescriptorPool& pool;
+	ShadowResolutionPreset preset;
+};
+
 struct GtaoParametersChangedEvent {
 	float radius;
 	float intensity;
