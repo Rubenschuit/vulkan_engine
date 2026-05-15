@@ -38,22 +38,23 @@ float4 fragMain(VertexOutput input) : SV_Target {
 	// 1 2 1
 	// for a total weight of 16.
 
-    float3 a = input_texture.Sample(input.uv + float2(-x, y)).rgb;
-    float3 b = input_texture.Sample(input.uv + float2(0, y)).rgb;
-    float3 c = input_texture.Sample(input.uv + float2(x, y)).rgb;
+    // Input was already sanitized by bloom_downsample, so values fit in fp16.
+    half3 a = (half3)input_texture.Sample(input.uv + float2(-x, y)).rgb;
+    half3 b = (half3)input_texture.Sample(input.uv + float2(0, y)).rgb;
+    half3 c = (half3)input_texture.Sample(input.uv + float2(x, y)).rgb;
 
-    float3 d = input_texture.Sample(input.uv + float2(-x, 0)).rgb;
-    float3 e = input_texture.Sample(input.uv + float2(0, 0)).rgb;
-    float3 f = input_texture.Sample(input.uv + float2(x, 0)).rgb;
+    half3 d = (half3)input_texture.Sample(input.uv + float2(-x, 0)).rgb;
+    half3 e = (half3)input_texture.Sample(input.uv + float2(0, 0)).rgb;
+    half3 f = (half3)input_texture.Sample(input.uv + float2(x, 0)).rgb;
 
-    float3 g = input_texture.Sample(input.uv + float2(-x, -y)).rgb;
-    float3 h = input_texture.Sample(input.uv + float2(0, -y)).rgb;
-    float3 i = input_texture.Sample(input.uv + float2(x, -y)).rgb;
+    half3 g = (half3)input_texture.Sample(input.uv + float2(-x, -y)).rgb;
+    half3 h = (half3)input_texture.Sample(input.uv + float2(0, -y)).rgb;
+    half3 i = (half3)input_texture.Sample(input.uv + float2(x, -y)).rgb;
 
-    float3 upsample = e * 4.0;
-    upsample += (b + d + f + h) * 2.0;
+    half3 upsample = e * 4.0h;
+    upsample += (b + d + f + h) * 2.0h;
     upsample += (a + c + g + i);
-    upsample *= 0.0625; // divide by 16.0
+    upsample *= 0.0625h; // divide by 16.0
 
     return float4(upsample, 1.0);
 }

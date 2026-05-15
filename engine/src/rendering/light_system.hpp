@@ -25,9 +25,9 @@ class VENGINE_API LightSystem {
 public:
 	LightSystem(
 		VeDevice& device,
-		VeResourceManager& resource_manager,
 		VeDescriptorPool& descriptor_pool,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
+		ResourceHandle<VeTexture> particle_texture,
 		vk::Format color_format,
 		vk::SampleCountFlagBits sample_count,
 		std::filesystem::path shader_path,
@@ -48,7 +48,7 @@ public:
 private:
 	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& billboard_set_layout);
 	void createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
-	void createBillboardDescriptorSet(VeResourceManager& resource_manager, VeDescriptorPool& descriptor_pool);
+	void createBillboardDescriptorSet(VeDescriptorPool& descriptor_pool);
 
 	VeDevice& m_ve_device;
 

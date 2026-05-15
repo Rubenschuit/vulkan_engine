@@ -14,6 +14,9 @@ public:
 
     vk::raii::DescriptorSet& getDescriptorSet() override;
     glm::vec4 getDefaultAmbient() const override { return {1.0f, 1.0f, 1.0f, 0.04f}; }
+	SceneSubsystems declareSubsystems() const override {
+		return {.particles = std::nullopt, .fireworks = FireworksSceneConfig{}};
+	}
 
 private:
     void loadGameObjects(const AssetPaths& paths);

@@ -142,6 +142,8 @@ bool VeTexture::doLoad() {
 			}
 		} else if (m_resource_id == "default_particle") {
 			// Soft radial gradient
+			w = 64;
+			h = 64;
 			pixels = (stbi_uc*)malloc(w * h * 4);
 			const float cx = (w - 1) * 0.5f;
 			const float cy = (h - 1) * 0.5f;

@@ -60,11 +60,33 @@ function(add_slang_spirv_target TARGET)
 		# Collect .slangh headers so shaders recompile when shared headers change
 		file(GLOB _SLANG_HEADERS "${PROJECT_SOURCE_DIR}/shaders/*.slangh")
 
+		set(_SLANG_CAPABILITIES
+			spvDerivativeControl
+			spvImageQuery
+			spvImageGatherExtended
+			spvMinLod
+			spvSparseResidency
+			spvFragmentFullyCoveredEXT
+			SPV_KHR_non_semantic_info
+			SPV_GOOGLE_user_type
+		)
+		list(JOIN _SLANG_CAPABILITIES "+" _SLANG_CAPABILITY_FLAG)
+
 		if (_TYPE_UP STREQUAL "GRAPHICS")
 			add_custom_command(
 				OUTPUT ${_OUT_FILE}
 				COMMAND ${CMAKE_COMMAND} -E make_directory "${_OUT_DIR}"
-				COMMAND "${SLANGC}" "${SLANG_SRC}" -I "${PROJECT_SOURCE_DIR}/shaders" -target spirv -profile ${_PROFILE} -capability spvDerivativeControl+spvImageQuery+spvImageGatherExtended+spvMinLod+spvSparseResidency+spvFragmentFullyCoveredEXT+SPV_KHR_non_semantic_info+SPV_GOOGLE_user_type -fvk-use-gl-layout -entry ${_VERT_ENTRY} -stage vertex -entry ${_FRAG_ENTRY} -stage fragment -emit-spirv-directly -fvk-use-entrypoint-name -o "${_OUT_FILE}"
+				COMMAND "${SLANGC}" "${SLANG_SRC}"
+					-I "${PROJECT_SOURCE_DIR}/shaders"
+					-target spirv
+					-profile ${_PROFILE}
+					-capability ${_SLANG_CAPABILITY_FLAG}
+					-fvk-use-gl-layout
+					-entry ${_VERT_ENTRY} -stage vertex
+					-entry ${_FRAG_ENTRY} -stage fragment
+					-emit-spirv-directly
+					-fvk-use-entrypoint-name
+					-o "${_OUT_FILE}"
 				DEPENDS "${SLANG_SRC}" ${_SLANG_HEADERS}
 				COMMENT "Slang compiling ${_FN}.slang -> ${_FN}.spv (vert=${_VERT_ENTRY}, frag=${_FRAG_ENTRY})"
 				VERBATIM
@@ -73,7 +95,15 @@ function(add_slang_spirv_target TARGET)
 			add_custom_command(
 				OUTPUT ${_OUT_FILE}
 				COMMAND ${CMAKE_COMMAND} -E make_directory "${_OUT_DIR}"
-				COMMAND "${SLANGC}" "${SLANG_SRC}" -I "${PROJECT_SOURCE_DIR}/shaders" -target spirv -profile ${_PROFILE} -fvk-use-gl-layout -entry ${_ENTRY} -stage compute -emit-spirv-directly -fvk-use-entrypoint-name -o "${_OUT_FILE}"
+				COMMAND "${SLANGC}" "${SLANG_SRC}"
+					-I "${PROJECT_SOURCE_DIR}/shaders"
+					-target spirv
+					-profile ${_PROFILE}
+					-fvk-use-gl-layout
+					-entry ${_ENTRY} -stage compute
+					-emit-spirv-directly
+					-fvk-use-entrypoint-name
+					-o "${_OUT_FILE}"
 				DEPENDS "${SLANG_SRC}" ${_SLANG_HEADERS}
 				COMMENT "Slang compiling ${_FN}.slang -> ${_FN}.spv (compute entry=${_ENTRY})"
 				VERBATIM

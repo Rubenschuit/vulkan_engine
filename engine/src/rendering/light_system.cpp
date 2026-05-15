@@ -61,14 +61,15 @@ struct SimplePushConstantData {
 };
 
 LightSystem::LightSystem(VeDevice& device,
-									VeResourceManager& resource_manager,
 									VeDescriptorPool& descriptor_pool,
 									const vk::raii::DescriptorSetLayout& global_set_layout,
+									ResourceHandle<VeTexture> particle_texture,
 									vk::Format color_format,
 									vk::SampleCountFlagBits sample_count,
 									std::filesystem::path shader_path,
 									EventBus& event_bus)
-									: m_ve_device(device), m_shader_path(shader_path) {
+									: m_ve_device(device), m_shader_path(shader_path),
+									  m_particle_handle(std::move(particle_texture)) {
 
 	event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
 		recreatePipeline(e.offscreen_format, e.sample_count);
@@ -80,12 +81,10 @@ LightSystem::LightSystem(VeDevice& device,
 
 	createPipelineLayout(global_set_layout, m_billboard_set_layout->getDescriptorSetLayout());
 	createPipeline(color_format, sample_count);
-	createBillboardDescriptorSet(resource_manager, descriptor_pool);
+	createBillboardDescriptorSet(descriptor_pool);
 }
 
-void LightSystem::createBillboardDescriptorSet(VeResourceManager& resource_manager,
-											  VeDescriptorPool& descriptor_pool) {
-	m_particle_handle = resource_manager.load<VeTexture>("default_particle");
+void LightSystem::createBillboardDescriptorSet(VeDescriptorPool& descriptor_pool) {
 	auto image_info = m_particle_handle.get()->getDescriptorInfo();
 	VeDescriptorWriter(*m_billboard_set_layout, descriptor_pool)
 		.writeImage(0, &image_info)

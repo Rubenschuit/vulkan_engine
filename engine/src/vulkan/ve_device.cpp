@@ -349,6 +349,7 @@ void VeDevice::createLogicalDevice() {
 		{.multiview = true, .shaderDrawParameters = true},
 		{	// Vulkan 1.2 features (descriptor indexing + timeline semaphore)
 			.drawIndirectCount = m_supports_draw_indirect_count,
+			.shaderFloat16 = true,
 			.descriptorIndexing = true,
 			.shaderSampledImageArrayNonUniformIndexing = true,
 			.descriptorBindingSampledImageUpdateAfterBind = true,

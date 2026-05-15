@@ -1206,9 +1206,9 @@ void VeApplication::initSystems() {
 
 	m_light_system = std::make_unique<LightSystem>(
 		m_ve_device,
-		*m_resource_manager,
 		*m_global_pool,
 		m_global_set_layout->getDescriptorSetLayout(),
+		m_particle_texture_handle,
 		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
 		shader("light_billboard_shader.spv"),
 		*m_event_bus

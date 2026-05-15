@@ -33,10 +33,9 @@ float3 sanitizeColor(float3 c) {
 }
 
 // Returns a weight inversely proportional to luminance to suppress fireflies
-float karisWeight(float3 col) {
-	// Convert color to luminance
-	float lum = dot(col, float3(0.2126, 0.7152, 0.0722));
-	return 1.0 / (1.0 + lum);
+half karisWeight(half3 col) {
+	half lum = dot(col, half3(0.2126h, 0.7152h, 0.0722h));
+	return 1.0h / (1.0h + lum);
 }
 
 [shader("fragment")]
@@ -53,36 +52,36 @@ float4 fragMain(VertexOutput input) : SV_Target {
     // f - g - h
     // - i - j -
     // k - l - m
-    float3 a = sanitizeColor(input_texture.Sample(input.uv + float2(-2*x, 2*y)).rgb);
-    float3 b = sanitizeColor(input_texture.Sample(input.uv + float2(0, 2*y)).rgb);
-    float3 c = sanitizeColor(input_texture.Sample(input.uv + float2(2*x, 2*y)).rgb);
+    half3 a = (half3)sanitizeColor(input_texture.Sample(input.uv + float2(-2*x, 2*y)).rgb);
+    half3 b = (half3)sanitizeColor(input_texture.Sample(input.uv + float2(0, 2*y)).rgb);
+    half3 c = (half3)sanitizeColor(input_texture.Sample(input.uv + float2(2*x, 2*y)).rgb);
 
-    float3 d = sanitizeColor(input_texture.Sample(input.uv + float2(-x, y)).rgb);
-    float3 e = sanitizeColor(input_texture.Sample(input.uv + float2(x, y)).rgb);
+    half3 d = (half3)sanitizeColor(input_texture.Sample(input.uv + float2(-x, y)).rgb);
+    half3 e = (half3)sanitizeColor(input_texture.Sample(input.uv + float2(x, y)).rgb);
 
-    float3 f = sanitizeColor(input_texture.Sample(input.uv + float2(-2*x, 0)).rgb);
-    float3 g = sanitizeColor(input_texture.Sample(input.uv + float2(0, 0)).rgb);
-    float3 h = sanitizeColor(input_texture.Sample(input.uv + float2(2*x, 0)).rgb);
+    half3 f = (half3)sanitizeColor(input_texture.Sample(input.uv + float2(-2*x, 0)).rgb);
+    half3 g = (half3)sanitizeColor(input_texture.Sample(input.uv + float2(0, 0)).rgb);
+    half3 h = (half3)sanitizeColor(input_texture.Sample(input.uv + float2(2*x, 0)).rgb);
 
-    float3 i = sanitizeColor(input_texture.Sample(input.uv + float2(-x, -y)).rgb);
-    float3 j = sanitizeColor(input_texture.Sample(input.uv + float2(x, -y)).rgb);
+    half3 i = (half3)sanitizeColor(input_texture.Sample(input.uv + float2(-x, -y)).rgb);
+    half3 j = (half3)sanitizeColor(input_texture.Sample(input.uv + float2(x, -y)).rgb);
 
-    float3 k = sanitizeColor(input_texture.Sample(input.uv + float2(-2*x, -2*y)).rgb);
-    float3 l = sanitizeColor(input_texture.Sample(input.uv + float2(0, -2*y)).rgb);
-    float3 m = sanitizeColor(input_texture.Sample(input.uv + float2(2*x, -2*y)).rgb);
+    half3 k = (half3)sanitizeColor(input_texture.Sample(input.uv + float2(-2*x, -2*y)).rgb);
+    half3 l = (half3)sanitizeColor(input_texture.Sample(input.uv + float2(0, -2*y)).rgb);
+    half3 m = (half3)sanitizeColor(input_texture.Sample(input.uv + float2(2*x, -2*y)).rgb);
 
-    float3 downsample;
+    half3 downsample;
     if (push.is_first_pass == 1) {
         // Weighted average per group of 4 pixels to suppress fireflies
         // without losing total scene energy ratio.
-        float3 groups[5];
-        float w[5];
+        half3 groups[5];
+        half w[5];
 
-		groups[0] = (a + b + g + f) * 0.25;
-        groups[1] = (b + c + h + g) * 0.25;
-        groups[2] = (f + g + l + k) * 0.25;
-        groups[3] = (g + h + m + l) * 0.25;
-        groups[4] = (d + e + j + i) * 0.25;
+		groups[0] = (a + b + g + f) * 0.25h;
+        groups[1] = (b + c + h + g) * 0.25h;
+        groups[2] = (f + g + l + k) * 0.25h;
+        groups[3] = (g + h + m + l) * 0.25h;
+        groups[4] = (d + e + j + i) * 0.25h;
 
 		w[0] = karisWeight(groups[0]);
 		w[1] = karisWeight(groups[1]);
@@ -94,13 +93,13 @@ float4 fragMain(VertexOutput input) : SV_Target {
         downsample /= (w[0] + w[1] + w[2] + w[3] + w[4]);
 
     } else {
-        float3 groups[5];
-        groups[0] = (a + b + g + f) * 0.25;
-        groups[1] = (b + c + h + g) * 0.25;
-        groups[2] = (f + g + l + k) * 0.25;
-        groups[3] = (g + h + m + l) * 0.25;
-        groups[4] = (d + e + j + i) * 0.25;
-        downsample = groups[0] * 0.125 + groups[1] * 0.125 + groups[2] * 0.125 + groups[3] * 0.125 + groups[4] * 0.5;
+        half3 groups[5];
+        groups[0] = (a + b + g + f) * 0.25h;
+        groups[1] = (b + c + h + g) * 0.25h;
+        groups[2] = (f + g + l + k) * 0.25h;
+        groups[3] = (g + h + m + l) * 0.25h;
+        groups[4] = (d + e + j + i) * 0.25h;
+        downsample = groups[0] * 0.125h + groups[1] * 0.125h + groups[2] * 0.125h + groups[3] * 0.125h + groups[4] * 0.5h;
     }
 
     return float4(downsample, 1.0);
