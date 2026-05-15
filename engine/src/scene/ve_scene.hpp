@@ -3,6 +3,7 @@
 #include "ve_config.hpp"
 #include "vulkan/ve_device.hpp"
 #include "scene/ve_registry.hpp"
+#include "scene/scene_subsystems.hpp"
 #include "resources/ve_material_properties.hpp"
 #include "resources/ve_resource_manager.hpp"
 #include <string>
@@ -46,6 +47,8 @@ public:
 
     // Per-scene ambient light defaults (color RGB, intensity in w)
     virtual glm::vec4 getDefaultAmbient() const { return DEFAULT_AMBIENT_LIGHT_COLOR; }
+
+    virtual SceneSubsystems declareSubsystems() const { return {}; }
 
 protected:
     VeDevice& m_device;

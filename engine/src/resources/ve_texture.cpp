@@ -124,11 +124,13 @@ bool VeTexture::doLoad() {
 		{"default_emissive",            TextureType::EMISSIVE,            vk::Format::eR8G8B8A8Unorm},
 		{"default_specular",            TextureType::SPECULAR,            vk::Format::eR8G8B8A8Unorm},
 		{"default_specular_color",      TextureType::SPECULAR_COLOR,      vk::Format::eR8G8B8A8Srgb},
+		{"default_particle",            TextureType::EMISSIVE,            vk::Format::eR8G8B8A8Unorm},
 	};
 	for (const auto& def : defaults) {
 		if (m_resource_id != def.id)
 			continue;
 		stbi_uc* pixels;
+		uint32_t w = 4, h = 4;
 		if (m_resource_id == "default_mr_unit") {
 			// Full metallic (B=255) and full roughness (G=255) so MaterialFactors alone control the values
 			pixels = (stbi_uc*)malloc(4 * 4 * 4);
@@ -138,10 +140,30 @@ bool VeTexture::doLoad() {
 				pixels[i * 4 + 2] = 255;  // metallic = 1.0
 				pixels[i * 4 + 3] = 255;
 			}
+		} else if (m_resource_id == "default_particle") {
+			// Soft radial gradient
+			pixels = (stbi_uc*)malloc(w * h * 4);
+			const float cx = (w - 1) * 0.5f;
+			const float cy = (h - 1) * 0.5f;
+			const float r_max = cx;
+			for (uint32_t y = 0; y < h; ++y) {
+				for (uint32_t x = 0; x < w; ++x) {
+					float dx = (float)x - cx;
+					float dy = (float)y - cy;
+					float d = std::sqrt(dx * dx + dy * dy) / r_max;
+					float t = std::clamp(1.0f - d, 0.0f, 1.0f);
+					float a = t * t * (3.0f - 2.0f * t); // smoothstep
+					size_t i = (y * w + x) * 4;
+					pixels[i + 0] = 255;
+					pixels[i + 1] = 255;
+					pixels[i + 2] = 255;
+					pixels[i + 3] = (stbi_uc)(a * 255.0f);
+				}
+			}
 		} else {
 			pixels = generateDefaultTexture(4, 4, def.type);
 		}
-		createTextureImageFromPixels(4, 4, pixels, def.format);
+		createTextureImageFromPixels(w, h, pixels, def.format);
 		free(pixels);
 		createTextureSampler();
 		return true;
@@ -173,8 +195,6 @@ bool VeTexture::doLoad() {
 		}
 		if (ok)
 			createTextureSampler();
-		// Don't erase — the same image may be referenced by multiple texture types
-		// (e.g. ORM shared between |mr and |occlusion). clearEmbeddedCache() handles cleanup.
 		return ok;
 	}
 

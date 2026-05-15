@@ -4,6 +4,8 @@
 #include "vulkan/ve_buffer.hpp"
 #include "vulkan/ve_descriptors.hpp"
 #include "rendering/ve_frame_info.hpp"
+#include "resources/ve_resource_manager.hpp"
+#include "resources/ve_texture.hpp"
 #include "vulkan/ve_pipeline.hpp"
 #include "vulkan/ve_compute_pipeline.hpp"
 
@@ -103,20 +105,28 @@ struct Particle {
 	}
 };
 
+struct ParticleSystemCreateInfo {
+	VeDevice& device;
+	std::shared_ptr<VeDescriptorPool> descriptor_pool;
+	const vk::raii::DescriptorSetLayout& global_set_layout;
+
+	ResourceHandle<VeTexture> particle_texture;
+	ResourceHandle<VeTexture> fire_texture;
+	ResourceHandle<VeTexture> smoke_texture;
+
+	vk::Format color_format;
+	vk::SampleCountFlagBits sample_count;
+
+	uint32_t particle_count;
+	glm::vec3 origin;
+	std::filesystem::path shader_path;
+	bool start_active = true;
+	EventBus* event_bus = nullptr;
+};
+
 class VENGINE_API ParticleSystem {
 public:
-	ParticleSystem(
-		VeDevice& device,
-		std::shared_ptr<VeDescriptorPool> descriptor_pool,
-		const vk::raii::DescriptorSetLayout& global_set_layout,
-		const vk::raii::DescriptorSetLayout& texture_set_layout,
-		vk::Format color_format,
-		vk::SampleCountFlagBits sample_count,
-		uint32_t particle_count,
-		glm::vec3 origin,
-		std::filesystem::path shader_path,
-		bool start_active = true,
-		EventBus* event_bus = nullptr);
+	explicit ParticleSystem(const ParticleSystemCreateInfo& info);
 	~ParticleSystem();
 
 	ParticleSystem(const ParticleSystem&) = delete;
@@ -184,6 +194,9 @@ private:
 	void createComputePipeline();
 	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& texture_set_layout);
 	void createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
+	void createRenderDescriptorSet(ResourceHandle<VeTexture> particle_texture,
+								   ResourceHandle<VeTexture> fire_texture,
+								   ResourceHandle<VeTexture> smoke_texture);
 
 	void ensureCapacity(uint32_t needed);
 
@@ -219,6 +232,7 @@ private:
 
 	// Descriptor layouts for this system
 	std::unique_ptr<VeDescriptorSetLayout> m_compute_set_layout;
+	std::unique_ptr<VeDescriptorSetLayout> m_render_set_layout;
 
 	// Per-frame resources
 	std::vector<std::unique_ptr<VeBuffer>> m_compute_uniform_buffers;  // small UBO per frame
@@ -240,6 +254,12 @@ private:
 
 	// Shared pool for descriptor allocations
 	std::shared_ptr<VeDescriptorPool> m_descriptor_pool;
+
+	// texture handles + descriptor set
+	ResourceHandle<VeTexture> m_particle_texture_handle;
+	ResourceHandle<VeTexture> m_fire_texture_handle;
+	ResourceHandle<VeTexture> m_smoke_texture_handle;
+	vk::raii::DescriptorSet m_render_descriptor_set{nullptr};
 
 	std::filesystem::path  m_shader_path;
 	vk::raii::PipelineLayout m_compute_pipeline_layout{nullptr};

@@ -217,6 +217,13 @@ void VeApplication::setActiveScene(std::unique_ptr<VeScene> scene) {
 		m_ui.ambient_light_color = glm::vec3(ambient);
 		m_ui.ambient_light_intensity = ambient.w;
 
+		// Apply per-scene content subsystem declarations. 
+		SceneSubsystems decl = m_active_scene->declareSubsystems();
+		m_particles_declared = decl.particles.has_value();
+		m_fireworks_declared = decl.fireworks.has_value();
+		m_particle_system->setEnabled(m_particles_declared);
+		m_fireworks_system->setEnabled(m_fireworks_declared);
+
 		m_event_bus->emitImmediate(SceneLoadedEvent{&m_active_scene->getRegistry()});
 	}
 }
@@ -381,7 +388,6 @@ VeFrameInfo VeApplication::buildFrameInfo() {
 		.compute_command_buffer = compute_command_buffer,
 		.compute2_command_buffer = &compute2_command_buffer,
 		.global_descriptor_set = m_active_backend->getGlobalDescriptorSet(current_frame),
-		.texture_descriptor_set = m_particle_descriptor_set,
 		.material_descriptor_set = material_descriptor_set,
 		.cubemap_descriptor_set = m_skybox_render_system->getCubemapDescriptorSet(),
 		.shadow_descriptor_set = shadow_desc_set,
@@ -1068,41 +1074,29 @@ void VeApplication::createDescriptors() {
 	m_default_material_ubo->unmap();
 	auto default_material_ubo_info = m_default_material_ubo->getDescriptorInfo();
 
-	// Particle textures
-	m_particle_texture_handle = m_resource_manager->load<VeTexture>(m_config.particle_texture.lexically_normal().generic_string());
-	m_fire_texture_handle = m_resource_manager->load<VeTexture>(m_config.fire_texture.lexically_normal().generic_string());
-	m_smoke_texture_handle = m_resource_manager->load<VeTexture>(m_config.smoke_texture.lexically_normal().generic_string());
-	m_default_occlusion_handle = m_resource_manager->load<VeTexture>("default_occlusion");
-	m_default_emissive_handle = m_resource_manager->load<VeTexture>("default_emissive");
-	auto particle_glow_info = m_particle_texture_handle.get()->getDescriptorInfo();
-	auto particle_fire_info = m_fire_texture_handle.get()->getDescriptorInfo();
-	auto particle_smoke_info = m_smoke_texture_handle.get()->getDescriptorInfo();
-	auto particle_occlusion_info = m_default_occlusion_handle.get()->getDescriptorInfo();
-	auto particle_emissive_info = m_default_emissive_handle.get()->getDescriptorInfo();
-	m_particle_descriptor_set = vk::raii::DescriptorSet{nullptr};
-	VeDescriptorWriter(*m_material_set_layout, *m_global_pool)
-		.writeImage(0, &particle_glow_info)
-		.writeImage(1, &particle_fire_info)
-		.writeImage(2, &particle_smoke_info)
-		.writeImage(3, &particle_occlusion_info)
-		.writeImage(4, &particle_emissive_info)
-		.writeBuffer(5, &default_material_ubo_info)
-		.build(m_particle_descriptor_set);
+	// Particle textures (held by VeApplication so they can be passed into ParticleSystem/FireworksSystem during initSystems)
+	m_particle_texture_handle = m_resource_manager->load<VeTexture>(m_config.particle_assets.glow.lexically_normal().generic_string());
+	m_fire_texture_handle = m_resource_manager->load<VeTexture>(m_config.particle_assets.fire.lexically_normal().generic_string());
+	m_smoke_texture_handle = m_resource_manager->load<VeTexture>(m_config.particle_assets.smoke.lexically_normal().generic_string());
 
 	// Default material descriptor set
 	m_default_albedo_handle = m_resource_manager->load<VeTexture>("default_albedo");
 	m_default_normal_handle = m_resource_manager->load<VeTexture>("default_normal");
 	m_default_mr_handle = m_resource_manager->load<VeTexture>("default_metallic_roughness");
+	m_default_occlusion_handle = m_resource_manager->load<VeTexture>("default_occlusion");
+	m_default_emissive_handle = m_resource_manager->load<VeTexture>("default_emissive");
 	auto default_albedo_info = m_default_albedo_handle.get()->getDescriptorInfo();
 	auto default_normal_info = m_default_normal_handle.get()->getDescriptorInfo();
 	auto default_mr_info = m_default_mr_handle.get()->getDescriptorInfo();
+	auto default_occlusion_info = m_default_occlusion_handle.get()->getDescriptorInfo();
+	auto default_emissive_info = m_default_emissive_handle.get()->getDescriptorInfo();
 	m_default_material_descriptor_set = vk::raii::DescriptorSet{nullptr};
 	VeDescriptorWriter(*m_material_set_layout, *m_global_pool)
 		.writeImage(0, &default_albedo_info)
 		.writeImage(1, &default_normal_info)
 		.writeImage(2, &default_mr_info)
-		.writeImage(3, &particle_occlusion_info)
-		.writeImage(4, &particle_emissive_info)
+		.writeImage(3, &default_occlusion_info)
+		.writeImage(4, &default_emissive_info)
 		.writeBuffer(5, &default_material_ubo_info)
 		.build(m_default_material_descriptor_set);
 }
@@ -1212,36 +1206,47 @@ void VeApplication::initSystems() {
 
 	m_light_system = std::make_unique<LightSystem>(
 		m_ve_device,
+		*m_resource_manager,
+		*m_global_pool,
 		m_global_set_layout->getDescriptorSetLayout(),
-		m_material_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
 		shader("light_billboard_shader.spv"),
 		*m_event_bus
 	);
 
-	m_particle_system = std::make_unique<ParticleSystem>(
-		m_ve_device, m_global_pool,
-		m_global_set_layout->getDescriptorSetLayout(),
-		m_material_set_layout->getDescriptorSetLayout(),
-		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
-		50000, glm::vec3{0.0f, -300.0f, 50.0f},
-		shader("particle_compute.spv"),
-		true, m_event_bus.get()
-	);
+	m_particle_system = std::make_unique<ParticleSystem>(ParticleSystemCreateInfo{
+		.device = m_ve_device,
+		.descriptor_pool = m_global_pool,
+		.global_set_layout = m_global_set_layout->getDescriptorSetLayout(),
+		.particle_texture = m_particle_texture_handle,
+		.fire_texture = m_fire_texture_handle,
+		.smoke_texture = m_smoke_texture_handle,
+		.color_format = m_ve_renderer.getOffscreenImageFormat(),
+		.sample_count = m_ve_renderer.getSampleCount(),
+		.particle_count = 50000,
+		.origin = glm::vec3{0.0f, -300.0f, 50.0f},
+		.shader_path = shader("particle_compute.spv"),
+		.start_active = true,
+		.event_bus = m_event_bus.get(),
+	});
 
-	m_fireworks_system = std::make_unique<FireworksSystem>(
-		m_ve_device, m_global_pool,
-		m_global_set_layout->getDescriptorSetLayout(),
-		m_material_set_layout->getDescriptorSetLayout(),
-		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
-		shader("particle_compute.spv"),
-		*m_event_bus
-	);
+	m_fireworks_system = std::make_unique<FireworksSystem>(FireworksSystemCreateInfo{
+		.device = m_ve_device,
+		.descriptor_pool = m_global_pool,
+		.global_set_layout = m_global_set_layout->getDescriptorSetLayout(),
+		.particle_texture = m_particle_texture_handle,
+		.fire_texture = m_fire_texture_handle,
+		.smoke_texture = m_smoke_texture_handle,
+		.color_format = m_ve_renderer.getOffscreenImageFormat(),
+		.sample_count = m_ve_renderer.getSampleCount(),
+		.shader_path = shader("particle_compute.spv"),
+		.event_bus = *m_event_bus,
+	});
 
 	m_skybox_render_system = std::make_unique<SkyboxRenderSystem>(
 		m_ve_device, *m_resource_manager, *m_global_pool, *m_material_set_layout,
 		m_global_set_layout->getDescriptorSetLayout(),
-		m_config.skybox_dir, shader("skybox_shader.spv"), m_config.cube_model,
+		m_config.skybox_dir, shader("skybox_shader.spv"),
 		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
 		*m_event_bus
 	);

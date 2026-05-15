@@ -176,7 +176,6 @@ struct VeFrameInfo {
 
 	// Descriptor sets bound during scene rendering (sets 0..6)
 	vk::raii::DescriptorSet& global_descriptor_set;                  // set 0
-	vk::raii::DescriptorSet& texture_descriptor_set;                 // set 1 (bindless textures)
 	vk::raii::DescriptorSet& material_descriptor_set;                // set 2 (material SSBO)
 	vk::raii::DescriptorSet* shadow_mask_descriptor_set = nullptr;   // set 3 (null when mask unavailable)
 	vk::raii::DescriptorSet* cluster_descriptor_set = nullptr;       // set 4 (null when clustering disabled)

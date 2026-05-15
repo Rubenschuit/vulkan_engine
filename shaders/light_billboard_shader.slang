@@ -48,10 +48,6 @@ VertexOutput vertMain(uint id : SV_VertexID) {
 
 [vk::binding(0, 1)]
 Sampler2D glow_texture;
-[vk::binding(1, 1)]
-Sampler2D fire_texture;
-[vk::binding(2, 1)]
-Sampler2D smoke_texture;
 
 [shader("fragment")]
 float4 fragMain(VertexOutput in) : SV_Target {

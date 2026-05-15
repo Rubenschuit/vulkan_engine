@@ -6,7 +6,6 @@
 #include "resources/ve_resource_manager.hpp"
 #include "scene/ve_component.hpp"
 #include "resources/ve_mesh.hpp"
-#include "resources/ve_model.hpp"
 #include "utils/ve_log.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
@@ -33,7 +32,6 @@ SkyboxRenderSystem::SkyboxRenderSystem(
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	std::filesystem::path skybox_base_path,
 	std::filesystem::path shader_path,
-	const std::filesystem::path& cube_model_path,
 	vk::Format color_format,
 	vk::SampleCountFlagBits sample_count,
 	EventBus& event_bus)
@@ -48,7 +46,7 @@ SkyboxRenderSystem::SkyboxRenderSystem(
 	discoverSkyboxes();
 	createPipelineLayout(global_set_layout, material_set_layout.getDescriptorSetLayout());
 	createPipeline(color_format, sample_count);
-	loadCubeModel(resource_manager, cube_model_path);
+	createCubeMesh(resource_manager);
 
 	m_event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
 		recreatePipeline(e.offscreen_format, e.sample_count);
@@ -131,14 +129,54 @@ void SkyboxRenderSystem::setSkybox(size_t index) {
 	m_pending_load = index;
 }
 
-void SkyboxRenderSystem::loadCubeModel(VeResourceManager& resource_manager, const std::filesystem::path& cube_model_path) {
+void SkyboxRenderSystem::createCubeMesh(VeResourceManager& resource_manager) {
 	constexpr float s = 4.0f * 1500.0f;
-	auto mesh_data = VeModel::loadSingleMesh(resource_manager, cube_model_path);
-	if (!mesh_data) {
-		VE_LOGE("Failed to load cube model for skybox");
-		return;
+	constexpr float u = 1.0f;
+	const glm::vec4 t0{0.0f};
+	std::vector<VeMesh::Vertex> verts = {
+		// +X
+		{{ u, -u, -u}, { 1,  0,  0}, {0, 0}, t0},
+		{{ u,  u, -u}, { 1,  0,  0}, {1, 0}, t0},
+		{{ u,  u,  u}, { 1,  0,  0}, {1, 1}, t0},
+		{{ u, -u,  u}, { 1,  0,  0}, {0, 1}, t0},
+		// -X
+		{{-u,  u, -u}, {-1,  0,  0}, {0, 0}, t0},
+		{{-u, -u, -u}, {-1,  0,  0}, {1, 0}, t0},
+		{{-u, -u,  u}, {-1,  0,  0}, {1, 1}, t0},
+		{{-u,  u,  u}, {-1,  0,  0}, {0, 1}, t0},
+		// +Y
+		{{ u,  u, -u}, { 0,  1,  0}, {0, 0}, t0},
+		{{-u,  u, -u}, { 0,  1,  0}, {1, 0}, t0},
+		{{-u,  u,  u}, { 0,  1,  0}, {1, 1}, t0},
+		{{ u,  u,  u}, { 0,  1,  0}, {0, 1}, t0},
+		// -Y
+		{{-u, -u, -u}, { 0, -1,  0}, {0, 0}, t0},
+		{{ u, -u, -u}, { 0, -1,  0}, {1, 0}, t0},
+		{{ u, -u,  u}, { 0, -1,  0}, {1, 1}, t0},
+		{{-u, -u,  u}, { 0, -1,  0}, {0, 1}, t0},
+		// +Z
+		{{-u, -u,  u}, { 0,  0,  1}, {0, 0}, t0},
+		{{ u, -u,  u}, { 0,  0,  1}, {1, 0}, t0},
+		{{ u,  u,  u}, { 0,  0,  1}, {1, 1}, t0},
+		{{-u,  u,  u}, { 0,  0,  1}, {0, 1}, t0},
+		// -Z
+		{{-u,  u, -u}, { 0,  0, -1}, {0, 0}, t0},
+		{{ u,  u, -u}, { 0,  0, -1}, {1, 0}, t0},
+		{{ u, -u, -u}, { 0,  0, -1}, {1, 1}, t0},
+		{{-u, -u, -u}, { 0,  0, -1}, {0, 1}, t0},
+	};
+	std::vector<uint32_t> indices;
+	indices.reserve(36);
+	for (uint32_t f = 0; f < 6; ++f) {
+		uint32_t b = f * 4;
+		indices.push_back(b + 0);
+		indices.push_back(b + 1);
+		indices.push_back(b + 2);
+		indices.push_back(b + 0);
+		indices.push_back(b + 2);
+		indices.push_back(b + 3);
 	}
-	m_cube_mesh = std::move(mesh_data->mesh);
+	m_cube_mesh = resource_manager.createMesh("engine::skybox_cube", verts, indices);
 	m_cube_transform.setScale({s, s, s});
 }
 

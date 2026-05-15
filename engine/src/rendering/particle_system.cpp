@@ -8,24 +8,13 @@
 
 namespace ve {
 
-ParticleSystem::ParticleSystem(
-	VeDevice& device,
-	std::shared_ptr<VeDescriptorPool> descriptor_pool,
-	const vk::raii::DescriptorSetLayout& global_set_layout,
-	const vk::raii::DescriptorSetLayout& texture_set_layout,
-	vk::Format color_format,
-	vk::SampleCountFlagBits sample_count,
-	uint32_t particle_count,
-	glm::vec3 origin,
-	std::filesystem::path shader_path,
-	bool start_active,
-	EventBus* event_bus)
-	: m_ve_device(device), m_particle_count(particle_count),
-	  m_origin(origin), m_descriptor_pool(std::move(descriptor_pool)),
-	  m_shader_path(shader_path) {
+ParticleSystem::ParticleSystem(const ParticleSystemCreateInfo& info)
+	: m_ve_device(info.device), m_particle_count(info.particle_count),
+	  m_origin(info.origin), m_descriptor_pool(info.descriptor_pool),
+	  m_shader_path(info.shader_path) {
 
-	if (event_bus) {
-		event_bus->subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
+	if (info.event_bus) {
+		info.event_bus->subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
 			recreatePipeline(e.offscreen_format, e.sample_count);
 		});
 	}
@@ -41,11 +30,29 @@ ParticleSystem::ParticleSystem(
 	createDescriptorSets();
 	createComputePipelineLayout();
 	createComputePipeline();
-	createPipelineLayout(global_set_layout, texture_set_layout);
-	createPipeline(color_format, sample_count);
-	if (start_active) {
+	createPipelineLayout(info.global_set_layout, m_render_set_layout->getDescriptorSetLayout());
+	createPipeline(info.color_format, info.sample_count);
+	createRenderDescriptorSet(info.particle_texture, info.fire_texture, info.smoke_texture);
+	if (info.start_active) {
 		scheduleRestart();
 	}
+}
+
+void ParticleSystem::createRenderDescriptorSet(ResourceHandle<VeTexture> particle_texture,
+											   ResourceHandle<VeTexture> fire_texture,
+											   ResourceHandle<VeTexture> smoke_texture) {
+	m_particle_texture_handle = std::move(particle_texture);
+	m_fire_texture_handle = std::move(fire_texture);
+	m_smoke_texture_handle = std::move(smoke_texture);
+
+	auto particle_info = m_particle_texture_handle.get()->getDescriptorInfo();
+	auto fire_info = m_fire_texture_handle.get()->getDescriptorInfo();
+	auto smoke_info = m_smoke_texture_handle.get()->getDescriptorInfo();
+	VeDescriptorWriter(*m_render_set_layout, *m_descriptor_pool)
+		.writeImage(0, &particle_info)
+		.writeImage(1, &fire_info)
+		.writeImage(2, &smoke_info)
+		.build(m_render_descriptor_set);
 }
 
 ParticleSystem::~ParticleSystem() {}
@@ -274,6 +281,13 @@ void ParticleSystem::createDescriptorSetLayouts() {
 		.addBinding(11, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Spawn Flags Prev
 		.addBinding(12, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Spawn Out
 		.addBinding(13, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // Spawn Flags Out
+		.build();
+
+	// Binding 3 different particle textures for rendering (glow, fire, smoke)
+	m_render_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
+		.addBinding(0, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
+		.addBinding(1, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
+		.addBinding(2, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
 		.build();
 }
 
@@ -546,7 +560,7 @@ void ParticleSystem::render(VeFrameInfo& frame_info) const {
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,
 		0,
-		{ *frame_info.global_descriptor_set, *frame_info.texture_descriptor_set },
+		{ *frame_info.global_descriptor_set, *m_render_descriptor_set },
 		{}
 	);
 	vk::DeviceSize offsets[] = { 0 };

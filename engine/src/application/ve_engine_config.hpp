@@ -9,10 +9,14 @@ struct VENGINE_API EngineConfig {
 	std::filesystem::path working_dir;       // project root
 	std::filesystem::path shaders_dir;       // compiled .spv files
 	std::filesystem::path skybox_dir;        // .ktx/.ktx2 skybox textures
-	std::filesystem::path cube_model;        // cube.gltf for skybox mesh
-	std::filesystem::path particle_texture;
-	std::filesystem::path fire_texture;
-	std::filesystem::path smoke_texture;
+
+	// Optional — needed only when ParticleSystem/FireworksSystem are used.
+	// Phase 2 will move these into per-scene declarations.
+	struct ParticleAssets {
+		std::filesystem::path glow;
+		std::filesystem::path fire;
+		std::filesystem::path smoke;
+	} particle_assets;
 };
 
 } // namespace ve

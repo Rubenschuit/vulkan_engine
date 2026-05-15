@@ -7,14 +7,15 @@ namespace ve {
 
 static EngineConfig makeEngineConfig(const std::filesystem::path& root) {
 	return EngineConfig{
-		.app_name          = "Sandbox",
-		.working_dir       = root,
-		.shaders_dir       = root / "shaders",
-		.skybox_dir        = root / "textures" / "skybox",
-		.cube_model        = root / "models" / "cube.gltf",
-		.particle_texture  = root / "textures" / "light.ktx2",
-		.fire_texture      = root / "textures" / "fire_ball.ktx",
-		.smoke_texture     = root / "textures" / "smoke_atlas.ktx2",
+		.app_name        = "Sandbox",
+		.working_dir     = root,
+		.shaders_dir     = root / "shaders",
+		.skybox_dir      = root / "textures" / "skybox",
+		.particle_assets = {
+			.glow  = root / "textures" / "light.ktx2",
+			.fire  = root / "textures" / "fire_ball.ktx",
+			.smoke = root / "textures" / "smoke_atlas.ktx2",
+		},
 	};
 }
 
@@ -123,11 +124,17 @@ void Sandbox::update() {
 }
 
 void Sandbox::updateParticles() {
+	if (!isParticlesDeclared() && !isFireworksDeclared())
+		return;
+
 	auto& ps = getParticleSystem();
 	auto& fw = getFireworksSystem();
 
-	ps.setEnabled(m_particles_enabled);
-	fw.setEnabled(m_fireworks_enabled);
+	ps.setEnabled(isParticlesDeclared() && m_particles_enabled);
+	fw.setEnabled(isFireworksDeclared() && m_fireworks_enabled);
+
+	if (!isParticlesDeclared())
+		return;
 
 	// UI-driven config
 	ps.stageParticleCount(m_particles.pending_count);
@@ -203,8 +210,10 @@ void Sandbox::renderUI() {
 
 	auto& app_visible = getEditor().getState().show_app_settings;
 	if (ImGui::Begin(getAppSettingsWindowName().c_str(), &app_visible, ImGuiWindowFlags_NoFocusOnAppearing)) {
-		if (ImGui::BeginTabBar("SettingsTabs")) {
-			if (ImGui::BeginTabItem("Particle")) {
+		if (!isParticlesDeclared() && !isFireworksDeclared()) {
+			ImGui::TextDisabled("The active scene does not declare any content subsystems.");
+		} else if (ImGui::BeginTabBar("SettingsTabs")) {
+			if (isParticlesDeclared() && ImGui::BeginTabItem("Particle")) {
 				ImGui::Checkbox("Enabled##particles", &m_particles_enabled);
 				ImGui::Separator();
 
@@ -242,7 +251,7 @@ void Sandbox::renderUI() {
 
 				ImGui::EndTabItem();
 			}
-			if (ImGui::BeginTabItem("Fireworks")) {
+			if (isFireworksDeclared() && ImGui::BeginTabItem("Fireworks")) {
 				ImGui::Checkbox("Enabled##fireworks", &m_fireworks_enabled);
 				ImGui::Separator();
 

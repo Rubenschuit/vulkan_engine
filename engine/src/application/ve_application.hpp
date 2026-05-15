@@ -118,6 +118,8 @@ protected:
 	// --- Access systems (for app-specific config) ---
 	ParticleSystem& getParticleSystem() { return *m_particle_system; }
 	FireworksSystem& getFireworksSystem() { return *m_fireworks_system; }
+	bool isParticlesDeclared() const { return m_particles_declared; }
+	bool isFireworksDeclared() const { return m_fireworks_declared; }
 	SkyboxRenderSystem& getSkyboxSystem() { return *m_skybox_render_system; }
 	PbrRenderSystem& getPbrSystem() { return *m_pbr_render_system; }
 	PhysicsSystem& getPhysicsSystem() { return *m_physics_system; }
@@ -205,6 +207,8 @@ private:
 	int m_loaded_scene_index = -1;
 	SceneLoadRequest m_pending_load;
 	void processSceneLoadRequest();
+	bool m_particles_declared = false;
+	bool m_fireworks_declared = false;
 
 	// --- Async loading ---
 	std::unique_ptr<AssetLoadingSystem> m_asset_loader;

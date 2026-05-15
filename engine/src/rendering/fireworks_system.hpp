@@ -49,17 +49,24 @@ struct FireworksConfig {
 	glm::vec4 smoke_color = glm::vec4(0.4f, 0.4f, 0.4f, 0.5f);
 };
 
+struct FireworksSystemCreateInfo {
+	VeDevice& device;
+	std::shared_ptr<VeDescriptorPool> descriptor_pool;
+	const vk::raii::DescriptorSetLayout& global_set_layout;
+
+	ResourceHandle<VeTexture> particle_texture;
+	ResourceHandle<VeTexture> fire_texture;
+	ResourceHandle<VeTexture> smoke_texture;
+
+	vk::Format color_format;
+	vk::SampleCountFlagBits sample_count;
+	std::filesystem::path shader_path;
+	EventBus& event_bus;
+};
+
 class VENGINE_API FireworksSystem {
 public:
-    FireworksSystem(
-        VeDevice& device,
-        std::shared_ptr<VeDescriptorPool> descriptor_pool,
-        const vk::raii::DescriptorSetLayout& global_set_layout,
-        const vk::raii::DescriptorSetLayout& texture_set_layout,
-        vk::Format color_format,
-        vk::SampleCountFlagBits sample_count,
-        std::filesystem::path shader_path,
-        EventBus& event_bus);
+    explicit FireworksSystem(const FireworksSystemCreateInfo& info);
 
     void recordComputeCommands(VeFrameInfo& frame_info);
     void render(VeFrameInfo& frame_info) const;

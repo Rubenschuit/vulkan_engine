@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "rendering/light_system.hpp"
 #include "vulkan/ve_device.hpp"
+#include "vulkan/ve_descriptors.hpp"
 #include "vulkan/ve_pipeline.hpp"
 #include "scene/ve_component.hpp"
 #include "scene/ve_registry.hpp"
@@ -59,9 +60,10 @@ struct SimplePushConstantData {
 	uint32_t padding[2];
 };
 
-LightSystem::LightSystem( VeDevice& device,
+LightSystem::LightSystem(VeDevice& device,
+									VeResourceManager& resource_manager,
+									VeDescriptorPool& descriptor_pool,
 									const vk::raii::DescriptorSetLayout& global_set_layout,
-									const vk::raii::DescriptorSetLayout& material_set_layout,
 									vk::Format color_format,
 									vk::SampleCountFlagBits sample_count,
 									std::filesystem::path shader_path,
@@ -72,8 +74,22 @@ LightSystem::LightSystem( VeDevice& device,
 		recreatePipeline(e.offscreen_format, e.sample_count);
 	});
 
-	createPipelineLayout(global_set_layout, material_set_layout);
+	m_billboard_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
+		.addBinding(0, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
+		.build();
+
+	createPipelineLayout(global_set_layout, m_billboard_set_layout->getDescriptorSetLayout());
 	createPipeline(color_format, sample_count);
+	createBillboardDescriptorSet(resource_manager, descriptor_pool);
+}
+
+void LightSystem::createBillboardDescriptorSet(VeResourceManager& resource_manager,
+											  VeDescriptorPool& descriptor_pool) {
+	m_particle_handle = resource_manager.load<VeTexture>("default_particle");
+	auto image_info = m_particle_handle.get()->getDescriptorInfo();
+	VeDescriptorWriter(*m_billboard_set_layout, descriptor_pool)
+		.writeImage(0, &image_info)
+		.build(m_billboard_descriptor_set);
 }
 
 LightSystem::~LightSystem() {
@@ -137,7 +153,7 @@ void LightSystem::createPipeline(vk::Format color_format, vk::SampleCountFlagBit
 // Renders billboard quads for each point light
 void LightSystem::render(VeFrameInfo& frame_info) const {
 	frame_info.cmd().bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-	std::array<vk::DescriptorSet, 2> sets{*frame_info.global_descriptor_set, *frame_info.texture_descriptor_set};
+	std::array<vk::DescriptorSet, 2> sets{*frame_info.global_descriptor_set, *m_billboard_descriptor_set};
 	frame_info.cmd().bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics,
 		*m_pipeline_layout,

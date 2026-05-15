@@ -51,7 +51,6 @@ public:
 						const vk::raii::DescriptorSetLayout& global_set_layout,
 						std::filesystem::path skybox_base_path,
 						std::filesystem::path shader_path,
-						const std::filesystem::path& cube_model_path,
 						vk::Format color_format,
 						vk::SampleCountFlagBits sample_count,
 						EventBus& event_bus);
@@ -90,7 +89,7 @@ public:
 private:
 	void discoverSkyboxes();
 	void loadSkyboxTexture(const std::filesystem::path& path);
-	void loadCubeModel(VeResourceManager& resource_manager, const std::filesystem::path& cube_model_path);
+	void createCubeMesh(VeResourceManager& resource_manager);
 	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& material_set_layout);
 	void createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
 

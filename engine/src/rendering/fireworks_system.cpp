@@ -8,32 +8,26 @@
 
 namespace ve {
 
-FireworksSystem::FireworksSystem(
-    VeDevice& device,
-    std::shared_ptr<VeDescriptorPool> descriptor_pool,
-    const vk::raii::DescriptorSetLayout& global_set_layout,
-    const vk::raii::DescriptorSetLayout& texture_set_layout,
-    vk::Format color_format,
-    vk::SampleCountFlagBits sample_count,
-    std::filesystem::path shader_path,
-    EventBus& event_bus) {
+FireworksSystem::FireworksSystem(const FireworksSystemCreateInfo& info) {
 
-	event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
+	info.event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
 		recreatePipeline(e.offscreen_format, e.sample_count);
 	});
 
-    m_particle_system = std::make_unique<ParticleSystem>(
-        device,
-        descriptor_pool,
-        global_set_layout,
-        texture_set_layout,
-        color_format,
-        sample_count,
-        m_config.max_particles, // Dedicated particle count for fireworks
-        glm::vec3(0.0f), // origin
-        shader_path,
-		false
-    );
+    m_particle_system = std::make_unique<ParticleSystem>(ParticleSystemCreateInfo{
+        .device = info.device,
+        .descriptor_pool = info.descriptor_pool,
+        .global_set_layout = info.global_set_layout,
+        .particle_texture = info.particle_texture,
+        .fire_texture = info.fire_texture,
+        .smoke_texture = info.smoke_texture,
+        .color_format = info.color_format,
+        .sample_count = info.sample_count,
+        .particle_count = static_cast<uint32_t>(m_config.max_particles),
+        .origin = glm::vec3(0.0f),
+        .shader_path = info.shader_path,
+        .start_active = false,
+    });
 
     m_particle_system->setLifeRange(0.5f, 3.0f);
     // Disable auto-respawn for fireworks, they should be spawned by events
