@@ -99,15 +99,15 @@ struct VisibleObjectEntry {
 // ---------------------------------------------------------------------------
 
 float extractMaxScale(float4x4 m) {
-	float sx = length(float3(m[0][0], m[0][1], m[0][2]));
-	float sy = length(float3(m[1][0], m[1][1], m[1][2]));
-	float sz = length(float3(m[2][0], m[2][1], m[2][2]));
+	float sx = length(float3(m[0][0], m[1][0], m[2][0]));
+	float sy = length(float3(m[0][1], m[1][1], m[2][1]));
+	float sz = length(float3(m[0][2], m[1][2], m[2][2]));
 	return max(max(sx, sy), sz);
 }
 
-bool frustumTest(CullParams cp, float3 center, float radius) {
+bool frustumTest(CullParams params, float3 center, float radius) {
 	for (int p = 0; p < 6; p++) {
-		float dist = dot(cp.frustum_planes[p].xyz, center) + cp.frustum_planes[p].w;
+		float dist = dot(params.frustum_planes[p].xyz, center) + params.frustum_planes[p].w;
 		if (dist < -radius)
 			return false;
 	}
@@ -117,15 +117,15 @@ bool frustumTest(CullParams cp, float3 center, float radius) {
 // Projects a world-space bounding sphere into the previous frame's screen space
 // and samples the Hi-Z pyramid (which was built from the previous frame's depth).
 // Returns true if the sphere might be visible (should NOT be culled).
-bool hizOcclusionTest(CullParams cp, Texture2D<float> hiz_tex, SamplerState hiz_smp,
+bool hizOcclusionTest(CullParams params, Texture2D<float> hiz_tex, SamplerState hiz_smp,
                       float3 center_world, float radius) {
 	// Current-frame near-plane check
-	float3 center_view = mul(cp.view, float4(center_world, 1.0)).xyz;
+	float3 center_view = mul(params.view, float4(center_world, 1.0)).xyz;
 	float cz = -center_view.z;
 	if (cz <= radius)
 		return true;
 
-	float3 prev_view_pos = mul(cp.prev_view, float4(center_world, 1.0)).xyz;
+	float3 prev_view_pos = mul(params.prev_view, float4(center_world, 1.0)).xyz;
 	float prev_cx = prev_view_pos.x;
 	float prev_cy = prev_view_pos.y;
 	float prev_cz = -prev_view_pos.z;
@@ -137,12 +137,12 @@ bool hizOcclusionTest(CullParams cp, Texture2D<float> hiz_tex, SamplerState hiz_
 	float denom    = prev_cz2 - r2;
 
 	float t_xz = sqrt(prev_cx * prev_cx + prev_cz2 - r2);
-	float x1 = cp.p00 * (prev_cx * prev_cz + radius * t_xz) / denom;
-	float x2 = cp.p00 * (prev_cx * prev_cz - radius * t_xz) / denom;
+	float x1 = params.p00 * (prev_cx * prev_cz + radius * t_xz) / denom;
+	float x2 = params.p00 * (prev_cx * prev_cz - radius * t_xz) / denom;
 
 	float t_yz = sqrt(prev_cy * prev_cy + prev_cz2 - r2);
-	float y1 = cp.p11 * (prev_cy * prev_cz + radius * t_yz) / denom;
-	float y2 = cp.p11 * (prev_cy * prev_cz - radius * t_yz) / denom;
+	float y1 = params.p11 * (prev_cy * prev_cz + radius * t_yz) / denom;
+	float y2 = params.p11 * (prev_cy * prev_cz - radius * t_yz) / denom;
 
 	float2 uv_min = float2(min(x1, x2), min(y1, y2)) * 0.5 + 0.5;
 	float2 uv_max = float2(max(x1, x2), max(y1, y2)) * 0.5 + 0.5;
@@ -151,13 +151,13 @@ bool hizOcclusionTest(CullParams cp, Texture2D<float> hiz_tex, SamplerState hiz_
 	if (uv_min.x < 0.0 || uv_min.y < 0.0 || uv_max.x > 1.0 || uv_max.y > 1.0)
 		return true;
 
-	float2 aabb_pixels = (uv_max - uv_min) * cp.hiz_size;
+	float2 aabb_pixels = (uv_max - uv_min) * params.hiz_size;
 	float max_dim = max(aabb_pixels.x, aabb_pixels.y);
 	if (max_dim <= 0.0)
 		return true;
 
 	float mip = floor(log2(max_dim));
-	mip = clamp(mip, 0.0, float(cp.hiz_mip_count - 1));
+	mip = clamp(mip, 0.0, float(params.hiz_mip_count - 1));
 
 	float2 uv_center = (uv_min + uv_max) * 0.5;
 	float hiz_depth = hiz_tex.SampleLevel(hiz_smp, uv_center, int(mip));
@@ -168,27 +168,27 @@ bool hizOcclusionTest(CullParams cp, Texture2D<float> hiz_tex, SamplerState hiz_
 	hiz_depth = min(min(d00, d11), min(min(d01, d10), hiz_depth));
 
 	float z_nearest = prev_view_pos.z + radius;
-	float nearest_ndc_z = (cp.p22 * z_nearest + cp.p32) / (-z_nearest);
+	float nearest_ndc_z = (params.p22 * z_nearest + params.p32) / (-z_nearest);
 
-	return nearest_ndc_z > hiz_depth;
+	return nearest_ndc_z >= hiz_depth;
 }
 
 // Select LOD level based on projected screen-space size.
-uint selectLod(CullParams cp, float3 center_world, float radius, uint lod_count) {
+uint selectLod(CullParams params, float3 center_world, float radius, uint lod_count) {
 	uint lod;
-	if (cp.is_shadow_pass != 0) {
+	if (params.is_shadow_pass != 0) {
 		lod = 0;
 	} else {
-		float3 center_view = mul(cp.view, float4(center_world, 1.0)).xyz;
+		float3 center_view = mul(params.view, float4(center_world, 1.0)).xyz;
 		float depth = max(-center_view.z, 0.001);
-		float screen_frac = (radius * abs(cp.p11)) / depth;
+		float screen_frac = (radius * abs(params.p11)) / depth;
 
 		if      (screen_frac >= LOD_SCREEN_THRESHOLDS[0]) lod = 0;
 		else if (screen_frac >= LOD_SCREEN_THRESHOLDS[1]) lod = 1;
 		else if (screen_frac >= LOD_SCREEN_THRESHOLDS[2]) lod = 2;
 		else                                               lod = 3;
 	}
-	int biased = int(lod) + cp.lod_bias;
+	int biased = int(lod) + params.lod_bias;
 	return uint(clamp(biased, 0, int(lod_count) - 1));
 }
 
