@@ -61,7 +61,8 @@ struct CullParams {
 	uint     hiz_enabled;        // 0 = frustum only, 1 = frustum + prev-frame Hi-Z
 	uint     is_shadow_pass;
 	uint     hiz_mip_count;
-	float2   hiz_size;           // mip 0 resolution
+	float2   hiz_size;           // screen extent: AABB pixel math stays in screen units
+	float2   hiz_uv_scale;       // screen_size / hiz_pad_size: applied to uv before sampling
 	int      lod_bias;           // 0 for main pass, cascade_index for shadow passes
 	uint     max_meshlet_draws;  // MAX_MESHLET_DRAWS for main, MAX_MESHLET_SHADOW_DRAWS for shadow
 	float4   camera_pos;         // xyz = world-space camera position (for cone culling)
@@ -156,15 +157,20 @@ bool hizOcclusionTest(CullParams params, Texture2D<float> hiz_tex, SamplerState 
 	if (max_dim <= 0.0)
 		return true;
 
-	float mip = floor(log2(max_dim));
+	float mip = ceil(log2(max_dim));
 	mip = clamp(mip, 0.0, float(params.hiz_mip_count - 1));
 
-	float2 uv_center = (uv_min + uv_max) * 0.5;
-	float hiz_depth = hiz_tex.SampleLevel(hiz_smp, uv_center, int(mip));
-	float d00 = hiz_tex.SampleLevel(hiz_smp, uv_min, int(mip));
-	float d11 = hiz_tex.SampleLevel(hiz_smp, uv_max, int(mip));
-	float d01 = hiz_tex.SampleLevel(hiz_smp, float2(uv_min.x, uv_max.y), int(mip));
-	float d10 = hiz_tex.SampleLevel(hiz_smp, float2(uv_max.x, uv_min.y), int(mip));
+	// Hi-Z is padded to next-POT; rescale screen-normalized uvs into the image's
+	// normalized space (identity at POT screen resolutions).
+	float2 huv_min = uv_min * params.hiz_uv_scale;
+	float2 huv_max = uv_max * params.hiz_uv_scale;
+	float2 huv_ctr = (huv_min + huv_max) * 0.5;
+
+	float hiz_depth = hiz_tex.SampleLevel(hiz_smp, huv_ctr, int(mip));
+	float d00 = hiz_tex.SampleLevel(hiz_smp, huv_min, int(mip));
+	float d11 = hiz_tex.SampleLevel(hiz_smp, huv_max, int(mip));
+	float d01 = hiz_tex.SampleLevel(hiz_smp, float2(huv_min.x, huv_max.y), int(mip));
+	float d10 = hiz_tex.SampleLevel(hiz_smp, float2(huv_max.x, huv_min.y), int(mip));
 	hiz_depth = min(min(d00, d11), min(min(d01, d10), hiz_depth));
 
 	float z_nearest = prev_view_pos.z + radius;
@@ -186,7 +192,7 @@ uint selectLod(CullParams params, float3 center_world, float radius, uint lod_co
 		if      (screen_frac >= LOD_SCREEN_THRESHOLDS[0]) lod = 0;
 		else if (screen_frac >= LOD_SCREEN_THRESHOLDS[1]) lod = 1;
 		else if (screen_frac >= LOD_SCREEN_THRESHOLDS[2]) lod = 2;
-		else                                               lod = 3;
+		else                                              lod = 3;
 	}
 	int biased = int(lod) + params.lod_bias;
 	return uint(clamp(biased, 0, int(lod_count) - 1));

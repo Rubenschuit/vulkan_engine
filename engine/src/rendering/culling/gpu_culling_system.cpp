@@ -343,7 +343,11 @@ void GpuCullingSystem::createShadowHizDescriptorSets(VeDescriptorPool& pool, Gpu
 
 void GpuCullingSystem::createHizDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr,
                                                 HizSystem& hiz) {
-	m_hiz_size = glm::vec2(static_cast<float>(hiz.getWidth()), static_cast<float>(hiz.getHeight()));
+	m_hiz_size = glm::vec2(static_cast<float>(hiz.getScreenWidth()),
+	                        static_cast<float>(hiz.getScreenHeight()));
+	m_hiz_uv_scale = glm::vec2(
+		static_cast<float>(hiz.getScreenWidth())  / static_cast<float>(hiz.getWidth()),
+		static_cast<float>(hiz.getScreenHeight()) / static_cast<float>(hiz.getHeight()));
 	m_hiz_mip_count = hiz.getMipLevels();
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		auto obj_info = scene_mgr.getObjectDataBuffer(i).getDescriptorInfo();
@@ -439,6 +443,7 @@ void GpuCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame
 	params.lod_bias = 0;
 	if (m_hiz_enabled) {
 		params.hiz_size = m_hiz_size;
+		params.hiz_uv_scale = m_hiz_uv_scale;
 		params.hiz_mip_count = m_hiz_mip_count;
 	}
 	m_cull_param_ubos[frame]->writeToBuffer(&params);
@@ -606,6 +611,7 @@ void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
 		params.p22 = proj[2][2];
 		params.p32 = proj[3][2];
 		params.hiz_size = m_hiz_size;
+		params.hiz_uv_scale = m_hiz_uv_scale;
 		params.hiz_mip_count = m_hiz_mip_count;
 	} else {
 		params.hiz_enabled = 0;

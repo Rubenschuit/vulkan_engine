@@ -15,10 +15,23 @@ namespace ve {
 
 struct HizPushConstants {
 	glm::uvec2 dst_size;
+	glm::uvec2 src_size;
 	glm::vec2 src_texel_size;
 	uint32_t mip_count;
 	uint32_t write_source;
 };
+
+static uint32_t nextPow2(uint32_t v) {
+	if (v <= 1)
+		return 1;
+	v--;
+	v |= v >> 1;
+	v |= v >> 2;
+	v |= v >> 4;
+	v |= v >> 8;
+	v |= v >> 16;
+	return v + 1;
+}
 
 static constexpr uint32_t MIPS_PASS1 = 6; // 1 copy + 5 reductions
 static constexpr uint32_t MIPS_TAIL = 5;  // 5 reductions per subsequent pass
@@ -49,15 +62,18 @@ HizSystem::HizSystem(
 	createPipeline(shaders_dir);
 	createDescriptorSets(descriptor_pool);
 
-	VE_LOGI("HizSystem: initialized (" << m_width << "x" << m_height << ", "
-	         << m_mip_levels << " mips, " << m_pass_count << " passes)");
+	VE_LOGI("HizSystem: initialized (screen " << m_screen_width << "x" << m_screen_height
+	         << ", padded " << m_width << "x" << m_height
+	         << ", " << m_mip_levels << " mips, " << m_pass_count << " passes)");
 }
 
 HizSystem::~HizSystem() = default;
 
 void HizSystem::createHizImages(vk::Extent2D extent) {
-	m_width = extent.width;
-	m_height = extent.height;
+	m_screen_width = extent.width;
+	m_screen_height = extent.height;
+	m_width = nextPow2(extent.width);
+	m_height = nextPow2(extent.height);
 	m_mip_levels = static_cast<uint32_t>(std::floor(std::log2(std::max(m_width, m_height)))) + 1;
 	if (m_mip_levels > MAX_HIZ_MIPS)
 		m_mip_levels = MAX_HIZ_MIPS;
@@ -299,13 +315,12 @@ void HizSystem::generate(vk::raii::CommandBuffer& cmd, uint32_t frame_index) {
 		uint32_t pass_mip_count = (pass == 0) ? std::min(MIPS_PASS1, remaining)
 		                                      : std::min(MIPS_TAIL, remaining);
 
-		// dst_size = region loaded into LDS (full res for pass 0, source mip size for pass 1+)
 		uint32_t dst_w, dst_h, src_w, src_h;
 		if (pass == 0) {
 			dst_w = m_width;
 			dst_h = m_height;
-			src_w = m_width;
-			src_h = m_height;
+			src_w = m_screen_width;
+			src_h = m_screen_height;
 		} else {
 			uint32_t src_mip = (pass == 1) ? 5 : 10;
 			dst_w = std::max(1u, m_width >> src_mip);
@@ -316,6 +331,7 @@ void HizSystem::generate(vk::raii::CommandBuffer& cmd, uint32_t frame_index) {
 
 		HizPushConstants pc{
 			.dst_size = glm::uvec2(dst_w, dst_h),
+			.src_size = glm::uvec2(src_w, src_h),
 			.src_texel_size = glm::vec2(1.0f / static_cast<float>(src_w),
 			                            1.0f / static_cast<float>(src_h)),
 			.mip_count = pass_mip_count,

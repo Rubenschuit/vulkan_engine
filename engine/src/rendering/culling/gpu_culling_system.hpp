@@ -33,7 +33,8 @@ struct CullParams {
 	alignas(4) uint32_t hiz_enabled;   // 0 = frustum only, 1 = frustum + prev-frame Hi-Z
 	alignas(4) uint32_t is_shadow_pass;
 	alignas(4) uint32_t hiz_mip_count;
-	alignas(8) glm::vec2 hiz_size;     // mip 0 resolution
+	alignas(8) glm::vec2 hiz_size;     // screen (not padded) extent: AABB pixel math
+	alignas(8) glm::vec2 hiz_uv_scale; // screen_size / hiz_pad_size: applied to UVs before sampling
 	alignas(4) int32_t  lod_bias;      // 0 for main pass; cascade_index for shadow passes
 	alignas(4) uint32_t max_meshlet_draws{MAX_MESHLET_DRAWS}; // meshlet pass-2 per-bucket capacity
 	alignas(16) glm::vec4 camera_pos;  // xyz = world-space camera position (for cone cull)
@@ -137,6 +138,7 @@ private:
 	bool m_hiz_enabled = false;
 	bool m_compaction_enabled = false;
 	glm::vec2 m_hiz_size{0.0f};
+	glm::vec2 m_hiz_uv_scale{1.0f};
 	uint32_t m_hiz_mip_count = 0;
 
 	// Per-frame camera view matrices for Hi-Z reprojection.

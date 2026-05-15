@@ -48,6 +48,8 @@ public:
 	uint32_t getMipLevels() const { return m_mip_levels; }
 	uint32_t getWidth() const { return m_width; }
 	uint32_t getHeight() const { return m_height; }
+	uint32_t getScreenWidth() const { return m_screen_width; }
+	uint32_t getScreenHeight() const { return m_screen_height; }
 	const vk::raii::Sampler& getSampler() const { return m_nearest_sampler; }
 
 private:
@@ -62,8 +64,12 @@ private:
 
 	VeDevice& m_ve_device;
 
+	// m_width/m_height are the padded (next-POT) Hi-Z image dims
+	// Padded pixels are initialised to 1.0 in mip 0
 	uint32_t m_width = 0;
 	uint32_t m_height = 0;
+	uint32_t m_screen_width = 0;
+	uint32_t m_screen_height = 0;
 	uint32_t m_mip_levels = 0;
 	uint32_t m_pass_count = 0;
 

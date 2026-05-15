@@ -315,7 +315,11 @@ void MeshletCullingSystem::createHizDescriptorSets(VeDescriptorPool& pool,
                                                    GpuSceneManager& scene_mgr,
                                                    const PbrMegaBuffer& mega_buffer,
                                                    HizSystem& hiz) {
-	m_hiz_size      = glm::vec2(static_cast<float>(hiz.getWidth()), static_cast<float>(hiz.getHeight()));
+	m_hiz_size      = glm::vec2(static_cast<float>(hiz.getScreenWidth()),
+	                             static_cast<float>(hiz.getScreenHeight()));
+	m_hiz_uv_scale  = glm::vec2(
+		static_cast<float>(hiz.getScreenWidth())  / static_cast<float>(hiz.getWidth()),
+		static_cast<float>(hiz.getScreenHeight()) / static_cast<float>(hiz.getHeight()));
 	m_hiz_mip_count = hiz.getMipLevels();
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
@@ -384,6 +388,7 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 	params.camera_pos     = glm::vec4(cv.position, 0.0f);
 	if (m_hiz_enabled) {
 		params.hiz_size      = m_hiz_size;
+		params.hiz_uv_scale  = m_hiz_uv_scale;
 		params.hiz_mip_count = m_hiz_mip_count;
 	}
 	m_cull_param_ubos[frame]->writeToBuffer(&params);

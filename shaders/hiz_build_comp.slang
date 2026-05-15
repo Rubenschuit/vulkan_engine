@@ -18,7 +18,8 @@
 [[vk::binding(7, 0)]] RWTexture2D<float> dst_mip5;
 
 struct HizPushConstants {
-	uint2  dst_size;
+	uint2  dst_size;       // padded (POT) output extent
+	uint2  src_size;       // valid source extent: threads past it load 1.0 (MIN identity)
 	float2 src_texel_size;
 	uint   mip_count;
 	uint   write_source;
@@ -49,7 +50,7 @@ void compMain(uint3 tid : SV_DispatchThreadID,
 
 	// Load one texel from source into LDS (OOB = 1.0 = near plane, won't affect MIN)
 	float depth = 1.0;
-	if (tid.x < pc.dst_size.x && tid.y < pc.dst_size.y) {
+	if (tid.x < pc.src_size.x && tid.y < pc.src_size.y) {
 		float2 uv = (float2(tid.xy) + 0.5) * pc.src_texel_size;
 		depth = src_image.SampleLevel(point_sampler, uv, 0);
 	}

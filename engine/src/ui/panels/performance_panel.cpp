@@ -125,7 +125,8 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 			ImGuiWindowFlags_NoMove;
 
 		if (ImGui::Begin("##PerfOverlay", &state.show_performance, overlay_flags)) {
-			ImGui::Text("%.0f FPS  (%.2f ms)", m_fps, m_frame_time_ms);
+			auto extent = m_renderer.getExtent();
+			ImGui::Text("%.0f FPS  (%.2f ms)  %u x %u", m_fps, m_frame_time_ms, extent.width, extent.height);
 			ImGui::TextDisabled("CPU %.2f ms | Fence %.2f ms | Acquire %.2f ms | GPU %.2f ms", m_cpu_time_ms, m_fence_wait_ms, m_acquire_wait_ms, m_gpu_time_ms);
 			if (m_compute_gpu_time_ms > 0.01f) {
 				ImGui::SameLine();

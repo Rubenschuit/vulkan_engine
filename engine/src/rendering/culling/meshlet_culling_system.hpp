@@ -150,6 +150,7 @@ private:
 	VeDevice& m_ve_device;
 	bool m_hiz_enabled = false;
 	glm::vec2 m_hiz_size{0.0f};
+	glm::vec2 m_hiz_uv_scale{1.0f};
 	uint32_t m_hiz_mip_count = 0;
 
 	// Per-frame camera view matrices for Hi-Z reprojection.
