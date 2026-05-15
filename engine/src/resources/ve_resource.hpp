@@ -9,6 +9,8 @@
 
 namespace ve {
 
+class EventBus;
+
 class VENGINE_API Resource {
 public:
 	explicit Resource(const std::string& resource_id);
@@ -22,6 +24,10 @@ public:
 
 	bool load();
 	void unload();
+
+	// Called by VeResourceManager just before doUnload. Subclasses override to
+	// emit a typed ResourceUnloadingEvent<Derived> on the bus.
+	virtual void emitUnloadingEvent(EventBus& /*bus*/) {}
 
 protected:
 	virtual bool doLoad() = 0;

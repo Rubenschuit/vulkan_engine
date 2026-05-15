@@ -14,12 +14,13 @@ class BindlessTextureRegistry;
 class MaterialSSBOManager;
 class GpuSceneManager;
 class EventBus;
+class VeResourceManager;
 
 // Owns the scene-scoped GPU resource managers (mega buffer, bindless textures, material SSBO,
 // GPU scene) and consolidates scene load / unload / model-add orchestration.
 class VENGINE_API SceneResourceManager {
 public:
-	SceneResourceManager(VeDevice& device, EventBus& event_bus);
+	SceneResourceManager(VeDevice& device, EventBus& event_bus, VeResourceManager& resource_manager);
 	~SceneResourceManager();
 
 	SceneResourceManager(const SceneResourceManager&) = delete;
@@ -46,6 +47,7 @@ private:
 	static std::vector<VeMesh*> collectUniqueMeshes(Registry& registry);
 
 	VeDevice& m_ve_device;
+	VeResourceManager& m_resource_manager;
 	std::unique_ptr<PbrMegaBuffer> m_mega_buffer;
 	std::unique_ptr<BindlessTextureRegistry> m_bindless_registry;
 	std::unique_ptr<MaterialSSBOManager> m_material_ssbo_manager;

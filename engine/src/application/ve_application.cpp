@@ -61,15 +61,14 @@ static vk::Extent2D halveExtent(vk::Extent2D e, bool half) {
 VeApplication::VeApplication(const EngineConfig& config)
 	: m_ve_window(WIDTH, HEIGHT, APP_NAME),
 	  m_ve_device(m_ve_window),
-	  m_ve_renderer(m_ve_device, m_ve_window),
+	  m_resource_manager(m_ve_device, m_event_bus),
+	  m_ve_renderer(m_ve_device, m_ve_window, m_resource_manager),
 	  m_input_controller(m_ve_window),
 	  m_config(config) {
 
-	m_event_bus = std::make_unique<EventBus>();
-	m_resource_manager = std::make_unique<VeResourceManager>(m_ve_device);
-	m_asset_loader = std::make_unique<AssetLoadingSystem>(*m_resource_manager);
+	m_asset_loader = std::make_unique<AssetLoadingSystem>(m_resource_manager);
 	createBuffers();
-	m_scene_resources = std::make_unique<SceneResourceManager>(m_ve_device, *m_event_bus);
+	m_scene_resources = std::make_unique<SceneResourceManager>(m_ve_device, m_event_bus, m_resource_manager);
 	createDescriptors();
 	initSystems();
 	initEditor();
@@ -77,7 +76,7 @@ VeApplication::VeApplication(const EngineConfig& config)
 
 VeApplication::~VeApplication() {
 	m_ve_device.getDevice().waitIdle();
-	m_active_scene.reset();
+	unloadScene();
 }
 
 // ─── Main Loop ───────────────────────────────────────────────────────────────
@@ -118,19 +117,19 @@ void VeApplication::run() {
 		m_editor->getState().editor_mode = m_input_controller.isEditorMode();
 		m_editor->editorCamera().tick(m_input_controller.getActions(), m_frame_time);
 
-		// Process pending entity deletions at a safe point
+		// Process pending entity deletions. Resource handles dropped here will
+		// be queued on VeResourceManager's rescue queue; their underlying GPU
+		// resources are destroyed MAX_FRAMES_IN_FLIGHT frames later by tickFrame.
 		if (m_active_scene) {
 			auto& registry = m_active_scene->getRegistry();
-			if (registry.hasPendingDeletions()) {
-				m_ve_device.getDevice().waitIdle();
+			if (registry.hasPendingDeletions())
 				registry.processPendingDeletions();
-			}
 		}
 
 		processSceneLoadRequest();
 		tickAsyncLoader();
 
-		m_event_bus->flushEvents();
+		m_event_bus.flushEvents();
 
 		// App per-frame logic (particle config, etc.)
 		update();
@@ -157,7 +156,7 @@ void VeApplication::run() {
 		}
 
 		// Flush collision events
-		m_event_bus->flushEvents();
+		m_event_bus.flushEvents();
 
 		// Engine pipeline
 		pushPerFrameSettings();
@@ -224,7 +223,7 @@ void VeApplication::setActiveScene(std::unique_ptr<VeScene> scene) {
 		m_particle_system->setEnabled(m_particles_declared);
 		m_fireworks_system->setEnabled(m_fireworks_declared);
 
-		m_event_bus->emitImmediate(SceneLoadedEvent{&m_active_scene->getRegistry()});
+		m_event_bus.emitImmediate(SceneLoadedEvent{&m_active_scene->getRegistry()});
 	}
 }
 
@@ -235,8 +234,11 @@ Registry* VeApplication::getActiveRegistry() {
 void VeApplication::unloadScene() {
 	if (!m_active_scene)
 		return;
-	m_event_bus->emitImmediate(SceneUnloadedEvent{});
+	// SceneResourceManager subscribes to SceneUnloadedEvent and does a
+	// vkDeviceWaitIdle before clearing its caches, so the GPU is idle here.
+	m_event_bus.emitImmediate(SceneUnloadedEvent{});
 	m_active_scene.reset();
+	m_resource_manager.flushPendingUnloads();
 }
 
 void VeApplication::registerScene(const std::string& name,
@@ -339,7 +341,7 @@ void VeApplication::finalizeAsyncLoad() {
 	} else if (m_async_load_type == SceneLoadRequest::Type::ADD_MODEL && m_active_scene) {
 		model->addToScene(m_active_scene->getRegistry(),
 		                  {0.f, 0.f, 0.f}, {0.f, 0.f, 0.f}, {1.f, 1.f, 1.f});
-		m_event_bus->emitImmediate(AssetLoadCompleteEvent{
+		m_event_bus.emitImmediate(AssetLoadCompleteEvent{
 			m_asset_loader->getModelName(), {}});
 	}
 	m_async_load_type = SceneLoadRequest::Type::NONE;
@@ -363,7 +365,7 @@ void VeApplication::selectBackend() {
 		m_active_backend = m_cpu_backend.get();
 
 	if (m_active_backend != prev)
-		m_event_bus->emitImmediate(BackendChangedEvent{});
+		m_event_bus.emitImmediate(BackendChangedEvent{});
 }
 
 VeFrameInfo VeApplication::buildFrameInfo() {
@@ -460,18 +462,18 @@ void VeApplication::emitSettingEvents() {
 		m_depth_bias_constant = m_ui.depth_bias_constant;
 		m_depth_bias_slope = m_ui.depth_bias_slope;
 		m_depth_bias_clamp = m_ui.depth_bias_clamp;
-		m_event_bus->emitImmediate(DepthBiasChangedEvent{});
+		m_event_bus.emitImmediate(DepthBiasChangedEvent{});
 	}
 
 	if (topology_changed) {
 		m_last_topology = m_ui.topology;
-		m_event_bus->emitImmediate(TopologyChangedEvent{.topology = m_ui.topology});
+		m_event_bus.emitImmediate(TopologyChangedEvent{.topology = m_ui.topology});
 	}
 
 	if (samples_changed) {
 		m_pcf_samples = m_ui.pcf_samples;
 		m_pcss_filter_samples = m_ui.pcss_filter_samples;
-		m_event_bus->emitImmediate(ShadowSamplesChangedEvent{
+		m_event_bus.emitImmediate(ShadowSamplesChangedEvent{
 			.pcf_samples = static_cast<uint32_t>(m_pcf_samples),
 			.pcss_filter_samples = static_cast<uint32_t>(m_pcss_filter_samples)
 		});
@@ -479,7 +481,7 @@ void VeApplication::emitSettingEvents() {
 
 	if (shadow_mask_res_changed) {
 		m_shadow_mask_half_res = m_ui.shadow_mask_half_res;
-		m_event_bus->emitImmediate(ShadowMaskResolutionChangedEvent{
+		m_event_bus.emitImmediate(ShadowMaskResolutionChangedEvent{
 			.pool = *m_global_pool,
 			.mask_extent = halveExtent(extent, m_shadow_mask_half_res),
 			.depth_extent = extent,
@@ -490,7 +492,7 @@ void VeApplication::emitSettingEvents() {
 
 	if (gtao_res_changed) {
 		m_gtao_half_res = m_ui.gtao_half_res;
-		m_event_bus->emitImmediate(GtaoResolutionChangedEvent{
+		m_event_bus.emitImmediate(GtaoResolutionChangedEvent{
 			.pool = *m_global_pool,
 			.ao_extent = halveExtent(extent, m_gtao_half_res),
 			.depth_extent = extent,
@@ -501,7 +503,7 @@ void VeApplication::emitSettingEvents() {
 
 	if (shadow_atlas_res_changed) {
 		m_shadow_resolution_preset = m_ui.shadow_resolution_preset;
-		m_event_bus->emitImmediate(ShadowAtlasResolutionChangedEvent{
+		m_event_bus.emitImmediate(ShadowAtlasResolutionChangedEvent{
 			.pool = *m_global_pool,
 			.preset = m_shadow_resolution_preset
 		});
@@ -944,12 +946,12 @@ void VeApplication::collectStats(const VeFrameInfo& fi) {
 
 void VeApplication::onSwapChainRecreated() {
 	m_ve_device.assertDeviceIdle();
-	m_event_bus->emitImmediate(PipelineRecreateEvent{
+	m_event_bus.emitImmediate(PipelineRecreateEvent{
 		.offscreen_format = m_ve_renderer.getOffscreenImageFormat(),
 		.sample_count = m_ve_renderer.getSampleCount()
 	});
 	auto extent = m_ve_renderer.getExtent();
-	m_event_bus->emitImmediate(ResolutionChangedEvent{
+	m_event_bus.emitImmediate(ResolutionChangedEvent{
 		.pool = *m_global_pool,
 		.extent = extent,
 		.swap_chain_format = m_ve_renderer.getSwapChainImageFormat(),
@@ -968,7 +970,7 @@ void VeApplication::onSwapChainRecreated() {
 
 void VeApplication::recreateResolutionDependentSystems() {
 	auto extent = m_ve_renderer.getExtent();
-	m_event_bus->emitImmediate(ResolutionChangedEvent{
+	m_event_bus.emitImmediate(ResolutionChangedEvent{
 		.pool = *m_global_pool,
 		.extent = extent,
 		.swap_chain_format = m_ve_renderer.getSwapChainImageFormat(),
@@ -1075,16 +1077,16 @@ void VeApplication::createDescriptors() {
 	auto default_material_ubo_info = m_default_material_ubo->getDescriptorInfo();
 
 	// Particle textures (held by VeApplication so they can be passed into ParticleSystem/FireworksSystem during initSystems)
-	m_particle_texture_handle = m_resource_manager->load<VeTexture>(m_config.particle_assets.glow.lexically_normal().generic_string());
-	m_fire_texture_handle = m_resource_manager->load<VeTexture>(m_config.particle_assets.fire.lexically_normal().generic_string());
-	m_smoke_texture_handle = m_resource_manager->load<VeTexture>(m_config.particle_assets.smoke.lexically_normal().generic_string());
+	m_particle_texture_handle = m_resource_manager.load<VeTexture>(m_config.particle_assets.glow.lexically_normal().generic_string());
+	m_fire_texture_handle = m_resource_manager.load<VeTexture>(m_config.particle_assets.fire.lexically_normal().generic_string());
+	m_smoke_texture_handle = m_resource_manager.load<VeTexture>(m_config.particle_assets.smoke.lexically_normal().generic_string());
 
 	// Default material descriptor set
-	m_default_albedo_handle = m_resource_manager->load<VeTexture>("default_albedo");
-	m_default_normal_handle = m_resource_manager->load<VeTexture>("default_normal");
-	m_default_mr_handle = m_resource_manager->load<VeTexture>("default_metallic_roughness");
-	m_default_occlusion_handle = m_resource_manager->load<VeTexture>("default_occlusion");
-	m_default_emissive_handle = m_resource_manager->load<VeTexture>("default_emissive");
+	m_default_albedo_handle = m_resource_manager.load<VeTexture>("default_albedo");
+	m_default_normal_handle = m_resource_manager.load<VeTexture>("default_normal");
+	m_default_mr_handle = m_resource_manager.load<VeTexture>("default_metallic_roughness");
+	m_default_occlusion_handle = m_resource_manager.load<VeTexture>("default_occlusion");
+	m_default_emissive_handle = m_resource_manager.load<VeTexture>("default_emissive");
 	auto default_albedo_info = m_default_albedo_handle.get()->getDescriptorInfo();
 	auto default_normal_info = m_default_normal_handle.get()->getDescriptorInfo();
 	auto default_mr_info = m_default_mr_handle.get()->getDescriptorInfo();
@@ -1106,7 +1108,7 @@ void VeApplication::initSystems() {
 	auto shader = [this](const char* name) { return m_config.shaders_dir / name; };
 
 	// Register engine-level input actions
-	m_input_controller.setEventBus(m_event_bus.get());
+	m_input_controller.setEventBus(&m_event_bus);
 	m_input_controller.registerAction({
 		.name = "Toggle Performance UI",
 		.key = GLFW_KEY_P,
@@ -1114,7 +1116,7 @@ void VeApplication::initSystems() {
 		.context = InputContext::Always,
 		.description = "Toggle performance panel"
 	});
-	m_event_bus->subscribe<InputActionEvent>([this](const InputActionEvent& e) {
+	m_event_bus.subscribe<InputActionEvent>([this](const InputActionEvent& e) {
 		if (e.name == "Toggle Performance UI")
 			m_editor->getState().show_performance = !m_editor->getState().show_performance;
 	});
@@ -1125,33 +1127,33 @@ void VeApplication::initSystems() {
 		m_ve_device, *m_global_pool,
 		m_material_set_layout->getDescriptorSetLayout(),
 		shader("shadow_shader.spv"),
-		*m_event_bus
+		m_event_bus
 	);
 
 	m_depth_prepass_system = std::make_unique<DepthPrePassSystem>(
 		m_ve_device, m_global_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getSampleCount(), shader("depth_prepass_shader.spv"),
-		*m_event_bus
+		m_event_bus
 	);
 
 	m_shadow_mask_system = std::make_unique<ShadowMaskSystem>(
-		m_ve_device, *m_global_pool, *m_resource_manager,
+		m_ve_device, *m_global_pool, m_resource_manager,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_shadow_render_system->getShadowSetLayout(),
 		m_config.shaders_dir, halveExtent(m_ve_renderer.getExtent(), m_ui.shadow_mask_half_res),
 		m_ve_renderer.getExtent(),
 		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage(),
-		*m_event_bus
+		m_event_bus
 	);
 	m_shadow_mask_half_res = m_ui.shadow_mask_half_res;
 
 	m_gtao_system = std::make_unique<GtaoSystem>(
-		m_ve_device, *m_global_pool, *m_resource_manager,
+		m_ve_device, *m_global_pool, m_resource_manager,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_config.shaders_dir, halveExtent(m_ve_renderer.getExtent(), m_ui.gtao_half_res),
 		m_ve_renderer.getExtent(),
 		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage(),
-		*m_event_bus
+		m_event_bus
 	);
 	m_gtao_half_res = m_ui.gtao_half_res;
 
@@ -1159,14 +1161,14 @@ void VeApplication::initSystems() {
 		m_ve_device, *m_global_pool,
 		m_global_set_layout->getDescriptorSetLayout(),
 		shader("cluster_assign_comp.spv"), m_ve_renderer.getExtent(),
-		*m_event_bus
+		m_event_bus
 	);
 
 	// IblSystem subscribes to SkyboxChangedEvent (must be constructed before SkyboxRenderSystem)
 	m_ibl_system = std::make_unique<IblSystem>(
-		m_ve_device, *m_global_pool, *m_resource_manager,
+		m_ve_device, *m_global_pool, m_resource_manager,
 		m_config.skybox_dir / "brdf_lut.ktx",
-		*m_event_bus
+		m_event_bus
 	);
 
 	m_pbr_render_system = std::make_unique<PbrRenderSystem>(
@@ -1181,7 +1183,7 @@ void VeApplication::initSystems() {
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
 		shader("pbr_shader.spv"),
-		*m_event_bus,
+		m_event_bus,
 		m_scene_resources->getMegaBuffer()
 	);
 	m_pbr_render_system->initWboit(
@@ -1193,15 +1195,15 @@ void VeApplication::initSystems() {
 		m_ve_device, m_global_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
 		shader("axes_shader.spv"),
-		*m_event_bus
+		m_event_bus
 	);
 
 	m_axes_render_system = std::make_unique<AxesRenderSystem>(
-		m_ve_device, *m_resource_manager,
+		m_ve_device, m_resource_manager,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
 		shader("axes_shader.spv"),
-		*m_event_bus
+		m_event_bus
 	);
 
 	m_light_system = std::make_unique<LightSystem>(
@@ -1211,7 +1213,7 @@ void VeApplication::initSystems() {
 		m_particle_texture_handle,
 		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
 		shader("light_billboard_shader.spv"),
-		*m_event_bus
+		m_event_bus
 	);
 
 	m_particle_system = std::make_unique<ParticleSystem>(ParticleSystemCreateInfo{
@@ -1227,7 +1229,7 @@ void VeApplication::initSystems() {
 		.origin = glm::vec3{0.0f, -300.0f, 50.0f},
 		.shader_path = shader("particle_compute.spv"),
 		.start_active = true,
-		.event_bus = m_event_bus.get(),
+		.event_bus = &m_event_bus,
 	});
 
 	m_fireworks_system = std::make_unique<FireworksSystem>(FireworksSystemCreateInfo{
@@ -1240,22 +1242,22 @@ void VeApplication::initSystems() {
 		.color_format = m_ve_renderer.getOffscreenImageFormat(),
 		.sample_count = m_ve_renderer.getSampleCount(),
 		.shader_path = shader("particle_compute.spv"),
-		.event_bus = *m_event_bus,
+		.event_bus = m_event_bus,
 	});
 
 	m_skybox_render_system = std::make_unique<SkyboxRenderSystem>(
-		m_ve_device, *m_resource_manager, *m_global_pool, *m_material_set_layout,
+		m_ve_device, m_resource_manager, *m_global_pool, *m_material_set_layout,
 		m_global_set_layout->getDescriptorSetLayout(),
 		m_config.skybox_dir, shader("skybox_shader.spv"),
 		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
-		*m_event_bus
+		m_event_bus
 	);
 
 	m_bloom_system = std::make_unique<BloomSystem>(
 		m_ve_device, m_ve_renderer.getExtent(),
 		m_ve_renderer.getResolveTargetImageView(),
 		shader("bloom_downsample.spv"), shader("bloom_upsample.spv"),
-		*m_event_bus
+		m_event_bus
 	);
 
 	m_post_process_system = std::make_unique<PostProcessSystem>(
@@ -1263,7 +1265,7 @@ void VeApplication::initSystems() {
 		m_ve_renderer.getResolveTargetImageView(),
 		m_bloom_system->getBloomTexture(),
 		shader("post_process.spv"),
-		*m_event_bus, *m_bloom_system
+		m_event_bus, *m_bloom_system
 	);
 
 	m_outline_system = std::make_unique<OutlineSystem>(
@@ -1272,7 +1274,7 @@ void VeApplication::initSystems() {
 		m_config.shaders_dir,
 		m_ve_renderer.getExtent(),
 		m_ve_renderer.getSwapChainImageFormat(),
-		*m_event_bus
+		m_event_bus
 	);
 
 	// GPU-driven culling
@@ -1291,19 +1293,19 @@ void VeApplication::initSystems() {
 	m_hiz_system = std::make_unique<HizSystem>(
 		m_ve_device, *m_global_pool, m_ve_renderer.getExtent(),
 		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage(),
-		m_config.shaders_dir, *m_event_bus);
+		m_config.shaders_dir, m_event_bus);
 	m_gpu_culling_system->createHizDescriptorSets(*m_global_pool, gpu_scene, *m_hiz_system);
 	m_gpu_culling_system->createShadowHizDescriptorSets(*m_global_pool, gpu_scene, *m_hiz_system);
-	m_gpu_culling_system->subscribeToEvents(*m_event_bus, *m_hiz_system, gpu_scene);
+	m_gpu_culling_system->subscribeToEvents(m_event_bus, *m_hiz_system, gpu_scene);
 
 	// SceneResourceManager subscribes to scene lifecycle events.
 	// Must be before MeshletCullingSystem so the mega buffer is rebuilt before
 	// meshlet descriptors reference it.
-	m_scene_resources->subscribeToEvents(*m_event_bus);
+	m_scene_resources->subscribeToEvents(m_event_bus);
 
 	// Meshlet culling (subscribes to SceneLoadedEvent/AssetLoadCompleteEvent for descriptor rebuild)
 	m_meshlet_culling_system = std::make_unique<MeshletCullingSystem>(
-		m_ve_device, m_config.shaders_dir, *m_event_bus, *m_global_pool,
+		m_ve_device, m_config.shaders_dir, m_event_bus, *m_global_pool,
 		*m_scene_resources, m_scene_resources->getMegaBuffer(), *m_hiz_system);
 	m_meshlet_culling_system->createDescriptorSets(*m_global_pool,
 		gpu_scene, m_scene_resources->getMegaBuffer());
@@ -1316,12 +1318,12 @@ void VeApplication::initSystems() {
 	m_shadow_render_system->createMeshletShadowDescriptorSets(*m_meshlet_culling_system);
 
 	m_skinning_pre_pass = std::make_unique<SkinningPrePass>(
-		m_ve_device, *m_global_pool, shader("skinning_comp.spv"), *m_event_bus);
+		m_ve_device, *m_global_pool, shader("skinning_comp.spv"), m_event_bus);
 
 	m_skinned_points_render_system = std::make_unique<SkinnedPointsRenderSystem>(
 		m_ve_device, m_global_set_layout->getDescriptorSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
-		shader("skinned_points.spv"), *m_event_bus);
+		shader("skinned_points.spv"), m_event_bus);
 
 	// Culling backends
 	m_cpu_backend = std::make_unique<CpuCullingBackend>(
@@ -1331,15 +1333,15 @@ void VeApplication::initSystems() {
 	m_gpu_backend = std::make_unique<GpuCullingBackend>(
 		*m_gpu_culling_system, gpu_scene);
 	m_meshlet_backend = std::make_unique<MeshletCullingBackend>(
-		*m_meshlet_culling_system, *m_gpu_culling_system, gpu_scene, *m_event_bus);
+		*m_meshlet_culling_system, *m_gpu_culling_system, gpu_scene, m_event_bus);
 	m_active_backend = m_cpu_backend.get();
 
 	// Physics (subscribes to SceneLoaded/Unloaded/AssetLoadComplete internally)
 	m_physics_system = std::make_unique<PhysicsSystem>();
-	m_physics_system->setEventBus(m_event_bus.get());
+	m_physics_system->setEventBus(&m_event_bus);
 
 	// Swap chain recreation on topology change (renderer-level, not owned by PbrRenderSystem)
-	m_event_bus->subscribe<TopologyChangedEvent>([this](const TopologyChangedEvent&) {
+	m_event_bus.subscribe<TopologyChangedEvent>([this](const TopologyChangedEvent&) {
 		m_ve_renderer.setSwapChainNeedsRecreation();
 	});
 }
@@ -1348,7 +1350,7 @@ void VeApplication::initEditor() {
 	VE_LOGD("Initialising UI");
 	m_imgui_layer = std::make_unique<ImGuiLayer>(m_ve_window, m_ve_device, m_ve_renderer);
 	m_imgui_layer->setAppSettingsWindowName(m_config.app_name);
-	m_editor = std::make_unique<Editor>(m_ve_renderer, *m_imgui_layer, *m_event_bus);
+	m_editor = std::make_unique<Editor>(m_ve_renderer, *m_imgui_layer, m_event_bus);
 	m_editor->setAppUICallback([this]() { renderUI(); });
 
 	// Wire scene registry and systems into editor

@@ -692,7 +692,7 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 	uint32_t obj_flags = 0;
 	bool is_transparent = false;
 	if (mesh.hasMaterial()) {
-		mat_index = mat_mgr.registerMaterial(mesh.getMaterial());
+		mat_index = mat_mgr.indexFor(mesh.getMaterial());
 		mat_mgr.updateMaterial(mat_index, mesh.getMaterial());
 		auto alpha = mesh.getMaterial()->getAlphaProps();
 		float transmission = mesh.getMaterial()->getMaterialFactors().transmission_factor;

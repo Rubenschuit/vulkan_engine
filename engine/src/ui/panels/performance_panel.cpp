@@ -265,6 +265,8 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		row("HDR", "Enabled");
 
 	// --- VRAM usage (device-local heap only) ---
+	// Number = sum of live VMA allocations.
+	// Bar = driver-reported committed memory (tracks OOM pressure).
 	{
 		VmaBudget budgets[VK_MAX_MEMORY_HEAPS];
 		vmaGetHeapBudgets(m_allocator, budgets);
@@ -275,10 +277,10 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		ImGui::Separator();
 		ImGui::Spacing();
 
-		double used_mb = static_cast<double>(vram.usage) / (1024.0 * 1024.0);
+		double live_mb = static_cast<double>(vram.statistics.allocationBytes) / (1024.0 * 1024.0);
 		double budget_mb = static_cast<double>(vram.budget) / (1024.0 * 1024.0);
 
-		snprintf(val, sizeof(val), "%.0f / %.0f MB", used_mb, budget_mb);
+		snprintf(val, sizeof(val), "%.0f / %.0f MB", live_mb, budget_mb);
 		row("VRAM", val);
 
 		float fraction = vram.budget > 0 ? static_cast<float>(static_cast<double>(vram.usage) / static_cast<double>(vram.budget)) : 0.0f;

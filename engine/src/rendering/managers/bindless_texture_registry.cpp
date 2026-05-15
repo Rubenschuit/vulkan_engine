@@ -1,11 +1,13 @@
 #include "pch.hpp"
 #include "rendering/managers/bindless_texture_registry.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 #include "utils/ve_log.hpp"
 
 namespace ve {
 
-BindlessTextureRegistry::BindlessTextureRegistry(VeDevice& device, uint32_t max_textures)
-	: m_ve_device(device), m_max_textures(max_textures) {
+BindlessTextureRegistry::BindlessTextureRegistry(VeDevice& device, EventBus& event_bus, uint32_t max_textures)
+	: m_ve_device(device), m_event_bus(event_bus), m_max_textures(max_textures) {
 
 	// Create pool with UPDATE_AFTER_BIND flag
 	m_pool = VeDescriptorPool::Builder(m_ve_device)
@@ -77,22 +79,30 @@ BindlessTextureRegistry::BindlessTextureRegistry(VeDevice& device, uint32_t max_
 	m_default_specular_color = VeTexture::createDefault(m_ve_device, TextureType::SPECULAR_COLOR);
 
 	// Populate default indices in the registry so they can be used immediately
-	m_default_albedo_index = registerTexture(m_default_albedo.get());
-	m_default_normal_index = registerTexture(m_default_normal.get());
-	m_default_mr_index = registerTexture(m_default_mr.get());
-	m_default_occlusion_index = registerTexture(m_default_occlusion.get());
-	m_default_emissive_index = registerTexture(m_default_emissive.get());
-	m_default_specular_index = registerTexture(m_default_specular.get());
-	m_default_specular_color_index = registerTexture(m_default_specular_color.get());
+	m_default_albedo_index = indexFor(m_default_albedo.get());
+	m_default_normal_index = indexFor(m_default_normal.get());
+	m_default_mr_index = indexFor(m_default_mr.get());
+	m_default_occlusion_index = indexFor(m_default_occlusion.get());
+	m_default_emissive_index = indexFor(m_default_emissive.get());
+	m_default_specular_index = indexFor(m_default_specular.get());
+	m_default_specular_color_index = indexFor(m_default_specular_color.get());
 
 	VE_LOGI("BindlessTextureRegistry: max=" << max_textures
 		<< ", defaults registered (albedo=" << m_default_albedo_index
 		<< ", normal=" << m_default_normal_index << ")");
+
+	m_unload_sub = m_event_bus.subscribe<ResourceUnloadingEvent<VeTexture>>(
+		[this](const ResourceUnloadingEvent<VeTexture>& e) {
+			releaseSlot(e.resource);
+		});
 }
 
-BindlessTextureRegistry::~BindlessTextureRegistry() = default;
+BindlessTextureRegistry::~BindlessTextureRegistry() {
+	if (m_unload_sub != NO_SUB)
+		m_event_bus.unsubscribe<ResourceUnloadingEvent<VeTexture>>(m_unload_sub);
+}
 
-uint32_t BindlessTextureRegistry::registerTexture(VeTexture* texture) {
+uint32_t BindlessTextureRegistry::indexFor(VeTexture* texture) {
 	auto it = m_texture_to_index.find(texture);
 	if (it != m_texture_to_index.end())
 		return it->second;
@@ -111,7 +121,7 @@ uint32_t BindlessTextureRegistry::registerTexture(VeTexture* texture) {
 	return index;
 }
 
-void BindlessTextureRegistry::unregisterTexture(VeTexture* texture) {
+void BindlessTextureRegistry::releaseSlot(VeTexture* texture) {
 	auto it = m_texture_to_index.find(texture);
 	if (it == m_texture_to_index.end())
 		return;
@@ -119,7 +129,8 @@ void BindlessTextureRegistry::unregisterTexture(VeTexture* texture) {
 	uint32_t index = it->second;
 	m_texture_to_index.erase(it);
 
-	// Overwrite slot with default albedo texture
+	// Overwrite slot with default albedo so the descriptor doesn't reference
+	// a destroyed image view.
 	writeSlot(index, m_default_albedo.get());
 	m_free_list.push_back(index);
 }

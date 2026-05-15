@@ -16,6 +16,8 @@ It manages the swap chain and command buffers. Default present mode is immediate
 
 namespace ve {
 
+class VeResourceManager;
+
 enum class HDRColorMode : int {
 	SDR = 0,
 	SCRGB = 1,        // Extended sRGB linear (scRGB)
@@ -24,7 +26,7 @@ enum class HDRColorMode : int {
 
 class VENGINE_API VeRenderer {
 public:
-	VeRenderer(VeDevice& device, VeWindow& window);
+	VeRenderer(VeDevice& device, VeWindow& window, VeResourceManager& resource_manager);
 	~VeRenderer();
 
 	VeRenderer(const VeRenderer&) = delete;
@@ -166,6 +168,7 @@ private:
 	VeDevice& m_ve_device;
 	CommandResourceManager m_command_manager;
 	VeWindow& m_ve_window;
+	VeResourceManager& m_resource_manager;
 	std::unique_ptr<VeSwapChain> m_ve_swap_chain;
 
 	vk::PresentModeKHR m_present_mode = vk::PresentModeKHR::eImmediate;

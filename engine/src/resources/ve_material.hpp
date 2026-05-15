@@ -19,6 +19,7 @@ namespace ve {
 class VeBuffer;
 class VeDescriptorPool;
 class VeDescriptorSetLayout;
+class MaterialSSBOManager;
 
 class VENGINE_API VeMaterial : public Resource {
 public:
@@ -63,6 +64,7 @@ public:
 protected:
 	bool doLoad() override;
 	void doUnload() override;
+	void emitUnloadingEvent(EventBus& bus) override;
 
 private:
 	VeResourceManager* m_resource_manager;

@@ -80,6 +80,7 @@ public:
 protected:
 	bool doLoad() override;
 	void doUnload() override;
+	void emitUnloadingEvent(EventBus& bus) override;
 
 private:
 	bool createTextureImage(const std::filesystem::path& texture_path, vk::Format format_hint = vk::Format::eUndefined);

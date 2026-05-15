@@ -3,6 +3,7 @@
 #include "ve_config.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "resources/ve_material_properties.hpp"
+#include "events/event_bus.hpp"
 
 #include <unordered_map>
 #include <glm/glm.hpp>
@@ -43,13 +44,18 @@ public:
 	MaterialSSBOManager(const MaterialSSBOManager&) = delete;
 	MaterialSSBOManager& operator=(const MaterialSSBOManager&) = delete;
 
-	uint32_t registerMaterial(VeMaterial* mat);
+	// Returns the SSBO index for this material, allocating a slot on the
+	// first call.
+	uint32_t indexFor(VeMaterial* mat);
+
 	void updateMaterial(uint32_t index, VeMaterial* mat);
-	void unregisterMaterial(VeMaterial* mat);
+
+	// Called by VeMaterial::doUnload to release this material's SSBO slot.
+	void releaseSlot(VeMaterial* mat);
 
 	void flushToDevice(const vk::raii::CommandBuffer&);
 
-	// Clear all cached material mappings (call when scene changes)
+	// Clear all cached material mappings. Intended for full scene tear-down.
 	void reset();
 
 	VeBuffer& getBuffer() { return *m_buffer; }
@@ -60,6 +66,8 @@ private:
 	VeDevice& m_ve_device;
 	BindlessTextureRegistry& m_texture_registry;
 	EventBus& m_event_bus;
+	static constexpr EventSubscriptionId NO_SUB = static_cast<EventSubscriptionId>(-1);
+	EventSubscriptionId m_unload_sub = NO_SUB;
 
 	std::unique_ptr<VeBuffer> m_buffer;          // device-local
 	std::unique_ptr<VeBuffer> m_staging_buffer;  // host-visible, persistently mapped

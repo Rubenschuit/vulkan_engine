@@ -4,6 +4,7 @@
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_descriptors.hpp"
 #include "resources/ve_texture.hpp"
+#include "events/event_bus.hpp"
 
 #include <unordered_map>
 #include <vector>
@@ -12,14 +13,18 @@ namespace ve {
 
 class VENGINE_API BindlessTextureRegistry {
 public:
-	BindlessTextureRegistry(VeDevice& device, uint32_t max_textures = MAX_BINDLESS_TEXTURES);
+	BindlessTextureRegistry(VeDevice& device, EventBus& event_bus, uint32_t max_textures = MAX_BINDLESS_TEXTURES);
 	~BindlessTextureRegistry();
 
 	BindlessTextureRegistry(const BindlessTextureRegistry&) = delete;
 	BindlessTextureRegistry& operator=(const BindlessTextureRegistry&) = delete;
 
-	uint32_t registerTexture(VeTexture* texture);
-	void unregisterTexture(VeTexture* texture);
+	// Returns the bindless index for this texture, allocating a slot on
+	// the first call.
+	uint32_t indexFor(VeTexture* texture);
+
+	// Called by VeTexture::doUnload to release this texture's bindless slot.
+	void releaseSlot(VeTexture* texture);
 
 	const vk::raii::DescriptorSet& getDescriptorSet() const { return m_descriptor_set; }
 	const vk::raii::DescriptorSetLayout& getSetLayout() const {
@@ -36,6 +41,9 @@ private:
 	void writeSlot(uint32_t index, VeTexture* texture);
 
 	VeDevice& m_ve_device;
+	EventBus& m_event_bus;
+	static constexpr EventSubscriptionId NO_SUB = static_cast<EventSubscriptionId>(-1);
+	EventSubscriptionId m_unload_sub = NO_SUB;
 	[[maybe_unused]] uint32_t m_max_textures;
 
 	std::unique_ptr<VeDescriptorPool> m_pool;

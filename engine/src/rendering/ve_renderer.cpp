@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "rendering/ve_renderer.hpp"
 #include "rendering/ve_frame_info.hpp"
+#include "resources/ve_resource_manager.hpp"
 #include "vulkan/ve_debug_utils.hpp"
 #include "ve_tracy.hpp"
 
@@ -10,8 +11,9 @@
 
 namespace ve {
 // Constructor, initializes swap chain with present mode immediate and command buffers
-VeRenderer::VeRenderer(VeDevice& device, VeWindow& window)
-	: m_ve_device(device), m_command_manager(device), m_ve_window(window), m_profiler(device) {
+VeRenderer::VeRenderer(VeDevice& device, VeWindow& window, VeResourceManager& resource_manager)
+	: m_ve_device(device), m_command_manager(device), m_ve_window(window),
+	  m_resource_manager(resource_manager), m_profiler(device) {
 	m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, m_ve_window.getExtent(), m_desired_num_samples, m_present_mode, m_hdr_enabled);
 	createViewportResources();
 
@@ -142,6 +144,9 @@ bool VeRenderer::beginFrame() {
 	auto fence_end = std::chrono::steady_clock::now();
 	float fence_ms = std::chrono::duration<float, std::chrono::milliseconds::period>(fence_end - fence_start).count();
 	m_profiler.recordFenceWait(fence_ms);
+
+	// Cleanup
+	m_resource_manager.tickFrame();
 
 	// Acquire an image from the swap chain
 	vk::Result result;

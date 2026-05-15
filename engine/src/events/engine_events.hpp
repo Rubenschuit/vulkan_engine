@@ -62,6 +62,14 @@ struct MaterialDataChangedEvent {
 	uint32_t gpu_index;
 };
 
+// ── Resource lifecycle ──────────────────────────────────────────────────────
+
+// Emitted by VeResourceManager just before doUnload runs.
+template <typename T>
+struct ResourceUnloadingEvent : ImmediateOnly {
+	T* resource;
+};
+
 // ── Settings changes ────────────────────────────────────────────────────────
 
 class VeDescriptorPool;

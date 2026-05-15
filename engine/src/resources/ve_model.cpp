@@ -2227,8 +2227,8 @@ std::unique_ptr<VeModel> VeModel::fromLoadedData(
 
 	auto model = std::make_unique<VeModel>();
 	model->m_nodes = std::move(data.nodes);
-	model->m_mesh_handles = mesh_handles;
-	model->m_material_handles = material_handles;
+	model->m_mesh_handles = std::move(mesh_handles);
+	model->m_material_handles = std::move(material_handles);
 	model->m_punctual_lights = std::move(data.punctual_lights);
 	model->m_emissive_lights = std::move(data.emissive_lights);
 	model->m_cameras = std::move(data.cameras);
@@ -2419,6 +2419,7 @@ void VeModel::addToScene(Registry& registry,
 
 	m_nodes.clear();
 	m_mesh_handles.clear();
+	m_material_handles.clear();
 
 	// Set up hierarchy from parent links
 	for (const auto& [child_idx, parent_idx] : m_parent_links)

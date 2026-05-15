@@ -2,6 +2,8 @@
 #include "resources/ve_material.hpp"
 #include "vulkan/ve_descriptors.hpp"
 #include "vulkan/ve_buffer.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 #include <glm/glm.hpp>
 
@@ -110,6 +112,12 @@ void VeMaterial::doUnload() {
 	m_emissive_texture = ResourceHandle<VeTexture>{};
 	m_specular_texture = ResourceHandle<VeTexture>{};
 	m_specular_color_texture = ResourceHandle<VeTexture>{};
+}
+
+void VeMaterial::emitUnloadingEvent(EventBus& bus) {
+	ResourceUnloadingEvent<VeMaterial> ev{};
+	ev.resource = this;
+	bus.emitImmediate(ev);
 }
 
 void VeMaterial::setMaterialFactors(const MaterialFactors& factors) {

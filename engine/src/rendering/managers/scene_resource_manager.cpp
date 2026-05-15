@@ -4,6 +4,7 @@
 #include "rendering/managers/bindless_texture_registry.hpp"
 #include "rendering/managers/material_ssbo_manager.hpp"
 #include "rendering/managers/gpu_scene_manager.hpp"
+#include "resources/ve_resource_manager.hpp"
 #include "vulkan/ve_pipeline.hpp"
 #include "scene/ve_registry.hpp"
 #include "scene/ve_component.hpp"
@@ -16,10 +17,11 @@
 
 namespace ve {
 
-SceneResourceManager::SceneResourceManager(VeDevice& device, EventBus& event_bus)
+SceneResourceManager::SceneResourceManager(VeDevice& device, EventBus& event_bus, VeResourceManager& resource_manager)
 	: m_ve_device(device),
+	  m_resource_manager(resource_manager),
 	  m_mega_buffer(std::make_unique<PbrMegaBuffer>(device)),
-	  m_bindless_registry(std::make_unique<BindlessTextureRegistry>(device)),
+	  m_bindless_registry(std::make_unique<BindlessTextureRegistry>(device, event_bus)),
 	  m_material_ssbo_manager(std::make_unique<MaterialSSBOManager>(device, *m_bindless_registry, event_bus)),
 	  m_gpu_scene_manager(std::make_unique<GpuSceneManager>(device)) {}
 
@@ -68,6 +70,7 @@ void SceneResourceManager::rebuildForModelAdd(Registry& registry) {
 	m_gpu_scene_manager->reset();
 	m_material_ssbo_manager->reset();
 	m_bindless_registry->reset();
+	m_resource_manager.flushPendingUnloads();
 
 	auto cmd = m_ve_device.beginSingleTimeCommands();
 	m_mega_buffer->build(*cmd, meshes);

@@ -15,6 +15,7 @@
 #include "resources/ve_material_properties.hpp"
 #include "resources/asset_loading_system.hpp"
 #include "physics/physics_system.hpp"
+#include "events/event_bus.hpp"
 #include <memory>
 #include <vector>
 #include <chrono>
@@ -43,7 +44,6 @@ struct VENGINE_API SceneLoadRequest {
 };
 
 // Forward declarations
-class EventBus;
 class CullingSystem;
 class ShadowRenderSystem;
 class DepthPrePassSystem;
@@ -111,7 +111,7 @@ protected:
 
 	// --- Scene construction context ---
 	SceneContext getSceneContext() {
-		return {m_ve_device, *m_resource_manager, *m_global_pool,
+		return {m_ve_device, m_resource_manager, *m_global_pool,
 				*m_material_set_layout, &m_default_material_descriptor_set};
 	}
 
@@ -129,7 +129,7 @@ protected:
 	const std::string& getAppSettingsWindowName() const;
 
 	// --- Engine event bus ---
-	EventBus& eventBus() { return *m_event_bus; }
+	EventBus& eventBus() { return m_event_bus; }
 
 	// --- Settings struct (app writes, engine reads) ---
 	UIContext& ui() { return m_ui; }
@@ -137,9 +137,11 @@ protected:
 	// --- Input ---
 	InputController& getInputController() { return m_input_controller; }
 
-	// Engine-managed state accessible to app
+	// Engine-managed state accessible to app.
 	VeWindow m_ve_window;
 	VeDevice m_ve_device;
+	EventBus m_event_bus;
+	VeResourceManager m_resource_manager;
 	VeRenderer m_ve_renderer;
 	CameraView m_current_camera_view;
 	InputController m_input_controller;
@@ -171,8 +173,6 @@ private:
 	void updateFrameTime();
 
 	UIContext m_ui;
-
-	std::unique_ptr<VeResourceManager> m_resource_manager;
 
 	// --- Buffers ---
 	std::vector<std::unique_ptr<VeBuffer>> m_uniform_buffers{};
@@ -216,9 +216,6 @@ private:
 	int m_pending_async_scene_index{-1};
 	void tickAsyncLoader();
 	void finalizeAsyncLoad();
-
-	// --- Engine event bus (must outlive all subscriber systems below) ---
-	std::unique_ptr<EventBus> m_event_bus;
 
 	// --- UI ---
 	std::unique_ptr<ImGuiLayer> m_imgui_layer;

@@ -5,91 +5,23 @@
 #include "resources/loaded_asset_data.hpp"
 #include "rendering/culling/meshlet_data.hpp"
 #include "vulkan/ve_descriptors.hpp"
+#include "ve_config.hpp"
+
+#include <cassert>
 
 namespace ve {
 
 // ---------------------------------------------------------------------------
-// ResourceHandle implementation
-// ---------------------------------------------------------------------------
-template <typename T>
-ResourceHandle<T>::ResourceHandle(const std::string& resource_id, VeResourceManager* manager)
-	: m_resource_id(resource_id), m_manager(manager),
-	  m_cached(manager ? manager->getResource<T>(resource_id) : nullptr) {
-}
-
-template <typename T>
-ResourceHandle<T>::~ResourceHandle() {
-	release();
-}
-
-// Copy constructor
-template <typename T>
-ResourceHandle<T>::ResourceHandle(const ResourceHandle& other)
-	: m_resource_id(other.m_resource_id), m_manager(other.m_manager), m_cached(other.m_cached) {
-	addRef();
-}
-
-// Copy assignment operator
-template <typename T>
-ResourceHandle<T>& ResourceHandle<T>::operator=(const ResourceHandle& other) {
-	if (this != &other) {
-		release();
-		m_resource_id = other.m_resource_id;
-		m_manager = other.m_manager;
-		m_cached = other.m_cached;
-		addRef();
-	}
-	return *this;
-}
-
-// Move constructor
-template <typename T>
-ResourceHandle<T>::ResourceHandle(ResourceHandle&& other) noexcept
-	: m_resource_id(std::move(other.m_resource_id)), m_manager(other.m_manager), m_cached(other.m_cached) {
-	other.m_manager = nullptr;
-	other.m_cached = nullptr;
-}
-
-// Move assignment operator
-template <typename T>
-ResourceHandle<T>& ResourceHandle<T>::operator=(ResourceHandle&& other) noexcept {
-	if (this != &other) {
-		release();
-		m_resource_id = std::move(other.m_resource_id);
-		m_manager = other.m_manager;
-		m_cached = other.m_cached;
-		other.m_manager = nullptr;
-		other.m_cached = nullptr;
-	}
-	return *this;
-}
-
-// Increment the reference count.
-template <typename T>
-void ResourceHandle<T>::addRef() const {
-	if (m_manager)
-		m_manager->addRef<T>(m_resource_id);
-}
-
-// Decrement the reference count.
-// If reference count reaches 0, the resource is unloaded.
-template <typename T>
-void ResourceHandle<T>::release() const {
-	if (m_manager) {
-		m_manager->release<T>(m_resource_id);
-		m_manager = nullptr;
-		m_cached = nullptr;
-	}
-}
-
-// ---------------------------------------------------------------------------
-// VeResourceManager implementation
+// VeResourceManager implementation (non-template members; template definitions
+// live in the header so foreign TUs / tests can instantiate them).
 // ---------------------------------------------------------------------------
 
-VeResourceManager::VeResourceManager(VeDevice& device) : m_device(device) {}
+VeResourceManager::VeResourceManager(VeDevice& device, EventBus& event_bus)
+	: m_device(device), m_event_bus(event_bus) {}
 
 VeResourceManager::~VeResourceManager() {
-    //unloadAll();
+	flushPendingUnloads();
+	assert(m_pending_unloads.empty());
 }
 
 // Unload all resources managed by this manager.
@@ -101,83 +33,61 @@ void VeResourceManager::unloadAll() {
 		type_resources.clear();
 	}
 	m_ref_counts.clear();
+	m_pending_unloads.clear();
+	m_latest_retire_frame.clear();
 }
 
-template <typename T>
-ResourceHandle<T> VeResourceManager::load(const std::string& resource_id) {
-	static_assert(std::is_base_of_v<Resource, T>, "T must derive from Resource");
+void VeResourceManager::processPendingEntry(const PendingUnload& entry) {
+	// Check this entry hasn't been superseded by a later push for the same id.
+	auto latest_type_it = m_latest_retire_frame.find(entry.type_idx);
+	if (latest_type_it == m_latest_retire_frame.end())
+		return;
+	auto latest_it = latest_type_it->second.find(entry.resource_id);
+	if (latest_it == latest_type_it->second.end())
+		return;
+	if (latest_it->second != entry.retire_frame)
+		return;
 
-	auto type_idx = typeid(T).hash_code();
-	auto& type_resources = m_resources[type_idx];
-	auto it = type_resources.find(resource_id);
+	auto type_refs_it = m_ref_counts.find(entry.type_idx);
+	if (type_refs_it == m_ref_counts.end())
+		return;
+	auto ref_it = type_refs_it->second.find(entry.resource_id);
+	if (ref_it == type_refs_it->second.end())
+		return; // earlier retirement already destroyed it
+	if (ref_it->second > 0)
+		return; // rescued by load() during the deferred window
 
-	if (it != type_resources.end()) {
-		m_ref_counts[type_idx][resource_id]++;
-		return ResourceHandle<T>(resource_id, this);
-	}
+	auto type_res_it = m_resources.find(entry.type_idx);
+	if (type_res_it != m_resources.end()) {
+		auto res_it = type_res_it->second.find(entry.resource_id);
+		if (res_it != type_res_it->second.end()) {
+			// Notify subscribers (e.g. MaterialSSBOManager, BindlessTextureRegistry)
+			res_it->second->emitUnloadingEvent(m_event_bus);
 
-	auto resource = std::make_shared<T>(m_device, resource_id);
-	if (!resource->load()) {
-		return ResourceHandle<T>();
-	}
-
-	type_resources[resource_id] = std::move(resource);
-	m_ref_counts[type_idx][resource_id] = 1;
-	return ResourceHandle<T>(resource_id, this);
-}
-
-template <typename T>
-T* VeResourceManager::getResource(const std::string& resource_id) const {
-	auto type_idx = typeid(T).hash_code();
-	auto type_it = m_resources.find(type_idx);
-	if (type_it == m_resources.end())
-		return nullptr;
-
-	auto it = type_it->second.find(resource_id);
-	if (it == type_it->second.end())
-		return nullptr;
-
-	return static_cast<T*>(it->second.get());
-}
-
-template <typename T>
-bool VeResourceManager::hasResource(const std::string& resource_id) const {
-	auto type_idx = typeid(T).hash_code();
-	auto type_it = m_resources.find(type_idx);
-	if (type_it == m_resources.end())
-		return false;
-	return type_it->second.find(resource_id) != type_it->second.end();
-}
-
-template <typename T>
-void VeResourceManager::addRef(const std::string& resource_id) {
-	auto type_idx = typeid(T).hash_code();
-	auto& type_refs = m_ref_counts[type_idx];
-	auto it = type_refs.find(resource_id);
-	if (it != type_refs.end())
-		it->second++;
-}
-
-// Decrement the reference count.
-// If reference count reaches 0, the resource is unloaded.
-// If resource not found, do nothing.
-template <typename T>
-void VeResourceManager::release(const std::string& resource_id) {
-	auto type_idx = typeid(T).hash_code();
-	auto& type_refs = m_ref_counts[type_idx];
-	auto it = type_refs.find(resource_id);
-	if (it == type_refs.end())
-		return; // Resource not found.
-
-	it->second--; // Decrement reference count.
-	if (it->second <= 0) { // If reference count reaches 0, unload resource.
-		auto& type_resources = m_resources[type_idx];
-		auto resource_it = type_resources.find(resource_id);
-		if (resource_it != type_resources.end()) {
-			resource_it->second->unload();
-			type_resources.erase(resource_it);
+			res_it->second->unload();
+			type_res_it->second.erase(res_it);
 		}
-		type_refs.erase(it);
+	}
+	type_refs_it->second.erase(ref_it);
+	latest_type_it->second.erase(latest_it);
+}
+
+void VeResourceManager::tickFrame() {
+	++m_current_frame;
+	while (!m_pending_unloads.empty()) {
+		if (m_pending_unloads.front().retire_frame > m_current_frame)
+			break;
+		PendingUnload local = m_pending_unloads.front();
+		m_pending_unloads.pop_front();
+		processPendingEntry(local);
+	}
+}
+
+void VeResourceManager::flushPendingUnloads() {
+	while (!m_pending_unloads.empty()) {
+		PendingUnload local = m_pending_unloads.front();
+		m_pending_unloads.pop_front();
+		processPendingEntry(local);
 	}
 }
 

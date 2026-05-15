@@ -199,7 +199,7 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		inst.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
 		inst.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
 		inst.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
-		inst.material_index = mat_mgr.registerMaterial(d.material_ptr);
+		inst.material_index = mat_mgr.indexFor(d.material_ptr);
 		inst.lod_level = d.lod_level;
 		inst.depth_offset = (d.alpha_mode == AlphaMode::MASK) ? MASK_DEPTH_OFFSET : 0.0f;
 		MaterialAlphaProps alpha = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};
@@ -289,7 +289,7 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		inst.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
 		inst.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
 		inst.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
-		inst.material_index = mat_mgr.registerMaterial(d.material_ptr);
+		inst.material_index = mat_mgr.indexFor(d.material_ptr);
 		inst.lod_level = d.lod_level;
 		inst.depth_offset = 0.0f;
 		MaterialAlphaProps alpha = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};
@@ -352,7 +352,7 @@ void PbrRenderSystem::prepareSkinnedFrame(VeFrameInfo& frame_info, MaterialSSBOM
 		inst.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
 		inst.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
 		inst.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
-		inst.material_index = mat_mgr.registerMaterial(d.material_ptr);
+		inst.material_index = mat_mgr.indexFor(d.material_ptr);
 		inst.lod_level = 0;
 		inst.depth_offset = (d.alpha_mode == AlphaMode::MASK) ? MASK_DEPTH_OFFSET : 0.0f;
 		MaterialAlphaProps alpha = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};
@@ -418,7 +418,7 @@ void PbrRenderSystem::prepareTransparents(VeFrameInfo& frame_info, MaterialSSBOM
 		inst.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
 		inst.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
 		inst.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
-		inst.material_index = mat_mgr.registerMaterial(d.material_ptr);
+		inst.material_index = mat_mgr.indexFor(d.material_ptr);
 		inst.lod_level = d.lod_level;
 		inst.depth_offset = 0.0f;
 		MaterialAlphaProps alpha = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};

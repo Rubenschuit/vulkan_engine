@@ -2,6 +2,8 @@
 #include "resources/ve_texture.hpp"
 #include "resources/loaded_asset_data.hpp"
 #include "vulkan/ve_buffer.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 #include <cmath>
 #include <filesystem>
@@ -221,6 +223,12 @@ void VeTexture::doUnload() {
 	m_texture_image.reset();
 	m_width = 0;
 	m_height = 0;
+}
+
+void VeTexture::emitUnloadingEvent(EventBus& bus) {
+	ResourceUnloadingEvent<VeTexture> ev{};
+	ev.resource = this;
+	bus.emitImmediate(ev);
 }
 
 const vk::raii::Sampler& VeTexture::getSampler() const {

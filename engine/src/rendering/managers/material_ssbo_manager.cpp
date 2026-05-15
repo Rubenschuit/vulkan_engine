@@ -21,11 +21,19 @@ MaterialSSBOManager::MaterialSSBOManager(VeDevice& device, BindlessTextureRegist
 		vk::BufferUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	m_staging_buffer->map();
+
+	m_unload_sub = m_event_bus.subscribe<ResourceUnloadingEvent<VeMaterial>>(
+		[this](const ResourceUnloadingEvent<VeMaterial>& e) {
+			releaseSlot(e.resource);
+		});
 }
 
-MaterialSSBOManager::~MaterialSSBOManager() = default;
+MaterialSSBOManager::~MaterialSSBOManager() {
+	if (m_unload_sub != NO_SUB)
+		m_event_bus.unsubscribe<ResourceUnloadingEvent<VeMaterial>>(m_unload_sub);
+}
 
-uint32_t MaterialSSBOManager::registerMaterial(VeMaterial* mat) {
+uint32_t MaterialSSBOManager::indexFor(VeMaterial* mat) {
 	auto it = m_material_to_index.find(mat);
 	if (it != m_material_to_index.end())
 		return it->second;
@@ -81,7 +89,7 @@ void MaterialSSBOManager::reset() {
 	m_next_index = 0;
 }
 
-void MaterialSSBOManager::unregisterMaterial(VeMaterial* mat) {
+void MaterialSSBOManager::releaseSlot(VeMaterial* mat) {
 	auto it = m_material_to_index.find(mat);
 	if (it == m_material_to_index.end())
 		return;
@@ -95,7 +103,7 @@ void MaterialSSBOManager::writeMaterialGPU(uint32_t index, VeMaterial* mat) {
 
 	auto getIdx = [&](const ResourceHandle<VeTexture>& tex, TextureType fallback) -> uint32_t {
 		if (tex.isValid())
-			return m_texture_registry.registerTexture(tex.get());
+			return m_texture_registry.indexFor(tex.get());
 		return m_texture_registry.getDefaultIndex(fallback);
 	};
 
