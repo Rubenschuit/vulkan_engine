@@ -75,7 +75,6 @@ public:
 	void emitSwapChainRecreatedEvents();
 	void emitResolutionChangedEvent();
 
-	void onSceneLoaded(VeScene& scene);
 	bool isParticlesDeclared() const { return m_particles_declared; }
 	bool isFireworksDeclared() const { return m_fireworks_declared; }
 

@@ -1,4 +1,5 @@
 #pragma once
+#include "events/event_bus.hpp"
 #include "ui/editor_panel.hpp"
 #include "ui/editor_state.hpp"
 #include <filesystem>
@@ -10,20 +11,18 @@
 
 namespace ve {
 
-class AssetLoadingSystem;
-struct SceneEntry;
-struct SceneLoadRequest;
-class VeScene;
+class SceneManager;
 
 class VENGINE_API HierarchyPanel : public EditorPanel {
 public:
+	HierarchyPanel();
+	~HierarchyPanel();
+
 	void render(Registry* registry, EditorState& state, UIContext& context) override;
 	const char* getName() const override { return "Scene Hierarchy"; }
 
-	void setSceneRegistry(const std::vector<SceneEntry>* entries, int* current_index, SceneLoadRequest* request);
-	void setActiveScene(VeScene* scene) { m_active_scene = scene; }
-	void setAssetLoader(AssetLoadingSystem* loader) { m_asset_loader = loader; }
-	void setLoadTimeDisplay(float seconds) { m_load_time_display_timer = seconds; }
+	void setSceneManager(SceneManager* sm) { m_scene_manager = sm; }
+	void setEventBus(EventBus* bus);
 
 private:
 	void renderSceneSelector();
@@ -44,11 +43,12 @@ private:
 		bool initialized = false;
 	};
 
-	const std::vector<SceneEntry>* m_scene_entries = nullptr;
-	int* m_current_scene_index = nullptr;
-	SceneLoadRequest* m_scene_load_request = nullptr;
-	AssetLoadingSystem* m_asset_loader = nullptr;
-	VeScene* m_active_scene = nullptr;
+	SceneManager* m_scene_manager = nullptr;
+	EventBus* m_event_bus = nullptr;
+	EventSubscriptionId m_scene_loaded_sub = 0;
+	EventSubscriptionId m_asset_complete_sub = 0;
+
+	int m_selected_scene_index = -1;
 	bool m_flip_tex_coord_v = false;
 	float m_load_time_display_timer = 0.f;
 

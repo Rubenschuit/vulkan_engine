@@ -4,6 +4,7 @@
 #include "input/input_controller.hpp"
 #include "input/input_action.hpp"
 #include "rendering/ve_renderer.hpp"
+#include "scene/scene_manager.hpp"
 #include "application/ve_application.hpp"
 #include <imgui.h>
 #include <cmath>
@@ -73,9 +74,6 @@ void Editor::renderUI(UIContext& context, Registry* registry, VeScene* active_sc
 	if (m_state.selection_changed && !m_state.selected_entity.isNull())
 		m_state.show_inspector = true;
 
-	// Update per-frame state on panels
-	m_hierarchy_panel.setActiveScene(active_scene);
-
 	m_imgui_layer.renderUI(context, m_state, [this, registry, editor_mode](UIContext& ctx) {
 		if (editor_mode) {
 			if (ImGui::IsKeyPressed(ImGuiKey_Escape) && !m_state.selected_entity.isNull()) {
@@ -112,8 +110,8 @@ void Editor::renderUI(UIContext& context, Registry* registry, VeScene* active_sc
 		}
 
 		// Loading overlay (renders on top of everything)
-		if (m_asset_loader)
-			m_loading_overlay.render(*m_asset_loader);
+		if (m_context.scene_manager)
+			m_loading_overlay.render(m_context.scene_manager->assetLoader());
 	});
 
 	// Cache AABB offset for gizmo/debug shape placement
@@ -165,25 +163,16 @@ void Editor::renderUI(UIContext& context, Registry* registry, VeScene* active_sc
 	m_state.selection_changed = false;
 }
 
-void Editor::setSceneRegistry(const std::vector<SceneEntry>* entries, int* current_index, SceneLoadRequest* request) {
-	m_hierarchy_panel.setSceneRegistry(entries, current_index, request);
-}
-
-void Editor::setCameraView(const CameraView* camera_view) {
-	m_viewport_panel.setCameraView(camera_view);
-}
-
-void Editor::setSkyboxSystem(SkyboxRenderSystem* skybox) {
+void Editor::setContext(const EditorContext& ctx) {
+	m_context = ctx;
+	m_hierarchy_panel.setSceneManager(ctx.scene_manager);
+	m_hierarchy_panel.setEventBus(ctx.event_bus);
+	m_viewport_panel.setCameraView(ctx.camera_view);
+	m_viewport_panel.setPhysicsSystem(ctx.physics);
 	if (m_environment_panel)
-		m_environment_panel->setSkyboxSystem(skybox);
-}
-
-void Editor::setPhysicsSystem(PhysicsSystem* ps) {
-	m_viewport_panel.setPhysicsSystem(ps);
-}
-
-void Editor::setShadowRenderSystem(ShadowRenderSystem* system) {
-	m_debug_panel->setShadowRenderSystem(system);
+		m_environment_panel->setSkyboxSystem(ctx.skybox);
+	if (m_debug_panel)
+		m_debug_panel->setShadowRenderSystem(ctx.shadow);
 }
 
 void Editor::onSwapChainRecreated() {
@@ -254,12 +243,12 @@ void Editor::renderKeybindingsWindow() {
 		}
 	}
 
-	if (m_input_controller && ImGui::CollapsingHeader("Application", ImGuiTreeNodeFlags_DefaultOpen)) {
+	if (m_context.input_controller && ImGui::CollapsingHeader("Application", ImGuiTreeNodeFlags_DefaultOpen)) {
 		if (ImGui::BeginTable("app_keys", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH)) {
 			ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthFixed, 100.0f);
 			ImGui::TableSetupColumn("Action");
 			ImGui::TableSetupColumn("Context", ImGuiTableColumnFlags_WidthFixed, 80.0f);
-			for (const auto& action : m_input_controller->getRegisteredActions()) {
+			for (const auto& action : m_context.input_controller->getRegisteredActions()) {
 				ImGui::TableNextRow();
 				ImGui::TableNextColumn();
 				auto key_name = keyDisplayName(action.binding.key);

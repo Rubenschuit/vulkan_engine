@@ -2,6 +2,9 @@
 #include "ui/panels/hierarchy_panel.hpp"
 #include "ui/imgui_layer.hpp"
 #include "application/ve_application.hpp"
+#include "events/engine_events.hpp"
+#include "resources/asset_loading_system.hpp"
+#include "scene/scene_manager.hpp"
 #include "scene/ve_registry.hpp"
 #include "scene/ve_scene.hpp"
 #include <imgui.h>
@@ -511,36 +514,59 @@ void HierarchyPanel::renderLightGroup(Registry& registry, const std::string& sou
 	}
 }
 
-void HierarchyPanel::setSceneRegistry(const std::vector<SceneEntry>* entries, int* current_index, SceneLoadRequest* request) {
-	m_scene_entries = entries;
-	m_current_scene_index = current_index;
-	m_scene_load_request = request;
+HierarchyPanel::HierarchyPanel() = default;
+
+HierarchyPanel::~HierarchyPanel() {
+	if (m_event_bus) {
+		m_event_bus->unsubscribe<SceneLoadedEvent>(m_scene_loaded_sub);
+		m_event_bus->unsubscribe<AssetLoadCompleteEvent>(m_asset_complete_sub);
+	}
+}
+
+void HierarchyPanel::setEventBus(EventBus* bus) {
+	if (m_event_bus) {
+		m_event_bus->unsubscribe<SceneLoadedEvent>(m_scene_loaded_sub);
+		m_event_bus->unsubscribe<AssetLoadCompleteEvent>(m_asset_complete_sub);
+	}
+	m_event_bus = bus;
+	if (!m_event_bus)
+		return;
+
+	m_scene_loaded_sub = m_event_bus->subscribe<SceneLoadedEvent>(
+		[this](const SceneLoadedEvent&) {
+			if (m_scene_manager)
+				m_selected_scene_index = m_scene_manager->loadedSceneIndex();
+		});
+	m_asset_complete_sub = m_event_bus->subscribe<AssetLoadCompleteEvent>(
+		[this](const AssetLoadCompleteEvent&) {
+			m_load_time_display_timer = 4.f;
+		});
 }
 
 void HierarchyPanel::renderSceneSelector() {
-	if (!m_scene_entries || !m_current_scene_index || !m_scene_load_request)
+	if (!m_scene_manager || !m_event_bus)
 		return;
 
-	// Show loading indicator
-	if (m_scene_load_request->type != SceneLoadRequest::Type::NONE)
+	const auto& entries = m_scene_manager->entries();
+	bool loading = m_scene_manager->assetLoader().getState() != LoadState::IDLE
+	               && m_scene_manager->assetLoader().getState() != LoadState::FAILED;
+
+	if (loading)
 		ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Loading...");
 
-	// Radio buttons for registered scenes
-	int current = *m_current_scene_index;
-	for (int i = 0; i < static_cast<int>(m_scene_entries->size()); i++) {
-		if (ImGui::RadioButton((*m_scene_entries)[static_cast<size_t>(i)].name.c_str(), &current, i)) {
-			*m_current_scene_index = i;
-			m_scene_load_request->type = SceneLoadRequest::Type::LOAD_REGISTERED;
-			m_scene_load_request->scene_index = i;
+	int current = m_selected_scene_index;
+	for (int i = 0; i < static_cast<int>(entries.size()); i++) {
+		if (ImGui::RadioButton(entries[static_cast<size_t>(i)].name.c_str(), &current, i)) {
+			m_selected_scene_index = i;
+			m_event_bus->emitImmediate(SceneLoadRequestedEvent{.scene_index = i});
 		}
-		if (i < static_cast<int>(m_scene_entries->size()) - 1 && i < 2)
+		if (i < static_cast<int>(entries.size()) - 1 && i < 2)
 			ImGui::SameLine();
 	}
 
 	if (ImGui::Button("New Empty Scene")) {
-		m_scene_load_request->type = SceneLoadRequest::Type::NEW_EMPTY;
-		m_scene_load_request->scene_index = -1;
-		*m_current_scene_index = -1;
+		m_selected_scene_index = -1;
+		m_event_bus->emitImmediate(SceneLoadRequestedEvent{.scene_index = -1});
 	}
 
 	if (ImGui::Button("Add Model...")) {
@@ -549,23 +575,21 @@ void HierarchyPanel::renderSceneSelector() {
 			{"glTF Files", "*.gltf *.glb"},
 			pfd::opt::none
 		).result();
-		if (!selection.empty()) {
-			m_scene_load_request->type = SceneLoadRequest::Type::ADD_MODEL;
-			m_scene_load_request->gltf_path = selection[0];
-			m_scene_load_request->flip_tex_coord_v = m_flip_tex_coord_v;
-		}
+		if (!selection.empty())
+			m_event_bus->emitImmediate(AddModelRequestedEvent{
+				.gltf_path = selection[0],
+				.flip_tex_coord_v = m_flip_tex_coord_v
+			});
 	}
 	ImGui::SameLine();
 	ImGui::Checkbox("Flip UV vertically", &m_flip_tex_coord_v);
 
 	// Show load time for a few seconds after completion
-	if (m_asset_loader) {
-		float load_time = m_asset_loader->getLastLoadSeconds();
-		if (load_time > 0.f && m_load_time_display_timer > 0.f) {
-			m_load_time_display_timer -= ImGui::GetIO().DeltaTime;
-			float alpha = std::min(m_load_time_display_timer, 1.f);
-			ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, alpha), "Loaded in %.1fs", load_time);
-		}
+	float load_time = m_scene_manager->assetLoader().getLastLoadSeconds();
+	if (load_time > 0.f && m_load_time_display_timer > 0.f) {
+		m_load_time_display_timer -= ImGui::GetIO().DeltaTime;
+		float alpha = std::min(m_load_time_display_timer, 1.f);
+		ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, alpha), "Loaded in %.1fs", load_time);
 	}
 
 	ImGui::Separator();

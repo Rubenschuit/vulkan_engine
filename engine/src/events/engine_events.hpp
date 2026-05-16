@@ -18,11 +18,13 @@
 namespace ve {
 
 class Registry;
+class VeScene;
 
 // ── Scene lifecycle ─────────────────────────────────────────────────────────
 
 struct SceneLoadedEvent {
 	Registry* registry;
+	VeScene* scene;
 };
 
 struct SceneUnloadedEvent {};

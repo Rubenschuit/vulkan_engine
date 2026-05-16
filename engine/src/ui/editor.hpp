@@ -8,6 +8,7 @@
 
 #pragma once
 #include "ve_export.hpp"
+#include "ui/editor_context.hpp"
 #include "ui/editor_state.hpp"
 #include "ui/editor_camera_controller.hpp"
 #include "ui/panels/viewport_panel.hpp"
@@ -21,26 +22,17 @@
 #include "ui/texture_inspector.hpp"
 #include <functional>
 #include <memory>
-#include <vector>
 
 #define VULKAN_HPP_ENABLE_RAII
 #include <vulkan/vulkan_raii.hpp>
 
 namespace ve {
 
-class AssetLoadingSystem;
 class ImGuiLayer;
-class InputController;
 class VeRenderer;
-struct CameraView;
 class Registry;
 class VeScene;
-class SkyboxRenderSystem;
-class ShadowRenderSystem;
-class PhysicsSystem;
 struct UIContext;
-struct SceneEntry;
-struct SceneLoadRequest;
 
 class EventBus;
 
@@ -61,28 +53,12 @@ public:
 	const EditorState& getState() const { return m_state; }
 	bool isEditorMode() const { return m_state.editor_mode; }
 
-	// System injection
+	// Call after construction with all engine references.
+	// Pointers must remain valid for the lifetime of the editor.
+	void setContext(const EditorContext& ctx);
+
+	// App-specific UI hook (rendered inside the "App Settings" window).
 	void setAppUICallback(std::function<void()> cb) { m_app_ui_callback = std::move(cb); }
-	void setSceneRegistry(const std::vector<SceneEntry>* entries, int* current_index, SceneLoadRequest* request);
-
-	// Per-frame camera view used by gizmo, raycast, and debug overlays.
-	// Pointer must remain valid for the lifetime of the editor.
-	void setCameraView(const CameraView* camera_view);
-
-	// Skybox system access for environment panel
-	void setSkyboxSystem(SkyboxRenderSystem* skybox);
-
-	// Physics system access for collision shape debug rendering
-	void setPhysicsSystem(PhysicsSystem* ps);
-
-	// Shadow render system access for debug panel atlas inspection
-	void setShadowRenderSystem(ShadowRenderSystem* system);
-
-	// Asset loader for rendering loading panel
-	void setAssetLoader(AssetLoadingSystem* loader) { m_asset_loader = loader; m_hierarchy_panel.setAssetLoader(loader); }
-
-	// Input controller for keybindings display
-	void setInputController(const InputController* ic) { m_input_controller = ic; }
 
 	// Panel access
 	HierarchyPanel& getHierarchyPanel() { return m_hierarchy_panel; }
@@ -117,8 +93,7 @@ private:
 	std::unique_ptr<DebugPanel> m_debug_panel;
 	TextureInspector m_texture_inspector;
 
-	const InputController* m_input_controller = nullptr;
-	AssetLoadingSystem* m_asset_loader = nullptr;
+	EditorContext m_context{};
 	LoadingPanel m_loading_overlay;
 
 	std::function<void()> m_app_ui_callback;

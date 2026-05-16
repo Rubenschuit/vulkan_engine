@@ -9,36 +9,16 @@
 #include "vulkan/ve_descriptors.hpp"
 #include "input/input_controller.hpp"
 #include "scene/camera_view.hpp"
+#include "scene/scene_manager.hpp"
 #include "resources/ve_resource_manager.hpp"
-#include "resources/asset_loading_system.hpp"
 #include "physics/physics_system.hpp"
 #include "events/event_bus.hpp"
 #include <memory>
-#include <vector>
 #include <chrono>
 #include <functional>
 #include <filesystem>
 
 namespace ve {
-
-// Scene registry: apps register named scene factories, editor provides the UI to switch
-struct VENGINE_API SceneEntry {
-	std::string name;
-	std::function<std::unique_ptr<VeScene>(const SceneContext&)> factory;
-	std::filesystem::path gltf_path;
-	std::function<std::unique_ptr<VeScene>(const SceneContext&, std::unique_ptr<VeModel>)> async_factory;
-	bool extract_lights = true;
-	bool flip_tex_coord_v = false;
-};
-
-// Written by editor, consumed by VeApplication main loop (one-frame deferred)
-struct VENGINE_API SceneLoadRequest {
-	enum class Type { NONE, LOAD_REGISTERED, NEW_EMPTY, ADD_MODEL };
-	Type type = Type::NONE;
-	int scene_index = -1;
-	std::filesystem::path gltf_path;
-	bool flip_tex_coord_v = false;
-};
 
 class ParticleSystem;
 class FireworksSystem;
@@ -73,19 +53,15 @@ protected:
 	virtual void renderUI() {}
 
 	// --- Scene management ---
-	void registerScene(const std::string& name,
-					   std::function<std::unique_ptr<VeScene>(const SceneContext&)> factory);
-	void registerAsyncScene(const std::string& name,
-	                        const std::filesystem::path& gltf_path,
-	                        std::function<std::unique_ptr<VeScene>(const SceneContext&, std::unique_ptr<VeModel>)> factory,
-	                        bool extract_lights = true,
-	                        bool flip_tex_coord_v = false);
+	void registerScene(std::string name,
+	                   std::function<std::unique_ptr<VeScene>(const SceneContext&)> factory);
+	void registerGltfScene(std::string name,
+	                       std::filesystem::path gltf_path,
+	                       std::function<std::unique_ptr<VeScene>(const SceneContext&, std::unique_ptr<VeModel>)> factory,
+	                       bool extract_lights = true,
+	                       bool flip_tex_coord_v = false);
 	void loadDefaultScene(int index);
-	void setActiveScene(std::unique_ptr<VeScene> scene);
-	void unloadScene();
-	VeScene* getActiveScene() { return m_active_scene.get(); }
-	Registry* getActiveRegistry();
-	SceneContext getSceneContext();
+	SceneManager& sceneManager() { return *m_scene_manager; }
 
 	// --- Engine accessors ---
 	EventBus& eventBus() { return m_event_bus; }
@@ -122,24 +98,7 @@ private:
 	void updateFrameTime();
 	void setWindowTitle();
 
-	// --- Scene loading ---
-	void processSceneLoadRequest();
-	void tickAsyncLoader();
-	void finalizeAsyncLoad();
-
 	EngineConfig m_config;
-
-	// --- Scene ---
-	std::unique_ptr<VeScene> m_active_scene;
-	std::vector<SceneEntry> m_scene_entries;
-	int m_current_scene_index = -1;
-	int m_loaded_scene_index = -1;
-	SceneLoadRequest m_pending_load;
-
-	// --- Async loading ---
-	std::unique_ptr<AssetLoadingSystem> m_asset_loader;
-	SceneLoadRequest::Type m_async_load_type{SceneLoadRequest::Type::NONE};
-	int m_pending_async_scene_index{-1};
 
 	// --- UI / engine state ---
 	RenderSettings m_settings;
@@ -154,6 +113,7 @@ private:
 	std::unique_ptr<RenderResources> m_render_resources;
 	std::unique_ptr<RenderPipeline> m_render_pipeline;
 	std::unique_ptr<PhysicsSystem> m_physics_system;
+	std::unique_ptr<SceneManager> m_scene_manager;
 
 	// --- Camera ---
 	float m_fov = glm::radians(80.0f);

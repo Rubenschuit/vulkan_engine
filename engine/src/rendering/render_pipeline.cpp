@@ -81,6 +81,16 @@ RenderPipeline::RenderPipeline(VeDevice& device,
 	initRenderSystems();
 	m_settings_watcher = std::make_unique<SettingsWatcher>(
 		m_ve_device, m_ve_renderer, m_event_bus, m_settings, m_resources);
+
+	m_event_bus.subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
+		if (!e.scene)
+			return;
+		SceneSubsystems decl = e.scene->declareSubsystems();
+		m_particles_declared = decl.particles.has_value();
+		m_fireworks_declared = decl.fireworks.has_value();
+		m_particle_system->setEnabled(m_particles_declared);
+		m_fireworks_system->setEnabled(m_fireworks_declared);
+	});
 }
 
 RenderPipeline::~RenderPipeline() = default;
@@ -308,14 +318,6 @@ FireworksSystem& RenderPipeline::getFireworksSystem() { return *m_fireworks_syst
 SkyboxRenderSystem& RenderPipeline::getSkyboxRenderSystem() { return *m_skybox_render_system; }
 ShadowRenderSystem& RenderPipeline::getShadowRenderSystem() { return *m_shadow_render_system; }
 PbrRenderSystem& RenderPipeline::getPbrRenderSystem() { return *m_pbr_render_system; }
-
-void RenderPipeline::onSceneLoaded(VeScene& scene) {
-	SceneSubsystems decl = scene.declareSubsystems();
-	m_particles_declared = decl.particles.has_value();
-	m_fireworks_declared = decl.fireworks.has_value();
-	m_particle_system->setEnabled(m_particles_declared);
-	m_fireworks_system->setEnabled(m_fireworks_declared);
-}
 
 void RenderPipeline::emitSwapChainRecreatedEvents() {
 	m_event_bus.emitImmediate(PipelineRecreateEvent{
