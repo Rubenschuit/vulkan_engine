@@ -9,10 +9,7 @@
 #include "vulkan/ve_descriptors.hpp"
 #include "input/input_controller.hpp"
 #include "scene/camera_view.hpp"
-#include "rendering/ve_frame_info.hpp"
 #include "resources/ve_resource_manager.hpp"
-#include "resources/ve_texture.hpp"
-#include "resources/ve_material_properties.hpp"
 #include "resources/asset_loading_system.hpp"
 #include "physics/physics_system.hpp"
 #include "events/event_bus.hpp"
@@ -43,36 +40,16 @@ struct VENGINE_API SceneLoadRequest {
 	bool flip_tex_coord_v = false;
 };
 
-// Forward declarations
-class CullingSystem;
-class ShadowRenderSystem;
-class DepthPrePassSystem;
-class ShadowMaskSystem;
-class GtaoSystem;
-class ClusterLightSystem;
-class PbrRenderSystem;
-class AabbDebugRenderSystem;
-class AxesRenderSystem;
-class LightSystem;
 class ParticleSystem;
 class FireworksSystem;
 class SkyboxRenderSystem;
-class IblSystem;
-class BloomSystem;
-class PostProcessSystem;
-class OutlineSystem;
-class SceneResourceManager;
-class GpuCullingSystem;
-class MeshletCullingSystem;
-class HizSystem;
-class SkinningPrePass;
-class SkinnedPointsRenderSystem;
+class PbrRenderSystem;
 class Editor;
 class VeScene;
-class CullingBackend;
-class CpuCullingBackend;
-class GpuCullingBackend;
-class MeshletCullingBackend;
+class VeModel;
+class RenderPipeline;
+class RenderResources;
+struct SceneContext;
 
 class VENGINE_API VeApplication {
 public:
@@ -105,39 +82,26 @@ protected:
 	                        bool flip_tex_coord_v = false);
 	void loadDefaultScene(int index);
 	void setActiveScene(std::unique_ptr<VeScene> scene);
+	void unloadScene();
 	VeScene* getActiveScene() { return m_active_scene.get(); }
 	Registry* getActiveRegistry();
-	void unloadScene();
+	SceneContext getSceneContext();
 
-	// --- Scene construction context ---
-	SceneContext getSceneContext() {
-		return {m_ve_device, m_resource_manager, *m_global_pool,
-				*m_material_set_layout, &m_default_material_descriptor_set};
-	}
-
-	// --- Access systems (for app-specific config) ---
-	ParticleSystem& getParticleSystem() { return *m_particle_system; }
-	FireworksSystem& getFireworksSystem() { return *m_fireworks_system; }
-	bool isParticlesDeclared() const { return m_particles_declared; }
-	bool isFireworksDeclared() const { return m_fireworks_declared; }
-	SkyboxRenderSystem& getSkyboxSystem() { return *m_skybox_render_system; }
-	PbrRenderSystem& getPbrSystem() { return *m_pbr_render_system; }
-	PhysicsSystem& getPhysicsSystem() { return *m_physics_system; }
+	// --- Engine accessors ---
+	EventBus& eventBus() { return m_event_bus; }
+	UIContext& ui() { return m_ui; }
+	InputController& getInputController() { return m_input_controller; }
 	Editor& getEditor() { return *m_editor; }
-
-	// --- App name ---
+	PhysicsSystem& getPhysicsSystem() { return *m_physics_system; }
+	ParticleSystem& getParticleSystem();
+	FireworksSystem& getFireworksSystem();
+	SkyboxRenderSystem& getSkyboxSystem();
+	PbrRenderSystem& getPbrSystem();
+	bool isParticlesDeclared() const;
+	bool isFireworksDeclared() const;
 	const std::string& getAppSettingsWindowName() const;
 
-	// --- Engine event bus ---
-	EventBus& eventBus() { return m_event_bus; }
-
-	// --- Settings struct (app writes, engine reads) ---
-	UIContext& ui() { return m_ui; }
-
-	// --- Input ---
-	InputController& getInputController() { return m_input_controller; }
-
-	// Engine-managed state accessible to app.
+	// --- Engine state ---
 	VeWindow m_ve_window;
 	VeDevice m_ve_device;
 	EventBus m_event_bus;
@@ -147,58 +111,23 @@ protected:
 	InputController m_input_controller;
 
 private:
-	EngineConfig m_config;
-
-	// --- Initialization (called from constructor) ---
-	void createBuffers();
-	void createDescriptors();
+	// --- Initialisation ---
 	void initSystems();
 	void initEditor();
 
-	// --- Main loop ---
-	VeFrameInfo buildFrameInfo();
-	void selectBackend();
-	void pushPerFrameSettings();
-	void emitSettingEvents();
-	void populateUBO(VeFrameInfo& fi);
-	void dispatchCompute(VeFrameInfo& fi);
-	void renderFrame(VeFrameInfo& fi);
-	void collectStats(const VeFrameInfo& fi);
+	// --- Per-frame helpers ---
 	void onSwapChainRecreated();
 	void recreateResolutionDependentSystems();
-
-	// --- Camera ---
 	void updateCamera(float fov_radians);
-	void updateUniformBuffer(uint32_t current_frame, const CameraView& view, UniformBufferObject& ubo);
 	void updateFrameTime();
+	void setWindowTitle();
 
-	UIContext m_ui;
+	// --- Scene loading ---
+	void processSceneLoadRequest();
+	void tickAsyncLoader();
+	void finalizeAsyncLoad();
 
-	// --- Buffers ---
-	std::vector<std::unique_ptr<VeBuffer>> m_uniform_buffers{};
-	std::vector<std::unique_ptr<VeBuffer>> m_instance_buffers{};
-	static constexpr uint32_t INITIAL_INSTANCE_CAPACITY = 16384*2;
-
-	// --- Descriptors ---
-	std::shared_ptr<VeDescriptorPool> m_global_pool{};
-	std::unique_ptr<VeDescriptorSetLayout> m_global_set_layout{};
-	std::unique_ptr<VeDescriptorSetLayout> m_material_set_layout{};
-	std::vector<vk::raii::DescriptorSet> m_global_descriptor_sets{};
-
-	// Default material (engine-generated solid-color PBR textures)
-	std::unique_ptr<VeBuffer> m_default_material_ubo;
-	ResourceHandle<VeTexture> m_default_albedo_handle;
-	ResourceHandle<VeTexture> m_default_normal_handle;
-	ResourceHandle<VeTexture> m_default_mr_handle;
-	ResourceHandle<VeTexture> m_default_occlusion_handle;
-	ResourceHandle<VeTexture> m_default_emissive_handle;
-	vk::raii::DescriptorSet m_default_material_descriptor_set{nullptr};
-
-	// Particle textures
-	ResourceHandle<VeTexture> m_particle_texture_handle;
-	ResourceHandle<VeTexture> m_fire_texture_handle;
-	ResourceHandle<VeTexture> m_smoke_texture_handle;
-	vk::raii::DescriptorSet m_particle_descriptor_set{nullptr};
+	EngineConfig m_config;
 
 	// --- Scene ---
 	std::unique_ptr<VeScene> m_active_scene;
@@ -206,57 +135,27 @@ private:
 	int m_current_scene_index = -1;
 	int m_loaded_scene_index = -1;
 	SceneLoadRequest m_pending_load;
-	void processSceneLoadRequest();
-	bool m_particles_declared = false;
-	bool m_fireworks_declared = false;
 
 	// --- Async loading ---
 	std::unique_ptr<AssetLoadingSystem> m_asset_loader;
 	SceneLoadRequest::Type m_async_load_type{SceneLoadRequest::Type::NONE};
 	int m_pending_async_scene_index{-1};
-	void tickAsyncLoader();
-	void finalizeAsyncLoad();
 
-	// --- UI ---
+	// --- UI / engine state ---
+	RenderSettings m_settings;
+	FrameStats m_stats;
+	EditorPanelState m_editor_panel;
+	SimulationSettings m_sim;
+	UIContext m_ui{m_settings, m_stats, m_editor_panel, m_sim};
 	std::unique_ptr<ImGuiLayer> m_imgui_layer;
 	std::unique_ptr<Editor> m_editor;
 
-	// --- Render systems ---
-	std::unique_ptr<CullingSystem> m_culling_system;
-	std::unique_ptr<ShadowRenderSystem> m_shadow_render_system;
-	std::unique_ptr<DepthPrePassSystem> m_depth_prepass_system;
-	std::unique_ptr<ShadowMaskSystem> m_shadow_mask_system;
-	std::unique_ptr<GtaoSystem> m_gtao_system;
-	std::unique_ptr<ClusterLightSystem> m_cluster_light_system;
-	std::unique_ptr<PbrRenderSystem> m_pbr_render_system;
-	std::unique_ptr<AabbDebugRenderSystem> m_aabb_debug_render_system;
-	std::unique_ptr<AxesRenderSystem> m_axes_render_system;
-	std::unique_ptr<LightSystem> m_light_system;
-	std::unique_ptr<ParticleSystem> m_particle_system;
-	std::unique_ptr<FireworksSystem> m_fireworks_system;
-	std::unique_ptr<SkyboxRenderSystem> m_skybox_render_system;
-	std::unique_ptr<IblSystem> m_ibl_system;
-	std::unique_ptr<BloomSystem> m_bloom_system;
-	std::unique_ptr<PostProcessSystem> m_post_process_system;
-	std::unique_ptr<OutlineSystem> m_outline_system;
-	std::unique_ptr<SceneResourceManager> m_scene_resources;
-	std::unique_ptr<GpuCullingSystem> m_gpu_culling_system;
-	std::unique_ptr<MeshletCullingSystem> m_meshlet_culling_system;
-	std::unique_ptr<HizSystem> m_hiz_system;
-	std::unique_ptr<SkinningPrePass> m_skinning_pre_pass;
-	std::unique_ptr<SkinnedPointsRenderSystem> m_skinned_points_render_system;
-
-	// --- Physics ---
+	// --- Systems ---
+	std::unique_ptr<RenderResources> m_render_resources;
+	std::unique_ptr<RenderPipeline> m_render_pipeline;
 	std::unique_ptr<PhysicsSystem> m_physics_system;
 
-	// --- Culling backends ---
-	std::unique_ptr<CpuCullingBackend> m_cpu_backend;
-	std::unique_ptr<GpuCullingBackend> m_gpu_backend;
-	std::unique_ptr<MeshletCullingBackend> m_meshlet_backend;
-	CullingBackend* m_active_backend = nullptr;
-
-	// --- Camera state ---
-	glm::mat4 m_prev_projection_view{1.0f};
+	// --- Camera ---
 	float m_fov = glm::radians(80.0f);
 	float m_near_plane = 0.1f;
 	float m_far_plane = 100000.0f;
@@ -267,18 +166,6 @@ private:
 	clock::time_point m_last_frame_time{clock::now()};
 	float m_total_time{0.0f};
 	float m_frame_time{0.0f};
-
-	bool m_shadow_mask_half_res = false;
-	bool m_gtao_half_res = true;
-	ShadowResolutionPreset m_shadow_resolution_preset = ShadowResolutionPreset::MEDIUM;
-	int m_pcf_samples = 8;
-	int m_pcss_filter_samples = 16;
-	float m_depth_bias_constant = ve::SHADOW_DEPTH_BIAS_CONSTANT;
-	float m_depth_bias_slope = ve::SHADOW_DEPTH_BIAS_SLOPE;
-	float m_depth_bias_clamp = 0.0f;
-	Topology m_last_topology = Topology::TRIANGLE_LIST;
-
-	void setWindowTitle();
 };
 
-} // namespace ve
+}

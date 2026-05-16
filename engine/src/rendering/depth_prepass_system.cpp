@@ -206,4 +206,9 @@ void DepthPrePassSystem::renderGpuCulledMeshlets(
 	}
 }
 
+void DepthPrePassSystem::recreatePipeline(vk::SampleCountFlagBits sample_count) {
+	m_ve_pipeline.reset();
+	createPipeline(sample_count);
+}
+
 } // namespace ve

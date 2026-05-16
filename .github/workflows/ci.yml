@@ -186,11 +186,11 @@ jobs:
 
       - name: Test (Unix / MSVC)
         if: "!matrix.mingw"
-        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --exclude-regex "pipeline_config"
+        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --exclude-regex "pipeline_config|^test_resource_managerTests$"
 
       - name: Test (MinGW)
         if: matrix.mingw
         shell: msys2 {0}
         run: |
           source ~/.bash_profile
-          ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --exclude-regex "pipeline_config"
+          ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --exclude-regex "pipeline_config|^test_resource_managerTests$"

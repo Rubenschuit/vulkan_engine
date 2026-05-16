@@ -12,7 +12,7 @@ class ShadowRenderSystem;
 class VeRenderer;
 class Registry;
 struct VeFrameInfo;
-struct UIContext;
+struct FrameStats;
 
 class CullingBackend {
 public:
@@ -36,7 +36,7 @@ public:
 
 	virtual vk::raii::DescriptorSet& getGlobalDescriptorSet(uint32_t frame) = 0;
 
-	virtual void collectStats(uint32_t frame, UIContext& ui,
+	virtual void collectStats(uint32_t frame, FrameStats& stats,
 	                          Registry& registry) const = 0;
 
 	virtual void setHizEnabled(bool enabled) = 0;

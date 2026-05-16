@@ -58,10 +58,7 @@ public:
 	void renderSkinned(VeFrameInfo& frame_info,
 	                   const std::vector<PbrRenderSystem::Drawable>& skinned_drawables) const;
 
-	void recreatePipeline(vk::SampleCountFlagBits sample_count) {
-		m_ve_pipeline.reset();
-		createPipeline(sample_count);
-	}
+	void recreatePipeline(vk::SampleCountFlagBits sample_count);
 
 private:
 	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout);

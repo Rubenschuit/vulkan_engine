@@ -994,4 +994,32 @@ void PbrRenderSystem::recreateWboit(const vk::raii::ImageView& accum_view, const
 	m_wboit_composite_pipeline = std::make_unique<VePipeline>(m_ve_device, composite_shader_path, config);
 }
 
+void PbrRenderSystem::recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+	for (auto& p : m_pipelines)
+		p.reset();
+	for (auto& p : m_pipelines_mask)
+		p.reset();
+	createPipelines(color_format, sample_count);
+	if (m_wboit_pipelines[0]) {
+		for (auto& p : m_wboit_pipelines)
+			p.reset();
+		createWboitGeometryPipelines();
+	}
+}
+
+void PbrRenderSystem::setShadowSamples(uint32_t pcf_samples, uint32_t pcss_filter_samples) {
+	m_pcf_samples = pcf_samples;
+	m_pcss_filter_samples = pcss_filter_samples;
+	for (auto& p : m_pipelines)
+		p.reset();
+	for (auto& p : m_pipelines_mask)
+		p.reset();
+	createPipelines(m_color_format, m_sample_count);
+	if (m_wboit_pipelines[0]) {
+		for (auto& p : m_wboit_pipelines)
+			p.reset();
+		createWboitGeometryPipelines();
+	}
+}
+
 } // namespace ve

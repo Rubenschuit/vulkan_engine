@@ -10,7 +10,7 @@
 #include "rendering/ve_frame_info.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
-#include "ui/imgui_layer.hpp"
+#include "rendering/frame_stats.hpp"
 
 namespace ve {
 
@@ -83,19 +83,19 @@ vk::raii::DescriptorSet& MeshletCullingBackend::getGlobalDescriptorSet(uint32_t 
 	return m_meshlet_cull_system.getGlobalDescriptorSet(frame);
 }
 
-void MeshletCullingBackend::collectStats(uint32_t frame, UIContext& ui, Registry&) const {
+void MeshletCullingBackend::collectStats(uint32_t frame, FrameStats& stats, Registry&) const {
 	(void)frame;
-	ui.stats.cull_total_objects = m_gpu_scene.getTotalRegisteredCount();
+	stats.cull_total_objects = m_gpu_scene.getTotalRegisteredCount();
 	uint32_t readback_visible = m_meshlet_cull_system.readbackVisibleObjectCount();
-	ui.stats.cull_visible_objects = readback_visible > 0 ? readback_visible : ui.stats.cull_total_objects;
+	stats.cull_visible_objects = readback_visible > 0 ? readback_visible : stats.cull_total_objects;
 	const uint32_t* rb = m_meshlet_cull_system.getRawDrawCounts();
 	if (rb) {
 		uint32_t total_draws = 0;
 		for (uint32_t b = 0; b < MeshletCullingSystem::BUCKET_COUNT; b++)
 			total_draws += rb[b];
-		ui.stats.visible_meshlets = total_draws;
+		stats.visible_meshlets = total_draws;
 	}
-	ui.stats.visible_triangles = m_meshlet_cull_system.readbackTriangleCount();
+	stats.visible_triangles = m_meshlet_cull_system.readbackTriangleCount();
 }
 
 void MeshletCullingBackend::setHizEnabled(bool enabled) { m_meshlet_cull_system.setHizEnabled(enabled); }

@@ -87,37 +87,13 @@ public:
 	void recreateWboit(const vk::raii::ImageView& accum_view, const vk::raii::ImageView& revealage_view,
 	                   vk::Format resolve_format);
 
-	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
-		for (auto& p : m_pipelines)
-			p.reset();
-		for (auto& p : m_pipelines_mask)
-			p.reset();
-		createPipelines(color_format, sample_count);
-		if (m_wboit_pipelines[0]) {
-			for (auto& p : m_wboit_pipelines)
-				p.reset();
-			createWboitGeometryPipelines();
-		}
-	}
+	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count);
 	void setTopology(Topology topo) {
 		m_topology = (topo == Topology::LINE_LIST)
 			? vk::PrimitiveTopology::eLineList
 			: vk::PrimitiveTopology::eTriangleList;
 	}
-	void setShadowSamples(uint32_t pcf_samples, uint32_t pcss_filter_samples) {
-		m_pcf_samples = pcf_samples;
-		m_pcss_filter_samples = pcss_filter_samples;
-		for (auto& p : m_pipelines)
-			p.reset();
-		for (auto& p : m_pipelines_mask)
-			p.reset();
-		createPipelines(m_color_format, m_sample_count);
-		if (m_wboit_pipelines[0]) {
-			for (auto& p : m_wboit_pipelines)
-				p.reset();
-			createWboitGeometryPipelines();
-		}
-	}
+	void setShadowSamples(uint32_t pcf_samples, uint32_t pcss_filter_samples);
 
 	uint32_t getOpaqueDrawCount() const { return m_total_indirect_count; }
 
@@ -188,9 +164,7 @@ private:
 	mutable uint32_t m_bucket_counts[BUCKET_COUNT]{};
 	mutable uint32_t m_total_indirect_count = 0;
 
-	// Persistent scratch vectors (avoid per-frame heap allocation)
 	mutable std::vector<VkDrawIndexedIndirectCommand> m_indirect_cmds;
-
 	mutable std::vector<Drawable> m_opaque_drawables;
 	mutable std::vector<Drawable> m_transparent_drawables;
 	mutable std::vector<Drawable> m_skinned_drawables;

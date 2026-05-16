@@ -7,7 +7,7 @@
 #include "rendering/shadow_render_system.hpp"
 #include "rendering/ve_renderer.hpp"
 #include "rendering/ve_frame_info.hpp"
-#include "ui/imgui_layer.hpp"
+#include "rendering/frame_stats.hpp"
 
 namespace ve {
 
@@ -80,11 +80,11 @@ vk::raii::DescriptorSet& GpuCullingBackend::getGlobalDescriptorSet(uint32_t fram
 	return m_cull.getGlobalDescriptorSet(frame);
 }
 
-void GpuCullingBackend::collectStats(uint32_t frame, UIContext& ui, Registry&) const {
-	ui.stats.cull_total_objects = m_gpu_scene.getTotalRegisteredCount();
-	ui.stats.cull_visible_objects = m_cull.readbackDrawCounts(frame);
-	ui.stats.visible_triangles = m_cull.readbackTriangleCount(frame);
-	ui.stats.visible_meshlets = 0;
+void GpuCullingBackend::collectStats(uint32_t frame, FrameStats& stats, Registry&) const {
+	stats.cull_total_objects = m_gpu_scene.getTotalRegisteredCount();
+	stats.cull_visible_objects = m_cull.readbackDrawCounts(frame);
+	stats.visible_triangles = m_cull.readbackTriangleCount(frame);
+	stats.visible_meshlets = 0;
 }
 
 void GpuCullingBackend::setHizEnabled(bool enabled) { m_cull.setHizEnabled(enabled); }

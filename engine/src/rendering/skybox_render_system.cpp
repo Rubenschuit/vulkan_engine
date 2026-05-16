@@ -275,4 +275,9 @@ void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 	cube->drawIndexed(frame_info.cmd());
 }
 
+void SkyboxRenderSystem::recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+	m_ve_pipeline.reset();
+	createPipeline(color_format, sample_count);
+}
+
 } // namespace ve

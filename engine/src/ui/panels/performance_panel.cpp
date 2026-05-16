@@ -289,7 +289,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 	ImGui::Spacing();
 	ImGui::Separator();
-	ImGui::Checkbox("GPU Profiling", &context.gpu_profiling);
+	ImGui::Checkbox("GPU Profiling", &context.settings.gpu_profiling);
 	ImGui::Spacing();
 
 	// --- Per-system breakdown table ---

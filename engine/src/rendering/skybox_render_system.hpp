@@ -64,10 +64,7 @@ public:
 
 	// Slowly rotate the skybox over time and render it
 	void render(VeFrameInfo& frame_info);
-	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
-		m_ve_pipeline.reset();
-		createPipeline(color_format, sample_count);
-	}
+	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count);
 
 	// Descriptor set for cubemap; used by frame_info.
 	vk::raii::DescriptorSet& getCubemapDescriptorSet() { return m_cubemap_descriptor_set; }
