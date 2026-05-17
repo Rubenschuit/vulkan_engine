@@ -3,7 +3,6 @@
 #include "ve_config.hpp"
 #include "vulkan/ve_device.hpp"
 #include "scene/ve_registry.hpp"
-#include "scene/scene_subsystems.hpp"
 #include "resources/ve_material_properties.hpp"
 #include "resources/ve_resource_manager.hpp"
 #include <string>
@@ -25,7 +24,6 @@ struct VENGINE_API SceneContext {
     VeResourceManager& resource_manager;
     VeDescriptorPool& pool;
     VeDescriptorSetLayout& material_layout;
-    vk::raii::DescriptorSet* default_material_descriptor_set = nullptr;
 };
 
 class VENGINE_API VeScene {
@@ -39,16 +37,19 @@ public:
     Registry& getRegistry() { return m_registry; }
     const Registry& getRegistry() const { return m_registry; }
 
+    const std::string& getName() const { return m_name; }
+
     // Load a GLTF model and add it to the scene.
     void addModel(const std::filesystem::path& gltf_path);
 
-    virtual vk::raii::DescriptorSet& getDescriptorSet() = 0;
     virtual void update(float dt);
 
     // Per-scene ambient light defaults (color RGB, intensity in w)
     virtual glm::vec4 getDefaultAmbient() const { return DEFAULT_AMBIENT_LIGHT_COLOR; }
 
-    virtual SceneSubsystems declareSubsystems() const { return {}; }
+    // Particle pool capacity required by this scene. 0 = use the engine
+    // default.
+    virtual uint32_t getParticleCapacity() const { return 0; }
 
 protected:
     VeDevice& m_device;
@@ -61,7 +62,6 @@ protected:
 	uint32_t m_num_shadow_casting_lights;
 
     std::vector<std::unique_ptr<VeModel>> m_models;
-    ResourceHandle<VeMaterial> m_default_material_handle;
 };
 
 }

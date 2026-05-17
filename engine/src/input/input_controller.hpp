@@ -1,4 +1,4 @@
-// Maps raw GLFW input to a per-frame InputActions snapshot and dispatches 
+// Maps raw GLFW input to a per-frame InputActions snapshot and dispatches
 // registered actions via EventBus.
 #pragma once
 #include "ve_export.hpp"
@@ -34,6 +34,24 @@ public:
 		int toggle_mouse_look = GLFW_KEY_TAB;
 	};
 
+	// RAII handle returned by acquireCursor(). While at least one token is
+	// alive the effective input mode is 'cursor visible'
+	class VENGINE_API CursorCaptureToken {
+	public:
+		CursorCaptureToken() = default;
+		CursorCaptureToken(const CursorCaptureToken&) = delete;
+		CursorCaptureToken& operator=(const CursorCaptureToken&) = delete;
+		CursorCaptureToken(CursorCaptureToken&& other) noexcept;
+		CursorCaptureToken& operator=(CursorCaptureToken&& other) noexcept;
+		~CursorCaptureToken();
+		void release();
+		explicit operator bool() const { return m_owner != nullptr; }
+	private:
+		friend class InputController;
+		explicit CursorCaptureToken(InputController* owner) : m_owner(owner) {}
+		InputController* m_owner = nullptr;
+	};
+
 	InputController(VeWindow& window, EventBus& event_bus);
 	~InputController();
 
@@ -46,15 +64,24 @@ public:
 	void registerAction(ActionBinding&& binding);
 	const std::deque<RegisteredAction>& getRegisteredActions() const;
 	bool isEditorMode() const;
+	void setEditorMode(bool enabled);
+
+	[[nodiscard]] CursorCaptureToken acquireCursor();
 
 private:
+	bool effectiveEditorMode() const { return m_cursor_capture_count > 0 || m_user_editor_mode; }
+	void applyCursorMode();
+	void releaseCursorInternal();
+
 	GLFWwindow* m_window{nullptr};
 
 	KeyMappings m_key_mappings{};
 	double m_last_x = 0.0;
 	double m_last_y = 0.0;
 
-	bool m_mouse_look_enabled = true;
+	bool m_user_editor_mode = false;
+	int m_cursor_capture_count = 0;
+	bool m_last_applied_editor_mode = false;
 	int m_prev_toggle_state = GLFW_RELEASE;
 	int m_prev_escape_state = GLFW_RELEASE;
 

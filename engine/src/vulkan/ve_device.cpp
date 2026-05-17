@@ -498,9 +498,9 @@ std::vector<const char *> VeDevice::getRequiredInstanceExtensions() {
 
 	// glfw extensions are always required
 	std::vector<const char*> extensions(glfw_extensions, glfw_extensions + glfw_extensionCount);
-	if (enable_validation_layers) {
-		extensions.push_back(vk::EXTDebugUtilsExtensionName);
-	}
+#ifndef NDEBUG
+	extensions.push_back(vk::EXTDebugUtilsExtensionName);
+#endif
 	// add configured instance extensions
 	extensions.insert(extensions.end(), ve::REQUIRED_INSTANCE_EXTENSIONS.begin(), ve::REQUIRED_INSTANCE_EXTENSIONS.end());
 

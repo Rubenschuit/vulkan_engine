@@ -6,8 +6,7 @@
 namespace ve {
 
 SimpleScene::SimpleScene(const SceneContext& ctx, const AssetPaths& paths)
-	: VeScene(ctx, "Simple Scene"), m_default_material_descriptor_set(ctx.default_material_descriptor_set) {
-	assert(m_default_material_descriptor_set && "Default material descriptor set must not be null");
+	: VeScene(ctx, "Simple Scene") {
 	loadGameObjects(paths);
 }
 

@@ -2,7 +2,9 @@
 ![PBR Rendering](screenshots/bistro_1.png)
 ![PBR Rendering](screenshots/sponza.png)
 
-Small modern cross-platform C++20 Vulkan 1.3+ clustered forward game engine using GLFW and Slang. Produces a shared library (`VEngineLib`) and an app (`VeApp`). The goal of this project is for me to have fun and to learn more about graphics programming!
+Cross-platform C++20 Vulkan 1.3+ GPU-driven clustered forward renderer with an integrated editor, built from scratch as a personal project to explore real-time graphics and engine architecture. Produces a shared library and an app.
+
+**Built with:** C++20 · Vulkan 1.3 (Vulkan-Hpp, VMA, dynamic rendering, timeline semaphores) · Slang shaders · GLFW · Jolt Physics · Dear ImGui + ImGuizmo · meshoptimizer · KTX-Software · TinyGLTF + MikkTSpace · Catch2 · Tracy (optional)
 
 ## Table of Contents
 
@@ -15,7 +17,6 @@ Small modern cross-platform C++20 Vulkan 1.3+ clustered forward game engine usin
 - [Manual build](#manual-build)
   - [Unix or MinGW shell](#unix-or-mingw64-shell)
   - [Windows (Visual Studio)](#windows-with-visual-studio)
-- [Controls](#controls)
 - [Credits](#credits)
 
 
@@ -27,12 +28,15 @@ Small modern cross-platform C++20 Vulkan 1.3+ clustered forward game engine usin
 ## Features
 
 #### Rendering
-- Modern Vulkan 1.3: dynamic rendering, Vulkan-Hpp RAII
-- PBR (physically based rendering) for .gltf models like Sponza and Bistro
-- Clustered forward rendering with depth pre-pass
-- Bindless textures
+- Modern Vulkan 1.3: dynamic rendering, timeline semaphores, Vulkan-Hpp RAII
+- PBR (physically based rendering) for .gltf models
+- Clustered forward rendering with depth pre-pass and infinite reverse-Z
+- Image-Based Lighting
+- Order-independent transparency (WBOIT)
+- Bindless textures with KTX2 (BC7/ASTC) transcoding
 - GPU-driven rendering: frustum + Hi-Z occlusion culling, multi-draw indirect, draw compaction
-- Automatic LOD selection based on screen coverage
+- Meshlet pipeline with two-pass meshlet culling
+- Automatic LOD selection
 - Multi-threaded command buffer recording with secondary command buffers
 - Shaders written in Slang, compiled to SPIR-V at build time
 
@@ -42,16 +46,26 @@ Small modern cross-platform C++20 Vulkan 1.3+ clustered forward game engine usin
 - Screen-space shadow mask (compute), PCF, PCSS
 - GTAO (Ground Truth Ambient Occlusion)
 
+#### Architecture
+- Shared-library + app split
+- Custom ECS with typed component pools, parent/child hierarchy
+- Engine-wide event bus and separate ECS-local event dispatcher
+- Refcounted, type-keyed resource handles with auto-unload
+- Per-frame primary and per-thread secondary command buffer management
+- Async glTF loading
+
+#### Simulation
+- Rigid-body physics via Jolt
+- Skeletal animation: glTF skin import, keyframed TRS clips, compute skinning
+- Compute-based particle system, async on a dedicated compute queue when available
+
 #### Post-processing & Effects
 - Bloom
 - HDR with several tone mapping options
-- Particle system with compute shaders, dispatched and executed asynchronously on dedicated compute queue if available
-- Fireworks using the particle system
+- Fireworks demo, app-side example built on top of the engine's particle system
 - Skybox
 - MSAA
 
-#### Architecture
-- Custom ECS with typed component pools, parent/child hierarchy, and lazy world-transform caching
 
 #### Editor & Tools
 - Dear ImGui docked UI with hierarchy, inspector, viewport, graphics settings, performance, and environment panels
@@ -142,15 +156,6 @@ cmake -S . -B build -G "Visual Studio 18 2026" -A x64
 ```
 
 Then, in VS, right-click the VeApp target, set as startup project, build and then run (f5)
-
-## Controls
-
-- Camera: WASD/C/Space and Shift to move, arrow keys or mouse to look
-- UI toggle: Tab
-- Particle modes: 1 / 2 / 3 / 4 / 5
-- Reset particles: E (explosion) or G (rotating disk)
-- Launch fireworks: F
-- Escape to exit the application
 
 ## Credits
 

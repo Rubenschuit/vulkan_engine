@@ -74,8 +74,6 @@ struct ResourceUnloadingEvent : ImmediateOnly {
 
 // ── Settings changes ────────────────────────────────────────────────────────
 
-class VeDescriptorPool;
-
 struct DepthBiasChangedEvent {};
 
 struct TopologyChangedEvent {
@@ -85,27 +83,6 @@ struct TopologyChangedEvent {
 struct ShadowSamplesChangedEvent {
 	uint32_t pcf_samples;
 	uint32_t pcss_filter_samples;
-};
-
-struct ShadowMaskResolutionChangedEvent : ImmediateOnly {
-	VeDescriptorPool& pool;
-	vk::Extent2D mask_extent;
-	vk::Extent2D depth_extent;
-	const vk::raii::ImageView& depth_image_view;
-	vk::Image depth_image;
-};
-
-struct GtaoResolutionChangedEvent : ImmediateOnly {
-	VeDescriptorPool& pool;
-	vk::Extent2D ao_extent;
-	vk::Extent2D depth_extent;
-	const vk::raii::ImageView& depth_image_view;
-	vk::Image depth_image;
-};
-
-struct ShadowAtlasResolutionChangedEvent : ImmediateOnly {
-	VeDescriptorPool& pool;
-	ShadowResolutionPreset preset;
 };
 
 struct GtaoParametersChangedEvent {
@@ -127,37 +104,18 @@ struct ClusterEnabledChangedEvent {
 
 // ── Rendering state changes ────────────────────────────────────────────────
 
-// Emitted by VeRenderer after its swap chain has been recreated 
+// Emitted by VeRenderer after its swap chain has been recreated
 struct SwapChainRecreatedEvent {};
 
-// Emitted by VeRenderer when the scene-render extent changes. RenderPipeline 
-// reacts and emits ResolutionChangedEvent including all the relevant data for
-// subscribers.
+// Emitted by VeRenderer when the scene-render extent changes. RenderPipeline
+// reacts and emits ResolutionChangedEvent (engine-internal, render_events.hpp)
+// including all the relevant data for subscribers.
 struct ViewportResizedEvent {};
 
 struct BackendChangedEvent {};
 
 struct SkyboxChangedEvent {
 	std::filesystem::path skybox_path;
-};
-
-struct PipelineRecreateEvent {
-	vk::Format offscreen_format;
-	vk::SampleCountFlagBits sample_count;
-};
-
-struct ResolutionChangedEvent : ImmediateOnly {
-	VeDescriptorPool& pool;
-	vk::Extent2D extent;
-	vk::Format swap_chain_format;
-	vk::Format offscreen_format;
-	const vk::raii::ImageView& resolve_target_view;
-	const vk::raii::ImageView& depth_image_view;
-	vk::Image depth_image;
-	const vk::raii::ImageView& wboit_accum_view;
-	const vk::raii::ImageView& wboit_revealage_view;
-	bool shadow_mask_half_res;
-	bool gtao_half_res;
 };
 
 } // namespace ve

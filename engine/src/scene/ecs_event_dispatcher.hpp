@@ -69,6 +69,16 @@ struct DeleteEntityRequest {
 
 using SubscriptionId = uint32_t;
 
+// Events tagged here bypass batch suppression
+template <typename E>
+struct is_always_dispatched : std::false_type {};
+
+template <typename T>
+struct is_always_dispatched<ComponentRemovedEvent<T>> : std::true_type {};
+
+template <typename E>
+inline constexpr bool is_always_dispatched_v = is_always_dispatched<E>::value;
+
 class EcsEventDispatcher {
 public:
 	EcsEventDispatcher() = default;
@@ -99,8 +109,10 @@ public:
 
 	template <typename EventT>
 	void emit(const EventT& event) {
-		if (m_batch_depth > 0)
-			return;
+		if constexpr (!is_always_dispatched_v<EventT>) {
+			if (m_batch_depth > 0)
+				return;
+		}
 		auto it = m_handlers.find(std::type_index(typeid(EventT)));
 		if (it == m_handlers.end())
 			return;

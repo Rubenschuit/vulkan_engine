@@ -55,6 +55,10 @@ public:
 		vk::Extent2D depth_extent,
 		const vk::raii::ImageView& depth_image_view, vk::Image depth_image);
 
+	// Acquire the per-frame GTAO output.
+	// Pair with the release-only barrier emitted at the end of dispatch().
+	void acquireForRead(vk::raii::CommandBuffer& cmd, uint32_t frame_index);
+
 	// Descriptor set layout for Set 5 (AO output for PBR/simple shaders)
 	const vk::raii::DescriptorSetLayout& getAoSetLayout() const {
 		return m_output_set_layout->getDescriptorSetLayout();

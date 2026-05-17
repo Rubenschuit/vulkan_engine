@@ -13,18 +13,14 @@ class EventBus;
 class InputController;
 class PhysicsSystem;
 class SceneManager;
-class ShadowRenderSystem;
-class SkyboxRenderSystem;
-struct CameraView;
+struct EngineConfig;
 
 struct VENGINE_API EditorContext {
 	SceneManager*          scene_manager     = nullptr;
-	SkyboxRenderSystem*    skybox            = nullptr;
-	ShadowRenderSystem*    shadow            = nullptr;
 	PhysicsSystem*         physics           = nullptr;
-	const CameraView*      camera_view       = nullptr;
 	const InputController* input_controller  = nullptr;
 	EventBus*              event_bus         = nullptr;
+	const EngineConfig*    engine_config     = nullptr;
 };
 
 } // namespace ve

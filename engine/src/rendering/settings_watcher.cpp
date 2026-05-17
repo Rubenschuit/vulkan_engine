@@ -2,6 +2,7 @@
 #include "rendering/settings_watcher.hpp"
 
 #include "events/engine_events.hpp"
+#include "events/render_events.hpp"
 #include "events/event_bus.hpp"
 #include "rendering/render_resources.hpp"
 #include "rendering/render_settings.hpp"

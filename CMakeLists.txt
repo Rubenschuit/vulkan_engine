@@ -42,6 +42,13 @@ project(${NAME} VERSION 0.1)
 # Required so static dependencies (KTX, etc.) are built with -fPIC when linked into our shared library
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+set(CMAKE_COLOR_DIAGNOSTICS ON)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
+	add_compile_options(-fcolor-diagnostics)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+	add_compile_options(-fdiagnostics-color=always)
+endif()
+
 # Prevent Windows.h from defining min/max macros that break std::min/std::max
 if(WIN32)
 	add_compile_definitions(NOMINMAX)

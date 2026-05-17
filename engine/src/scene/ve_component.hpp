@@ -8,6 +8,9 @@
 #include "resources/ve_mesh.hpp"
 #include "resources/ve_material.hpp"
 #include "resources/ve_animation_clip.hpp"
+#include "resources/ve_texture.hpp"
+
+#include "rendering/particle_emitter_params.hpp"
 
 #include <glm/glm.hpp>
 #include <memory>
@@ -222,8 +225,8 @@ private:
 	glm::vec3 m_color{1.0f};
 	float m_range{0.0f};// 0 means derive from intensity
 	glm::vec3 m_direction{0.f, 0.f, -1.f}; // local-space
-	float m_inner_cone_angle{glm::radians(25.0f)};        
-	float m_outer_cone_angle{glm::radians(35.0f)};        
+	float m_inner_cone_angle{glm::radians(25.0f)};
+	float m_outer_cone_angle{glm::radians(35.0f)};
 	bool m_casts_shadow{false};
 
 	mutable float m_effective_range{0.0f};
@@ -414,12 +417,72 @@ public:
 	void setSkeletonRoot(Entity e) { m_skeleton_root = e; }
 	void setPaletteOffset(uint32_t off) { m_palette_offset_cache = off; }
 
+	void remapEntities(const std::unordered_map<uint32_t, Entity>& old_to_new);
+
 private:
 	std::vector<Entity> m_joint_entities;
 	std::vector<glm::mat4> m_inverse_bind_matrices;
 	std::vector<VeMesh::AABB> m_joint_local_extents;  // joint-local space, IBM applied
 	Entity m_skeleton_root;
 	uint32_t m_palette_offset_cache = 0;
+};
+
+// ---------------------------------------------------------------------------
+// ParticleEmitterComponent
+// ---------------------------------------------------------------------------
+class VENGINE_API ParticleEmitterComponent : public Component {
+public:
+	ParticleEmitterComponent() = default;
+
+	ParticleEmitterComponent(const ParticleEmitterComponent& other)
+		: Component(other)
+		, params(other.params)
+		, texture(other.texture)
+		, rate(other.rate)
+		, burst_count(other.burst_count)
+		, burst_period(other.burst_period)
+		, scale(other.scale)
+		, rate_accumulator(0.0f)
+		, burst_accumulator(0.0f)
+		, m_active(other.m_active) {}
+
+	ParticleEmitterComponent& operator=(const ParticleEmitterComponent& other) {
+		if (this != &other) {
+			Component::operator=(other);
+			params = other.params;
+			texture = other.texture;
+			rate = other.rate;
+			burst_count = other.burst_count;
+			burst_period = other.burst_period;
+			scale = other.scale;
+			rate_accumulator = 0.0f;
+			burst_accumulator = 0.0f;
+			m_active = other.m_active;
+		}
+		return *this;
+	}
+
+	bool isActive() const { return m_active; }
+	void setActive(bool v) { m_active = v; }
+
+	EmitterParams params{};
+
+	// Optional sprite/atlas texture overwrite.
+	ResourceHandle<VeTexture> texture;
+
+	// CPU-driven emission. Either or both can be active simultaneously.
+	float rate = 0.0f;          // particles/sec; 0 = no rate-based emission
+	uint32_t burst_count = 0;   // particles per burst trigger (0 = no burst)
+	float burst_period = 0.0f;  // seconds between bursts; 0 = manual trigger only
+
+	float scale = 1.0f;
+
+	// System internal accumulators
+	float rate_accumulator = 0.0f;
+	float burst_accumulator = 0.0f;
+
+private:
+	bool m_active = true;
 };
 
 // suppress implicit instantiation
@@ -432,5 +495,6 @@ extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<RigidbodyCom
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<AnimatorComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SkinComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<CameraComponent>();
+extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<ParticleEmitterComponent>();
 
 } // namespace ve

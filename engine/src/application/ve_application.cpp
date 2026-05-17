@@ -12,6 +12,7 @@
 
 #include "rendering/render_pipeline.hpp"
 #include "rendering/render_resources.hpp"
+#include "rendering/render_settings.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
 #include "ve_tracy.hpp"
@@ -25,45 +26,21 @@
 namespace ve {
 
 VeApplication::VeApplication(const EngineConfig& config)
-	: m_ve_window(WIDTH, HEIGHT, APP_NAME),
+	: m_ve_window(static_cast<int>(config.window_width), static_cast<int>(config.window_height), config.app_name.c_str()),
 	  m_ve_device(m_ve_window),
 	  m_resource_manager(m_ve_device, m_event_bus),
 	  m_ve_renderer(m_ve_device, m_ve_window, m_resource_manager, m_event_bus),
 	  m_input_controller(m_ve_window, m_event_bus),
 	  m_config(config) {
 
-	m_render_resources = std::make_unique<RenderResources>(m_ve_device, m_resource_manager, m_config);
+	m_render_resources = std::make_unique<RenderResources>(m_ve_device, m_resource_manager);
 	m_render_pipeline = std::make_unique<RenderPipeline>(
-		m_ve_device, m_ve_renderer, m_resource_manager, *m_render_resources, m_event_bus,
-		m_settings, m_stats, m_config);
+		m_ve_device, m_ve_renderer, m_resource_manager, *m_render_resources, m_event_bus, m_config);
 	m_scene_manager = std::make_unique<SceneManager>(m_resource_manager, *m_render_resources, m_event_bus);
 	initSystems();
 	initEditor();
 }
 
-ParticleSystem& VeApplication::getParticleSystem() {
-	return m_render_pipeline->getParticleSystem();
-}
-
-FireworksSystem& VeApplication::getFireworksSystem() {
-	return m_render_pipeline->getFireworksSystem();
-}
-
-SkyboxRenderSystem& VeApplication::getSkyboxSystem() {
-	return m_render_pipeline->getSkyboxRenderSystem();
-}
-
-PbrRenderSystem& VeApplication::getPbrSystem() {
-	return m_render_pipeline->getPbrRenderSystem();
-}
-
-bool VeApplication::isParticlesDeclared() const {
-	return m_render_pipeline->isParticlesDeclared();
-}
-
-bool VeApplication::isFireworksDeclared() const {
-	return m_render_pipeline->isFireworksDeclared();
-}
 
 VeApplication::~VeApplication() {
 	m_event_bus.unsubscribe<InputActionEvent>(m_input_action_sub);
@@ -104,50 +81,55 @@ void VeApplication::run() {
 
 		// Process input and tick the editor camera controller.
 		m_input_controller.processInput(m_frame_time);
-		m_editor->getState().editor_mode = m_input_controller.isEditorMode();
 		m_editor->editorCamera().tick(m_input_controller.getActions(), m_frame_time);
 
 		{
 			ZoneScopedN("Scene Tick");
 			m_scene_manager->tick(m_frame_time);
 		}
-		m_event_bus.flushEvents();
 
 		// App per-frame logic (particle config, etc.)
 		update();
 
 		VeScene* scene = m_scene_manager->getActiveScene();
-		if (!scene) {
-			m_ve_renderer.beginUIRecording(m_editor->isEditorMode());
-			m_editor->renderUI(m_ui, nullptr);
-			m_ve_renderer.endFrame();
-			continue;
-		}
 
 		// Physics
-		if (m_sim.physics_enabled) {
+		if (scene && m_sim.physics_enabled) {
 			ZoneScopedN("Physics Update");
 			m_ve_renderer.getProfiler().beginCpuTimer(ProfileTimer::PHYSICS);
 			m_physics_system->update(m_frame_time, scene->getRegistry());
 			m_ve_renderer.getProfiler().endCpuTimer(ProfileTimer::PHYSICS);
 		}
 
-		// Events
+		// Handle all queued events before rendering
 		m_event_bus.flushEvents();
+
+		UIContext ui{m_render_pipeline->settings(), m_render_pipeline->stats(), m_sim};
+
+		if (!scene) {
+			m_editor->beginFrame();
+			m_ve_renderer.beginUIRecording(m_editor->isEditorMode());
+			m_editor->renderUI(ui, nullptr);
+			m_ve_renderer.endFrame();
+			continue;
+		}
 
 		// Render
 		m_render_pipeline->prepareFrame();
 		m_editor->beginFrame();
-		updateCamera(glm::radians(m_settings.fov));
+		Registry* reg = m_scene_manager->getActiveRegistry();
+		const CameraView& view = m_editor->resolveCameraView(
+			reg, m_ve_renderer.getExtentAspectRatio(),
+			glm::radians(m_render_pipeline->settings().fov));
 
-		m_render_pipeline->renderFrame(*scene, m_current_camera_view,
+		m_render_pipeline->renderFrame(*scene, view,
 			m_editor->getState(), m_frame_time, m_total_time);
 
 		bool editor_mode = m_editor->isEditorMode();
 		{
 			ZoneScopedN("UI");
 			m_ve_renderer.beginUIRecording(editor_mode);
-			m_editor->renderUI(m_ui, &scene->getRegistry());
+			m_editor->renderUI(ui, &scene->getRegistry());
 		}
 
 		{
@@ -159,8 +141,12 @@ void VeApplication::run() {
 	m_ve_device.getDevice().waitIdle();
 }
 
-const std::string& VeApplication::getAppSettingsWindowName() const {
-	return m_imgui_layer->getAppSettingsWindowName();
+const RenderServices& VeApplication::renderServices() const {
+	return m_render_pipeline->services();
+}
+
+const CameraView& VeApplication::cameraView() const {
+	return m_editor->cameraView();
 }
 
 // ─── Scene Management (proxies to SceneManager) ──────────────────────────────
@@ -205,8 +191,9 @@ void VeApplication::initSystems() {
 		if (!e.scene)
 			return;
 		glm::vec4 ambient = e.scene->getDefaultAmbient();
-		m_settings.ambient_light_color = glm::vec3(ambient);
-		m_settings.ambient_light_intensity = ambient.w;
+		auto& settings = m_render_pipeline->settings();
+		settings.ambient_light_color = glm::vec3(ambient);
+		settings.ambient_light_intensity = ambient.w;
 	});
 
 	m_physics_system = std::make_unique<PhysicsSystem>(m_event_bus);
@@ -214,48 +201,25 @@ void VeApplication::initSystems() {
 
 void VeApplication::initEditor() {
 	VE_LOGD("Initialising UI");
-	m_imgui_layer = std::make_unique<ImGuiLayer>(m_ve_window, m_ve_device, m_ve_renderer, m_event_bus);
-	m_imgui_layer->setAppSettingsWindowName(m_config.app_name);
-	m_editor = std::make_unique<Editor>(m_ve_renderer, *m_imgui_layer, m_event_bus);
+	m_editor = std::make_unique<Editor>(m_ve_window, m_ve_device, m_ve_renderer, m_event_bus, m_config);
 	m_editor->setAppUICallback([this]() { renderUI(); });
-	m_editor->setContext({
+	m_editor->setContext(EditorContext{
 		.scene_manager    = m_scene_manager.get(),
-		.skybox           = &m_render_pipeline->getSkyboxRenderSystem(),
-		.shadow           = &m_render_pipeline->getShadowRenderSystem(),
 		.physics          = m_physics_system.get(),
-		.camera_view      = &m_current_camera_view,
 		.input_controller = &m_input_controller,
 		.event_bus        = &m_event_bus,
-	});
+		.engine_config    = &m_config,
+	}, m_render_pipeline->services());
 
 	auto& editor_cam = m_editor->editorCamera();
 	editor_cam.setPosition(glm::vec3{20.0f, 20.0f, 20.0f});
-	editor_cam.setFov(m_fov);
-	editor_cam.setNearFar(m_near_plane, m_far_plane);
 	editor_cam.lookAt(glm::vec3{0.0f, 0.0f, 5.0f});
 
-	m_settings.hdr_enabled = m_ve_renderer.hasHdrSupport() && m_ve_renderer.isHdrEnabled();
-	m_settings.fov = glm::degrees(m_fov);
-	m_settings.ambient_light_color = glm::vec3(DEFAULT_AMBIENT_LIGHT_COLOR);
-	m_settings.ambient_light_intensity = DEFAULT_AMBIENT_LIGHT_COLOR.w;
-}
-
-// ─── Camera ──────────────────────────────────────────────────────────────────
-
-void VeApplication::updateCamera(float fov_radians) {
-	float aspect = m_ve_renderer.getExtentAspectRatio();
-	if (aspect > 0.0f)
-		m_last_aspect = aspect;
-	m_fov = fov_radians;
-
-	auto& editor_cam = m_editor->editorCamera();
-	editor_cam.setFov(m_fov);
-	editor_cam.setNearFar(m_near_plane, m_far_plane);
-
-	Registry* reg = m_scene_manager ? m_scene_manager->getActiveRegistry() : nullptr;
-	Entity vp_cam = m_editor ? m_editor->getState().viewport_camera : Entity::null();
-	auto scene_cam = tryGetSceneCamera(reg, vp_cam, m_last_aspect);
-	m_current_camera_view = scene_cam ? *scene_cam : editor_cam.buildView(m_last_aspect);
+	auto& settings = m_render_pipeline->settings();
+	settings.hdr_enabled = m_ve_renderer.hasHdrSupport() && m_ve_renderer.isHdrEnabled();
+	settings.fov = glm::degrees(editor_cam.fov());
+	settings.ambient_light_color = glm::vec3(DEFAULT_AMBIENT_LIGHT_COLOR);
+	settings.ambient_light_intensity = DEFAULT_AMBIENT_LIGHT_COLOR.w;
 }
 
 void VeApplication::updateFrameTime() {
@@ -275,7 +239,7 @@ void VeApplication::setWindowTitle() {
 #else
 	const char* mode_str = "Debug";
 #endif
-	std::string title = std::format("Vulkan Engine -- {} mode", mode_str);
+	std::string title = std::format("{} -- {} mode", m_config.app_name, mode_str);
 	glfwSetWindowTitle(m_ve_window.getGLFWwindow(), title.c_str());
 }
 

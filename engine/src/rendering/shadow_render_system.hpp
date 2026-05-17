@@ -164,6 +164,8 @@ private:
 	void renderShadowMap(VeFrameInfo& frame_info, uint32_t light_index,
 		const std::vector<ShadowInstanceGroup>& instance_groups,
 		bool include_skinned = false) const;
+	void populateSkinnedShadowDrawablesGpuPath(VeFrameInfo& frame_info);
+	void renderSkinnedShadowsForLayer(VeFrameInfo& frame_info, uint32_t layer) const;
 
 	// --- CPU-path mega-buffer ---
 

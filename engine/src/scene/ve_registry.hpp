@@ -63,7 +63,8 @@ using ComponentPools = std::tuple<
 	ComponentPool<RigidbodyComponent>,
 	ComponentPool<AnimatorComponent>,
 	ComponentPool<SkinComponent>,
-	ComponentPool<CameraComponent>
+	ComponentPool<CameraComponent>,
+	ComponentPool<ParticleEmitterComponent>
 >;
 
 class VENGINE_API Registry {
@@ -143,6 +144,9 @@ public:
 	ComponentPool<CameraComponent>& cameras() { return pool<CameraComponent>(); }
 	const ComponentPool<CameraComponent>& cameras() const { return pool<CameraComponent>(); }
 
+	ComponentPool<ParticleEmitterComponent>& particleEmitters() { return pool<ParticleEmitterComponent>(); }
+	const ComponentPool<ParticleEmitterComponent>& particleEmitters() const { return pool<ParticleEmitterComponent>(); }
+
 	// Fast active check (skips generation validation)
 	bool isActiveAtIndex(uint32_t index) const {
 		return index < m_meta.size() && m_meta[index].active;
@@ -208,6 +212,8 @@ private:
 	void ensureSlotSize(uint32_t index);
 	void invalidateMeshWorldAABBs(Entity e);
 	void processPendingComponentRemovals();
+
+	Entity cloneEntityCore(Entity source, bool reparent_to_source_parent);
 
 	template <typename T>
 	void cloneComponentIfPresent(Entity source, Entity clone) {

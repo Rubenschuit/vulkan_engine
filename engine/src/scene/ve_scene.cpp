@@ -13,9 +13,7 @@ VeScene::VeScene(const SceneContext& ctx, const std::string& name)
       m_pool(ctx.pool), m_material_layout(ctx.material_layout),
       m_name(name), m_num_lights(0), m_num_shadow_casting_lights(0) {}
 
-VeScene::~VeScene() {
-	m_default_material_handle = ResourceHandle<VeMaterial>{};
-}
+VeScene::~VeScene() = default;
 
 void VeScene::addModel(const std::filesystem::path& gltf_path) {
 	auto model = VeModel::load(m_resource_manager, gltf_path.lexically_normal(), &m_pool, &m_material_layout,
@@ -23,16 +21,6 @@ void VeScene::addModel(const std::filesystem::path& gltf_path) {
 
 	if (model) {
 		model->addToScene(m_registry, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f});
-
-		if (!m_default_material_handle.isValid()) {
-			for (auto& mc : m_registry.meshes()) {
-				if (mc.hasMaterial() && mc.getMaterial()->hasDescriptorSet()) {
-					m_default_material_handle = mc.getMaterialHandle();
-					break;
-				}
-			}
-		}
-
 		m_models.push_back(std::move(model));
 	} else {
 		VE_LOGE("Failed to load GLTF model: " << gltf_path);

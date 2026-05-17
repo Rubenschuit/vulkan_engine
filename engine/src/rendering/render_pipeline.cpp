@@ -4,6 +4,7 @@
 #include "application/ve_engine_config.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
+#include "events/render_events.hpp"
 #include "rendering/aabb_debug_render_system.hpp"
 #include "rendering/axes_render_system.hpp"
 #include "rendering/bloom_system.hpp"
@@ -17,7 +18,6 @@
 #include "rendering/culling/meshlet_culling_system.hpp"
 #include "rendering/frame_profiler.hpp"
 #include "rendering/depth_prepass_system.hpp"
-#include "rendering/fireworks_system.hpp"
 #include "rendering/gtao_system.hpp"
 #include "rendering/hiz_system.hpp"
 #include "rendering/ibl_system.hpp"
@@ -27,7 +27,8 @@
 #include "rendering/managers/material_ssbo_manager.hpp"
 #include "rendering/managers/scene_resource_manager.hpp"
 #include "rendering/outline_system.hpp"
-#include "rendering/particle_system.hpp"
+#include "rendering/particle_backend.hpp"
+#include "rendering/particle_emitter_system.hpp"
 #include "rendering/pbr_render_system.hpp"
 #include "rendering/post_process_system.hpp"
 #include "rendering/shadow_mask_system.hpp"
@@ -65,16 +66,12 @@ RenderPipeline::RenderPipeline(VeDevice& device,
                                VeResourceManager& resource_manager,
                                RenderResources& resources,
                                EventBus& event_bus,
-                               const RenderSettings& settings,
-                               FrameStats& stats,
                                const EngineConfig& config)
 	: m_ve_device(device),
 	  m_ve_renderer(renderer),
 	  m_resource_manager(resource_manager),
 	  m_resources(resources),
 	  m_event_bus(event_bus),
-	  m_settings(settings),
-	  m_stats(stats),
 	  m_config(config) {
 	m_scene_resources = std::make_unique<SceneResourceManager>(m_ve_device, m_event_bus, m_resource_manager);
 	createPerFrameResources(m_scene_resources->getMaterialManager().getBuffer());
@@ -85,11 +82,15 @@ RenderPipeline::RenderPipeline(VeDevice& device,
 	m_scene_loaded_sub = m_event_bus.subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
 		if (!e.scene)
 			return;
-		SceneSubsystems decl = e.scene->declareSubsystems();
-		m_particles_declared = decl.particles.has_value();
-		m_fireworks_declared = decl.fireworks.has_value();
-		m_particle_system->setEnabled(m_particles_declared);
-		m_fireworks_system->setEnabled(m_fireworks_declared);
+		// Configure particle backend
+		uint32_t requested = e.scene->getParticleCapacity();
+		uint32_t target = (requested > 0)
+			? std::min(requested, m_config.max_particle_capacity)
+			: m_config.default_particle_capacity;
+		if (target != m_particle_backend->getCapacity())
+			m_particle_backend->setCapacity(target);
+		m_particle_backend->scheduleRestart();
+		m_particle_backend->setEnabled(true);
 	});
 
 	m_swap_chain_recreated_sub = m_event_bus.subscribe<SwapChainRecreatedEvent>([this](const SwapChainRecreatedEvent&) {
@@ -233,44 +234,33 @@ void RenderPipeline::initRenderSystems() {
 		m_event_bus
 	);
 
+	auto light_billboard_texture = m_config.light_billboard_texture.empty()
+		? m_resources.defaultParticleTexture()
+		: m_resource_manager.load<VeTexture>(m_config.light_billboard_texture.lexically_normal().generic_string());
 	m_light_system = std::make_unique<LightSystem>(
 		m_ve_device,
 		*m_resources.pool(),
 		m_resources.globalSetLayout().getDescriptorSetLayout(),
-		m_resources.particleTexture(),
+		std::move(light_billboard_texture),
 		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
 		shader("light_billboard_shader.spv"),
 		m_event_bus
 	);
 
-	m_particle_system = std::make_unique<ParticleSystem>(ParticleSystemCreateInfo{
+	m_particle_backend = std::make_unique<ParticleBackend>(ParticleBackendCreateInfo{
 		.device = m_ve_device,
 		.descriptor_pool = m_resources.pool(),
 		.global_set_layout = m_resources.globalSetLayout().getDescriptorSetLayout(),
-		.particle_texture = m_resources.particleTexture(),
-		.fire_texture = m_resources.fireTexture(),
-		.smoke_texture = m_resources.smokeTexture(),
+		// Safe default for every unallocated bindless atlas slot.
+		.default_atlas = m_resources.defaultParticleTexture(),
 		.color_format = m_ve_renderer.getOffscreenImageFormat(),
 		.sample_count = m_ve_renderer.getSampleCount(),
-		.particle_count = 50000,
-		.origin = glm::vec3{0.0f, -300.0f, 50.0f},
-		.shader_path = shader("particle_compute.spv"),
-		.start_active = true,
+		.capacity = m_config.default_particle_capacity,
+		.shader_path = shader("particle_shader.spv"),
 		.event_bus = &m_event_bus,
 	});
 
-	m_fireworks_system = std::make_unique<FireworksSystem>(FireworksSystemCreateInfo{
-		.device = m_ve_device,
-		.descriptor_pool = m_resources.pool(),
-		.global_set_layout = m_resources.globalSetLayout().getDescriptorSetLayout(),
-		.particle_texture = m_resources.particleTexture(),
-		.fire_texture = m_resources.fireTexture(),
-		.smoke_texture = m_resources.smokeTexture(),
-		.color_format = m_ve_renderer.getOffscreenImageFormat(),
-		.sample_count = m_ve_renderer.getSampleCount(),
-		.shader_path = shader("particle_compute.spv"),
-		.event_bus = m_event_bus,
-	});
+	m_particle_emitter_system = std::make_unique<ParticleEmitterSystem>(*m_particle_backend, m_event_bus);
 
 	m_skybox_render_system = std::make_unique<SkyboxRenderSystem>(
 		m_ve_device, m_resource_manager, *m_resources.pool(), m_resources.materialSetLayout(),
@@ -362,13 +352,13 @@ void RenderPipeline::initRenderSystems() {
 	m_event_bus.subscribe<TopologyChangedEvent>([this](const TopologyChangedEvent&) {
 		m_ve_renderer.setSwapChainNeedsRecreation();
 	});
-}
 
-ParticleSystem& RenderPipeline::getParticleSystem() { return *m_particle_system; }
-FireworksSystem& RenderPipeline::getFireworksSystem() { return *m_fireworks_system; }
-SkyboxRenderSystem& RenderPipeline::getSkyboxRenderSystem() { return *m_skybox_render_system; }
-ShadowRenderSystem& RenderPipeline::getShadowRenderSystem() { return *m_shadow_render_system; }
-PbrRenderSystem& RenderPipeline::getPbrRenderSystem() { return *m_pbr_render_system; }
+	m_services = RenderServices{
+		.skybox    = m_skybox_render_system.get(),
+		.shadow    = m_shadow_render_system.get(),
+		.particles = m_particle_backend.get(),
+	};
+}
 
 void RenderPipeline::emitSwapChainRecreatedEvents() {
 	m_event_bus.emitImmediate(PipelineRecreateEvent{
@@ -402,6 +392,7 @@ void RenderPipeline::pushPerFrameSettings() {
 void RenderPipeline::prepareFrame() {
 	pushPerFrameSettings();
 	m_settings_watcher->tick();
+	m_particle_backend->applyPendingResize();
 }
 
 void RenderPipeline::renderFrame(VeScene& scene,
@@ -460,7 +451,7 @@ VeFrameInfo RenderPipeline::buildFrameInfo(VeScene& scene,
 	auto& compute_command_buffer = m_ve_renderer.getCurrentComputeCommandBuffer();
 	auto& compute2_command_buffer = m_ve_renderer.getCurrentCompute2CommandBuffer();
 
-	vk::raii::DescriptorSet& material_descriptor_set = scene.getDescriptorSet();
+	vk::raii::DescriptorSet& material_descriptor_set = m_resources.defaultMaterialDescriptorSet();
 	vk::raii::DescriptorSet& shadow_desc_set = m_shadow_render_system->getShadowDescriptorSet(current_frame);
 
 	int color_space_type = static_cast<int>(m_ve_renderer.getHDRColorMode());
@@ -572,17 +563,27 @@ void RenderPipeline::dispatchCompute(VeFrameInfo& fi) {
 
 	{
 		ScopedDebugLabel label(fi.compute_command_buffer, "Compute Dispatch", {0.2f, 0.6f, 0.9f, 1.0f});
-		TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Compute");
+		TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Compute Dispatch");
 		{
 			ZoneScopedN("Skinning Dispatch");
-			ScopedDebugLabel skin_label(fi.compute_command_buffer, "Skinning", {0.9f, 0.6f, 0.9f, 1.0f});
-			TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Skinning");
+			ScopedDebugLabel skin_label(fi.compute_command_buffer, "Skinning Dispatch", {0.9f, 0.6f, 0.9f, 1.0f});
+			TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Skinning Dispatch");
 			m_skinning_pre_pass->dispatch(fi);
 		}
-		m_fireworks_system->recordComputeCommands(fi);
-		m_particle_system->recordComputeCommands(fi);
-		if (m_cluster_light_system->isEnabled())
+		{
+			ZoneScopedN("Particle Dispatch");
+			ScopedDebugLabel particle_label(fi.compute_command_buffer, "Particle Dispatch", {0.9f, 0.4f, 0.2f, 1.0f});
+			TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Particle Dispatch");
+			if (fi.registry)
+				m_particle_emitter_system->tick(*fi.registry, fi.frame_time);
+			m_particle_backend->recordComputeCommands(fi);
+		}
+		if (m_cluster_light_system->isEnabled()) {
+			ZoneScopedN("Cluster Light Dispatch");
+			ScopedDebugLabel cluster_label(fi.compute_command_buffer, "Cluster Light Dispatch", {0.4f, 0.7f, 0.5f, 1.0f});
+			TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Cluster Light Dispatch");
 			m_cluster_light_system->dispatch(fi, extent);
+		}
 	}
 
 	m_ve_renderer.submitCompute(fi.compute_command_buffer);
@@ -604,6 +605,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 	{
 		ScopedDebugLabel label(command_buffer, "Culling", {0.6f, 0.6f, 0.6f, 1.0f});
+		ZoneScopedN("Culling");
 		TracyVkZone(tracy_gfx, *command_buffer, "Culling");
 		if (fi.gpu_culling_active)
 			profiler.beginGpuTimer(command_buffer, ProfileTimer::CULLING);
@@ -657,8 +659,10 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 	if (any_depth_consumer) {
 		vk::ImageMemoryBarrier2 depth_to_read{
-			.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
-			.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+			.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests
+				| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+			.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+				| vk::AccessFlagBits2::eColorAttachmentWrite,
 			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 			.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
 			.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
@@ -690,6 +694,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 			if (hiz_active) {
 				ScopedDebugLabel label(compute2_cb, "Hi-Z", {0.4f, 0.4f, 0.8f, 1.0f});
+				ZoneScopedN("Hi-Z");
 				TracyVkZone(tracy_compute, *compute2_cb, "Hi-Z (async)");
 				profiler.beginCpuTimer(ProfileTimer::HIZ);
 				profiler.beginGpuTimer(compute2_cb, ProfileTimer::HIZ);
@@ -715,6 +720,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 			if (fi.shadow_mask_active) {
 				ScopedDebugLabel label(gfx2_cb, "Shadow Mask", {0.5f, 0.3f, 0.5f, 1.0f});
+				ZoneScopedN("Shadow Mask");
 				TracyVkZone(tracy_gfx, *gfx2_cb, "Shadow Mask");
 				profiler.beginCpuTimer(ProfileTimer::SHADOW_MASK);
 				profiler.beginGpuTimer(gfx2_cb, ProfileTimer::SHADOW_MASK);
@@ -733,9 +739,11 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 			vk::ImageMemoryBarrier2 depth_to_attach{
 				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 				.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+					| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
 				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
-					| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+					| vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+					| vk::AccessFlagBits2::eColorAttachmentWrite,
 				.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
 				.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -748,6 +756,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		} else {
 			if (fi.shadow_mask_active) {
 				ScopedDebugLabel label(command_buffer, "Shadow Mask", {0.5f, 0.3f, 0.5f, 1.0f});
+				ZoneScopedN("Shadow Mask");
 				TracyVkZone(tracy_gfx, *command_buffer, "Shadow Mask");
 				profiler.beginCpuTimer(ProfileTimer::SHADOW_MASK);
 				profiler.beginGpuTimer(command_buffer, ProfileTimer::SHADOW_MASK);
@@ -771,7 +780,8 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 			if (hiz_active) {
 				ScopedDebugLabel label(command_buffer, "Hi-Z", {0.4f, 0.4f, 0.8f, 1.0f});
-				TracyVkZone(tracy_gfx, *command_buffer, "Hi-Z Build");
+				ZoneScopedN("Hi-Z");
+				TracyVkZone(tracy_gfx, *command_buffer, "Hi-Z");
 				profiler.beginCpuTimer(ProfileTimer::HIZ);
 				profiler.beginGpuTimer(command_buffer, ProfileTimer::HIZ);
 				m_hiz_system->generate(command_buffer, fi.current_frame);
@@ -782,9 +792,11 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 			vk::ImageMemoryBarrier2 depth_to_attach{
 				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 				.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+					| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
 				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
-					| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+					| vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+					| vk::AccessFlagBits2::eColorAttachmentWrite,
 				.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
 				.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -804,6 +816,9 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 	auto& active_cb = fi.cmd();
 
+	if (gtao_active)
+		m_gtao_system->acquireForRead(active_cb, fi.current_frame);
+
 	{
 		ZoneScopedN("Scene Render");
 		TracyVkZone(tracy_gfx, *active_cb, "Scene Render");
@@ -815,7 +830,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		m_skybox_render_system->render(fi);
 		if (!fi.gpu_culling_active)
 			m_pbr_render_system->renderTransparent(fi, bindless_set);
-		m_particle_system->render(fi);
+		m_particle_backend->render(fi);
 		if (m_settings.show_axes)
 			m_axes_render_system->render(fi);
 		if (m_settings.show_aabb_debug)
@@ -823,7 +838,6 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		if (m_settings.show_skinned_points)
 			m_skinned_points_render_system->render(fi, *m_skinning_pre_pass);
 		m_light_system->render(fi);
-		m_fireworks_system->render(fi);
 		m_ve_renderer.endSceneRender(active_cb);
 		profiler.endGpuTimer(active_cb, ProfileTimer::SCENE_RENDER);
 		profiler.endCpuTimer(ProfileTimer::SCENE_RENDER);
@@ -835,6 +849,8 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 	bool outline_active = editor_state.outline_enabled && !fi.selected_entity.isNull();
 	if (outline_active) {
 		ScopedDebugLabel label(active_cb, "Selection Outline", {1.0f, 0.5f, 0.0f, 1.0f});
+		ZoneScopedN("Selection Outline");
+		TracyVkZone(tracy_gfx, *active_cb, "Selection Outline");
 		profiler.beginCpuTimer(ProfileTimer::OUTLINE);
 		profiler.beginGpuTimer(active_cb, ProfileTimer::OUTLINE);
 		m_outline_system->renderMask(fi, *fi.registry, fi.selected_entity);

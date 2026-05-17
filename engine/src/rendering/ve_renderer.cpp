@@ -285,10 +285,16 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer,
 		if (clear) {
 			// Prepare resolved depth for resolve target (only on first clear pass).
 			vk::ImageMemoryBarrier2 prep{
-				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-				.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-				.dstStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
-				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader
+					| vk::PipelineStageFlagBits2::eColorAttachmentOutput
+					| vk::PipelineStageFlagBits2::eLateFragmentTests,
+				.srcAccessMask = vk::AccessFlagBits2::eShaderRead
+					| vk::AccessFlagBits2::eColorAttachmentWrite
+					| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+				.dstStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests
+					| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+					| vk::AccessFlagBits2::eColorAttachmentWrite,
 				.oldLayout = vk::ImageLayout::eUndefined,
 				.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -470,8 +476,10 @@ void VeRenderer::beginWboitRender(vk::raii::CommandBuffer& command_buffer) {
 
 	// Transition resolved depth to read-only, WBOIT images to color attachment
 	vk::ImageMemoryBarrier2 depth_barrier{
-		.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
-		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+		.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests
+			| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+			| vk::AccessFlagBits2::eColorAttachmentWrite,
 		.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
 		.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead,
 		.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,

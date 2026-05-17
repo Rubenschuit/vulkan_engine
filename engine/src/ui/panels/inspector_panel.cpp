@@ -477,6 +477,18 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 			renderCamera(*registry->getComponent<CameraComponent>(entity));
 	}
 
+	// Particle Emitter
+	if (registry->hasComponent<ParticleEmitterComponent>(entity)) {
+		bool open = ImGui::CollapsingHeader("Particle Emitter", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
+		ImGui::PushID("remove_emitter");
+		if (ImGui::SmallButton("X"))
+			registry->queueComponentRemoval<ParticleEmitterComponent>(entity);
+		ImGui::PopID();
+		if (open && registry->hasComponent<ParticleEmitterComponent>(entity))
+			renderParticleEmitter(*registry->getComponent<ParticleEmitterComponent>(entity));
+	}
+
 	// Add Component
 	ImGui::Spacing();
 	ImGui::Separator();
@@ -506,6 +518,10 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		if (!registry->hasComponent<CameraComponent>(entity))
 			if (ImGui::MenuItem("Camera"))
 				registry->addComponent<CameraComponent>(entity);
+
+		if (!registry->hasComponent<ParticleEmitterComponent>(entity))
+			if (ImGui::MenuItem("Particle Emitter"))
+				registry->addComponent<ParticleEmitterComponent>(entity);
 
 		if (!registry->hasComponent<MeshComponent>(entity)) {
 			ImGui::BeginDisabled(true);
@@ -1117,6 +1133,158 @@ void InspectorPanel::renderCamera(CameraComponent& camera) {
 		if (ImGui::DragInt("##Priority", &priority, 1.0f, -1000, 1000))
 			camera.setPriority(priority);
 	}, [&]() { camera.setPriority(0); });
+}
+
+void InspectorPanel::renderParticleEmitter(ParticleEmitterComponent& emitter) {
+	EmitterParams& p = emitter.params;
+	constexpr float label_w = 110.0f;
+
+	bool active = emitter.isActive();
+	if (ImGui::Checkbox("Active##ParticleEmitter", &active))
+		emitter.setActive(active);
+
+	if (ImGui::TreeNodeEx("Emission", ImGuiTreeNodeFlags_DefaultOpen)) {
+		labeledWidget(label_w, "Rate (p/s)", [&]() {
+			ImGui::DragFloat("##Rate", &emitter.rate, 1.0f, 0.0f, 10000.0f, "%.1f",
+				ImGuiSliderFlags_AlwaysClamp);
+		}, [&]() { emitter.rate = 0.0f; });
+
+		int bc = static_cast<int>(emitter.burst_count);
+		labeledWidget(label_w, "Burst size", [&]() {
+			if (ImGui::DragInt("##BurstCount", &bc, 1.0f, 0, 10000, "%d", ImGuiSliderFlags_AlwaysClamp))
+				emitter.burst_count = static_cast<uint32_t>(std::max(0, bc));
+		}, [&]() { emitter.burst_count = 0u; });
+
+		labeledWidget(label_w, "Burst interval", [&]() {
+			ImGui::DragFloat("##BurstPeriod", &emitter.burst_period, 0.01f, 0.0f, 60.0f, "%.2f s",
+				ImGuiSliderFlags_AlwaysClamp);
+		}, [&]() { emitter.burst_period = 0.0f; });
+
+		if (emitter.burst_count == 0u || emitter.burst_period <= 0.0f)
+			ImGui::TextDisabled("Bursts disabled (set size and interval > 0).");
+		else
+			ImGui::TextDisabled("Fires %u particle%s every %.2fs.",
+				emitter.burst_count, emitter.burst_count == 1u ? "" : "s", emitter.burst_period);
+		ImGui::TreePop();
+	}
+
+	if (ImGui::TreeNodeEx("Particle", ImGuiTreeNodeFlags_DefaultOpen)) {
+		labeledWidget(label_w, "Size", [&]() {
+			ImGui::DragFloat("##Size", &emitter.scale, 0.01f, 0.0f, 1000.0f, "%.3f",
+				ImGuiSliderFlags_AlwaysClamp);
+		}, [&]() { emitter.scale = 1.0f; });
+
+		labeledWidget(label_w, "Color start", [&]() {
+			ImGui::ColorEdit4("##ColorStart", &p.color_start.r);
+		}, [&]() { p.color_start = glm::vec4(1.0f); });
+
+		labeledWidget(label_w, "Color end", [&]() {
+			ImGui::ColorEdit4("##ColorEnd", &p.color_end.r);
+		}, [&]() { p.color_end = glm::vec4(1.0f); });
+
+		labeledWidget(label_w, "Brightness", [&]() {
+			ImGui::DragFloat("##Brightness", &p.brightness, 0.05f, 0.0f, 100.0f, "%.2fx",
+				ImGuiSliderFlags_AlwaysClamp);
+		}, [&]() { p.brightness = 1.0f; });
+
+		ImGui::TextDisabled("Lerps start (life=max) -> end (life=0); brightness scales rgb.");
+		ImGui::TreePop();
+	}
+
+	if (ImGui::TreeNodeEx("Lifetime", ImGuiTreeNodeFlags_DefaultOpen)) {
+		labeledWidget(label_w, "Life range (s)", [&]() {
+			ImGui::DragFloatRange2("##LifeRange", &p.min_life, &p.max_life, 0.1f, 0.01f, 1000.0f,
+				"%.2f", nullptr, ImGuiSliderFlags_AlwaysClamp);
+		});
+		labeledWidget(label_w, "Velocity mean", [&]() {
+			ImGui::DragFloat("##VelMean", &p.mean, 0.1f, -100.0f, 100.0f, "%.2f",
+				ImGuiSliderFlags_AlwaysClamp);
+		}, [&]() { p.mean = 0.0f; });
+		labeledWidget(label_w, "Velocity stddev", [&]() {
+			ImGui::DragFloat("##VelStddev", &p.stddev, 0.1f, 0.0f, 100.0f, "%.2f",
+				ImGuiSliderFlags_AlwaysClamp);
+		}, [&]() { p.stddev = 5.0f; });
+		ImGui::TreePop();
+	}
+
+	if (ImGui::TreeNodeEx("Forces", ImGuiTreeNodeFlags_DefaultOpen)) {
+		labeledWidget(label_w, "Gravity", [&]() {
+			ImGui::DragFloat("##Gravity", &p.gravity, 0.1f, -100.0f, 100.0f, "%.2f",
+				ImGuiSliderFlags_AlwaysClamp);
+		}, [&]() { p.gravity = 9.81f; });
+		labeledWidget(label_w, "Drag", [&]() {
+			ImGui::DragFloat("##Drag", &p.drag, 0.01f, 0.0f, 10.0f, "%.3f",
+				ImGuiSliderFlags_AlwaysClamp);
+		}, [&]() { p.drag = 0.0f; });
+		labeledWidget(label_w, "Central", [&]() {
+			ImGui::DragFloat("##Central", &p.central_attractor, 0.1f, -100.0f, 100.0f, "%.2f",
+				ImGuiSliderFlags_AlwaysClamp);
+		}, [&]() { p.central_attractor = 0.0f; });
+		labeledWidget(label_w, "Tangential", [&]() {
+			ImGui::DragFloat("##Tangential", &p.tangential_strength, 0.1f, -100.0f, 100.0f, "%.2f",
+				ImGuiSliderFlags_AlwaysClamp);
+		}, [&]() { p.tangential_strength = 0.0f; });
+
+		bool floor_enabled = p.floor_z > FLOOR_DISABLED_THRESHOLD;
+		labeledWidget(label_w, "Floor Z", [&]() {
+			ImGui::PushID("FloorEnable");
+			if (ImGui::Checkbox("##floor_en", &floor_enabled))
+				p.floor_z = floor_enabled ? 0.0f : FLOOR_DISABLED;
+			ImGui::PopID();
+			ImGui::SameLine();
+			if (floor_enabled) {
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				ImGui::DragFloat("##FloorZ", &p.floor_z, 0.1f, -1000.0f, 1000.0f, "%.2f",
+					ImGuiSliderFlags_AlwaysClamp);
+			} else {
+				ImGui::TextDisabled("(disabled)");
+			}
+		});
+
+		labeledWidget(label_w, "Wind dir", [&]() {
+			if (ImGui::DragFloat3("##WindDir", &p.wind.x, 0.05f, -1.0f, 1.0f, "%.2f")) {
+				float len = glm::length(glm::vec3(p.wind));
+				if (len > 1e-4f) {
+					glm::vec3 n = glm::vec3(p.wind) / len;
+					p.wind.x = n.x; p.wind.y = n.y; p.wind.z = n.z;
+				}
+			}
+		});
+		labeledWidget(label_w, "Wind strength", [&]() {
+			ImGui::DragFloat("##WindStr", &p.wind.w, 0.1f, 0.0f, 100.0f, "%.2f",
+				ImGuiSliderFlags_AlwaysClamp);
+		}, [&]() { p.wind.w = 0.0f; });
+		ImGui::TreePop();
+	}
+
+	if (ImGui::TreeNodeEx("Atlas (sprite sheet)")) {
+		if (emitter.texture.isValid() && emitter.texture.get()) {
+			if (ImGui::BeginTable("##EmitterTex", 3, ImGuiTableFlags_SizingFixedFit)) {
+				ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+				ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthFixed, 52.0f);
+				ImGui::TableSetupColumn("Info", ImGuiTableColumnFlags_WidthStretch);
+				renderTextureSlot("Sprite", emitter.texture.getId(), emitter.texture.get());
+				ImGui::EndTable();
+			}
+		} else {
+			ImGui::TextDisabled("No atlas bound (procedural round mask).");
+		}
+
+		ImGui::TextDisabled("Bindless slot: %u", p.atlas_index);
+
+		int rows = static_cast<int>(p.row_count);
+		labeledWidget(label_w, "Rows", [&]() {
+			if (ImGui::DragInt("##Rows", &rows, 1.0f, 1, 32, "%d", ImGuiSliderFlags_AlwaysClamp))
+				p.row_count = static_cast<uint32_t>(std::max(1, rows));
+		}, [&]() { p.row_count = 8u; });
+
+		bool one_shot = p.atlas_one_shot != 0u;
+		labeledWidget(label_w, "One-shot", [&]() {
+			if (ImGui::Checkbox("##OneShot", &one_shot))
+				p.atlas_one_shot = one_shot ? 1u : 0u;
+		});
+		ImGui::TreePop();
+	}
 }
 
 } // namespace ve

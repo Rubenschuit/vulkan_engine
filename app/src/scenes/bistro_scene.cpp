@@ -14,20 +14,7 @@ BistroScene::BistroScene(const SceneContext& ctx, std::unique_ptr<VeModel> model
 	model->addToScene(m_registry, bistro_translation, {0.0f, 0.0f, 0.0f}, {2.0f, 2.0f, 2.0f});
 	m_bistro_model = std::move(model);
 
-	// Store default material for getDescriptorSet() fallback
-	for (auto& mc : m_registry.meshes()) {
-		if (mc.hasMaterial() && mc.getMaterial()->hasDescriptorSet()) {
-			m_default_material_handle = mc.getMaterialHandle();
-			break;
-		}
-	}
-
 	setupScene(bistro_translation);
-}
-
-vk::raii::DescriptorSet& BistroScene::getDescriptorSet() {
-	assert(m_default_material_handle.isValid() && m_default_material_handle.get()->hasDescriptorSet() && "BistroScene requires at least one textured material");
-	return m_default_material_handle.get()->getDescriptorSet();
 }
 
 void BistroScene::loadGameObjects(const AssetPaths& paths) {
@@ -50,14 +37,6 @@ void BistroScene::loadGameObjects(const AssetPaths& paths) {
 		glm::vec3 root_rotation = {0.0f, 0.0f, 0.0f};
 		glm::vec3 root_scale = {2.0f, 2.0f, 2.0f};
 		m_bistro_model->addToScene(m_registry, root_translation, root_rotation, root_scale);
-
-		// Store default material for getDescriptorSet() fallback
-		for (auto& mc : m_registry.meshes()) {
-			if (mc.hasMaterial() && mc.getMaterial()->hasDescriptorSet()) {
-				m_default_material_handle = mc.getMaterialHandle();
-				break;
-			}
-		}
 	}
 
 	setupScene(bistro_translation);

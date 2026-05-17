@@ -2,6 +2,9 @@
 #include "ve_export.hpp"
 #include "ve_config.hpp"
 #include "events/event_bus.hpp"
+#include "rendering/render_services.hpp"
+#include "rendering/render_settings.hpp"
+#include "rendering/frame_stats.hpp"
 
 #define VULKAN_HPP_ENABLE_RAII
 #include <vulkan/vulkan_raii.hpp>
@@ -23,8 +26,6 @@ class VeScene;
 class Registry;
 class CullingBackend;
 struct EngineConfig;
-struct RenderSettings;
-struct FrameStats;
 struct SceneContext;
 struct UniformBufferObject;
 struct CameraView;
@@ -41,8 +42,8 @@ class PbrRenderSystem;
 class AabbDebugRenderSystem;
 class AxesRenderSystem;
 class LightSystem;
-class ParticleSystem;
-class FireworksSystem;
+class ParticleBackend;
+class ParticleEmitterSystem;
 class SkyboxRenderSystem;
 class IblSystem;
 class BloomSystem;
@@ -64,8 +65,6 @@ public:
 	               VeResourceManager& resource_manager,
 	               RenderResources& resources,
 	               EventBus& event_bus,
-	               const RenderSettings& settings,
-	               FrameStats& stats,
 	               const EngineConfig& config);
 	~RenderPipeline();
 
@@ -73,9 +72,6 @@ public:
 	RenderPipeline& operator=(const RenderPipeline&) = delete;
 
 	static constexpr uint32_t INITIAL_INSTANCE_CAPACITY = 16384 * 2;
-
-	bool isParticlesDeclared() const { return m_particles_declared; }
-	bool isFireworksDeclared() const { return m_fireworks_declared; }
 
 	// Apply per-frame UI settings and emit setting-change events.
 	void prepareFrame();
@@ -85,11 +81,12 @@ public:
 	                 float frame_time,
 	                 float total_time);
 
-	ParticleSystem& getParticleSystem();
-	FireworksSystem& getFireworksSystem();
-	SkyboxRenderSystem& getSkyboxRenderSystem();
-	ShadowRenderSystem& getShadowRenderSystem();
-	PbrRenderSystem& getPbrRenderSystem();
+	const RenderServices& services() const { return m_services; }
+
+	RenderSettings& settings() { return m_settings; }
+	const RenderSettings& settings() const { return m_settings; }
+	FrameStats& stats() { return m_stats; }
+	const FrameStats& stats() const { return m_stats; }
 
 private:
 	void initRenderSystems();
@@ -114,8 +111,8 @@ private:
 	VeResourceManager& m_resource_manager;
 	RenderResources& m_resources;
 	EventBus& m_event_bus;
-	const RenderSettings& m_settings;
-	FrameStats& m_stats;
+	RenderSettings m_settings;
+	FrameStats m_stats;
 	const EngineConfig& m_config;
 
 	std::unique_ptr<SceneResourceManager> m_scene_resources;
@@ -134,8 +131,8 @@ private:
 	std::unique_ptr<AabbDebugRenderSystem> m_aabb_debug_render_system;
 	std::unique_ptr<AxesRenderSystem> m_axes_render_system;
 	std::unique_ptr<LightSystem> m_light_system;
-	std::unique_ptr<ParticleSystem> m_particle_system;
-	std::unique_ptr<FireworksSystem> m_fireworks_system;
+	std::unique_ptr<ParticleBackend> m_particle_backend;
+	std::unique_ptr<ParticleEmitterSystem> m_particle_emitter_system;
 	std::unique_ptr<SkyboxRenderSystem> m_skybox_render_system;
 	std::unique_ptr<IblSystem> m_ibl_system;
 	std::unique_ptr<BloomSystem> m_bloom_system;
@@ -154,10 +151,10 @@ private:
 
 	std::unique_ptr<SettingsWatcher> m_settings_watcher;
 
+	RenderServices m_services{};
+
 	glm::mat4 m_prev_projection_view{1.0f};
 
-	bool m_particles_declared = false;
-	bool m_fireworks_declared = false;
 
 	EventSubscriptionId m_scene_loaded_sub = 0;
 	EventSubscriptionId m_swap_chain_recreated_sub = 0;

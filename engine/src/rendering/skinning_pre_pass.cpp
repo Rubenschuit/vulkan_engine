@@ -49,6 +49,7 @@ SkinningPrePass::SkinningPrePass(VeDevice& device, VeDescriptorPool& descriptor_
 	event_bus.subscribe<SceneUnloadedEvent>([this](const SceneUnloadedEvent&) {
 		// Registry's event dispatcher dies with the scene
 		m_instance_outputs.clear();
+		m_graveyard.clear();
 	});
 }
 
@@ -94,11 +95,22 @@ void SkinningPrePass::subscribeToRegistry(Registry& registry) {
 
 void SkinningPrePass::freeEntityOutputs(Entity entity) {
 	const uint64_t hi = static_cast<uint64_t>(entity.id()) << 32;
-	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++)
-		m_instance_outputs.erase(hi | f);
+	const uint64_t release_frame = m_frame_counter + MAX_FRAMES_IN_FLIGHT;
+	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
+		auto it = m_instance_outputs.find(hi | f);
+		if (it == m_instance_outputs.end())
+			continue;
+		m_graveyard.push_back({release_frame, std::move(it->second)});
+		m_instance_outputs.erase(it);
+	}
 }
 
 void SkinningPrePass::updatePalette(Registry& registry, uint32_t frame_index) {
+	// Handle graveyard entries
+	++m_frame_counter;
+	while (!m_graveyard.empty() && m_graveyard.front().release_frame <= m_frame_counter)
+		m_graveyard.pop_front();
+
 	auto& dispatches = m_pending_dispatches[frame_index];
 	dispatches.clear();
 

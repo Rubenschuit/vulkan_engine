@@ -101,7 +101,9 @@ void VeSwapChain::submitComputeWork(vk::CommandBuffer command_buffer) {
 vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* image_index) {
 	vk::PipelineStageFlags wait_stages[2] = {
 		vk::PipelineStageFlagBits::eColorAttachmentOutput,
-		vk::PipelineStageFlagBits::eFragmentShader,
+		vk::PipelineStageFlagBits::eDrawIndirect
+			| vk::PipelineStageFlagBits::eVertexInput
+			| vk::PipelineStageFlagBits::eFragmentShader,
 	};
 
 	uint64_t graphics_wait = m_split_active ? m_compute2_signal_value : m_compute1_signal_value;
@@ -490,11 +492,12 @@ void VeSwapChain::activateSplitTimeline() {
 }
 
 void VeSwapChain::submitGraphicsPhase1(vk::CommandBuffer cb) {
-	// Waits: image_available (binary) + compute1 (timeline)
-	// Signals: graphics1 (timeline), no fence
+	// Waits: image_available (binary) + compute1 (timeline). Signals: graphics1 (timeline).
 	vk::PipelineStageFlags wait_stages[2] = {
 		vk::PipelineStageFlagBits::eColorAttachmentOutput,
-		vk::PipelineStageFlagBits::eFragmentShader,
+		vk::PipelineStageFlagBits::eDrawIndirect
+			| vk::PipelineStageFlagBits::eVertexInput
+			| vk::PipelineStageFlagBits::eFragmentShader,
 	};
 
 	std::array<uint64_t, 2> wait_values{ uint64_t{0}, m_compute1_signal_value };
@@ -557,9 +560,11 @@ void VeSwapChain::submitComputePhase2(vk::CommandBuffer cb) {
 
 vk::Result VeSwapChain::submitGraphicsPhase2AndPresent(
 	vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* image_index) {
-	// Waits: compute2 (timeline) at fragment shader stage
-	// Signals: render_finished (binary), fence
-	vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eFragmentShader;
+	// Waits: compute2 (timeline). Signals: render_finished (binary), fence.
+	vk::PipelineStageFlags wait_stage =
+		vk::PipelineStageFlagBits::eDrawIndirect
+		| vk::PipelineStageFlagBits::eVertexInput
+		| vk::PipelineStageFlagBits::eFragmentShader;
 
 	uint64_t wait_value = m_compute2_signal_value;
 	uint64_t signal_value{0};

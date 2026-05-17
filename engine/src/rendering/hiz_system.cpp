@@ -8,6 +8,7 @@
 #include "utils/ve_log.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
+#include "events/render_events.hpp"
 
 #include <cmath>
 
@@ -235,12 +236,16 @@ void HizSystem::createDescriptorSets(VeDescriptorPool& pool) {
 				};
 			}
 
-			// Output mip range for this pass
+			// Output mip range for this pass. Bind only the slots the shader actually writes
+			// (gated by mip_count push constant); leave the rest as the dummy image.
 			uint32_t first_out = (pass == 0) ? 0 : (pass == 1) ? 6 : 11;
+			uint32_t remaining = m_mip_levels - first_out;
+			uint32_t pass_mip_count = (pass == 0) ? std::min(MIPS_PASS1, remaining)
+			                                      : std::min(MIPS_TAIL, remaining);
 			vk::DescriptorImageInfo out_infos[6];
 			for (uint32_t i = 0; i < 6; i++) {
 				uint32_t mip = first_out + i;
-				if (mip < m_mip_levels)
+				if (i < pass_mip_count && mip < m_mip_levels)
 					out_infos[i] = {
 						.imageView = *m_hiz_mip_views[f][mip],
 						.imageLayout = vk::ImageLayout::eGeneral,
@@ -269,11 +274,11 @@ void HizSystem::generate(vk::raii::CommandBuffer& cmd, uint32_t frame_index) {
 	vk::Image hiz_image = m_hiz_images[frame_index]->getImage();
 
 	// Transition all Hi-Z mips to eGeneral for storage writes
-	// srcStage=eNone: cross-queue sync handled by timeline semaphore
 	{
 		vk::ImageMemoryBarrier2 barrier{
-			.srcStageMask = vk::PipelineStageFlagBits2::eNone,
-			.srcAccessMask = vk::AccessFlagBits2::eNone,
+			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite
+				| vk::AccessFlagBits2::eShaderSampledRead,
 			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 			.dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
 			.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
@@ -290,22 +295,16 @@ void HizSystem::generate(vk::raii::CommandBuffer& cmd, uint32_t frame_index) {
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
 
 	for (uint32_t pass = 0; pass < m_pass_count; pass++) {
-		// Between-pass barrier: sync storage writes on source mip before reading
 		if (pass > 0) {
-			uint32_t src_mip = (pass == 1) ? 5 : 10;
-			vk::ImageMemoryBarrier2 sync{
+			vk::MemoryBarrier2 sync{
 				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 				.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
 				.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-				.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
-				.oldLayout = vk::ImageLayout::eGeneral,
-				.newLayout = vk::ImageLayout::eGeneral,
-				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.image = hiz_image,
-				.subresourceRange = {vk::ImageAspectFlagBits::eColor, src_mip, 1, 0, 1},
+				.dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead
+					| vk::AccessFlagBits2::eShaderStorageRead
+					| vk::AccessFlagBits2::eShaderStorageWrite,
 			};
-			vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &sync};
+			vk::DependencyInfo dep{.memoryBarrierCount = 1, .pMemoryBarriers = &sync};
 			cmd.pipelineBarrier2(dep);
 		}
 
@@ -352,13 +351,12 @@ void HizSystem::generate(vk::raii::CommandBuffer& cmd, uint32_t frame_index) {
 	}
 
 	// Final barrier: all Hi-Z mips eGeneral -> eShaderReadOnlyOptimal
-	// dstStage=eNone: GPU culling reads on graphics queue next frame, semaphore handles sync
 	{
 		vk::ImageMemoryBarrier2 barrier{
 			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 			.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-			.dstStageMask = vk::PipelineStageFlagBits2::eNone,
-			.dstAccessMask = vk::AccessFlagBits2::eNone,
+			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
 			.oldLayout = vk::ImageLayout::eGeneral,
 			.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,

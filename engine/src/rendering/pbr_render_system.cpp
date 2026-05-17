@@ -15,6 +15,7 @@
 #include "utils/ve_frustum.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
+#include "events/render_events.hpp"
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -618,7 +619,7 @@ void PbrRenderSystem::renderSkinned(VeFrameInfo& frame_info, const SkinningPrePa
 	bool mask = frame_info.shadow_mask_active;
 	auto& pipeline = mask ? m_pipelines_mask[mode] : m_pipelines[mode];
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
-	bindPbrResources(frame_info, bindless_set);
+	bindPbrResources(frame_info, bindless_set, frame_info.cpu_global_descriptor_set);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
 	cmd.setDepthWriteEnable(VK_TRUE);
 
@@ -995,6 +996,8 @@ void PbrRenderSystem::recreateWboit(const vk::raii::ImageView& accum_view, const
 }
 
 void PbrRenderSystem::recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+	m_color_format = color_format;
+	m_sample_count = sample_count;
 	for (auto& p : m_pipelines)
 		p.reset();
 	for (auto& p : m_pipelines_mask)

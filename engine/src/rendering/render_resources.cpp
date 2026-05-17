@@ -1,7 +1,6 @@
 #include "pch.hpp"
 #include "rendering/render_resources.hpp"
 
-#include "application/ve_engine_config.hpp"
 #include "resources/ve_material_properties.hpp"
 #include "scene/ve_scene.hpp"
 #include "utils/ve_log.hpp"
@@ -15,11 +14,9 @@
 namespace ve {
 
 RenderResources::RenderResources(VeDevice& device,
-                                 VeResourceManager& resource_manager,
-                                 const EngineConfig& config)
+                                 VeResourceManager& resource_manager)
 	: m_ve_device(device),
-	  m_resource_manager(resource_manager),
-	  m_config(config) {
+	  m_resource_manager(resource_manager) {
 	createDescriptors();
 }
 
@@ -44,14 +41,15 @@ void RenderResources::createDescriptors() {
 		.build();
 
 	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
-		.setMaxSets(1024)
+		.setMaxSets(8192)
 		.addPoolSize(vk::DescriptorType::eUniformBuffer, 1024)
 		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 4096)
 		.addPoolSize(vk::DescriptorType::eSampler, 256)
 		.addPoolSize(vk::DescriptorType::eSampledImage, 256)
-		.addPoolSize(vk::DescriptorType::eStorageBuffer, 1024)
+		.addPoolSize(vk::DescriptorType::eStorageBuffer, 8192)
 		.addPoolSize(vk::DescriptorType::eStorageImage, 128)
-		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
+		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet
+			| vk::DescriptorPoolCreateFlagBits::eUpdateAfterBind)
 		.buildShared();
 
 	m_default_material_ubo = std::make_unique<VeBuffer>(m_ve_device, MATERIAL_UBO_SIZE, 1,
@@ -65,9 +63,7 @@ void RenderResources::createDescriptors() {
 	m_default_material_ubo->unmap();
 	auto default_material_ubo_info = m_default_material_ubo->getDescriptorInfo();
 
-	m_particle_texture_handle = m_resource_manager.load<VeTexture>(m_config.particle_assets.glow.lexically_normal().generic_string());
-	m_fire_texture_handle = m_resource_manager.load<VeTexture>(m_config.particle_assets.fire.lexically_normal().generic_string());
-	m_smoke_texture_handle = m_resource_manager.load<VeTexture>(m_config.particle_assets.smoke.lexically_normal().generic_string());
+	m_default_particle_texture_handle = m_resource_manager.load<VeTexture>("default_particle");
 
 	m_default_albedo_handle = m_resource_manager.load<VeTexture>("default_albedo");
 	m_default_normal_handle = m_resource_manager.load<VeTexture>("default_normal");
@@ -91,7 +87,7 @@ void RenderResources::createDescriptors() {
 }
 
 SceneContext RenderResources::makeSceneContext() {
-	return {m_ve_device, m_resource_manager, *m_global_pool, *m_material_set_layout, &m_default_material_descriptor_set};
+	return {m_ve_device, m_resource_manager, *m_global_pool, *m_material_set_layout};
 }
 
 } // namespace ve

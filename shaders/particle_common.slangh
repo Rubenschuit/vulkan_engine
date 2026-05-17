@@ -1,0 +1,278 @@
+// Shared compute-side data structures, SSBO bindings, and helpers for the
+// particle system. Included by all three compute kernels so they agree on the
+// descriptor layout and on particle recycle semantics.
+
+#ifndef PARTICLE_COMMON_SLANGH
+#define PARTICLE_COMMON_SLANGH
+
+// Particle-local bindless atlas array. Slot 0..MAX-1 = engine/app textures.
+// The sentinel means "skip texture sample and use the procedural
+// round-mask path".
+static const uint ROUND_MASK_SENTINEL = 0xFFFFFFFEu;
+
+// When a slot is on the free list, Particle.velocity.w is stamped with
+// FREE_LIST_SENTINEL so the alive-update path can skip it cheaply.
+static const float FREE_LIST_SENTINEL = -1.0e9f;
+
+static const uint SPAWN_DIST_GAUSSIAN       = 0u;
+static const uint SPAWN_DIST_UNIFORM_SPHERE = 1u;
+
+// Indices into slot_pool_counters.
+static const uint FREE_LIST_TOP_INDEX       = 0u;
+static const uint RECYCLE_QUEUE_COUNT_INDEX = 1u;
+
+// ---------------------------------------------------------------------------
+// Structs
+// ---------------------------------------------------------------------------
+
+struct SpawnEvent {
+	float4 position_scale; // xyz = position, w = scale (<=0 -> emitter default)
+	float4 velocity_life;  // xyz = base velocity, w = life (<=0 -> randomize from emitter)
+	float4 color;          // rgba
+	uint count;
+	uint emitter_id;
+	uint _pad0;
+	uint _pad1;
+};
+
+// Per-emitter parameters. Indexed by emitter_id. Layout must match C++ ve::EmitterParams.
+struct EmitterParams {
+	float4 origin;
+	float4 wind;
+	float4 color_start;
+	float4 color_end;
+	float gravity;
+	float drag;
+	float central_attractor;
+	float tangential_strength;
+	float floor_z;
+	float min_life;
+	float max_life;
+	float mean;
+	float stddev;
+	int on_tick_emitter_id;
+	int on_tick2_emitter_id;
+	float tick_probability;
+	float tick2_probability;
+	float trail_interval;
+	float spawn_scale;
+	float spawn_velocity_scale;
+	float spawn_life_fraction;
+	uint row_count;
+	uint atlas_one_shot;
+	uint atlas_index;
+	uint spawn_distribution;
+	float brightness;
+	float scale_end; // sentinel: < 0 disables the scale-over-life lerp
+	uint _pad0;
+};
+
+struct Params {
+	float4 frustum_planes[6];
+	float delta_time;
+	float total_time;
+	uint32_t capacity;
+	uint32_t reset;
+	uint32_t seed;
+	uint32_t spawn_event_count;
+	uint32_t frame_id;
+	uint32_t _pad0;
+};
+
+struct Particle {
+	float4 position;        // w = current scale
+	float4 velocity;        // w = life remaining (or FREE_LIST_SENTINEL when slot is on the free list)
+	float4 color;
+	float4 tex_coords;
+
+	uint  atlas_index;
+	float max_life;
+	float blend;
+	uint  emitter_id;
+
+	float trail_accumulator;
+	float spawn_scale;
+	float _pad0;
+	float _pad1;
+};
+
+struct RenderParticle {
+	float4 position;
+	float4 color;
+	float4 tex_coords;
+	uint   atlas_index;
+	float  blend;
+	uint   _pad0;
+	uint   _pad1;
+};
+
+struct DrawIndirectCommand {
+	uint vertexCount;
+	uint instanceCount;
+	uint firstVertex;
+	uint firstInstance;
+};
+
+// ---------------------------------------------------------------------------
+// Descriptor bindings (set 0). Shared by all compute kernels.
+// ---------------------------------------------------------------------------
+
+[vk::binding(1, 0)]
+RWStructuredBuffer<Particle> particles_prev;
+[vk::binding(2, 0)]
+RWStructuredBuffer<Particle> particles_out;
+[vk::binding(3, 0)]
+ConstantBuffer<Params> params;
+[vk::binding(4, 0)]
+StructuredBuffer<SpawnEvent> spawn_events;
+[vk::binding(5, 0)]
+RWStructuredBuffer<DrawIndirectCommand> indirect_command;
+[vk::binding(6, 0)]
+RWStructuredBuffer<RenderParticle> particles_render;
+
+// Allocator metadata for the slot pool:
+//   [FREE_LIST_TOP_INDEX]       LIFO stack pointer
+//   [RECYCLE_QUEUE_COUNT_INDEX] transient fill count
+[vk::binding(7, 0)]
+RWStructuredBuffer<uint> slot_pool_counters;
+[vk::binding(8, 0)]
+RWStructuredBuffer<uint> free_slot_stack;
+
+// Recycle queue: main update appends slot ids of particles that died this
+// frame; a separate recycle kernel pushes them onto free_slot_stack after a
+// dispatch barrier, so pop and push on free_slot_stack are never concurrent.
+[vk::binding(9, 0)]
+RWStructuredBuffer<uint> recycle_queue;
+[vk::binding(10, 0)]
+StructuredBuffer<EmitterParams> emitter_params;
+
+// ---------------------------------------------------------------------------
+// RNG
+// ---------------------------------------------------------------------------
+
+uint wang_hash(uint seed) {
+	seed = (seed ^ 61u) ^ (seed >> 16);
+	seed *= 9u;
+	seed = seed ^ (seed >> 4);
+	seed *= 0x27d4eb2du;
+	seed = seed ^ (seed >> 15);
+	return seed;
+}
+
+float rand01(inout uint state) {
+	state = wang_hash(state);
+	return (float)(state & 0x00FFFFFFu) / 16777216.0f;
+}
+
+float2 rand_normal2(inout uint state, uint emitter_id) {
+	float mean = emitter_params[emitter_id].mean;
+	float stddev = emitter_params[emitter_id].stddev;
+	float u1 = max(1e-6f, rand01(state));
+	float u2 = rand01(state);
+	float r = sqrt(-2.0f * log(u1));
+	float theta = 6.28318530718f * u2;
+	return float2(r * cos(theta), r * sin(theta)) * stddev + mean;
+}
+
+// Two unit-variance, zero-mean gaussian samples
+float2 rand_unit_normal2(inout uint state) {
+	float u1 = max(1e-6f, rand01(state));
+	float u2 = rand01(state);
+	float r = sqrt(-2.0f * log(u1));
+	float theta = 6.28318530718f * u2;
+	return float2(r * cos(theta), r * sin(theta));
+}
+
+// ---------------------------------------------------------------------------
+// Free-list helpers
+// ---------------------------------------------------------------------------
+
+bool inFreeList(Particle p) { return p.velocity.w < -1.0e8f; }
+
+Particle makeFreeSlot() {
+	Particle p;
+	p.position = float4(0.0f);
+	p.velocity = float4(0.0f, 0.0f, 0.0f, FREE_LIST_SENTINEL);
+	p.color = float4(0.0f);
+	p.tex_coords = float4(0.0f);
+	p.atlas_index = 0u;
+	p.max_life = 0.0f;
+	p.blend = 0.0f;
+	p.emitter_id = 0u;
+	p.trail_accumulator = 0.0f;
+	p.spawn_scale = 0.0f;
+	p._pad0 = 0.0f;
+	p._pad1 = 0.0f;
+	return p;
+}
+
+// Push a freed slot onto the free list. Only safe when no concurrent
+// popFreeIndex is running in the same dispatch
+void pushFreeIndex(uint particle_index) {
+	uint slot;
+	InterlockedAdd(slot_pool_counters[FREE_LIST_TOP_INDEX], 1u, slot);
+	free_slot_stack[slot] = particle_index;
+}
+
+// Stage a freed slot in the per-frame recycle queue. The recycle kernel
+// forwards these onto free_slot_stack after a dispatch barrier.
+void addToRecycleQueue(uint particle_index) {
+	uint slot;
+	InterlockedAdd(slot_pool_counters[RECYCLE_QUEUE_COUNT_INDEX], 1u, slot);
+	recycle_queue[slot] = particle_index;
+}
+
+// CAS-loop pop. The counter only decrements when a slot actually exists, so
+// contention can't advance the stack pointer past empty. Returns false (and
+// 0xFFFFFFFF) when the free list is drained; the caller drops the spawn.
+bool popFreeIndex(out uint particle_index) {
+	uint current = slot_pool_counters[FREE_LIST_TOP_INDEX];
+	while (current > 0u) {
+		uint actual;
+		InterlockedCompareExchange(slot_pool_counters[FREE_LIST_TOP_INDEX], current, current - 1u, actual);
+		if (actual == current) {
+			particle_index = free_slot_stack[current - 1u];
+			return true;
+		}
+		current = actual;
+	}
+	particle_index = 0xFFFFFFFFu;
+	return false;
+}
+
+bool isVisible(float3 pos, float radius) {
+	for (int i = 0; i < 6; ++i) {
+		if (dot(params.frustum_planes[i].xyz, pos) + params.frustum_planes[i].w < -radius)
+			return false;
+	}
+	return true;
+}
+
+void appendToRenderBuffer(Particle p) {
+	const float MIN_VISIBLE_SIZE = 0.001f;
+	const float MIN_VISIBLE_ALPHA = 0.001f;
+	if (p.velocity.w < 0.0f || p.position.w < MIN_VISIBLE_SIZE || p.color.a < MIN_VISIBLE_ALPHA)
+		return;
+
+	const float CULL_RADIUS_MULTIPLIER = 2.0f;
+	if (!isVisible(p.position.xyz, p.position.w * CULL_RADIUS_MULTIPLIER))
+		return;
+
+	uint index;
+	InterlockedAdd(indirect_command[0].instanceCount, 1, index);
+	if (index >= params.capacity) {
+		InterlockedAdd(indirect_command[0].instanceCount, asuint(-1)); // undo
+		return;
+	}
+	RenderParticle rp;
+	rp.position = p.position;
+	rp.color = p.color;
+	rp.tex_coords = p.tex_coords;
+	rp.atlas_index = p.atlas_index;
+	rp.blend = p.blend;
+	rp._pad0 = 0u;
+	rp._pad1 = 0u;
+	particles_render[index] = rp;
+}
+
+#endif // PARTICLE_COMMON_SLANGH

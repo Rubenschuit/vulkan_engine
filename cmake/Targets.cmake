@@ -60,6 +60,10 @@ if(VE_ENABLE_TRACY)
 	target_compile_definitions(VEngineLib PUBLIC TRACY_ENABLE TRACY_VK_USE_SYMBOL_TABLE)
 endif()
 
+if(VE_DISABLE_VK_VALIDATION)
+	target_compile_definitions(VEngineLib PUBLIC VE_DISABLE_VK_VALIDATION)
+endif()
+
 target_link_libraries(${PROJECT_NAME} PRIVATE VEngine::Lib)
 
 # For MinGW, prevent exception symbol conflicts when linking against DLL

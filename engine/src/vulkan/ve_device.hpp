@@ -51,7 +51,7 @@ struct QueueFamilyIndices {
 class VENGINE_API VeDevice {
 public:
 
-	#ifdef NDEBUG
+	#if defined(NDEBUG) || defined(VE_DISABLE_VK_VALIDATION)
 		const bool enable_validation_layers = false;
 	#else
 		const bool enable_validation_layers = true;

@@ -17,6 +17,8 @@ struct AssetPaths {
 	// textures
 	std::filesystem::path mots_texture;
 	std::filesystem::path grid_texture;
+	std::filesystem::path fire_texture;
+	std::filesystem::path smoke_texture;
 
 	std::filesystem::path sponza_model() const { return project_root / "models" / "sponza" / "glTF" / "Sponza.gltf"; }
 	std::filesystem::path bistro_model() const { return project_root / "models" / "bistro-master" / "bistro.gltf"; }
@@ -30,7 +32,9 @@ struct AssetPaths {
 		  smooth_vase_model(root / "models" / "smooth_vase.gltf"),
 		  viking_room_model(root / "models" / "viking_room.gltf"),
 		  mots_texture(root / "textures" / "mots.png"),
-		  grid_texture(root / "textures" / "grid.ktx") {}
+		  grid_texture(root / "textures" / "grid.ktx"),
+		  fire_texture(root / "textures" / "fire_ball.ktx"),
+		  smoke_texture(root / "textures" / "smoke_atlas.ktx2") {}
 };
 
 } // namespace ve

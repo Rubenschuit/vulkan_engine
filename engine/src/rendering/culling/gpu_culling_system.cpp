@@ -9,6 +9,7 @@
 #include "utils/ve_log.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
+#include "events/render_events.hpp"
 
 namespace ve {
 
@@ -589,6 +590,19 @@ void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
 	if (object_count == 0)
 		return;
 
+	vk::MemoryBarrier2 entry_barrier{
+		.srcStageMask = vk::PipelineStageFlagBits2::eDrawIndirect
+			| vk::PipelineStageFlagBits2::eVertexShader
+			| vk::PipelineStageFlagBits2::eComputeShader,
+		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+		.dstStageMask = vk::PipelineStageFlagBits2::eTransfer
+			| vk::PipelineStageFlagBits2::eComputeShader,
+		.dstAccessMask = vk::AccessFlagBits2::eTransferWrite
+			| vk::AccessFlagBits2::eShaderStorageWrite,
+	};
+	vk::DependencyInfo entry_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &entry_barrier};
+	cmd.pipelineBarrier2(entry_dep);
+
 	FrustumPlane cpu_planes[6];
 	extractFrustumPlanes(light_view_proj, cpu_planes);
 
@@ -629,7 +643,9 @@ void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
 		.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
 		.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
 		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite,
+		.dstAccessMask = vk::AccessFlagBits2::eUniformRead
+			| vk::AccessFlagBits2::eShaderStorageRead
+			| vk::AccessFlagBits2::eShaderStorageWrite,
 	};
 	vk::DependencyInfo clear_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &clear_barrier};
 	cmd.pipelineBarrier2(clear_dep);

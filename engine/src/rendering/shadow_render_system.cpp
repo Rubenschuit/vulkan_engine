@@ -19,6 +19,7 @@
 #include "utils/ve_frustum.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
+#include "events/render_events.hpp"
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -613,7 +614,8 @@ void ShadowRenderSystem::transitionAtlasForRendering(
 			.sType = vk::StructureType::eImageMemoryBarrier2,
 			.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
 			.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-			.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+			.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+				| vk::PipelineStageFlagBits2::eLateFragmentTests,
 			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
 				| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
 			.oldLayout = vk::ImageLayout::eTransferDstOptimal,
@@ -630,8 +632,10 @@ void ShadowRenderSystem::transitionAtlasForRendering(
 			.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader
 				| vk::PipelineStageFlagBits2::eComputeShader,
 			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-			.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
-			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+			.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+				| vk::PipelineStageFlagBits2::eLateFragmentTests,
+			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+				| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
 			.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
 			.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -1202,7 +1206,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 							| vk::PipelineStageFlagBits2::eLateFragmentTests,
 						.srcAccessMask = vk::AccessFlagBits2::eTransferWrite
 							| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-						.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+						.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+							| vk::PipelineStageFlagBits2::eLateFragmentTests,
 						.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
 							| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
 					};
@@ -1309,7 +1314,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 						.sType = vk::StructureType::eImageMemoryBarrier2,
 						.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
 						.srcAccessMask = vk::AccessFlagBits2::eTransferRead,
-						.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+						.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+							| vk::PipelineStageFlagBits2::eLateFragmentTests,
 						.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
 							| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
 						.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
@@ -1346,7 +1352,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 					.sType = vk::StructureType::eImageMemoryBarrier2,
 					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
 					.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-					.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+					.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+						| vk::PipelineStageFlagBits2::eLateFragmentTests,
 					.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
 						| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
 					.oldLayout = vk::ImageLayout::eTransferDstOptimal,
@@ -1451,6 +1458,73 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 			);
 			cmd.drawIndexed(sd.mesh->getIndexCount(), 1, 0, 0, 0);
 		}
+	}
+}
+
+void ShadowRenderSystem::populateSkinnedShadowDrawablesGpuPath(VeFrameInfo& frame_info) {
+	m_skinned_shadow_drawables.clear();
+	if (!frame_info.registry)
+		return;
+	auto& registry = *frame_info.registry;
+	uint32_t frame = frame_info.current_frame;
+	uint32_t csm_count = frame_info.csm_data.active_cascade_count;
+
+	FrustumPlane skin_cull_planes[6];
+	bool have_cull = false;
+	if (csm_count > 0) {
+		glm::mat4 outer_vp = m_light_projs[frame][csm_count - 1]
+		                   * m_light_views[frame][csm_count - 1];
+		extractFrustumPlanes(outer_vp, skin_cull_planes);
+		have_cull = true;
+	}
+
+	auto* shadow_instance_data = static_cast<InstanceData*>(
+		m_shadow_instance_buffers[frame]->getMappedMemory());
+	uint32_t shadow_instance_count = 0;
+
+	for (auto [entity, mc, sc] : registry.view<MeshComponent, SkinComponent>()) {
+		if (!mc.has_shadow || !mc.hasMesh() || !mc.hasMaterial())
+			continue;
+		if (have_cull && !isAABBInFrustum(mc.getWorldAABB(), skin_cull_planes))
+			continue;
+		if (shadow_instance_count >= m_shadow_instance_capacity) {
+			VE_LOGW("Shadow instance buffer full (skinned, GPU path)");
+			break;
+		}
+		uint32_t idx = shadow_instance_count++;
+		shadow_instance_data[idx].transform = registry.getWorldTransform(entity);
+		shadow_instance_data[idx].normal_transform[0] = glm::vec4(0.0f);
+		shadow_instance_data[idx].normal_transform[1] = glm::vec4(0.0f);
+		shadow_instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
+		m_skinned_shadow_drawables.push_back({entity, mc.getMesh(), idx});
+	}
+}
+
+void ShadowRenderSystem::renderSkinnedShadowsForLayer(VeFrameInfo& frame_info, uint32_t layer) const {
+	if (m_skinned_shadow_drawables.empty() || !frame_info.skinning_pre_pass)
+		return;
+	auto& cmd = frame_info.cmd();
+	uint32_t frame = frame_info.current_frame;
+
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		0, {*m_shadow_global_descriptor_sets[frame][layer]}, {});
+
+	for (const auto& sd : m_skinned_shadow_drawables) {
+		if (!sd.mesh)
+			continue;
+		VeBuffer* pos_buf = frame_info.skinning_pre_pass->getOutputPositionBuffer(sd.entity, frame);
+		if (!pos_buf)
+			continue;
+		cmd.bindVertexBuffers(0, {pos_buf->getBuffer()}, {vk::DeviceSize{0}});
+		cmd.bindIndexBuffer(sd.mesh->getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
+		ShadowPushConstantData push{};
+		push.instance_offset = sd.instance_offset;
+		cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
+			vk::ArrayProxy<const uint8_t>(sizeof(ShadowPushConstantData),
+				reinterpret_cast<const uint8_t*>(&push)));
+		cmd.drawIndexed(sd.mesh->getIndexCount(), 1, 0, 0, 0);
 	}
 }
 
@@ -1562,8 +1636,11 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		if (m_cascade_state[c].incremental) any_incremental = true;
 		else any_full_dirty = true;
 	}
+	populateSkinnedShadowDrawablesGpuPath(frame_info);
+	bool has_skinned = !m_skinned_shadow_drawables.empty();
 	bool has_dynamics = scene_mgr.hasDynamicObjects();
-	bool any_dirty = any_incremental || any_full_dirty || num_shadow_lights > 0 || has_dynamics;
+	bool any_dirty = any_incremental || any_full_dirty || num_shadow_lights > 0
+		|| has_dynamics || has_skinned;
 	if (!any_dirty)
 		return;
 
@@ -1699,7 +1776,8 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 					.sType = vk::StructureType::eImageMemoryBarrier2,
 					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
 					.srcAccessMask = vk::AccessFlagBits2::eTransferRead,
-					.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+					.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+						| vk::PipelineStageFlagBits2::eLateFragmentTests,
 					.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
 						| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
 					.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
@@ -1712,7 +1790,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 				vk::ImageMemoryBarrier2 post_barriers[] = {cache_back, atlas_back};
 				cmd.pipelineBarrier2({.imageMemoryBarrierCount = 2, .pImageMemoryBarriers = post_barriers});
 			}
-		} else if (has_dynamics) {
+		} else if (has_dynamics || has_skinned) {
 			// Restore static cache to atlas for dynamic overlay
 			vk::ImageMemoryBarrier2 atlas_dst{
 				.sType = vk::StructureType::eImageMemoryBarrier2,
@@ -1735,7 +1813,8 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 				.sType = vk::StructureType::eImageMemoryBarrier2,
 				.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
 				.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+					| vk::PipelineStageFlagBits2::eLateFragmentTests,
 				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
 					| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
 				.oldLayout = vk::ImageLayout::eTransferDstOptimal,
@@ -1777,6 +1856,20 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		cmd.endRendering();
 	}
 
+	if (has_skinned) {
+		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
+			beginShadowRegionRender(cmd, m_atlas_regions[c], vk::AttachmentLoadOp::eLoad);
+			renderSkinnedShadowsForLayer(frame_info, c);
+			cmd.endRendering();
+		}
+		for (uint32_t i = 0; i < num_shadow_lights; i++) {
+			uint32_t slot = NUM_CSM_CASCADES + i;
+			beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eLoad);
+			renderSkinnedShadowsForLayer(frame_info, slot);
+			cmd.endRendering();
+		}
+	}
+
 	transitionAtlasPostRender(cmd);
 }
 
@@ -1808,8 +1901,10 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		}
 	}
 
+	populateSkinnedShadowDrawablesGpuPath(frame_info);
+	bool has_skinned = !m_skinned_shadow_drawables.empty();
 	bool has_dynamics = scene_mgr.hasDynamicObjects();
-	bool any_dirty = num_shadow_lights > 0 || has_dynamics;
+	bool any_dirty = num_shadow_lights > 0 || has_dynamics || has_skinned;
 	for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES && !any_dirty; c++)
 		any_dirty = m_cascade_state[c].dirty;
 	if (!any_dirty)
@@ -1967,7 +2062,8 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 					.sType = vk::StructureType::eImageMemoryBarrier2,
 					.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
 					.srcAccessMask = vk::AccessFlagBits2::eTransferRead,
-					.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+					.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+						| vk::PipelineStageFlagBits2::eLateFragmentTests,
 					.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
 						| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
 					.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
@@ -1980,8 +2076,8 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 				vk::ImageMemoryBarrier2 post_barriers[] = {cache_back, atlas_back};
 				cmd.pipelineBarrier2({.imageMemoryBarrierCount = 2, .pImageMemoryBarriers = post_barriers});
 			}
-		} else if (has_dynamics) {
-			// Restore static cache to atlas
+		} else if (has_dynamics || has_skinned) {
+			// Restore static cache to atlas for dynamic overlay
 			vk::ImageMemoryBarrier2 atlas_dst{
 				.sType = vk::StructureType::eImageMemoryBarrier2,
 				.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
@@ -2003,7 +2099,8 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 				.sType = vk::StructureType::eImageMemoryBarrier2,
 				.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
 				.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+					| vk::PipelineStageFlagBits2::eLateFragmentTests,
 				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
 					| vk::AccessFlagBits2::eDepthStencilAttachmentRead,
 				.oldLayout = vk::ImageLayout::eTransferDstOptimal,
@@ -2048,6 +2145,20 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 			0, {*m_meshlet_shadow_descriptor_sets[frame][i]}, {});
 		drawMeshletIndirect(slot);
 		cmd.endRendering();
+	}
+
+	if (has_skinned) {
+		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
+			beginShadowRegionRender(cmd, m_atlas_regions[c], vk::AttachmentLoadOp::eLoad);
+			renderSkinnedShadowsForLayer(frame_info, c);
+			cmd.endRendering();
+		}
+		for (uint32_t i = 0; i < num_shadow_lights; i++) {
+			uint32_t slot = NUM_CSM_CASCADES + i;
+			beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eLoad);
+			renderSkinnedShadowsForLayer(frame_info, slot);
+			cmd.endRendering();
+		}
 	}
 
 	transitionAtlasPostRender(cmd);

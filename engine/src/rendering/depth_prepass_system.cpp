@@ -8,6 +8,7 @@
 #include "resources/ve_mesh.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
+#include "events/render_events.hpp"
 
 namespace ve {
 
@@ -146,7 +147,7 @@ void DepthPrePassSystem::renderSkinned(
 	auto& cmd = frame_info.cmd();
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
-		0, {*frame_info.global_descriptor_set}, {});
+		0, {**frame_info.cpu_global_descriptor_set}, {});
 
 	for (const auto& d : skinned_drawables) {
 		if (!d.mesh_ptr)

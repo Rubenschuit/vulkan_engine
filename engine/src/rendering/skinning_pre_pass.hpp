@@ -13,6 +13,7 @@
 #include "scene/ve_entity.hpp"
 
 #include <array>
+#include <deque>
 #include <filesystem>
 #include <memory>
 #include <unordered_map>
@@ -91,6 +92,13 @@ private:
 
 	// Per-frame dispatch list, populated by updatePalette and consumed by dispatch.
 	std::array<std::vector<SkinDispatch>, MAX_FRAMES_IN_FLIGHT> m_pending_dispatches;
+
+	struct PendingFree {
+		uint64_t release_frame;
+		InstanceFrame frame;
+	};
+	std::deque<PendingFree> m_graveyard;
+	uint64_t m_frame_counter = 0;
 };
 
 } // namespace ve

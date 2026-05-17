@@ -7,6 +7,7 @@
 #include "glm/gtc/constants.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
+#include "events/render_events.hpp"
 
 namespace ve {
 

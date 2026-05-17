@@ -27,6 +27,15 @@ public:
 		return glm::vec3(floatRange(min.x, max.x), floatRange(min.y, max.y), floatRange(min.z, max.z));
 	}
 
+	static float floatNormal(float mean, float stddev) {
+		static thread_local std::normal_distribution<float> dist;
+		return dist(generator(), std::normal_distribution<float>::param_type{mean, stddev});
+	}
+
+	static glm::vec3 vec3Normal(float stddev) {
+		return glm::vec3(floatNormal(0.0f, stddev), floatNormal(0.0f, stddev), floatNormal(0.0f, stddev));
+	}
+
 	static glm::vec4 color() {
 		return glm::vec4(float01(), float01(), float01(), 1.0f);
 	}

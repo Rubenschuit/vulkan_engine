@@ -27,6 +27,7 @@ template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<RigidbodyComponent>
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<AnimatorComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SkinComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<CameraComponent>();
+template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<ParticleEmitterComponent>();
 
 
 // ---------------------------------------------------------------------------
@@ -625,6 +626,20 @@ void AnimatorComponent::remapEntities(const std::unordered_map<uint32_t, Entity>
 		if (it != old_to_new.end())
 			entity = it->second;
 	}
+}
+
+void SkinComponent::remapEntities(const std::unordered_map<uint32_t, Entity>& old_to_new) {
+	for (auto& entity : m_joint_entities) {
+		auto it = old_to_new.find(entity.index());
+		if (it != old_to_new.end())
+			entity = it->second;
+	}
+	if (!m_skeleton_root.isNull()) {
+		auto it = old_to_new.find(m_skeleton_root.index());
+		if (it != old_to_new.end())
+			m_skeleton_root = it->second;
+	}
+	m_palette_offset_cache = 0;
 }
 
 void AnimatorComponent::update(float delta_time) {

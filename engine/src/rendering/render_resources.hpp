@@ -1,7 +1,7 @@
 /*
 *  Long-lived, scene-agnostic GPU infrastructure: descriptor pool, global and
 *  material set layouts, default-material descriptor set + UBO + textures, and
-*  particle textures.
+*  the engine-default particle texture.
 */
 #pragma once
 #include "ve_export.hpp"
@@ -20,14 +20,12 @@ class VeDevice;
 class VeBuffer;
 class VeDescriptorPool;
 class VeDescriptorSetLayout;
-struct EngineConfig;
 struct SceneContext;
 
 class VENGINE_API RenderResources {
 public:
 	RenderResources(VeDevice& device,
-	                VeResourceManager& resource_manager,
-	                const EngineConfig& config);
+	                VeResourceManager& resource_manager);
 	~RenderResources();
 
 	RenderResources(const RenderResources&) = delete;
@@ -39,9 +37,7 @@ public:
 
 	vk::raii::DescriptorSet& defaultMaterialDescriptorSet() { return m_default_material_descriptor_set; }
 
-	ResourceHandle<VeTexture> particleTexture() const { return m_particle_texture_handle; }
-	ResourceHandle<VeTexture> fireTexture() const { return m_fire_texture_handle; }
-	ResourceHandle<VeTexture> smokeTexture() const { return m_smoke_texture_handle; }
+	ResourceHandle<VeTexture> defaultParticleTexture() const { return m_default_particle_texture_handle; }
 
 	SceneContext makeSceneContext();
 
@@ -50,7 +46,6 @@ private:
 
 	VeDevice& m_ve_device;
 	VeResourceManager& m_resource_manager;
-	const EngineConfig& m_config;
 
 	std::shared_ptr<VeDescriptorPool> m_global_pool;
 	std::unique_ptr<VeDescriptorSetLayout> m_global_set_layout;
@@ -64,9 +59,7 @@ private:
 	ResourceHandle<VeTexture> m_default_emissive_handle;
 	vk::raii::DescriptorSet m_default_material_descriptor_set{nullptr};
 
-	ResourceHandle<VeTexture> m_particle_texture_handle;
-	ResourceHandle<VeTexture> m_fire_texture_handle;
-	ResourceHandle<VeTexture> m_smoke_texture_handle;
+	ResourceHandle<VeTexture> m_default_particle_texture_handle;
 };
 
 }

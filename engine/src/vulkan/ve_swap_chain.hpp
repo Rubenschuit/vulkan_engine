@@ -1,6 +1,19 @@
 /* VeSwapChain is owned by VeRenderer and is responsible for managing the swap chain
  and its associated resources. This includes image views, depth resources and
-synchronization objects. Also sets the number of samples for MSAA. */
+synchronization objects. Also sets the number of samples for MSAA.
+ *
+ * Frame submission (timeline semaphore = m_frame_timeline):
+ *   Non-split: compute1 -> graphics (submitAndPresent).
+ *   Split:     compute1 -> graphics1 -> shadow -> compute2 -> graphics3
+ *
+ *   compute1: skinning pre-pass, particle backend, cluster light.
+ *             Writes consumed by graphics at DrawIndirect (particles),
+ *             VertexInput (particles + skinned), and FragmentShader (sampled).
+ *   compute2: GTAO and Hi-Z. Both image outputs sampled at FragmentShader.
+ *
+ * Graphics-side timeline waits must therefore gate at
+ *   eDrawIndirect | eVertexInput | eFragmentShader
+ */
 #pragma once
 #include "ve_export.hpp"
 #include "vulkan/ve_device.hpp"

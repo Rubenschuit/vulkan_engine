@@ -1,8 +1,6 @@
 #pragma once
 #include "ve_export.hpp"
-#include "rendering/render_settings.hpp"
-#include "rendering/frame_stats.hpp"
-#include "application/simulation_settings.hpp"
+#include "ui/ui_context.hpp"
 #include "events/event_bus.hpp"
 
 #include <vulkan/vulkan.hpp>
@@ -16,13 +14,6 @@ class VeWindow;
 class VeDevice;
 class VeRenderer;
 struct EditorState;
-
-// Bundle of references passed to the UI rendering
-struct VENGINE_API UIContext {
-	RenderSettings& settings;
-	const FrameStats& stats;
-	SimulationSettings& sim;
-};
 
 class VENGINE_API ImGuiLayer {
 public:

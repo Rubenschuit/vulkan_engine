@@ -3,9 +3,11 @@
 #include "ui/imgui_layer.hpp"
 #include "input/input_controller.hpp"
 #include "input/input_action.hpp"
+#include "rendering/render_services.hpp"
 #include "rendering/ve_renderer.hpp"
 #include "scene/scene_manager.hpp"
 #include "application/ve_application.hpp"
+#include "application/ve_engine_config.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
 #include <imgui.h>
@@ -13,8 +15,11 @@
 
 namespace ve {
 
-Editor::Editor(VeRenderer& renderer, ImGuiLayer& imgui_layer, EventBus& event_bus)
-	: m_renderer(renderer), m_imgui_layer(imgui_layer), m_event_bus(event_bus) {
+Editor::Editor(VeWindow& window, VeDevice& device, VeRenderer& renderer,
+               EventBus& event_bus, const EngineConfig& config)
+	: m_renderer(renderer), m_event_bus(event_bus) {
+	m_imgui_layer = std::make_unique<ImGuiLayer>(window, device, renderer, event_bus);
+	m_imgui_layer->setAppSettingsWindowName(config.app_name);
 	m_performance_panel = std::make_unique<PerformancePanel>(renderer);
 	m_graphics_panel = std::make_unique<GraphicsPanel>(renderer, event_bus);
 	m_environment_panel = std::make_unique<EnvironmentPanel>();
@@ -34,6 +39,8 @@ Editor::~Editor() {
 }
 
 void Editor::beginFrame() {
+	if (m_context.input_controller)
+		m_state.editor_mode = m_context.input_controller->isEditorMode();
 	handleModeTransition();
 	if (m_state.editor_mode)
 		handleViewportResize();
@@ -66,9 +73,20 @@ void Editor::registerViewportImage() {
 	auto vp_view = m_renderer.getViewportImageView();
 	auto vp_sampler = m_renderer.getViewportSampler();
 	if (vp_view != VK_NULL_HANDLE && vp_sampler != VK_NULL_HANDLE) {
-		m_imgui_layer.registerViewportImage(vp_sampler, vp_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-		m_viewport_panel.setTextureID(m_imgui_layer.getViewportTextureId());
+		m_imgui_layer->registerViewportImage(vp_sampler, vp_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		m_viewport_panel.setTextureID(m_imgui_layer->getViewportTextureId());
 	}
+}
+
+const CameraView& Editor::resolveCameraView(Registry* registry, float aspect, float fov_y_radians) {
+	if (aspect > 0.0f)
+		m_last_aspect = aspect;
+
+	m_camera_controller.setFov(fov_y_radians);
+
+	auto scene_cam = tryGetSceneCamera(registry, m_state.viewport_camera, m_last_aspect);
+	m_current_camera_view = scene_cam ? *scene_cam : m_camera_controller.buildView(m_last_aspect);
+	return m_current_camera_view;
 }
 
 void Editor::renderUI(UIContext& context, Registry* registry) {
@@ -78,7 +96,7 @@ void Editor::renderUI(UIContext& context, Registry* registry) {
 	if (m_state.selection_changed && !m_state.selected_entity.isNull())
 		m_state.show_inspector = true;
 
-	m_imgui_layer.renderUI(context, m_state, [this, registry, editor_mode](UIContext& ctx) {
+	m_imgui_layer->renderUI(context, m_state, [this, registry, editor_mode](UIContext& ctx) {
 		if (editor_mode) {
 			if (ImGui::IsKeyPressed(ImGuiKey_Escape) && !m_state.selected_entity.isNull()) {
 				m_state.selected_entity = Entity::null();
@@ -167,16 +185,21 @@ void Editor::renderUI(UIContext& context, Registry* registry) {
 	m_state.selection_changed = false;
 }
 
-void Editor::setContext(const EditorContext& ctx) {
+void Editor::setContext(const EditorContext& ctx, const RenderServices& services) {
 	m_context = ctx;
 	m_hierarchy_panel.setSceneManager(ctx.scene_manager);
 	m_hierarchy_panel.setEventBus(ctx.event_bus);
-	m_viewport_panel.setCameraView(ctx.camera_view);
+	m_viewport_panel.setCameraView(&m_current_camera_view);
 	m_viewport_panel.setPhysicsSystem(ctx.physics);
 	if (m_environment_panel)
-		m_environment_panel->setSkyboxSystem(ctx.skybox);
+		m_environment_panel->setSkyboxSystem(services.skybox);
 	if (m_debug_panel)
-		m_debug_panel->setShadowRenderSystem(ctx.shadow);
+		m_debug_panel->setShadowRenderSystem(services.shadow);
+	if (m_graphics_panel) {
+		m_graphics_panel->setParticleBackend(services.particles);
+		if (ctx.engine_config)
+			m_graphics_panel->setMaxParticleCapacity(ctx.engine_config->max_particle_capacity);
+	}
 }
 
 void Editor::renderMenuBar() {

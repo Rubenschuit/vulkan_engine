@@ -8,6 +8,7 @@
 #include "utils/ve_log.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
+#include "events/render_events.hpp"
 
 namespace ve {
 
@@ -424,28 +425,27 @@ void GtaoSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd)
 		vk::ArrayProxy<const uint8_t>(sizeof(BlurPushConstant), reinterpret_cast<const uint8_t*>(&blur_push_v)));
 	cmd.dispatch(groups_x, groups_y, 1);
 
-	// ===== Post-blur barriers =====
-	// ao_raw: eGeneral -> eShaderReadOnlyOptimal
-	// dstStage=eNone: fragment shader reads on graphics queue, semaphore handles cross-queue sync
-	vk::ImageMemoryBarrier2 ao_final_to_read{
+}
+
+void GtaoSystem::acquireForRead(vk::raii::CommandBuffer& cmd, uint32_t frame_index) {
+	vk::ImageMemoryBarrier2 acquire{
+		.sType = vk::StructureType::eImageMemoryBarrier2,
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eNone,
-		.dstAccessMask = vk::AccessFlagBits2::eNone,
+		.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+		.dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
 		.oldLayout = vk::ImageLayout::eGeneral,
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_ao_raw_images[frame]->getImage(),
+		.image = m_ao_raw_images[frame_index]->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
-	{
-		vk::DependencyInfo dep{
-			.imageMemoryBarrierCount = 1,
-			.pImageMemoryBarriers = &ao_final_to_read,
-		};
-		cmd.pipelineBarrier2(dep);
-	}
+	vk::DependencyInfo dep{
+		.imageMemoryBarrierCount = 1,
+		.pImageMemoryBarriers = &acquire,
+	};
+	cmd.pipelineBarrier2(dep);
 }
 
 void GtaoSystem::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D ao_extent,

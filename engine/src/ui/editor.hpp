@@ -9,6 +9,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "events/event_bus.hpp"
+#include "scene/camera_view.hpp"
 #include "ui/editor_context.hpp"
 #include "ui/editor_state.hpp"
 #include "ui/editor_camera_controller.hpp"
@@ -30,14 +31,19 @@
 namespace ve {
 
 class ImGuiLayer;
+class VeWindow;
+class VeDevice;
 class VeRenderer;
 class Registry;
 class VeScene;
 struct UIContext;
+struct RenderServices;
+struct EngineConfig;
 
 class VENGINE_API Editor {
 public:
-	Editor(VeRenderer& renderer, ImGuiLayer& imgui_layer, EventBus& event_bus);
+	Editor(VeWindow& window, VeDevice& device, VeRenderer& renderer,
+	       EventBus& event_bus, const EngineConfig& config);
 	~Editor();
 
 	Editor(const Editor&) = delete;
@@ -46,6 +52,11 @@ public:
 	void beginFrame();
 	void renderUI(UIContext& context, Registry* registry);
 
+	// Picks between the entity-bound viewport camera and the editor camera, updates
+	// the editor camera's FOV, and caches the resolved view.
+	const CameraView& resolveCameraView(Registry* registry, float aspect, float fov_y_radians);
+	const CameraView& cameraView() const { return m_current_camera_view; }
+
 	// State
 	EditorState& getState() { return m_state; }
 	const EditorState& getState() const { return m_state; }
@@ -53,7 +64,7 @@ public:
 
 	// Call after construction with all engine references.
 	// Pointers must remain valid for the lifetime of the editor.
-	void setContext(const EditorContext& ctx);
+	void setContext(const EditorContext& ctx, const RenderServices& services);
 
 	// App-specific UI hook (rendered inside the "App Settings" window).
 	void setAppUICallback(std::function<void()> cb) { m_app_ui_callback = std::move(cb); }
@@ -75,7 +86,7 @@ private:
 	void renderKeybindingsWindow();
 
 	VeRenderer& m_renderer;
-	ImGuiLayer& m_imgui_layer;
+	std::unique_ptr<ImGuiLayer> m_imgui_layer;
 
 	EditorState m_state;
 	bool m_was_editor_mode = false;
@@ -93,6 +104,9 @@ private:
 
 	EditorContext m_context{};
 	LoadingPanel m_loading_overlay;
+
+	CameraView m_current_camera_view{};
+	float m_last_aspect{0.0f};
 
 	std::function<void()> m_app_ui_callback;
 

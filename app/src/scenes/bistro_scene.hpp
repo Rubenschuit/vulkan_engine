@@ -12,11 +12,7 @@ public:
 	BistroScene(const SceneContext& ctx, const AssetPaths& paths);
 	BistroScene(const SceneContext& ctx, std::unique_ptr<VeModel> model);
 
-	vk::raii::DescriptorSet& getDescriptorSet() override;
 	glm::vec4 getDefaultAmbient() const override { return {1.0f, 1.0f, 1.0f, 0.05f}; }
-	SceneSubsystems declareSubsystems() const override {
-		return {.particles = std::nullopt, .fireworks = FireworksSceneConfig{}};
-	}
 
 private:
 	void loadGameObjects(const AssetPaths& paths);

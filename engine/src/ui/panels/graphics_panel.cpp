@@ -2,6 +2,7 @@
 #include "ui/panels/graphics_panel.hpp"
 #include "ui/editor_state.hpp"
 #include "ui/imgui_layer.hpp"
+#include "rendering/particle_backend.hpp"
 #include "rendering/ve_renderer.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
@@ -282,6 +283,30 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Bloom effect creates glow around bright areas.\nSimulates light bleeding in cameras");
 		ImGui::DragFloat("Bloom Strength", &ctx.settings.bloom_strength, 0.001f, 0.0f, 0.4f);
+	}
+
+	// --- Particles ---
+	if (m_particles && ImGui::CollapsingHeader("Particles", ImGuiTreeNodeFlags_DefaultOpen)) {
+		uint32_t capacity = m_particles->getCapacity();
+		uint32_t pending = m_particles->getPendingCapacity();
+		ImGui::Text("Allocated: %u", capacity);
+
+		uint32_t ceiling = m_max_particle_capacity > 0 ? m_max_particle_capacity : 1;
+		int pending_int = static_cast<int>(pending);
+		if (ImGui::DragInt("Capacity", &pending_int, 100.0f, 1, static_cast<int>(ceiling))) {
+			pending_int = std::clamp(pending_int, 1, static_cast<int>(ceiling));
+			m_particles->stageCapacity(static_cast<uint32_t>(pending_int));
+		}
+
+		bool has_pending = m_particles->hasPendingCapacity();
+		if (!has_pending)
+			ImGui::BeginDisabled();
+		if (ImGui::Button("Apply"))
+			m_particles->applyStagedCapacity();
+		if (!has_pending)
+			ImGui::EndDisabled();
+		ImGui::SameLine();
+		ImGui::TextDisabled("(reallocates GPU buffers)");
 	}
 
 	// --- Display ---
