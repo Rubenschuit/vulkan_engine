@@ -39,7 +39,7 @@ struct PhysicsConfig {
 
 class VENGINE_API PhysicsSystem {
 public:
-	explicit PhysicsSystem(const PhysicsConfig& config = {});
+	PhysicsSystem(EventBus& event_bus, const PhysicsConfig& config = {});
 	~PhysicsSystem();
 
 	PhysicsSystem(const PhysicsSystem&) = delete;
@@ -55,8 +55,6 @@ public:
 	void freezeBody(Entity entity);
 	void unfreezeBody(Entity entity);
 	void setPreserveVelocity(Entity entity, bool preserve);
-
-	void setEventBus(EventBus* bus);
 
 	uint32_t getActiveBodyCount() const;
 	std::optional<DebugShape> getDebugShape(Entity entity, Registry& registry) const;

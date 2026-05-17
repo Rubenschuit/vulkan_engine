@@ -28,8 +28,8 @@ VeApplication::VeApplication(const EngineConfig& config)
 	: m_ve_window(WIDTH, HEIGHT, APP_NAME),
 	  m_ve_device(m_ve_window),
 	  m_resource_manager(m_ve_device, m_event_bus),
-	  m_ve_renderer(m_ve_device, m_ve_window, m_resource_manager),
-	  m_input_controller(m_ve_window),
+	  m_ve_renderer(m_ve_device, m_ve_window, m_resource_manager, m_event_bus),
+	  m_input_controller(m_ve_window, m_event_bus),
 	  m_config(config) {
 
 	m_render_resources = std::make_unique<RenderResources>(m_ve_device, m_resource_manager, m_config);
@@ -66,6 +66,8 @@ bool VeApplication::isFireworksDeclared() const {
 }
 
 VeApplication::~VeApplication() {
+	m_event_bus.unsubscribe<InputActionEvent>(m_input_action_sub);
+	m_event_bus.unsubscribe<SceneLoadedEvent>(m_scene_loaded_sub);
 	m_ve_device.getDevice().waitIdle();
 }
 
@@ -85,7 +87,6 @@ void VeApplication::run() {
 			m_ve_device.getDevice().waitIdle();
 			m_ve_window.resetWindowResizedFlag();
 			m_ve_renderer.recreateSwapChain();
-			onSwapChainRecreated();
 			continue;
 		}
 
@@ -103,7 +104,6 @@ void VeApplication::run() {
 
 		// Process input and tick the editor camera controller.
 		m_input_controller.processInput(m_frame_time);
-		m_editor_panel.visible = m_input_controller.isEditorMode();
 		m_editor->getState().editor_mode = m_input_controller.isEditorMode();
 		m_editor->editorCamera().tick(m_input_controller.getActions(), m_frame_time);
 
@@ -119,7 +119,7 @@ void VeApplication::run() {
 		VeScene* scene = m_scene_manager->getActiveScene();
 		if (!scene) {
 			m_ve_renderer.beginUIRecording(m_editor->isEditorMode());
-			m_editor->renderUI(m_ui, nullptr, nullptr);
+			m_editor->renderUI(m_ui, nullptr);
 			m_ve_renderer.endFrame();
 			continue;
 		}
@@ -137,8 +137,7 @@ void VeApplication::run() {
 
 		// Render
 		m_render_pipeline->prepareFrame();
-		if (m_editor->beginFrame())
-			recreateResolutionDependentSystems();
+		m_editor->beginFrame();
 		updateCamera(glm::radians(m_settings.fov));
 
 		m_render_pipeline->renderFrame(*scene, m_current_camera_view,
@@ -148,7 +147,7 @@ void VeApplication::run() {
 		{
 			ZoneScopedN("UI");
 			m_ve_renderer.beginUIRecording(editor_mode);
-			m_editor->renderUI(m_ui, &scene->getRegistry(), scene);
+			m_editor->renderUI(m_ui, &scene->getRegistry());
 		}
 
 		{
@@ -183,26 +182,12 @@ void VeApplication::loadDefaultScene(int index) {
 	m_scene_manager->loadDefaultScene(index);
 }
 
-// ─── Swap Chain Recreation ───────────────────────────────────────────────────
-
-void VeApplication::onSwapChainRecreated() {
-	m_ve_device.assertDeviceIdle();
-	m_render_pipeline->emitSwapChainRecreatedEvents();
-	m_imgui_layer->recreatePipeline();
-	m_editor->onSwapChainRecreated();
-}
-
-void VeApplication::recreateResolutionDependentSystems() {
-	m_render_pipeline->emitResolutionChangedEvent();
-}
-
 // ─── System Initialization ───────────────────────────────────────────────────
 
 void VeApplication::initSystems() {
 	VE_LOGD("Initialising application systems");
 
 	// Register engine-level input actions
-	m_input_controller.setEventBus(&m_event_bus);
 	m_input_controller.registerAction({
 		.name = "Toggle Performance UI",
 		.key = GLFW_KEY_P,
@@ -210,13 +195,13 @@ void VeApplication::initSystems() {
 		.context = InputContext::Always,
 		.description = "Toggle performance panel"
 	});
-	m_event_bus.subscribe<InputActionEvent>([this](const InputActionEvent& e) {
+	m_input_action_sub = m_event_bus.subscribe<InputActionEvent>([this](const InputActionEvent& e) {
 		if (e.name == "Toggle Performance UI")
 			m_editor->getState().show_performance = !m_editor->getState().show_performance;
 	});
 
 	// Apply scene-default ambient on activation.
-	m_event_bus.subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
+	m_scene_loaded_sub = m_event_bus.subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
 		if (!e.scene)
 			return;
 		glm::vec4 ambient = e.scene->getDefaultAmbient();
@@ -224,13 +209,12 @@ void VeApplication::initSystems() {
 		m_settings.ambient_light_intensity = ambient.w;
 	});
 
-	m_physics_system = std::make_unique<PhysicsSystem>();
-	m_physics_system->setEventBus(&m_event_bus);
+	m_physics_system = std::make_unique<PhysicsSystem>(m_event_bus);
 }
 
 void VeApplication::initEditor() {
 	VE_LOGD("Initialising UI");
-	m_imgui_layer = std::make_unique<ImGuiLayer>(m_ve_window, m_ve_device, m_ve_renderer);
+	m_imgui_layer = std::make_unique<ImGuiLayer>(m_ve_window, m_ve_device, m_ve_renderer, m_event_bus);
 	m_imgui_layer->setAppSettingsWindowName(m_config.app_name);
 	m_editor = std::make_unique<Editor>(m_ve_renderer, *m_imgui_layer, m_event_bus);
 	m_editor->setAppUICallback([this]() { renderUI(); });
@@ -268,13 +252,10 @@ void VeApplication::updateCamera(float fov_radians) {
 	editor_cam.setFov(m_fov);
 	editor_cam.setNearFar(m_near_plane, m_far_plane);
 
-	Entity vp_cam = m_editor->getState().viewport_camera;
-	VeScene* scene = m_scene_manager->getActiveScene();
-	Registry* reg = scene ? &scene->getRegistry() : nullptr;
-	if (!vp_cam.isNull() && reg && reg->isAlive(vp_cam) && reg->hasComponent<CameraComponent>(vp_cam))
-		m_current_camera_view = buildCameraView(*reg, vp_cam, m_last_aspect);
-	else
-		m_current_camera_view = editor_cam.buildView(m_last_aspect);
+	Registry* reg = m_scene_manager ? m_scene_manager->getActiveRegistry() : nullptr;
+	Entity vp_cam = m_editor ? m_editor->getState().viewport_camera : Entity::null();
+	auto scene_cam = tryGetSceneCamera(reg, vp_cam, m_last_aspect);
+	m_current_camera_view = scene_cam ? *scene_cam : editor_cam.buildView(m_last_aspect);
 }
 
 void VeApplication::updateFrameTime() {

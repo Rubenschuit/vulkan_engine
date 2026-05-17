@@ -6,43 +6,49 @@
 #include "rendering/ve_renderer.hpp"
 #include "scene/scene_manager.hpp"
 #include "application/ve_application.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 #include <imgui.h>
 #include <cmath>
 
 namespace ve {
 
 Editor::Editor(VeRenderer& renderer, ImGuiLayer& imgui_layer, EventBus& event_bus)
-	: m_renderer(renderer), m_imgui_layer(imgui_layer) {
+	: m_renderer(renderer), m_imgui_layer(imgui_layer), m_event_bus(event_bus) {
 	m_performance_panel = std::make_unique<PerformancePanel>(renderer);
 	m_graphics_panel = std::make_unique<GraphicsPanel>(renderer, event_bus);
 	m_environment_panel = std::make_unique<EnvironmentPanel>();
 	m_debug_panel = std::make_unique<DebugPanel>(m_texture_inspector);
 	m_inspector_panel.setTextureInspector(&m_texture_inspector);
 	registerViewportImage();
+
+	m_swap_chain_recreated_sub = m_event_bus.subscribe<SwapChainRecreatedEvent>(
+		[this](const SwapChainRecreatedEvent&) {
+			registerViewportImage();
+			m_texture_inspector.invalidateCache();
+		});
 }
 
-Editor::~Editor() = default;
+Editor::~Editor() {
+	m_event_bus.unsubscribe<SwapChainRecreatedEvent>(m_swap_chain_recreated_sub);
+}
 
-bool Editor::beginFrame() {
-	bool resized = handleModeTransition();
+void Editor::beginFrame() {
+	handleModeTransition();
 	if (m_state.editor_mode)
-		resized |= handleViewportResize();
-	return resized;
+		handleViewportResize();
 }
 
-bool Editor::handleModeTransition() {
+void Editor::handleModeTransition() {
 	bool editor_mode = m_state.editor_mode;
-	bool resized = false;
 	if (!editor_mode && m_was_editor_mode) {
 		m_renderer.waitIdle();
 		m_renderer.resetSceneRenderExtent();
-		resized = true;
 	}
 	m_was_editor_mode = editor_mode;
-	return resized;
 }
 
-bool Editor::handleViewportResize() {
+void Editor::handleViewportResize() {
 	uint32_t vp_w = static_cast<uint32_t>(m_state.viewport_width);
 	uint32_t vp_h = static_cast<uint32_t>(m_state.viewport_height);
 	auto cur_extent = m_renderer.getExtent();
@@ -53,9 +59,7 @@ bool Editor::handleViewportResize() {
 		m_renderer.resizeSceneRender(vp_w, vp_h);
 		m_renderer.resizeViewportImage(vp_w, vp_h);
 		registerViewportImage();
-		return true;
 	}
-	return false;
 }
 
 void Editor::registerViewportImage() {
@@ -67,7 +71,7 @@ void Editor::registerViewportImage() {
 	}
 }
 
-void Editor::renderUI(UIContext& context, Registry* registry, VeScene* active_scene) {
+void Editor::renderUI(UIContext& context, Registry* registry) {
 	bool editor_mode = m_state.editor_mode;
 
 	// Auto-show inspector when an entity is selected
@@ -173,11 +177,6 @@ void Editor::setContext(const EditorContext& ctx) {
 		m_environment_panel->setSkyboxSystem(ctx.skybox);
 	if (m_debug_panel)
 		m_debug_panel->setShadowRenderSystem(ctx.shadow);
-}
-
-void Editor::onSwapChainRecreated() {
-	registerViewportImage();
-	m_texture_inspector.invalidateCache();
 }
 
 void Editor::renderMenuBar() {

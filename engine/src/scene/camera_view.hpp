@@ -3,6 +3,7 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
+#include <optional>
 
 namespace ve {
 
@@ -31,4 +32,9 @@ struct CameraView {
 
 CameraView buildCameraView(const Registry& registry, Entity entity, float aspect);
 
-} // namespace ve
+// Returns a CameraView built from `camera` if it is alive in `registry` and has
+// a CameraComponent; otherwise nullopt. Caller decides what to do when empty
+// (e.g. fall back to an editor camera).
+std::optional<CameraView> tryGetSceneCamera(const Registry* registry, Entity camera, float aspect);
+
+}

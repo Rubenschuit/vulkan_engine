@@ -127,6 +127,14 @@ struct ClusterEnabledChangedEvent {
 
 // ── Rendering state changes ────────────────────────────────────────────────
 
+// Emitted by VeRenderer after its swap chain has been recreated 
+struct SwapChainRecreatedEvent {};
+
+// Emitted by VeRenderer when the scene-render extent changes. RenderPipeline 
+// reacts and emits ResolutionChangedEvent including all the relevant data for
+// subscribers.
+struct ViewportResizedEvent {};
+
 struct BackendChangedEvent {};
 
 struct SkyboxChangedEvent {

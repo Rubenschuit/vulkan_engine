@@ -77,12 +77,12 @@ RenderPipeline::RenderPipeline(VeDevice& device,
 	  m_stats(stats),
 	  m_config(config) {
 	m_scene_resources = std::make_unique<SceneResourceManager>(m_ve_device, m_event_bus, m_resource_manager);
-	m_resources.bindMaterialSsbo(m_scene_resources->getMaterialManager().getBuffer());
+	createPerFrameResources(m_scene_resources->getMaterialManager().getBuffer());
 	initRenderSystems();
 	m_settings_watcher = std::make_unique<SettingsWatcher>(
 		m_ve_device, m_ve_renderer, m_event_bus, m_settings, m_resources);
 
-	m_event_bus.subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
+	m_scene_loaded_sub = m_event_bus.subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
 		if (!e.scene)
 			return;
 		SceneSubsystems decl = e.scene->declareSubsystems();
@@ -91,9 +91,60 @@ RenderPipeline::RenderPipeline(VeDevice& device,
 		m_particle_system->setEnabled(m_particles_declared);
 		m_fireworks_system->setEnabled(m_fireworks_declared);
 	});
+
+	m_swap_chain_recreated_sub = m_event_bus.subscribe<SwapChainRecreatedEvent>([this](const SwapChainRecreatedEvent&) {
+		m_ve_device.assertDeviceIdle();
+		emitSwapChainRecreatedEvents();
+	});
+	m_viewport_resized_sub = m_event_bus.subscribe<ViewportResizedEvent>([this](const ViewportResizedEvent&) {
+		emitResolutionChangedEvent();
+	});
 }
 
-RenderPipeline::~RenderPipeline() = default;
+RenderPipeline::~RenderPipeline() {
+	m_event_bus.unsubscribe<SceneLoadedEvent>(m_scene_loaded_sub);
+	m_event_bus.unsubscribe<SwapChainRecreatedEvent>(m_swap_chain_recreated_sub);
+	m_event_bus.unsubscribe<ViewportResizedEvent>(m_viewport_resized_sub);
+}
+
+void RenderPipeline::createPerFrameResources(const VeBuffer& material_ssbo) {
+	VE_LOGD("Creating per-frame resources");
+	vk::DeviceSize ubo_size = sizeof(UniformBufferObject);
+	assert(ubo_size > 0 && "Uniform buffer size is zero");
+	assert(ubo_size <= m_ve_device.getDeviceProperties().limits.maxUniformBufferRange && "Uniform buffer size exceeds maximum limit");
+
+	m_uniform_buffers.reserve(MAX_FRAMES_IN_FLIGHT);
+	m_instance_buffers.reserve(MAX_FRAMES_IN_FLIGHT);
+	m_global_descriptor_sets.reserve(MAX_FRAMES_IN_FLIGHT);
+
+	auto material_ssbo_info = material_ssbo.getDescriptorInfo();
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+		auto ub = std::make_unique<VeBuffer>(
+			m_ve_device, ubo_size, 1,
+			vk::BufferUsageFlagBits::eUniformBuffer,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+			m_ve_device.getDeviceProperties().limits.minUniformBufferOffsetAlignment);
+		ub->map();
+		auto ib = std::make_unique<VeBuffer>(
+			m_ve_device, sizeof(InstanceData), INITIAL_INSTANCE_CAPACITY,
+			vk::BufferUsageFlagBits::eStorageBuffer,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		ib->map();
+
+		auto ubo_info = ub->getDescriptorInfo();
+		auto inst_info = ib->getDescriptorInfo();
+		vk::raii::DescriptorSet set{nullptr};
+		VeDescriptorWriter(m_resources.globalSetLayout(), *m_resources.pool())
+			.writeBuffer(0, &ubo_info)
+			.writeBuffer(1, &inst_info)
+			.writeBuffer(2, &material_ssbo_info)
+			.build(set);
+
+		m_uniform_buffers.push_back(std::move(ub));
+		m_instance_buffers.push_back(std::move(ib));
+		m_global_descriptor_sets.push_back(std::move(set));
+	}
+}
 
 void RenderPipeline::initRenderSystems() {
 	VE_LOGD("Initialising systems");
@@ -260,7 +311,7 @@ void RenderPipeline::initRenderSystems() {
 	if (m_gpu_culling_system->compactionEnabled())
 		m_gpu_culling_system->createCompactionDescriptorSets(*m_resources.pool());
 	m_gpu_culling_system->createGlobalDescriptorSets(*m_resources.pool(), m_resources.globalSetLayout(),
-		m_resources.uniformBuffers(), m_scene_resources->getMaterialManager().getBuffer());
+		m_uniform_buffers, m_scene_resources->getMaterialManager().getBuffer());
 
 	m_shadow_render_system->createGpuShadowDescriptorSets(*m_gpu_culling_system);
 
@@ -285,7 +336,7 @@ void RenderPipeline::initRenderSystems() {
 	m_meshlet_culling_system->createHizDescriptorSets(*m_resources.pool(),
 		gpu_scene, m_scene_resources->getMegaBuffer(), *m_hiz_system);
 	m_meshlet_culling_system->createGlobalDescriptorSets(*m_resources.pool(), m_resources.globalSetLayout(),
-		m_resources.uniformBuffers(), m_scene_resources->getMaterialManager().getBuffer());
+		m_uniform_buffers, m_scene_resources->getMaterialManager().getBuffer());
 	m_meshlet_culling_system->createShadowDescriptorSets(*m_resources.pool(),
 		gpu_scene, m_scene_resources->getMegaBuffer());
 	m_shadow_render_system->createMeshletShadowDescriptorSets(*m_meshlet_culling_system);
@@ -301,7 +352,7 @@ void RenderPipeline::initRenderSystems() {
 	m_cpu_backend = std::make_unique<CpuCullingBackend>(
 		*m_culling_system, *m_pbr_render_system,
 		m_scene_resources->getMaterialManager(), m_settings,
-		m_resources.globalDescriptorSets(), m_ve_renderer.getThreadPool());
+		m_global_descriptor_sets, m_ve_renderer.getThreadPool());
 	m_gpu_backend = std::make_unique<GpuCullingBackend>(
 		*m_gpu_culling_system, gpu_scene);
 	m_meshlet_backend = std::make_unique<MeshletCullingBackend>(
@@ -428,7 +479,7 @@ VeFrameInfo RenderPipeline::buildFrameInfo(VeScene& scene,
 		.material_descriptor_set = material_descriptor_set,
 		.cubemap_descriptor_set = m_skybox_render_system->getCubemapDescriptorSet(),
 		.shadow_descriptor_set = shadow_desc_set,
-		.cpu_global_descriptor_set = &m_resources.globalDescriptorSets()[current_frame],
+		.cpu_global_descriptor_set = &m_global_descriptor_sets[current_frame],
 		.active_scene = &scene,
 		.registry = &scene.getRegistry(),
 		.camera_view = camera_view,
@@ -437,9 +488,9 @@ VeFrameInfo RenderPipeline::buildFrameInfo(VeScene& scene,
 		.frame_time = frame_time,
 		.total_time = total_time,
 		.visible_objects = m_culling_system->getVisibleObjectsRef(),
-		.instance_data = static_cast<InstanceData*>(m_resources.instanceBuffers()[current_frame]->getMappedMemory()),
+		.instance_data = static_cast<InstanceData*>(m_instance_buffers[current_frame]->getMappedMemory()),
 		.instance_count = 0,
-		.instance_capacity = RenderResources::INITIAL_INSTANCE_CAPACITY,
+		.instance_capacity = INITIAL_INSTANCE_CAPACITY,
 		.shadow_mode = m_settings.shadow_mode,
 		.depth_bias_constant = m_settings.depth_bias_constant,
 		.depth_bias_slope = m_settings.depth_bias_slope,
@@ -869,7 +920,7 @@ void RenderPipeline::writeUniformBuffer(uint32_t current_frame, const CameraView
 	ubo.prev_projection_view = m_prev_projection_view;
 	m_prev_projection_view = ubo.projection_view;
 	ubo.camera_position = glm::vec4{view.position, 1.0f};
-	m_resources.uniformBuffers()[current_frame]->writeToBuffer(&ubo);
+	m_uniform_buffers[current_frame]->writeToBuffer(&ubo);
 }
 
 } // namespace ve

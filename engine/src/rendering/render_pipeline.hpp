@@ -1,6 +1,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "ve_config.hpp"
+#include "events/event_bus.hpp"
 
 #define VULKAN_HPP_ENABLE_RAII
 #include <vulkan/vulkan_raii.hpp>
@@ -18,7 +19,6 @@ class VeBuffer;
 class SceneResourceManager;
 class RenderResources;
 class SettingsWatcher;
-class EventBus;
 class VeScene;
 class Registry;
 class CullingBackend;
@@ -72,8 +72,7 @@ public:
 	RenderPipeline(const RenderPipeline&) = delete;
 	RenderPipeline& operator=(const RenderPipeline&) = delete;
 
-	void emitSwapChainRecreatedEvents();
-	void emitResolutionChangedEvent();
+	static constexpr uint32_t INITIAL_INSTANCE_CAPACITY = 16384 * 2;
 
 	bool isParticlesDeclared() const { return m_particles_declared; }
 	bool isFireworksDeclared() const { return m_fireworks_declared; }
@@ -94,6 +93,8 @@ public:
 
 private:
 	void initRenderSystems();
+	void emitSwapChainRecreatedEvents();
+	void emitResolutionChangedEvent();
 	void pushPerFrameSettings();
 	void selectBackend();
 	VeFrameInfo buildFrameInfo(VeScene& scene,
@@ -106,6 +107,7 @@ private:
 	void renderFrameBody(VeFrameInfo& fi, const EditorState& editor_state);
 	void collectStats(const VeFrameInfo& fi, Registry& registry);
 	void writeUniformBuffer(uint32_t current_frame, const CameraView& view, UniformBufferObject& ubo);
+	void createPerFrameResources(const VeBuffer& material_ssbo);
 
 	VeDevice& m_ve_device;
 	VeRenderer& m_ve_renderer;
@@ -117,6 +119,10 @@ private:
 	const EngineConfig& m_config;
 
 	std::unique_ptr<SceneResourceManager> m_scene_resources;
+
+	std::vector<std::unique_ptr<VeBuffer>> m_uniform_buffers;
+	std::vector<std::unique_ptr<VeBuffer>> m_instance_buffers;
+	std::vector<vk::raii::DescriptorSet> m_global_descriptor_sets;
 
 	std::unique_ptr<CullingSystem> m_culling_system;
 	std::unique_ptr<ShadowRenderSystem> m_shadow_render_system;
@@ -152,6 +158,10 @@ private:
 
 	bool m_particles_declared = false;
 	bool m_fireworks_declared = false;
+
+	EventSubscriptionId m_scene_loaded_sub = 0;
+	EventSubscriptionId m_swap_chain_recreated_sub = 0;
+	EventSubscriptionId m_viewport_resized_sub = 0;
 };
 
 } // namespace ve

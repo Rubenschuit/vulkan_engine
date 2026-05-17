@@ -65,4 +65,12 @@ CameraView buildCameraView(const Registry& registry, Entity entity, float aspect
 	return v;
 }
 
+std::optional<CameraView> tryGetSceneCamera(const Registry* registry, Entity camera, float aspect) {
+	if (!registry || camera.isNull())
+		return std::nullopt;
+	if (!registry->isAlive(camera) || !registry->hasComponent<CameraComponent>(camera))
+		return std::nullopt;
+	return buildCameraView(*registry, camera, aspect);
+}
+
 } // namespace ve

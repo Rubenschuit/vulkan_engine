@@ -5,7 +5,8 @@
 
 namespace ve {
 
-InputController::InputController(VeWindow& ve_window) {
+InputController::InputController(VeWindow& ve_window, EventBus& event_bus)
+	: m_event_bus(event_bus) {
 	m_window = ve_window.getGLFWwindow();
 	assert(m_window != nullptr && "InputController: GLFWwindow is null");
 	glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
@@ -14,10 +15,6 @@ InputController::InputController(VeWindow& ve_window) {
 }
 
 InputController::~InputController() {}
-
-void InputController::setEventBus(EventBus* bus) {
-	m_event_bus = bus;
-}
 
 void InputController::registerAction(ActionBinding&& binding) {
 	m_actions.push_back(RegisteredAction{std::move(binding)});
@@ -127,8 +124,8 @@ void InputController::processInput(float /*delta_time*/) {
 			fire = (cur == GLFW_PRESS);
 		action.prev_state = cur;
 
-		if (fire && m_event_bus)
-			m_event_bus->emitImmediate(InputActionEvent{action.binding.name, action.binding.value});
+		if (fire)
+			m_event_bus.emitImmediate(InputActionEvent{action.binding.name, action.binding.value});
 	}
 }
 

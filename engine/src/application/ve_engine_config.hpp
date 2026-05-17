@@ -5,8 +5,8 @@
 namespace ve {
 
 struct VENGINE_API EngineConfig {
-	std::string app_name = "App";            // used for window titles (e.g. "App Settings")
-	std::filesystem::path working_dir;       // project root
+	std::string app_name = "App";            // used for window titles
+	std::filesystem::path working_dir;
 	std::filesystem::path shaders_dir;       // compiled .spv files
 	std::filesystem::path skybox_dir;        // .ktx/.ktx2 skybox textures
 
@@ -17,4 +17,4 @@ struct VENGINE_API EngineConfig {
 	} particle_assets;
 };
 
-} // namespace ve
+}

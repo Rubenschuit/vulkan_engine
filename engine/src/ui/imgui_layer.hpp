@@ -2,8 +2,8 @@
 #include "ve_export.hpp"
 #include "rendering/render_settings.hpp"
 #include "rendering/frame_stats.hpp"
-#include "ui/editor_panel_state.hpp"
 #include "application/simulation_settings.hpp"
+#include "events/event_bus.hpp"
 
 #include <vulkan/vulkan.hpp>
 #define VULKAN_HPP_ENABLE_RAII
@@ -21,13 +21,12 @@ struct EditorState;
 struct VENGINE_API UIContext {
 	RenderSettings& settings;
 	const FrameStats& stats;
-	EditorPanelState& editor;
 	SimulationSettings& sim;
 };
 
 class VENGINE_API ImGuiLayer {
 public:
-    ImGuiLayer(VeWindow& window, VeDevice& device, VeRenderer& renderer);
+    ImGuiLayer(VeWindow& window, VeDevice& device, VeRenderer& renderer, EventBus& event_bus);
     ~ImGuiLayer();
 
     ImGuiLayer(const ImGuiLayer&) = delete;
@@ -48,8 +47,6 @@ public:
 	void unregisterViewportImage();
 	VkDescriptorSet getViewportTextureId() const { return m_viewport_texture_id; }
 
-    void recreatePipeline();
-
 	// Set the app-specific settings window name
 	void setAppSettingsWindowName(const std::string& name) { m_app_settings_window_name = name; }
 	const std::string& getAppSettingsWindowName() const { return m_app_settings_window_name; }
@@ -58,12 +55,16 @@ private:
 	void renderDockSpace();
 	void applyEditorTheme();
     void uploadFonts();
+    void recreatePipeline();
 
     VeDevice& m_device;
     VeRenderer& m_renderer;
+    EventBus& m_event_bus;
     VkDescriptorPool m_descriptor_pool = VK_NULL_HANDLE;
     VkFormat m_color_format = VK_FORMAT_UNDEFINED;
 	VkDescriptorSet m_viewport_texture_id = VK_NULL_HANDLE;
 	std::string m_app_settings_window_name = "Settings";
+
+	EventSubscriptionId m_swap_chain_recreated_sub = 0;
 };
 }

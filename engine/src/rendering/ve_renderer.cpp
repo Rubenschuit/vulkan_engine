@@ -3,6 +3,8 @@
 #include "rendering/ve_frame_info.hpp"
 #include "resources/ve_resource_manager.hpp"
 #include "vulkan/ve_debug_utils.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 #include "ve_tracy.hpp"
 
 #include <stdexcept>
@@ -11,9 +13,9 @@
 
 namespace ve {
 // Constructor, initializes swap chain with present mode immediate and command buffers
-VeRenderer::VeRenderer(VeDevice& device, VeWindow& window, VeResourceManager& resource_manager)
+VeRenderer::VeRenderer(VeDevice& device, VeWindow& window, VeResourceManager& resource_manager, EventBus& event_bus)
 	: m_ve_device(device), m_command_manager(device), m_ve_window(window),
-	  m_resource_manager(resource_manager), m_profiler(device) {
+	  m_resource_manager(resource_manager), m_event_bus(event_bus), m_profiler(device) {
 	m_ve_swap_chain = std::make_unique<VeSwapChain>(m_ve_device, m_ve_window.getExtent(), m_desired_num_samples, m_present_mode, m_hdr_enabled);
 	createViewportResources();
 
@@ -127,6 +129,7 @@ void VeRenderer::recreateSwapChain() {
 		m_ve_swap_chain->resizeOffscreenResources(m_scene_render_extent);
 	createViewportResources();
 	VE_LOGI("Swap chain recreated: " << extent.width << "x" << extent.height);
+	m_event_bus.emitImmediate(SwapChainRecreatedEvent{});
 }
 
 // Begin a frame; returns true when a frame is started and command buffer can be used
@@ -917,12 +920,14 @@ void VeRenderer::resizeSceneRender(uint32_t w, uint32_t h) {
 	m_scene_render_extent = vk::Extent2D{w, h};
 	m_ve_swap_chain->resizeOffscreenResources({w, h});
 	recreateWboitImages();
+	m_event_bus.emitImmediate(ViewportResizedEvent{});
 }
 
 void VeRenderer::resetSceneRenderExtent() {
 	m_scene_render_extent = vk::Extent2D{0, 0};
 	m_ve_swap_chain->resizeOffscreenResources(m_ve_swap_chain->getSwapChainExtent());
 	recreateWboitImages();
+	m_event_bus.emitImmediate(ViewportResizedEvent{});
 }
 
 void VeRenderer::resizeViewportImage(uint32_t width, uint32_t height) {

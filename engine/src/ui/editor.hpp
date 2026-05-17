@@ -8,6 +8,7 @@
 
 #pragma once
 #include "ve_export.hpp"
+#include "events/event_bus.hpp"
 #include "ui/editor_context.hpp"
 #include "ui/editor_state.hpp"
 #include "ui/editor_camera_controller.hpp"
@@ -34,8 +35,6 @@ class Registry;
 class VeScene;
 struct UIContext;
 
-class EventBus;
-
 class VENGINE_API Editor {
 public:
 	Editor(VeRenderer& renderer, ImGuiLayer& imgui_layer, EventBus& event_bus);
@@ -44,9 +43,8 @@ public:
 	Editor(const Editor&) = delete;
 	Editor& operator=(const Editor&) = delete;
 
-	bool beginFrame();
-	void renderUI(UIContext& context, Registry* registry, VeScene* active_scene = nullptr);
-	void onSwapChainRecreated();
+	void beginFrame();
+	void renderUI(UIContext& context, Registry* registry);
 
 	// State
 	EditorState& getState() { return m_state; }
@@ -70,8 +68,8 @@ public:
 	const EditorCameraController& editorCamera() const { return m_camera_controller; }
 
 private:
-	bool handleModeTransition();
-	bool handleViewportResize();
+	void handleModeTransition();
+	void handleViewportResize();
 	void registerViewportImage();
 	void renderMenuBar();
 	void renderKeybindingsWindow();
@@ -97,6 +95,9 @@ private:
 	LoadingPanel m_loading_overlay;
 
 	std::function<void()> m_app_ui_callback;
+
+	EventBus& m_event_bus;
+	EventSubscriptionId m_swap_chain_recreated_sub = 0;
 };
 
 } // namespace ve

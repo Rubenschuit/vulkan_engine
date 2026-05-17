@@ -34,7 +34,7 @@ public:
 		int toggle_mouse_look = GLFW_KEY_TAB;
 	};
 
-	InputController(VeWindow& window);
+	InputController(VeWindow& window, EventBus& event_bus);
 	~InputController();
 
 	InputController(const InputController&) = delete;
@@ -43,7 +43,6 @@ public:
 	void processInput(float delta_time);
 	const InputActions& getActions() const { return m_current_actions; }
 
-	void setEventBus(EventBus* bus);
 	void registerAction(ActionBinding&& binding);
 	const std::deque<RegisteredAction>& getRegisteredActions() const;
 	bool isEditorMode() const;
@@ -59,7 +58,7 @@ private:
 	int m_prev_toggle_state = GLFW_RELEASE;
 	int m_prev_escape_state = GLFW_RELEASE;
 
-	EventBus* m_event_bus = nullptr;
+	EventBus& m_event_bus;
 	std::deque<RegisteredAction> m_actions;
 	InputActions m_current_actions{};
 };

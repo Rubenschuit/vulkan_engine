@@ -2,7 +2,6 @@
 #include "rendering/render_resources.hpp"
 
 #include "application/ve_engine_config.hpp"
-#include "rendering/ve_frame_info.hpp"
 #include "resources/ve_material_properties.hpp"
 #include "scene/ve_scene.hpp"
 #include "utils/ve_log.hpp"
@@ -21,39 +20,10 @@ RenderResources::RenderResources(VeDevice& device,
 	: m_ve_device(device),
 	  m_resource_manager(resource_manager),
 	  m_config(config) {
-	createBuffers();
 	createDescriptors();
 }
 
 RenderResources::~RenderResources() = default;
-
-void RenderResources::createBuffers() {
-	VE_LOGD("Creating buffers");
-	vk::DeviceSize buffer_size = sizeof(UniformBufferObject);
-	assert(buffer_size > 0 && "Uniform buffer size is zero");
-	assert(buffer_size <= m_ve_device.getDeviceProperties().limits.maxUniformBufferRange && "Uniform buffer size exceeds maximum limit");
-
-	m_uniform_buffers.clear();
-	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-		m_uniform_buffers.emplace_back(std::make_unique<VeBuffer>(
-			m_ve_device, buffer_size, 1,
-			vk::BufferUsageFlagBits::eUniformBuffer,
-			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-			m_ve_device.getDeviceProperties().limits.minUniformBufferOffsetAlignment
-		));
-		m_uniform_buffers[i]->map();
-	}
-
-	m_instance_buffers.clear();
-	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-		m_instance_buffers.emplace_back(std::make_unique<VeBuffer>(
-			m_ve_device, sizeof(InstanceData), INITIAL_INSTANCE_CAPACITY,
-			vk::BufferUsageFlagBits::eStorageBuffer,
-			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
-		));
-		m_instance_buffers[i]->map();
-	}
-}
 
 void RenderResources::createDescriptors() {
 	VE_LOGD("Creating descriptors");
@@ -118,23 +88,6 @@ void RenderResources::createDescriptors() {
 		.writeImage(4, &default_emissive_info)
 		.writeBuffer(5, &default_material_ubo_info)
 		.build(m_default_material_descriptor_set);
-}
-
-void RenderResources::bindMaterialSsbo(const VeBuffer& material_ssbo) {
-	m_global_descriptor_sets.clear();
-	m_global_descriptor_sets.reserve(MAX_FRAMES_IN_FLIGHT);
-	auto material_ssbo_info = material_ssbo.getDescriptorInfo();
-	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-		auto buffer_info = m_uniform_buffers[i]->getDescriptorInfo();
-		auto instance_info = m_instance_buffers[i]->getDescriptorInfo();
-		vk::raii::DescriptorSet set{nullptr};
-		VeDescriptorWriter(*m_global_set_layout, *m_global_pool)
-			.writeBuffer(0, &buffer_info)
-			.writeBuffer(1, &instance_info)
-			.writeBuffer(2, &material_ssbo_info)
-			.build(set);
-		m_global_descriptor_sets.push_back(std::move(set));
-	}
 }
 
 SceneContext RenderResources::makeSceneContext() {

@@ -76,7 +76,9 @@ protected:
 	bool isParticlesDeclared() const;
 	bool isFireworksDeclared() const;
 	const std::string& getAppSettingsWindowName() const;
+	const CameraView& cameraView() const { return m_current_camera_view; }
 
+private:
 	// --- Engine state ---
 	VeWindow m_ve_window;
 	VeDevice m_ve_device;
@@ -86,14 +88,11 @@ protected:
 	CameraView m_current_camera_view;
 	InputController m_input_controller;
 
-private:
 	// --- Initialisation ---
 	void initSystems();
 	void initEditor();
 
 	// --- Per-frame helpers ---
-	void onSwapChainRecreated();
-	void recreateResolutionDependentSystems();
 	void updateCamera(float fov_radians);
 	void updateFrameTime();
 	void setWindowTitle();
@@ -103,11 +102,13 @@ private:
 	// --- UI / engine state ---
 	RenderSettings m_settings;
 	FrameStats m_stats;
-	EditorPanelState m_editor_panel;
 	SimulationSettings m_sim;
-	UIContext m_ui{m_settings, m_stats, m_editor_panel, m_sim};
+	UIContext m_ui{m_settings, m_stats, m_sim};
 	std::unique_ptr<ImGuiLayer> m_imgui_layer;
 	std::unique_ptr<Editor> m_editor;
+
+	EventSubscriptionId m_input_action_sub = 0;
+	EventSubscriptionId m_scene_loaded_sub = 0;
 
 	// --- Systems ---
 	std::unique_ptr<RenderResources> m_render_resources;

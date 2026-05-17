@@ -5,6 +5,8 @@
 #include "platform/ve_window.hpp"
 #include "vulkan/ve_device.hpp"
 #include "rendering/ve_renderer.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -46,8 +48,8 @@ static VkDescriptorPool createImguiDescriptorPool(vk::raii::Device& device) {
     return pool;
 }
 
-ImGuiLayer::ImGuiLayer(VeWindow& window, VeDevice& device, VeRenderer& renderer)
-    : m_device(device), m_renderer(renderer) {
+ImGuiLayer::ImGuiLayer(VeWindow& window, VeDevice& device, VeRenderer& renderer, EventBus& event_bus)
+    : m_device(device), m_renderer(renderer), m_event_bus(event_bus) {
     // Create ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -90,9 +92,15 @@ ImGuiLayer::ImGuiLayer(VeWindow& window, VeDevice& device, VeRenderer& renderer)
     init_info.PipelineInfoMain.PipelineRenderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 
     ImGui_ImplVulkan_Init(&init_info);
+
+    m_swap_chain_recreated_sub = m_event_bus.subscribe<SwapChainRecreatedEvent>(
+        [this](const SwapChainRecreatedEvent&) {
+            recreatePipeline();
+        });
 }
 
 ImGuiLayer::~ImGuiLayer() {
+	m_event_bus.unsubscribe<SwapChainRecreatedEvent>(m_swap_chain_recreated_sub);
 	unregisterViewportImage();
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();

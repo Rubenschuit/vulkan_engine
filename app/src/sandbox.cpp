@@ -98,7 +98,7 @@ void Sandbox::registerInputActions() {
 	m_input_sub = eventBus().subscribe<InputActionEvent>(
 		[this](const InputActionEvent& e) {
 			auto& ps = getParticleSystem();
-			const auto& cv = m_current_camera_view;
+			const auto& cv = cameraView();
 			if (e.name == "Reset Particles") {
 				ps.setOrigin(cv.forward * 100.0f + cv.position);
 				ps.resetPoint();

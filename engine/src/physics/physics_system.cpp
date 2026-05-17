@@ -115,7 +115,9 @@ public:
 
 class ContactListenerImpl : public JPH::ContactListener {
 public:
-	EventBus* event_bus = nullptr;
+	EventBus& event_bus;
+
+	explicit ContactListenerImpl(EventBus& bus) : event_bus(bus) {}
 
 	JPH::ValidateResult OnContactValidate(
 		[[maybe_unused]] const JPH::Body& body1,
@@ -130,13 +132,11 @@ public:
 		const JPH::Body& body2,
 		[[maybe_unused]] const JPH::ContactManifold& manifold,
 		[[maybe_unused]] JPH::ContactSettings& settings) override {
-		if (!event_bus)
-			return;
 		Entity a = Entity::fromRaw(static_cast<uint32_t>(body1.GetUserData()));
 		Entity b = Entity::fromRaw(static_cast<uint32_t>(body2.GetUserData()));
 		auto cp = manifold.GetWorldSpaceContactPointOn1(0);
 		auto cn = manifold.mWorldSpaceNormal;
-		event_bus->enqueue(CollisionEvent{
+		event_bus.enqueue(CollisionEvent{
 			a, b,
 			{cp.GetX(), cp.GetY(), cp.GetZ()},
 			{cn.GetX(), cn.GetY(), cn.GetZ()},
@@ -195,7 +195,10 @@ struct PhysicsSystem::Impl {
 	SubscriptionId sub_rb_changed = 0;
 	Registry* active_registry = nullptr;
 
-	EventBus* event_bus = nullptr;
+	EventBus& event_bus;
+	EventSubscriptionId scene_loaded_sub = 0;
+	EventSubscriptionId scene_unloaded_sub = 0;
+	EventSubscriptionId asset_load_complete_sub = 0;
 
 	// Event-driven dirty tracking (replaces per-frame scan in rebuildDirtyBodies)
 	std::vector<uint32_t> m_dirty_rb_indices;
@@ -241,7 +244,8 @@ struct PhysicsSystem::Impl {
 
 	// ── Lifecycle ───────────────────────────────────────────────────────────
 
-	explicit Impl(const PhysicsConfig& cfg) : config(cfg) {
+	Impl(EventBus& bus, const PhysicsConfig& cfg)
+		: config(cfg), contact_listener(bus), event_bus(bus) {
 		if (s_jolt_ref_count++ == 0) {
 			JPH::RegisterDefaultAllocator();
 			JPH::Trace = JoltTrace;
@@ -265,6 +269,10 @@ struct PhysicsSystem::Impl {
 	}
 
 	~Impl() {
+		event_bus.unsubscribe<SceneLoadedEvent>(scene_loaded_sub);
+		event_bus.unsubscribe<SceneUnloadedEvent>(scene_unloaded_sub);
+		event_bus.unsubscribe<AssetLoadCompleteEvent>(asset_load_complete_sub);
+
 		removeAllBodies();
 
 		physics_system.reset();
@@ -1291,29 +1299,22 @@ struct PhysicsSystem::Impl {
 
 // ── Public interface delegates to Impl struct ────────────────────────────────
 
-PhysicsSystem::PhysicsSystem(const PhysicsConfig& config)
-	: m_impl(std::make_unique<Impl>(config)) {}
+PhysicsSystem::PhysicsSystem(EventBus& event_bus, const PhysicsConfig& config)
+	: m_impl(std::make_unique<Impl>(event_bus, config)) {
+	m_impl->scene_loaded_sub = event_bus.subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
+		m_impl->onSceneLoaded(*e.registry);
+		m_impl->addStaticCollidersForAllMeshes(*e.registry);
+	});
+	m_impl->scene_unloaded_sub = event_bus.subscribe<SceneUnloadedEvent>([this](const SceneUnloadedEvent&) {
+		m_impl->onSceneUnloaded();
+	});
+	m_impl->asset_load_complete_sub = event_bus.subscribe<AssetLoadCompleteEvent>([this](const AssetLoadCompleteEvent&) {
+		if (m_impl->active_registry)
+			m_impl->addStaticCollidersForAllMeshes(*m_impl->active_registry);
+	});
+}
 
 PhysicsSystem::~PhysicsSystem() = default;
-
-void PhysicsSystem::setEventBus(EventBus* bus) {
-	m_impl->event_bus = bus;
-	m_impl->contact_listener.event_bus = bus;
-
-	if (bus) {
-		bus->subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
-			m_impl->onSceneLoaded(*e.registry);
-			m_impl->addStaticCollidersForAllMeshes(*e.registry);
-		});
-		bus->subscribe<SceneUnloadedEvent>([this](const SceneUnloadedEvent&) {
-			m_impl->onSceneUnloaded();
-		});
-		bus->subscribe<AssetLoadCompleteEvent>([this](const AssetLoadCompleteEvent&) {
-			if (m_impl->active_registry)
-				m_impl->addStaticCollidersForAllMeshes(*m_impl->active_registry);
-		});
-	}
-}
 
 void PhysicsSystem::onSceneLoaded(Registry& registry) {
 	m_impl->onSceneLoaded(registry);
