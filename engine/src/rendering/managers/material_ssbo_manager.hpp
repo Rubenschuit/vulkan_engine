@@ -55,6 +55,8 @@ public:
 
 	void flushToDevice(const vk::raii::CommandBuffer&);
 
+	bool isDirty() const { return m_any_dirty; }
+
 	// Clear all cached material mappings. Intended for full scene tear-down.
 	void reset();
 
@@ -71,7 +73,8 @@ private:
 
 	std::unique_ptr<VeBuffer> m_buffer;          // device-local
 	std::unique_ptr<VeBuffer> m_staging_buffer;  // host-visible, persistently mapped
-	bool m_dirty = false;
+	std::vector<uint8_t> m_dirty_slots;
+	bool m_any_dirty = false;
 	std::unordered_map<VeMaterial*, uint32_t> m_material_to_index;
 	std::vector<uint32_t> m_free_list;
 	uint32_t m_next_index = 0;

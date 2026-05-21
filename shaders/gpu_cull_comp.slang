@@ -58,45 +58,109 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 
 	TransformGPU xform = transforms[idx];
 
-	// Transform bounding sphere center to world space
-	float3 center_local = obj.bounding_sphere.xyz;
-	float3 center_world = mul(xform.world_transform, float4(center_local, 1.0)).xyz;
+	// Sphere precull
+	float3 local_center = (obj.aabb_min.xyz + obj.aabb_max.xyz) * 0.5;
+	float3 local_extent = (obj.aabb_max.xyz - obj.aabb_min.xyz) * 0.5;
+	float3 center_world = mul(xform.world_transform, float4(local_center, 1.0)).xyz;
 	float max_scale = extractMaxScale(xform.world_transform);
-	float radius = obj.bounding_sphere.w * max_scale;
+	float radius = length(local_extent) * max_scale;
 
 	if (!frustumTest(cull_params, center_world, radius))
 		return;
 
+	float3 corners_world[8];
+	transformAabbCorners(xform.world_transform, obj.aabb_min.xyz, obj.aabb_max.xyz, corners_world);
+	float3 world_min, world_max;
+	aabbBounds(corners_world, world_min, world_max);
+
+	if (!aabbFrustumTest(cull_params, world_min, world_max))
+		return;
+
 	if (cull_params.hiz_enabled != 0 && cull_params.is_shadow_pass == 0)
-		if (!hizOcclusionTest(cull_params, hiz_pyramid, hiz_sampler, center_world, radius))
+		if (!hizOcclusionTestAabb(cull_params, hiz_pyramid, hiz_sampler, corners_world))
 			return;
 
-	// Select LOD and resolve the corresponding draw group
 	uint lod = selectLod(cull_params, center_world, radius, obj.lod_count);
 
-	// Stats tracking (main pass only)
+	// Stats tracking (main pass only). Reduce per-wave first, then one atomic per bucket
+	// from the first lane to avoid contention
 	if (cull_params.is_shadow_pass == 0) {
 		uint bucket;
 		if (is_transparent)
 			bucket = 4u + (is_double_sided ? 1u : 0u);
 		else
 			bucket = (is_mask ? 2u : 0u) + (is_double_sided ? 1u : 0u);
-		draw_counts.InterlockedAdd(bucket * 4, 1);
-		draw_counts.InterlockedAdd(GPU_CULL_BUCKET_COUNT * 4, obj.lod_index_count[lod]);
+		uint idx_count = obj.lod_index_count[lod];
+
+		uint wave_idx_sum = WaveActiveSum(idx_count);
+		uint wave_bucket[GPU_CULL_BUCKET_COUNT];
+		[unroll]
+		for (uint b = 0; b < GPU_CULL_BUCKET_COUNT; b++)
+			wave_bucket[b] = WaveActiveCountBits(bucket == b);
+
+		if (WaveIsFirstLane()) {
+			[unroll]
+			for (uint b = 0; b < GPU_CULL_BUCKET_COUNT; b++)
+				if (wave_bucket[b] > 0)
+					draw_counts.InterlockedAdd(b * 4, wave_bucket[b]);
+			if (wave_idx_sum > 0)
+				draw_counts.InterlockedAdd(GPU_CULL_BUCKET_COUNT * 4, wave_idx_sum);
+		}
 	}
 
 	uint draw_group_id = obj.lod_draw_group_id[lod];
-
-	// Atomically increment instanceCount in this draw group's pre-filled indirect command.
-	// VkDrawIndexedIndirectCommand layout (20 bytes):
-	//   offset +0: indexCount, +4: instanceCount, +8: firstIndex, +12: vertexOffset, +16: firstInstance
-	uint cmd_byte_offset = draw_group_id * 20 + 4; // instanceCount field
-	uint local_idx;
-	indirect_cmds.InterlockedAdd(cmd_byte_offset, 1, local_idx);
-
-	// Guard against overflow into adjacent group's instance range
 	DrawGroupGPU group = draw_groups[draw_group_id];
-	if (local_idx >= group.max_instances)
+
+	// Wave-aggregated, bounded reservation of instanceCount.
+	// VkDrawIndexedIndirectCommand layout (20 bytes):
+	//   +0: indexCount, +4: instanceCount, +8: firstIndex, +12: vertexOffset, +16: firstInstance
+	uint cmd_byte_offset = draw_group_id * 20 + 4;
+	uint local_idx = 0;
+	bool got_slot = false;
+	bool pending = true;
+
+	[allow_uav_condition]
+	[loop]
+	while (WaveActiveAnyTrue(pending)) {
+		uint pick = WaveActiveMin(pending ? draw_group_id : 0xFFFFFFFFu);
+		bool member = pending && (draw_group_id == pick);
+
+		uint members = WaveActiveCountBits(member);
+		uint my_pos  = WavePrefixCountBits(member);
+
+		uint base = 0;
+		if (member && my_pos == 0) {
+			uint cur = indirect_cmds.Load(cmd_byte_offset);
+			[allow_uav_condition]
+			[loop]
+			while (true) {
+				uint want = min(cur + members, group.max_instances);
+				if (want == cur) {
+					base = cur;
+					break;
+				}
+				uint orig;
+				indirect_cmds.InterlockedCompareExchange(cmd_byte_offset, cur, want, orig);
+				if (orig == cur) {
+					base = cur;
+					break;
+				}
+				cur = orig;
+			}
+		}
+		base = WaveActiveMax(member ? base : 0);
+
+		if (member) {
+			uint granted = min(base + members, group.max_instances) - base;
+			if (my_pos < granted) {
+				local_idx = base + my_pos;
+				got_slot = true;
+			}
+			pending = false;
+		}
+	}
+
+	if (!got_slot)
 		return;
 
 	uint instance_slot = group.instance_base + local_idx;

@@ -2,6 +2,7 @@
 #include "ve_export.hpp"
 #include "ve_config.hpp"
 #include "rendering/ve_frame_info.hpp"
+#include "vulkan/ve_descriptors.hpp"
 
 #include <memory>
 #include <array>
@@ -10,8 +11,6 @@
 namespace ve {
 	class VeDevice;
 	class VeBuffer;
-	class VeDescriptorPool;
-	class VeDescriptorSetLayout;
 	class VeComputePipeline;
 	class EventBus;
 }
@@ -25,7 +24,7 @@ struct ClusterParams {
 	alignas(16) glm::mat4 view{1.0f};
 	alignas(4)  float z_near = 0.1f;
 	alignas(4)  float z_far = 1000.0f;
-	alignas(4)  float log_depth_ratio = 1.0f;    // log(z_far / z_near)
+	alignas(4)  float z_slice_scale = 1.0f;      // grid_dims.z / log(z_far / z_near)
 	alignas(4)  uint32_t num_lights = 0;
 	alignas(8)  glm::uvec2 screen_size{};
 	alignas(8)  glm::uvec2 tile_size{};           // pixels per tile

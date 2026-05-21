@@ -1,3 +1,7 @@
+// Manages the GPU-resident scene description: object metadata + transforms.
+// Assigns stable GPU object IDs via free-list (ComponentPool dense indices are unstable).
+// Subscribes to Registry events for automatic registration/unregistration.
+
 #pragma once
 #include "ve_export.hpp"
 #include "ve_config.hpp"
@@ -21,19 +25,21 @@ class MeshComponent;
 class PbrMegaBuffer;
 class MaterialSSBOManager;
 
-// Updated on entity add/remove/material change. Rarely changes at runtime.
+// GPU-resident per-object metadata. Re-staged when an entity is registered/unregistered,
+// its material is edited, or its DYNAMIC flag flips.
 struct ObjectDataGPU {
-	glm::vec4 bounding_sphere; // xyz = local-space center, w = radius
+	glm::vec4 aabb_min; // w = padding
+	glm::vec4 aabb_max; // w = padding
 	uint32_t vertex_offset;
 	uint32_t material_index;
 	uint32_t material_flags; // see MaterialFlag namespace in ve_config.hpp
 	uint32_t object_flags;   // see ObjectFlag namespace in ve_config.hpp
 	uint32_t lod_count;
-	uint32_t lod_draw_group_id[MAX_LOD_LEVELS]; // draw group per LOD; filled by rebuildDrawGroups()
-	uint32_t lod_index_count[MAX_LOD_LEVELS];   // index count per LOD (kept for reference)
+	uint32_t lod_draw_group_id[MAX_LOD_LEVELS]; // draw group per LOD
+	uint32_t lod_index_count[MAX_LOD_LEVELS];
 	uint32_t _pad[3];
 };
-static_assert(sizeof(ObjectDataGPU) == 80, "ObjectDataGPU must be 80 bytes (vec4-aligned)");
+static_assert(sizeof(ObjectDataGPU) == 96, "ObjectDataGPU must be 96 bytes (vec4-aligned)");
 
 // GPU-resident per-object transform
 struct TransformGPU {
@@ -49,9 +55,6 @@ struct DrawGroup {
 	uint32_t index_count;
 	uint32_t first_index;
 	int32_t  vertex_offset;
-	uint32_t material_index;
-	uint32_t material_flags;
-	uint32_t object_flags;
 	uint32_t bucket;
 	uint32_t instance_base;  // start index in instance buffer
 	uint32_t max_instances;  // number of objects in this group
@@ -64,27 +67,26 @@ struct DrawGroupGPU {
 };
 static_assert(sizeof(DrawGroupGPU) == 8, "DrawGroupGPU must be 8 bytes");
 
-// Active object entry: one per non-transparent object; shader looks up LOD draw group from ObjectDataGPU
+// One entry per active object
 struct ActiveIdEntry {
 	uint32_t gpu_id;
 	uint32_t _pad{};
 };
 static_assert(sizeof(ActiveIdEntry) == 8, "ActiveIdEntry must be 8 bytes");
 
-// CPU-side per-object LOD data; cached so rebuildDrawGroups() doesn't need to read GPU staging.
+// CPU-side per-object LOD data; authoritative source for ObjectDataGPU staging rebuild.
 struct CpuLodData {
-	uint32_t vertex_offset;
-	uint32_t material_flags;
-	uint32_t object_flags;
-	uint32_t material_index;
-	uint32_t lod_count;
-	uint32_t first_index[MAX_LOD_LEVELS];
-	uint32_t index_count[MAX_LOD_LEVELS];
+	glm::vec3 aabb_min{};
+	glm::vec3 aabb_max{};
+	uint32_t vertex_offset{};
+	uint32_t material_flags{};
+	uint32_t object_flags{};
+	uint32_t material_index{};
+	uint32_t lod_count{};
+	uint32_t first_index[MAX_LOD_LEVELS]{};
+	uint32_t index_count[MAX_LOD_LEVELS]{};
 };
 
-// Manages the GPU-resident scene description: object metadata + transforms.
-// Assigns stable GPU object IDs via free-list (ComponentPool dense indices are unstable).
-// Subscribes to Registry events for automatic registration/unregistration.
 class VENGINE_API GpuSceneManager {
 public:
 	GpuSceneManager(VeDevice& device);
@@ -107,8 +109,8 @@ public:
 	void markObjectDataDirty(Entity entity);
 	void setDynamic(Entity entity, bool is_dynamic);
 
-	// Returns true if an entity should be classified as dynamic for shadow purposes.
-	// Currently checks for Dynamic rigidbodies; extend for animations later.
+	// True if the entity should be classified as dynamic for shadow caching.
+	// Checked: animated entities or entities with a Dynamic rigidbody.
 	static bool isDynamicEntity(const Registry& registry, Entity entity);
 	void updateDirtyTransforms(uint32_t current_frame, const Registry& registry,
 	                           vk::raii::CommandBuffer& cmd);
@@ -117,7 +119,6 @@ public:
 	void registerAllObjects(Registry& registry, const PbrMegaBuffer& mega_buffer,
 	                        MaterialSSBOManager& mat_mgr);
 
-	// Clear all registrations (for scene changes).
 	void reset();
 
 	uint32_t getObjectCount() const { return static_cast<uint32_t>(m_active_ids.size()); }
@@ -133,7 +134,7 @@ public:
 		return changed;
 	}
 
-	// Buffer accessors for descriptor set creation
+	// Buffer accessors
 	VeBuffer& getObjectDataBuffer(uint32_t frame) { return *m_object_data_buffers[frame]; }
 	VeBuffer& getTransformBuffer(uint32_t frame) { return *m_transform_buffers[frame]; }
 	VeBuffer& getActiveIdBuffer(uint32_t frame) { return *m_active_id_buffers[frame]; }
@@ -171,7 +172,11 @@ private:
 	void writeTransform(uint32_t gpu_id, uint32_t frame, const Registry& registry,
 	                    Entity entity);
 
+	void buildObjectData(uint32_t gpu_id, ObjectDataGPU& out) const;
+	void stageObjectData(uint32_t frame);
+
 	void rebuildDrawGroups();
+	void unsubscribeFromRegistry();
 
 	VeDevice& m_ve_device;
 	const PbrMegaBuffer* m_mega_buffer = nullptr;
@@ -186,20 +191,20 @@ private:
 	std::unordered_map<uint32_t, uint32_t> m_entity_to_gpu_id; // entity_index to gpu_id
 	std::unordered_map<uint32_t, Entity> m_gpu_id_to_entity;   // gpu_id to entity
 
-	// GPU buffers (device-local, fast compute reads)
+	// GPU buffers (device-local)
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_object_data_buffers;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_transform_buffers;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_active_id_buffers;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_draw_group_buffers;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_meshlet_object_info_buffers;
+	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_indirect_template;
 
-	// Staging buffers (host-visible, for CPU->GPU copies)
+	// Staging buffers
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_object_data_staging;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_transform_staging;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_active_id_staging;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_draw_group_staging;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_indirect_staging;
-	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_indirect_template;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_meshlet_object_info_staging;
 
 	// Active object entries (contiguous, rebuilt on register/unregister)
@@ -212,9 +217,10 @@ private:
 	uint32_t m_total_groups = 0;
 	// Per gpu_id, per lod_level: which draw group to route to; filled by rebuildDrawGroups()
 	std::vector<std::array<uint32_t, MAX_LOD_LEVELS>> m_object_lod_group_ids;
-	// CPU-side LOD geometry cache; filled by writeObjectData() for use in rebuildDrawGroups()
+	// Authoritative CPU-side ObjectDataGPU source. Mutating methods update this;
+	// stageObjectData() reads it to populate the per-frame staging buffer.
 	std::vector<CpuLodData> m_cpu_lod_data;
-	// CPU-side meshlet object info; filled by writeObjectData(), uploaded each frame when dirty
+	// Authoritative CPU-side MeshletObjectInfo source
 	std::vector<MeshletObjectInfo> m_meshlet_object_info_cpu;
 
 	// Per GPU object: frame number when transform was last dirtied
@@ -223,7 +229,6 @@ private:
 	std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> m_buffer_last_written{};
 	uint32_t m_global_frame_counter = 0;
 	std::array<bool, MAX_FRAMES_IN_FLIGHT> m_object_data_dirty{};
-	std::array<bool, MAX_FRAMES_IN_FLIGHT> m_template_needs_copy{};
 	bool m_draw_groups_dirty = false;
 	bool m_dynamic_classification_changed = false;
 
@@ -232,18 +237,17 @@ private:
 	std::vector<uint32_t> m_transparent_entity_indices;
 	std::vector<bool>     m_is_transparent_by_gpu_id; // indexed by gpu_id
 
-	void unsubscribeFromRegistry();
-
 	// Event subscriptions
 	SubscriptionId m_mesh_removed_sub = 0;
 	SubscriptionId m_transform_invalidated_sub = 0;
 	SubscriptionId m_mesh_data_changed_sub = 0;
 	SubscriptionId m_mesh_added_sub = 0;
 	SubscriptionId m_rb_changed_sub = 0;
+	SubscriptionId m_rb_removed_sub = 0;
 	SubscriptionId m_anim_state_changed_sub = 0;
 	SubscriptionId m_anim_removed_sub = 0;
 	SubscriptionId m_skin_added_sub = 0;
 	SubscriptionId m_skin_removed_sub = 0;
 };
 
-} // namespace ve
+}

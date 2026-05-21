@@ -95,7 +95,6 @@ public:
 	                                  const std::vector<uint32_t>& indices,
 	                                  const std::vector<std::vector<uint32_t>>& lod_indices);
 
-	// Create VeMaterial from texture paths. pool and layout can be null for untextured materials.
 	ResourceHandle<VeMaterial> createMaterial(const std::string& resource_id,
 	                                         const std::filesystem::path& albedo_path,
 	                                         const std::filesystem::path& normal_path,
@@ -106,8 +105,6 @@ public:
 	                                         const std::filesystem::path& specular_color_path,
 	                                         MaterialAlphaProps alpha_props,
 	                                         MaterialFactors factors,
-	                                         class VeDescriptorPool* pool = nullptr,
-	                                         class VeDescriptorSetLayout* layout = nullptr,
 	                                         bool flip_tex_coord_v = false);
 
 	ResourceHandle<VeMesh> createMeshFromData(const std::string& resource_id,

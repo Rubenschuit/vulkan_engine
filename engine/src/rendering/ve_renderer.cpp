@@ -374,9 +374,9 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer,
 		command_buffer,
 		vk::ImageLayout::eUndefined,
 		vk::ImageLayout::eColorAttachmentOptimal,
-		vk::AccessFlagBits2::eShaderRead,
+		vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eColorAttachmentWrite,
 		vk::AccessFlagBits2::eColorAttachmentWrite,
-		vk::PipelineStageFlagBits2::eFragmentShader,
+		vk::PipelineStageFlagBits2::eFragmentShader | vk::PipelineStageFlagBits2::eColorAttachmentOutput,
 		vk::PipelineStageFlagBits2::eColorAttachmentOutput
 	);
 

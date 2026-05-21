@@ -10,13 +10,12 @@ namespace ve {
 
 VeScene::VeScene(const SceneContext& ctx, const std::string& name)
     : m_device(ctx.device), m_resource_manager(ctx.resource_manager),
-      m_pool(ctx.pool), m_material_layout(ctx.material_layout),
       m_name(name), m_num_lights(0), m_num_shadow_casting_lights(0) {}
 
 VeScene::~VeScene() = default;
 
 void VeScene::addModel(const std::filesystem::path& gltf_path) {
-	auto model = VeModel::load(m_resource_manager, gltf_path.lexically_normal(), &m_pool, &m_material_layout,
+	auto model = VeModel::load(m_resource_manager, gltf_path.lexically_normal(),
 		/*extract_lights=*/true, /*flip_tex_coord_v=*/false);
 
 	if (model) {

@@ -24,7 +24,7 @@ struct CullParams {
 	alignas(16) glm::vec4 frustum_planes[6];
 	alignas(16) glm::mat4 view_proj;
 	alignas(16) glm::mat4 view;
-	alignas(16) glm::mat4 prev_view{1.0f};  // previous frame's view matrix for Hi-Z reprojection
+	alignas(16) glm::mat4 prev_view{1.0f};
 	alignas(4) float p00;              // projection[0][0] (horizontal focal length)
 	alignas(4) float p11;              // projection[1][1] (vertical focal length)
 	alignas(4) float p22;              // projection[2][2] (depth mapping)
@@ -33,13 +33,13 @@ struct CullParams {
 	alignas(4) uint32_t hiz_enabled;   // 0 = frustum only, 1 = frustum + prev-frame Hi-Z
 	alignas(4) uint32_t is_shadow_pass;
 	alignas(4) uint32_t hiz_mip_count;
-	alignas(8) glm::vec2 hiz_size;     // screen (not padded) extent: AABB pixel math
-	alignas(8) glm::vec2 hiz_uv_scale; // screen_size / hiz_pad_size: applied to UVs before sampling
-	alignas(4) int32_t  lod_bias;      // 0 for main pass; cascade_index for shadow passes
-	alignas(4) uint32_t max_meshlet_draws{MAX_MESHLET_DRAWS}; // meshlet pass-2 per-bucket capacity
-	alignas(16) glm::vec4 camera_pos;  // xyz = world-space camera position (for cone cull)
-	alignas(4) uint32_t bucket_count{MESHLET_BUCKET_COUNT};   // meshlet pass-2 bucket count
-	alignas(4) uint32_t shadow_cone_cull{0};                  // 1 = enable backface cone culling in shadow pass
+	alignas(8) glm::vec2 hiz_size;     // screen (not padded) extent
+	alignas(8) glm::vec2 hiz_uv_scale; // screen_size / hiz_pad_size
+	alignas(4) int32_t  lod_bias;
+	alignas(4) uint32_t max_meshlet_draws{MAX_MESHLET_DRAWS};
+	alignas(16) glm::vec4 camera_pos;  // for cone culling
+	alignas(4) uint32_t bucket_count{MESHLET_BUCKET_COUNT};
+	alignas(4) uint32_t shadow_cone_cull{0};
 };
 
 class VENGINE_API GpuCullingSystem {
@@ -50,13 +50,8 @@ public:
 	GpuCullingSystem(const GpuCullingSystem&) = delete;
 	GpuCullingSystem& operator=(const GpuCullingSystem&) = delete;
 
-	// Build descriptor sets that reference scene manager's buffers.
-	// Call after GpuSceneManager is constructed.
 	void createDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr);
-
-	// Build shadow descriptor sets (dummy Hi-Z; call before HizSystem exists)
 	void createShadowDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr);
-	// Recreate shadow descriptor sets with real Hi-Z bound (call after HizSystem init and on resize)
 	void createShadowHizDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr,
 	                                   HizSystem& hiz);
 	void createHizDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr,
@@ -69,9 +64,8 @@ public:
 
 	void dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame_info, GpuSceneManager& scene_mgr);
 
-	// Dispatches shadow culling for one independent shadow buffer slot (no WAR barrier needed).
+	// Dispatches shadow culling for one independent shadow buffer slot.
 	// Call for every shadow layer (cascades 0..csm_count-1, then lights at NUM_CSM_CASCADES+i).
-	// lod_bias offsets LOD selection (cascade_index for CSM, 1 for point/spot lights).
 	// If camera_view is provided and Hi-Z is enabled, camera-space occlusion culling is applied.
 	void dispatchShadowCull(vk::raii::CommandBuffer& cmd,
 	                        const glm::mat4& light_view_proj,
@@ -82,7 +76,7 @@ public:
 	                        const CameraView* camera_view = nullptr,
 	                        ShadowPassMode shadow_mode = ShadowPassMode::ALL_OBJECTS);
 
-	// Single global compute→draw barrier covering all shadow buffer slots.
+	// Single global compute->draw barrier covering all shadow buffer slots.
 	// Call once after all dispatchShadowCull calls for a frame.
 	// If compaction is enabled, also dispatches shadow compaction passes before the barrier.
 	void flushShadowCullBarrier(vk::raii::CommandBuffer& cmd, GpuSceneManager& scene_mgr,
@@ -130,9 +124,8 @@ private:
 	void dispatchShadowCompaction(vk::raii::CommandBuffer& cmd, GpuSceneManager& scene_mgr,
 	                              uint32_t frame, uint32_t slot);
 
-	// Copy pre-filled indirect commands from scene manager staging to device-local buffer
-	void copyIndirectStaging(vk::raii::CommandBuffer& cmd, GpuSceneManager& scene_mgr,
-	                         uint32_t frame, VeBuffer& dst_indirect);
+	void refreshMainIndirectBuffer(vk::raii::CommandBuffer& cmd, GpuSceneManager& scene_mgr,
+	                               uint32_t frame);
 
 	VeDevice& m_ve_device;
 	bool m_hiz_enabled = false;
@@ -141,15 +134,14 @@ private:
 	glm::vec2 m_hiz_uv_scale{1.0f};
 	uint32_t m_hiz_mip_count = 0;
 
-	// Per-frame camera view matrices for Hi-Z reprojection.
+	// Per-frame camera view matrices
 	std::array<glm::mat4, MAX_FRAMES_IN_FLIGHT> m_frame_views{glm::mat4{1.0f}, glm::mat4{1.0f}};
 
-	// Compute pipeline
 	std::unique_ptr<VeDescriptorSetLayout> m_compute_set_layout;
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VeComputePipeline> m_compute_pipeline;
 
-	// Frustum-only descriptor sets (bindings 6-7 have dummy placeholders)
+	// Frustum-only descriptor sets
 	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_compute_descriptor_sets =
 		makeNullArray<vk::raii::DescriptorSet>();
 
@@ -173,7 +165,7 @@ private:
 	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_global_descriptor_sets =
 		makeNullArray<vk::raii::DescriptorSet>();
 
-	// Shadow culling output: one independent buffer set per shadow layer per frame
+	// Shadow culling
 	using ShadowBufSet = std::array<std::unique_ptr<VeBuffer>, SHADOW_BUFFER_COUNT>;
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_indirect_buffers;
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_instance_buffers;
@@ -189,15 +181,17 @@ private:
 	std::unique_ptr<VeDescriptorSetLayout> m_compact_set_layout;
 	vk::raii::PipelineLayout m_compact_pipeline_layout{nullptr};
 	std::unique_ptr<VeComputePipeline> m_compact_pipeline;
+
 	// Main pass
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_compacted_indirect_buffers;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_compact_count_buffers;
 	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_compact_descriptor_sets =
 		makeNullArray<vk::raii::DescriptorSet>();
+		
 	// Shadow pass
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_compacted_indirect_buffers;
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_compact_count_buffers;
 	std::vector<std::vector<vk::raii::DescriptorSet>> m_shadow_compact_descriptor_sets; // [frame][slot]
 };
 
-} // namespace ve
+}

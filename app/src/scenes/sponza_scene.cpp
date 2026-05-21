@@ -24,7 +24,7 @@ void SponzaScene::loadGameObjects(const AssetPaths& paths) {
     // Sponza model
     {
         std::filesystem::path sponza_model_path = paths.sponza_model();
-        m_sponza_model = VeModel::load(m_resource_manager, sponza_model_path.lexically_normal(), &m_pool, &m_material_layout);
+        m_sponza_model = VeModel::load(m_resource_manager, sponza_model_path.lexically_normal());
         assert(m_sponza_model && "Failed to load Sponza model");
 
         glm::vec3 root_translation = glm::vec3{0.0f, 0.0f, -350.0f} + sponza_translation;

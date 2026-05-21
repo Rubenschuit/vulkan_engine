@@ -403,15 +403,15 @@ void GpuCullingSystem::createGlobalDescriptorSets(VeDescriptorPool& pool,
 	}
 }
 
-void GpuCullingSystem::copyIndirectStaging(vk::raii::CommandBuffer& cmd, GpuSceneManager& scene_mgr,
-                                            uint32_t frame, VeBuffer& dst_indirect) {
+void GpuCullingSystem::refreshMainIndirectBuffer(vk::raii::CommandBuffer& cmd,
+                                                  GpuSceneManager& scene_mgr, uint32_t frame) {
 	uint32_t total_groups = scene_mgr.getTotalGroups();
 	if (total_groups == 0)
 		return;
 	vk::DeviceSize copy_size = static_cast<vk::DeviceSize>(total_groups) * sizeof(VkDrawIndexedIndirectCommand);
 	vk::BufferCopy copy{0, 0, copy_size};
 	cmd.copyBuffer(scene_mgr.getIndirectTemplateBuffer(frame).getBuffer(),
-	               dst_indirect.getBuffer(), copy);
+	               m_indirect_buffers[frame]->getBuffer(), copy);
 }
 
 void GpuCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame_info, GpuSceneManager& scene_mgr) {
@@ -450,27 +450,23 @@ void GpuCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame
 	m_cull_param_ubos[frame]->writeToBuffer(&params);
 	m_frame_views[frame] = params.view;
 
-	// Copy pre-filled indirect commands from staging (resets instanceCount to 0)
-	copyIndirectStaging(cmd, scene_mgr, frame, *m_indirect_buffers[frame]);
+	refreshMainIndirectBuffer(cmd, scene_mgr, frame);
 
-	// Clear draw count buffer (bucket counts + total index count)
 	cmd.fillBuffer(m_draw_count_buffers[frame]->getBuffer(), 0,
 		static_cast<vk::DeviceSize>(BUCKET_COUNT + 1) * sizeof(uint32_t), 0);
 
-	// Clear compaction count buffer
 	if (m_compaction_enabled)
 		cmd.fillBuffer(m_compact_count_buffers[frame]->getBuffer(), 0,
 			static_cast<vk::DeviceSize>(BUCKET_COUNT) * sizeof(uint32_t), 0);
 
-	// Barrier: transfer clear/copy -> compute read/write
-	vk::MemoryBarrier2 clear_barrier{
+	vk::MemoryBarrier2 transfer_to_compute{
 		.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
 		.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
 		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.dstAccessMask = vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite,
 	};
-	vk::DependencyInfo clear_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &clear_barrier};
-	cmd.pipelineBarrier2(clear_dep);
+	vk::DependencyInfo transfer_to_compute_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &transfer_to_compute};
+	cmd.pipelineBarrier2(transfer_to_compute_dep);
 
 	// Bind and dispatch (same pipeline for frustum-only and Hi-Z paths)
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
@@ -593,12 +589,15 @@ void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
 	vk::MemoryBarrier2 entry_barrier{
 		.srcStageMask = vk::PipelineStageFlagBits2::eDrawIndirect
 			| vk::PipelineStageFlagBits2::eVertexShader
-			| vk::PipelineStageFlagBits2::eComputeShader,
-		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eTransfer
-			| vk::PipelineStageFlagBits2::eComputeShader,
-		.dstAccessMask = vk::AccessFlagBits2::eTransferWrite
-			| vk::AccessFlagBits2::eShaderStorageWrite,
+			| vk::PipelineStageFlagBits2::eComputeShader
+			| vk::PipelineStageFlagBits2::eTransfer,
+		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite
+			| vk::AccessFlagBits2::eTransferWrite,
+		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader
+			| vk::PipelineStageFlagBits2::eTransfer,
+		.dstAccessMask = vk::AccessFlagBits2::eShaderStorageRead
+			| vk::AccessFlagBits2::eShaderStorageWrite
+			| vk::AccessFlagBits2::eTransferWrite,
 	};
 	vk::DependencyInfo entry_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &entry_barrier};
 	cmd.pipelineBarrier2(entry_dep);
@@ -635,11 +634,15 @@ void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
 	cmd.updateBuffer<CullParams>(m_shadow_cull_param_ubos[frame_index][shadow_buf_index]->getBuffer(),
 		vk::DeviceSize{0}, params);
 
-	// Copy pre-filled indirect commands (resets instanceCount to 0)
-	copyIndirectStaging(cmd, scene_mgr, frame_index, *m_shadow_indirect_buffers[frame_index][shadow_buf_index]);
+	uint32_t total_groups = scene_mgr.getTotalGroups();
+	if (total_groups > 0) {
+		vk::DeviceSize copy_size = static_cast<vk::DeviceSize>(total_groups) * sizeof(VkDrawIndexedIndirectCommand);
+		cmd.copyBuffer(scene_mgr.getIndirectTemplateBuffer(frame_index).getBuffer(),
+		               m_shadow_indirect_buffers[frame_index][shadow_buf_index]->getBuffer(),
+		               vk::BufferCopy{0, 0, copy_size});
+	}
 
-	// Barrier: transfer copy -> compute read/write
-	vk::MemoryBarrier2 clear_barrier{
+	vk::MemoryBarrier2 ubo_barrier{
 		.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
 		.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
 		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
@@ -647,8 +650,8 @@ void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
 			| vk::AccessFlagBits2::eShaderStorageRead
 			| vk::AccessFlagBits2::eShaderStorageWrite,
 	};
-	vk::DependencyInfo clear_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &clear_barrier};
-	cmd.pipelineBarrier2(clear_dep);
+	vk::DependencyInfo ubo_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &ubo_barrier};
+	cmd.pipelineBarrier2(ubo_dep);
 
 	// Bind and dispatch
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());

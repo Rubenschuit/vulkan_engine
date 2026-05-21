@@ -4,6 +4,7 @@
 #include "rendering/ve_frame_info.hpp"
 #include "resources/ve_resource_manager.hpp"
 #include "resources/ve_texture.hpp"
+#include "vulkan/ve_descriptors.hpp"
 
 #include <memory>
 #include <array>
@@ -12,8 +13,6 @@
 namespace ve {
 	class VeDevice;
 	class VeImage;
-	class VeDescriptorPool;
-	class VeDescriptorSetLayout;
 	class EventBus;
 }
 

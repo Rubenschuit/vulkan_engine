@@ -26,8 +26,6 @@ void BistroScene::loadGameObjects(const AssetPaths& paths) {
 		m_bistro_model = VeModel::load(
 			m_resource_manager,
 			bistro_model_path.lexically_normal(),
-			&m_pool,
-			&m_material_layout,
 			true,
 			true
 		);

@@ -174,9 +174,8 @@ struct VeFrameInfo {
 	vk::raii::CommandBuffer& compute_command_buffer;
 	vk::raii::CommandBuffer* compute2_command_buffer = nullptr;
 
-	// Descriptor sets bound during scene rendering (sets 0..6)
-	vk::raii::DescriptorSet& global_descriptor_set;                  // set 0
-	vk::raii::DescriptorSet& material_descriptor_set;                // set 2 (material SSBO)
+	// Descriptor sets bound during scene rendering
+	vk::raii::DescriptorSet& global_descriptor_set;                  // set 0 (UBO + per-instance SSBO + material SSBO)
 	vk::raii::DescriptorSet* shadow_mask_descriptor_set = nullptr;   // set 3 (null when mask unavailable)
 	vk::raii::DescriptorSet* cluster_descriptor_set = nullptr;       // set 4 (null when clustering disabled)
 	vk::raii::DescriptorSet* ao_descriptor_set = nullptr;            // set 5 (dummy white when AO disabled)

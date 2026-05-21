@@ -51,21 +51,28 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 
 	TransformGPU xform = transforms[gpu_id];
 
-	// Transform bounding sphere to world space
-	float3 center_world = mul(xform.world_transform, float4(obj.bounding_sphere.xyz, 1.0)).xyz;
+	// Sphere precull 
+	float3 local_center = (obj.aabb_min.xyz + obj.aabb_max.xyz) * 0.5;
+	float3 local_extent = (obj.aabb_max.xyz - obj.aabb_min.xyz) * 0.5;
+	float3 center_world = mul(xform.world_transform, float4(local_center, 1.0)).xyz;
 	float max_scale = extractMaxScale(xform.world_transform);
-	float radius = obj.bounding_sphere.w * max_scale;
+	float radius = length(local_extent) * max_scale;
 
-	// Frustum cull
 	if (!frustumTest(cull_params, center_world, radius))
 		return;
 
-	// Hi-Z occlusion cull
+	float3 corners_world[8];
+	transformAabbCorners(xform.world_transform, obj.aabb_min.xyz, obj.aabb_max.xyz, corners_world);
+	float3 world_min, world_max;
+	aabbBounds(corners_world, world_min, world_max);
+
+	if (!aabbFrustumTest(cull_params, world_min, world_max))
+		return;
+
 	if (cull_params.hiz_enabled != 0 && cull_params.is_shadow_pass == 0)
-		if (!hizOcclusionTest(cull_params, hiz_pyramid, hiz_sampler, center_world, radius))
+		if (!hizOcclusionTestAabb(cull_params, hiz_pyramid, hiz_sampler, corners_world))
 			return;
 
-	// LOD selection
 	uint lod = selectLod(cull_params, center_world, radius, obj.lod_count);
 
 	// Look up meshlet range for this object + LOD

@@ -142,8 +142,6 @@ ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& 
                                                              const std::filesystem::path& specular_color_path,
                                                              MaterialAlphaProps alpha_props,
                                                              MaterialFactors factors,
-                                                             VeDescriptorPool* pool,
-                                                             VeDescriptorSetLayout* layout,
                                                              bool flip_tex_coord_v) {
 	auto type_idx = typeid(VeMaterial).hash_code();
 	auto& type_resources = m_resources[type_idx];
@@ -158,7 +156,7 @@ ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& 
 	                                            albedo_path, normal_path, metallic_roughness_path,
 	                                            occlusion_path, emissive_path,
 	                                            specular_path, specular_color_path,
-	                                            alpha_props, factors, pool, layout, flip_tex_coord_v);
+	                                            alpha_props, factors, flip_tex_coord_v);
 	if (!resource->load()) {
 		return ResourceHandle<VeMaterial>();
 	}

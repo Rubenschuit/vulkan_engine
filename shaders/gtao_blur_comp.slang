@@ -33,9 +33,28 @@ static const float WEIGHTS[5] = {
 	0.0162162162,  // offset 4
 };
 
+static const float DEPTH_WEIGHT_SCALE = 10000.0;
+
 float fetchDepthLinear(int2 coord) {
 	coord = clamp(coord, int2(0), int2(push.depth_size) - 1);
 	return depth_texture.Load(int3(coord, 0));
+}
+
+void accumulateTap(
+	int2 coord, int2 depth_coord, int2 offset,
+	float center_depth, float w,
+	inout float total_ao, inout float total_weight)
+{
+	int2 sample_coord = clamp(coord + offset, int2(0), int2(push.image_size) - 1);
+	float sample_ao = ao_input[sample_coord];
+	float sample_depth = fetchDepthLinear(depth_coord + offset);
+
+	float depth_diff = abs(center_depth - sample_depth);
+	float depth_weight = exp(-depth_diff * depth_diff * push.sharpness * DEPTH_WEIGHT_SCALE);
+	float final_w = w * depth_weight;
+
+	total_ao += sample_ao * final_w;
+	total_weight += final_w;
 }
 
 [numthreads(16, 16, 1)]
@@ -63,40 +82,8 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 
 	for (int i = 1; i <= BLUR_RADIUS; i++) {
 		float w = WEIGHTS[i];
-
-		// Positive direction
-		{
-			int2 sample_coord = coord + dir * i;
-			int2 sample_depth_coord = depth_coord + dir * i;
-			sample_coord = clamp(sample_coord, int2(0), int2(push.image_size) - 1);
-			float sample_ao = ao_input[sample_coord];
-			float sample_depth = fetchDepthLinear(sample_depth_coord);
-
-			// Depth-aware weight: reduce contribution when depth difference is large
-			static const float DEPTH_WEIGHT_SCALE = 10000.0; // Scales NDC depth range [0,1]
-			float depth_diff = abs(center_depth - sample_depth);
-			float depth_weight = exp(-depth_diff * depth_diff * push.sharpness * DEPTH_WEIGHT_SCALE);
-			float final_w = w * depth_weight;
-
-			total_ao += sample_ao * final_w;
-			total_weight += final_w;
-		}
-
-		// Negative direction
-		{
-			int2 sample_coord = coord - dir * i;
-			int2 sample_depth_coord = depth_coord - dir * i;
-			sample_coord = clamp(sample_coord, int2(0), int2(push.image_size) - 1);
-			float sample_ao = ao_input[sample_coord];
-			float sample_depth = fetchDepthLinear(sample_depth_coord);
-
-			float depth_diff = abs(center_depth - sample_depth);
-			float depth_weight = exp(-depth_diff * depth_diff * push.sharpness * 10000.0);
-			float final_w = w * depth_weight;
-
-			total_ao += sample_ao * final_w;
-			total_weight += final_w;
-		}
+		accumulateTap(coord, depth_coord,  dir * i, center_depth, w, total_ao, total_weight);
+		accumulateTap(coord, depth_coord, -dir * i, center_depth, w, total_ao, total_weight);
 	}
 
 	ao_output[id.xy] = total_ao / max(total_weight, 0.001);

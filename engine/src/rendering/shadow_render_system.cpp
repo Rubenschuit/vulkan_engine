@@ -909,6 +909,9 @@ void ShadowRenderSystem::snapshotAtlasToStaticCache(vk::raii::CommandBuffer& cmd
 
 void ShadowRenderSystem::growShadowInstanceBuffers(uint32_t new_capacity) {
 	VE_LOGI("Shadow instance buffer growing: " << m_shadow_instance_capacity << " -> " << new_capacity);
+	// createShadowPassDescriptorSets() below frees the existing per-frame shadow
+	// global descriptor sets so wait for idle.
+	m_ve_device.getDevice().waitIdle();
 	m_shadow_instance_capacity = new_capacity;
 	for (auto& buf : m_shadow_instance_buffers)
 		retireBuffer(std::move(buf));

@@ -85,8 +85,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 				.alpha_cutoff = 0.5f,
 				.double_sided = true,
 				.use_spec_gloss_texture = false},
-			floor_factors, &m_pool, &m_material_layout
-		);
+			floor_factors		);
 
 		Entity e = m_registry.createEntity("floor");
 		auto& tc = m_registry.addComponent<TransformComponent>(e);
@@ -110,7 +109,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 				default_dir / "default_emissive.png",
 				default_dir / "default_specular.png",
 				default_dir / "default_specular_color.png",
-				MaterialAlphaProps{AlphaMode::MASK, 0.5f, true}, MaterialFactors{}, &m_pool, &m_material_layout);
+				MaterialAlphaProps{AlphaMode::MASK, 0.5f, true}, MaterialFactors{});
 
 			Entity quad_entity = m_registry.createEntity("tex_quad");
 			auto& tc = m_registry.addComponent<TransformComponent>(quad_entity);
@@ -166,7 +165,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 						.double_sided = false,
 						.use_spec_gloss_texture = false
 					},
-					factors, &m_pool, &m_material_layout);
+					factors);
 
 				Entity e = m_registry.createEntity(name + "_r" + std::to_string(j) + "_m" + std::to_string(i));
 				auto& tc = m_registry.addComponent<TransformComponent>(e);

@@ -144,6 +144,7 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 
 	// Duplicate entity (recursive)
 	if (!m_pending_duplicate.isNull() && registry) {
+		VE_LOGI("Duplicate entity requested: index=" << m_pending_duplicate.index());
 		Entity cloned = registry->cloneEntityRecursive(m_pending_duplicate);
 		state.selected_entity = cloned;
 		state.selection_changed = true;
@@ -516,31 +517,10 @@ void HierarchyPanel::renderLightGroup(Registry& registry, const std::string& sou
 
 HierarchyPanel::HierarchyPanel() = default;
 
-HierarchyPanel::~HierarchyPanel() {
-	if (m_event_bus) {
-		m_event_bus->unsubscribe<SceneLoadedEvent>(m_scene_loaded_sub);
-		m_event_bus->unsubscribe<AssetLoadCompleteEvent>(m_asset_complete_sub);
-	}
-}
+HierarchyPanel::~HierarchyPanel() = default;
 
 void HierarchyPanel::setEventBus(EventBus* bus) {
-	if (m_event_bus) {
-		m_event_bus->unsubscribe<SceneLoadedEvent>(m_scene_loaded_sub);
-		m_event_bus->unsubscribe<AssetLoadCompleteEvent>(m_asset_complete_sub);
-	}
 	m_event_bus = bus;
-	if (!m_event_bus)
-		return;
-
-	m_scene_loaded_sub = m_event_bus->subscribe<SceneLoadedEvent>(
-		[this](const SceneLoadedEvent&) {
-			if (m_scene_manager)
-				m_selected_scene_index = m_scene_manager->loadedSceneIndex();
-		});
-	m_asset_complete_sub = m_event_bus->subscribe<AssetLoadCompleteEvent>(
-		[this](const AssetLoadCompleteEvent&) {
-			m_load_time_display_timer = 4.f;
-		});
 }
 
 void HierarchyPanel::renderSceneSelector() {
@@ -554,19 +534,19 @@ void HierarchyPanel::renderSceneSelector() {
 	if (loading)
 		ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Loading...");
 
-	int current = m_selected_scene_index;
+	int current = m_scene_manager->loadedSceneIndex();
 	for (int i = 0; i < static_cast<int>(entries.size()); i++) {
 		if (ImGui::RadioButton(entries[static_cast<size_t>(i)].name.c_str(), &current, i)) {
-			m_selected_scene_index = i;
 			m_event_bus->emitImmediate(SceneLoadRequestedEvent{.scene_index = i});
+			VE_LOGI("Scene load requested: index=" << i << " name='" << entries[static_cast<size_t>(i)].name << "'");
 		}
 		if (i < static_cast<int>(entries.size()) - 1 && i < 2)
 			ImGui::SameLine();
 	}
 
 	if (ImGui::Button("New Empty Scene")) {
-		m_selected_scene_index = -1;
 		m_event_bus->emitImmediate(SceneLoadRequestedEvent{.scene_index = -1});
+		VE_LOGI("New empty scene load requested");
 	}
 
 	if (ImGui::Button("Add Model...")) {
@@ -575,22 +555,16 @@ void HierarchyPanel::renderSceneSelector() {
 			{"glTF Files", "*.gltf *.glb"},
 			pfd::opt::none
 		).result();
-		if (!selection.empty())
+		if (!selection.empty()) {
 			m_event_bus->emitImmediate(AddModelRequestedEvent{
 				.gltf_path = selection[0],
 				.flip_tex_coord_v = m_flip_tex_coord_v
 			});
+			VE_LOGI("Add model requested: path='" << selection[0] << "' flip_uv_v=" << m_flip_tex_coord_v);
+		}
 	}
 	ImGui::SameLine();
 	ImGui::Checkbox("Flip UV vertically", &m_flip_tex_coord_v);
-
-	// Show load time for a few seconds after completion
-	float load_time = m_scene_manager->assetLoader().getLastLoadSeconds();
-	if (load_time > 0.f && m_load_time_display_timer > 0.f) {
-		m_load_time_display_timer -= ImGui::GetIO().DeltaTime;
-		float alpha = std::min(m_load_time_display_timer, 1.f);
-		ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, alpha), "Loaded in %.1fs", load_time);
-	}
 
 	ImGui::Separator();
 	ImGui::Spacing();

@@ -81,7 +81,7 @@ std::string AssetLoadingSystem::getStatusMessage() {
 	return {};
 }
 
-void AssetLoadingSystem::tick(VeDescriptorPool* pool, VeDescriptorSetLayout* layout) {
+void AssetLoadingSystem::tick() {
 	if (m_state == LoadState::IDLE || m_state == LoadState::READY || m_state == LoadState::FAILED)
 		return;
 
@@ -140,15 +140,6 @@ void AssetLoadingSystem::tick(VeDescriptorPool* pool, VeDescriptorSetLayout* lay
 					return tex.file_path;
 				};
 
-				bool has_textured = false;
-				for (int idx : {pm.albedo_tex_idx, pm.normal_tex_idx, pm.metallic_roughness_tex_idx,
-				                pm.occlusion_tex_idx, pm.emissive_tex_idx,
-				                pm.specular_tex_idx, pm.specular_color_tex_idx}) {
-					if (idx >= 0 && static_cast<size_t>(idx) < m_asset_data.textures.size()
-					    && !m_asset_data.textures[static_cast<size_t>(idx)].is_default)
-						has_textured = true;
-				}
-
 				auto mat_handle = m_resource_manager.createMaterial(
 					pm.resource_id,
 					getTexPath(pm.albedo_tex_idx),
@@ -159,8 +150,6 @@ void AssetLoadingSystem::tick(VeDescriptorPool* pool, VeDescriptorSetLayout* lay
 					getTexPath(pm.specular_tex_idx),
 					getTexPath(pm.specular_color_tex_idx),
 					pm.alpha_props, pm.factors,
-					has_textured ? pool : nullptr,
-					has_textured ? layout : nullptr,
 					pm.flip_tex_coord_v);
 				m_uploaded_materials.push_back(std::move(mat_handle));
 				m_mat_upload_cursor++;

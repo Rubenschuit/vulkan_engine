@@ -451,7 +451,6 @@ VeFrameInfo RenderPipeline::buildFrameInfo(VeScene& scene,
 	auto& compute_command_buffer = m_ve_renderer.getCurrentComputeCommandBuffer();
 	auto& compute2_command_buffer = m_ve_renderer.getCurrentCompute2CommandBuffer();
 
-	vk::raii::DescriptorSet& material_descriptor_set = m_resources.defaultMaterialDescriptorSet();
 	vk::raii::DescriptorSet& shadow_desc_set = m_shadow_render_system->getShadowDescriptorSet(current_frame);
 
 	int color_space_type = static_cast<int>(m_ve_renderer.getHDRColorMode());
@@ -467,7 +466,6 @@ VeFrameInfo RenderPipeline::buildFrameInfo(VeScene& scene,
 		.compute_command_buffer = compute_command_buffer,
 		.compute2_command_buffer = &compute2_command_buffer,
 		.global_descriptor_set = m_active_backend->getGlobalDescriptorSet(current_frame),
-		.material_descriptor_set = material_descriptor_set,
 		.cubemap_descriptor_set = m_skybox_render_system->getCubemapDescriptorSet(),
 		.shadow_descriptor_set = shadow_desc_set,
 		.cpu_global_descriptor_set = &m_global_descriptor_sets[current_frame],
@@ -601,7 +599,8 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 	auto& gpu_scene = m_scene_resources->getGpuSceneManager();
 	auto& material_mgr = m_scene_resources->getMaterialManager();
 	auto& bindless_set = m_scene_resources->getBindlessRegistry().getDescriptorSet();
-	material_mgr.flushToDevice(command_buffer);
+	if (material_mgr.isDirty())
+		material_mgr.flushToDevice(command_buffer);
 
 	{
 		ScopedDebugLabel label(command_buffer, "Culling", {0.6f, 0.6f, 0.6f, 1.0f});
@@ -659,7 +658,8 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 	if (any_depth_consumer) {
 		vk::ImageMemoryBarrier2 depth_to_read{
-			.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests
+			.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+				| vk::PipelineStageFlagBits2::eLateFragmentTests
 				| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
 			.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
 				| vk::AccessFlagBits2::eColorAttachmentWrite,
@@ -740,6 +740,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 				.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
 				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+					| vk::PipelineStageFlagBits2::eLateFragmentTests
 					| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
 				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
 					| vk::AccessFlagBits2::eDepthStencilAttachmentWrite
@@ -793,6 +794,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 				.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
 				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+					| vk::PipelineStageFlagBits2::eLateFragmentTests
 					| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
 				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
 					| vk::AccessFlagBits2::eDepthStencilAttachmentWrite

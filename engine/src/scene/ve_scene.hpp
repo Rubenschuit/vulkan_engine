@@ -10,20 +10,13 @@
 #include <memory>
 #include <vector>
 
-#define VULKAN_HPP_ENABLE_RAII
-#include <vulkan/vulkan_raii.hpp>
-
 namespace ve {
 
 class VeModel;
-class VeDescriptorPool;
-class VeDescriptorSetLayout;
 
 struct VENGINE_API SceneContext {
     VeDevice& device;
     VeResourceManager& resource_manager;
-    VeDescriptorPool& pool;
-    VeDescriptorSetLayout& material_layout;
 };
 
 class VENGINE_API VeScene {
@@ -54,8 +47,6 @@ public:
 protected:
     VeDevice& m_device;
     VeResourceManager& m_resource_manager;
-    VeDescriptorPool& m_pool;
-    VeDescriptorSetLayout& m_material_layout;
     std::string m_name;
     Registry m_registry;
 	uint32_t m_num_lights;

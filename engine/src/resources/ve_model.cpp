@@ -1942,21 +1942,15 @@ static std::vector<ParsedMaterial> parseAllMaterials(
 static void createMaterialResources(
     const std::vector<ParsedMaterial>& parsed_materials,
     VeResourceManager& resource_manager, const std::filesystem::path& model_path,
-    VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout,
     bool flip_tex_coord_v,
     std::vector<ResourceHandle<VeMaterial>>& out_handles) {
-	bool has_textured = std::any_of(parsed_materials.begin(), parsed_materials.end(),
-		[](const ParsedMaterial& m) { return m.has_textures; });
-	VeDescriptorPool* mat_pool = has_textured ? pool : nullptr;
-	VeDescriptorSetLayout* mat_layout = has_textured ? material_layout : nullptr;
 	for (size_t i = 0; i < parsed_materials.size(); i++) {
 		const auto& pm = parsed_materials[i];
 		std::string mat_id = model_path.generic_string() + "::material_" + std::to_string(i);
 		auto mat_handle = resource_manager.createMaterial(mat_id, pm.albedo_path, pm.normal_path,
 		                                                  pm.metallic_roughness_path, pm.occlusion_path, pm.emissive_path,
 		                                                  pm.specular_path, pm.specular_color_path,
-		                                                  pm.alpha_props, pm.factors, mat_pool, mat_layout,
-		                                                  flip_tex_coord_v);
+		                                                  pm.alpha_props, pm.factors, flip_tex_coord_v);
 		if (!mat_handle.isValid()) {
 			VE_LOGE("Failed to create material " << i);
 			continue;
@@ -1982,12 +1976,11 @@ static std::vector<MaterialFactors> extractFactors(const std::vector<ParsedMater
 // Required for some gltf exporters.
 std::unique_ptr<VeModel> VeModel::load(VeResourceManager& resource_manager,
                                        const std::filesystem::path& model_path,
-                                       VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout,
                                        bool extract_lights,
                                        bool flip_tex_coord_v) {
 	auto model = std::make_unique<VeModel>();
 	VE_LOGI("Loading model from: " << model_path);
-	model->loadFromGltf(model_path, resource_manager, pool, material_layout, extract_lights, flip_tex_coord_v);
+	model->loadFromGltf(model_path, resource_manager, extract_lights, flip_tex_coord_v);
 	return model;
 }
 
@@ -1996,7 +1989,6 @@ VeModel::VeModel() = default;
 VeModel::~VeModel() = default;
 
 void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceManager& resource_manager,
-                           VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout,
                            bool extract_lights, bool flip_tex_coord_v) {
 	// Parse glTF file
 	tinygltf::Model gltf;
@@ -2013,7 +2005,7 @@ void VeModel::loadFromGltf(const std::filesystem::path& model_path, VeResourceMa
 	float emissive_scale = detectEmissiveScale(gltf);
 	auto parsed_materials = parseAllMaterials(gltf, model_path.parent_path(), model_path_str, emissive_scale);
 	createMaterialResources(parsed_materials, resource_manager, model_path,
-	                        pool, material_layout, flip_tex_coord_v, m_material_handles);
+	                        flip_tex_coord_v, m_material_handles);
 	VeTexture::clearEmbeddedCache();
 
 	// Determine root nodes
@@ -2346,7 +2338,7 @@ void VeModel::addToScene(Registry& registry,
 			if (add_mesh) {
 				auto& mc = registry.addComponent<MeshComponent>(entity, mesh_h, mat_h);
 				auto* mat = mat_h.get();
-				mc.has_texture = (mat && mat->hasDescriptorSet()) ? 1.0f : 0.0f;
+				mc.has_texture = (mat && mat->getAlbedoTexture().isValid()) ? 1.0f : 0.0f;
 				last_mesh_entity = entity;
 				mesh_attached++;
 			}
@@ -2550,7 +2542,7 @@ std::optional<VeModel::SingleMeshData> VeModel::loadSingleMesh(
 	VeResourceManager& resource_manager,
 	const std::filesystem::path& model_path,
 	bool flip_tex_coord_v) {
-	auto model = load(resource_manager, model_path.lexically_normal(), nullptr, nullptr, false, flip_tex_coord_v);
+	auto model = load(resource_manager, model_path.lexically_normal(), false, flip_tex_coord_v);
 	for (const auto& node : model->m_nodes) {
 		if (node.mesh_idx >= 0 && node.material_idx >= 0
 		    && static_cast<size_t>(node.mesh_idx) < model->m_mesh_handles.size()

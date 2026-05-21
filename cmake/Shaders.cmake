@@ -67,6 +67,11 @@ function(add_slang_spirv_target TARGET)
 			spvMinLod
 			spvSparseResidency
 			spvFragmentFullyCoveredEXT
+			spvGroupNonUniform
+			spvGroupNonUniformArithmetic
+			spvGroupNonUniformBallot
+			spvGroupNonUniformShuffle
+			spvGroupNonUniformVote
 			SPV_KHR_non_semantic_info
 			SPV_GOOGLE_user_type
 		)
@@ -99,6 +104,7 @@ function(add_slang_spirv_target TARGET)
 					-I "${PROJECT_SOURCE_DIR}/shaders"
 					-target spirv
 					-profile ${_PROFILE}
+					-capability ${_SLANG_CAPABILITY_FLAG}
 					-fvk-use-gl-layout
 					-entry ${_ENTRY} -stage compute
 					-emit-spirv-directly

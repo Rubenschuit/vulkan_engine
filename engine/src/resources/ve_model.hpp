@@ -22,8 +22,6 @@
 
 namespace ve {
 
-class VeDescriptorPool;
-class VeDescriptorSetLayout;
 struct LoadedAssetData;
 struct LoadProgress;
 
@@ -45,14 +43,11 @@ struct ModelSkin {
 
 class VENGINE_API VeModel {
 public:
-	// Load glTF from path, create meshes and node hierarchy
-	// pool and material_layout can be null for models without textures
+	// Load glTF from path, create meshes and node hierarchy.
 	// extract_lights: parse KHR_lights_punctual + emissive-as-lights when addToScene is used
 	// flip_tex_coord_v: when true, materials use flipped v for tex coords
 	static std::unique_ptr<VeModel> load(VeResourceManager& resource_manager,
 	                                    const std::filesystem::path& model_path,
-	                                    VeDescriptorPool* pool = nullptr,
-	                                    VeDescriptorSetLayout* material_layout = nullptr,
 	                                    bool extract_lights = false,
 	                                    bool flip_tex_coord_v = false);
 
@@ -128,7 +123,6 @@ public:
 private:
 
 	void loadFromGltf(const std::filesystem::path& model_path, VeResourceManager& resource_manager,
-	                  VeDescriptorPool* pool, VeDescriptorSetLayout* material_layout,
 	                  bool extract_lights, bool flip_tex_coord_v = false);
 
 	std::vector<ModelNode> m_nodes;

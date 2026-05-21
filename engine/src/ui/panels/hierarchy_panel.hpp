@@ -45,12 +45,8 @@ private:
 
 	SceneManager* m_scene_manager = nullptr;
 	EventBus* m_event_bus = nullptr;
-	EventSubscriptionId m_scene_loaded_sub = 0;
-	EventSubscriptionId m_asset_complete_sub = 0;
 
-	int m_selected_scene_index = -1;
 	bool m_flip_tex_coord_v = false;
-	float m_load_time_display_timer = 0.f;
 
 	std::unordered_map<std::string, LightGroupState> m_group_states;
 	Registry* m_last_registry = nullptr;

@@ -14,6 +14,7 @@
 #include "ve_export.hpp"
 #include "ve_config.hpp"
 #include "rendering/ve_frame_info.hpp"
+#include "vulkan/ve_descriptors.hpp"
 
 #include <memory>
 #include <vector>

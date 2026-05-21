@@ -85,8 +85,11 @@ void SceneManager::loadDefaultScene(int index) {
 void SceneManager::setActiveScene(std::unique_ptr<VeScene> scene) {
 	unloadScene();
 	m_active_scene = std::move(scene);
-	if (m_active_scene)
+	if (m_active_scene) {
 		m_event_bus.emitImmediate(SceneLoadedEvent{&m_active_scene->getRegistry(), m_active_scene.get()});
+		VE_LOGI("SceneManager: loaded scene '" << m_active_scene->getName() << "' with "
+			<< m_active_scene->getRegistry().entityCount() << " entities");
+	}
 }
 
 void SceneManager::unloadScene() {
@@ -94,6 +97,7 @@ void SceneManager::unloadScene() {
 		return;
 	// SceneResourceManager subscribes to SceneUnloadedEvent and does a
 	// vkDeviceWaitIdle before clearing its caches, so the GPU is idle here.
+	VE_LOGI("SceneManager: unloading scene '" << m_active_scene->getName() << "'");
 	m_event_bus.emitImmediate(SceneUnloadedEvent{});
 	m_active_scene.reset();
 	m_resource_manager.flushPendingUnloads();
@@ -162,7 +166,7 @@ void SceneManager::tickAsyncLoader() {
 	    m_asset_loader->getState() == LoadState::FAILED)
 		return;
 
-	m_asset_loader->tick(&*m_render_resources.pool(), &m_render_resources.materialSetLayout());
+	m_asset_loader->tick();
 
 	if (m_asset_loader->getState() == LoadState::READY)
 		finalizeAsyncLoad();
@@ -181,8 +185,6 @@ void SceneManager::finalizeAsyncLoad() {
 			auto scene = m_scene_entries[static_cast<size_t>(idx)].gltf_factory(ctx, std::move(model));
 			m_loaded_scene_index = idx;
 			setActiveScene(std::move(scene));
-			m_event_bus.emitImmediate(AssetLoadCompleteEvent{
-				m_asset_loader->getModelName(), {}});
 		}
 		m_async_scene_index = -1;
 	} else if (m_async_op == PendingOp::ADD_MODEL && m_active_scene) {

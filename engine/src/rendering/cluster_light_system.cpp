@@ -215,7 +215,7 @@ void ClusterLightSystem::dispatch(VeFrameInfo& frame_info, vk::Extent2D screen_e
 	params.view = cv.view;
 	params.z_near = cv.z_near;
 	params.z_far = cv.z_far;
-	params.log_depth_ratio = std::log(params.z_far / params.z_near);
+	params.z_slice_scale = float(CLUSTER_Z_SLICES) / std::log(params.z_far / params.z_near);
 	params.num_lights = m_last_light_count;
 	params.screen_size = glm::uvec2(screen_extent.width, screen_extent.height);
 	params.tile_size = glm::uvec2(CLUSTER_TILE_SIZE, CLUSTER_TILE_SIZE);

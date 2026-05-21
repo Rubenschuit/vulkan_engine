@@ -1,29 +1,21 @@
-/* VeMaterial - PBR material resource (textures + descriptor set).
+/* VeMaterial - PBR material resource
  * Inherits from Resource for use with VeResourceManager.
  * Holds albedo, normal, metallic-roughness, occlusion, emissive textures.
+ * Material data reaches shaders via MaterialSSBOManager (bindless lookup by index).
  */
 #pragma once
 #include "ve_export.hpp"
 #include "resources/ve_resource.hpp"
 #include "resources/ve_resource_manager.hpp"
 #include "resources/ve_texture.hpp"
-#include "vulkan/ve_descriptors.hpp"
 #include "resources/ve_material_properties.hpp"
 
 #include <filesystem>
-#include <memory>
-#include <optional>
 
 namespace ve {
 
-class VeBuffer;
-class VeDescriptorPool;
-class VeDescriptorSetLayout;
-class MaterialSSBOManager;
-
 class VENGINE_API VeMaterial : public Resource {
 public:
-	// Create material from texture paths and PBR factors. pool and layout can be null for untextured materials.
 	VeMaterial(VeResourceManager& resource_manager, const std::string& resource_id,
 	           const std::filesystem::path& albedo_path,
 	           const std::filesystem::path& normal_path,
@@ -34,16 +26,11 @@ public:
 	           const std::filesystem::path& specular_color_path,
 	           MaterialAlphaProps alpha_props,
 	           MaterialFactors factors,
-	           VeDescriptorPool* pool, VeDescriptorSetLayout* layout,
 	           bool flip_tex_coord_v = false);
 	~VeMaterial() override;
 
 	VeMaterial(const VeMaterial&) = delete;
 	VeMaterial& operator=(const VeMaterial&) = delete;
-
-	// Get descriptor set for PBR rendering. Valid only when created with pool/layout.
-	vk::raii::DescriptorSet& getDescriptorSet();
-	bool hasDescriptorSet() const { return m_descriptor_set.has_value(); }
 
 	MaterialAlphaProps getAlphaProps() const { return m_alpha_props; }
 	void setAlphaProps(const MaterialAlphaProps& props) { m_alpha_props = props; }
@@ -77,8 +64,6 @@ private:
 	std::filesystem::path m_specular_color_path;
 	MaterialAlphaProps m_alpha_props;
 	MaterialFactors m_factors;
-	VeDescriptorPool* m_pool;
-	VeDescriptorSetLayout* m_layout;
 	bool m_flip_tex_coord_v{false};
 
 	ResourceHandle<VeTexture> m_albedo_texture;
@@ -88,8 +73,6 @@ private:
 	ResourceHandle<VeTexture> m_emissive_texture;
 	ResourceHandle<VeTexture> m_specular_texture;
 	ResourceHandle<VeTexture> m_specular_color_texture;
-	std::unique_ptr<VeBuffer> m_material_ubo;
-	std::optional<vk::raii::DescriptorSet> m_descriptor_set;
 };
 
 } // namespace ve

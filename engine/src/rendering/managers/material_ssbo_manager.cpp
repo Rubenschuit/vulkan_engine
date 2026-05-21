@@ -22,6 +22,8 @@ MaterialSSBOManager::MaterialSSBOManager(VeDevice& device, BindlessTextureRegist
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	m_staging_buffer->map();
 
+	m_dirty_slots.assign(MAX_GPU_MATERIALS, 0);
+
 	m_unload_sub = m_event_bus.subscribe<ResourceUnloadingEvent<VeMaterial>>(
 		[this](const ResourceUnloadingEvent<VeMaterial>& e) {
 			releaseSlot(e.resource);
@@ -57,7 +59,29 @@ void MaterialSSBOManager::updateMaterial(uint32_t index, VeMaterial* mat) {
 }
 
 void MaterialSSBOManager::flushToDevice(const vk::raii::CommandBuffer& cmd) {
-	if (!m_dirty || m_next_index == 0)
+	if (!m_any_dirty || m_next_index == 0)
+		return;
+
+	std::vector<vk::BufferCopy> regions;
+	uint32_t i = 0;
+	while (i < m_next_index) {
+		if (!m_dirty_slots[i]) {
+			i++;
+			continue;
+		}
+		uint32_t run_start = i;
+		while (i < m_next_index && m_dirty_slots[i]) {
+			m_dirty_slots[i] = 0;
+			i++;
+		}
+		vk::DeviceSize offset = static_cast<vk::DeviceSize>(run_start) * sizeof(MaterialGPU);
+		vk::DeviceSize length = static_cast<vk::DeviceSize>(i - run_start) * sizeof(MaterialGPU);
+		regions.push_back({offset, offset, length});
+	}
+
+	m_any_dirty = false;
+
+	if (regions.empty())
 		return;
 
 	vk::DeviceSize size = static_cast<vk::DeviceSize>(m_next_index) * sizeof(MaterialGPU);
@@ -78,8 +102,7 @@ void MaterialSSBOManager::flushToDevice(const vk::raii::CommandBuffer& cmd) {
 	vk::DependencyInfo pre_dep{.bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &pre_barrier};
 	cmd.pipelineBarrier2(pre_dep);
 
-	cmd.copyBuffer(m_staging_buffer->getBuffer(), m_buffer->getBuffer(),
-		vk::BufferCopy{0, 0, size});
+	cmd.copyBuffer(m_staging_buffer->getBuffer(), m_buffer->getBuffer(), regions);
 
 	vk::BufferMemoryBarrier2 barrier{
 		.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
@@ -96,14 +119,14 @@ void MaterialSSBOManager::flushToDevice(const vk::raii::CommandBuffer& cmd) {
 	};
 	vk::DependencyInfo dep{.bufferMemoryBarrierCount = 1, .pBufferMemoryBarriers = &barrier};
 	cmd.pipelineBarrier2(dep);
-
-	m_dirty = false;
 }
 
 void MaterialSSBOManager::reset() {
 	m_material_to_index.clear();
 	m_free_list.clear();
 	m_next_index = 0;
+	std::fill(m_dirty_slots.begin(), m_dirty_slots.end(), 0);
+	m_any_dirty = false;
 }
 
 void MaterialSSBOManager::releaseSlot(VeMaterial* mat) {
@@ -153,7 +176,8 @@ void MaterialSSBOManager::writeMaterialGPU(uint32_t index, VeMaterial* mat) {
 
 	m_staging_buffer->writeToBuffer(&gpu, sizeof(MaterialGPU),
 		static_cast<vk::DeviceSize>(index) * sizeof(MaterialGPU));
-	m_dirty = true;
+	m_dirty_slots[index] = 1;
+	m_any_dirty = true;
 	m_event_bus.enqueue(MaterialDataChangedEvent{index});
 }
 

@@ -16,9 +16,6 @@
 
 namespace ve {
 
-class VeDescriptorPool;
-class VeDescriptorSetLayout;
-
 enum class LoadState { IDLE, CPU_LOADING, GPU_UPLOADING, FINALIZING, READY, FAILED };
 
 class VENGINE_API AssetLoadingSystem {
@@ -34,7 +31,7 @@ public:
 	                    bool extract_lights, bool flip_tex_coord_v);
 
 	// Call once per frame from main thread. Performs batched GPU uploads.
-	void tick(VeDescriptorPool* pool, VeDescriptorSetLayout* layout);
+	void tick();
 
 	// Cancel current load and join the background thread
 	void cancel();

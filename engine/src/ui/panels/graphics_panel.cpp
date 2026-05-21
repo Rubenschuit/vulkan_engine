@@ -19,8 +19,86 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		return;
 	}
 
+	// --- Display ---
+	if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen)) {
+		ImGui::SliderFloat("FOV (Degrees)", &ctx.settings.fov, 30.0f, 120.0f, "%.1f");
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Field of View in degrees.");
+
+		if (ImGui::Checkbox("Enable VSync", &ctx.settings.vsync))
+			m_renderer.setVSync(ctx.settings.vsync);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Synchronizes frame rate with display refresh rate.\nEliminates screen tearing but may increase input latency.");
+
+		bool hdr_supported = m_renderer.hasHdrSupport();
+		if (!hdr_supported)
+			ImGui::BeginDisabled();
+		if (ImGui::Checkbox("Enable HDR", &ctx.settings.hdr_enabled))
+			m_renderer.setHdrEnabled(ctx.settings.hdr_enabled);
+		if (hdr_supported && ctx.settings.hdr_enabled) {
+			const char* mode_str = m_renderer.getHDRColorModeString();
+			if (mode_str[0] != '\0') {
+				ImGui::SameLine();
+				ImGui::TextDisabled("| Selected Mode: %s", mode_str);
+			}
+		}
+		if (!hdr_supported) {
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			ImGui::TextDisabled("(Not supported by device)");
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("High Dynamic Range.\nRequires compatible HDR display.");
+
+		ImGui::Separator();
+		auto extent = m_renderer.getExtent();
+		ImGui::Text("Resolution: %d x %d", extent.width, extent.height);
+	}
+
+	// --- Culling ---
+	if (ImGui::CollapsingHeader("Culling", ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (ImGui::Checkbox("Depth Pre-pass", &ctx.settings.depth_prepass_enabled))
+			m_event_bus.emitImmediate(DepthPrePassChangedEvent{ctx.settings.depth_prepass_enabled});
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Early depth pass. Required by GTAO, shadow mask, and Hi-Z occlusion culling.");
+		ImGui::Checkbox("Frustum culling", &ctx.settings.enable_frustum_culling);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Skip drawing objects outside the camera view");
+		ImGui::Checkbox("GPU Culling", &ctx.settings.gpu_culling_enabled);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("GPU-driven frustum culling via compute shader.\n Improves performance for large scenes.");
+		if (ctx.settings.gpu_culling_enabled) {
+			ImGui::Indent();
+			ImGui::Checkbox("Hi-Z Occlusion Culling", &ctx.settings.hiz_occlusion_enabled);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Skips objects occluded by depth buffer.\nRequires depth pre-pass enabled.");
+			ImGui::Checkbox("Meshlet Culling", &ctx.settings.meshlet_culling_enabled);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Sub-object meshlet culling (frustum + backface cone + Hi-Z).\nReduces triangle count for partially-visible large meshes.\n More overhead on Apple silicon.");
+			if (ctx.settings.meshlet_culling_enabled) {
+				ImGui::Indent();
+				if (ImGui::Checkbox("Object Culled Shadows", &ctx.settings.meshlet_gpu_shadow_fallback))
+					m_event_bus.emitImmediate(GpuShadowFallbackChangedEvent{ctx.settings.meshlet_gpu_shadow_fallback});
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Use object-level GPU culling for shadows instead of meshlet culling.");
+				ImGui::Unindent();
+			}
+			ImGui::Unindent();
+		}
+		if (ImGui::Checkbox("Clustered Lighting", &ctx.settings.cluster_enabled))
+			m_event_bus.emitImmediate(ClusterEnabledChangedEvent{ctx.settings.cluster_enabled});
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Use 3D cluster grid to cull lights per-fragment");
+
+		ImGui::Separator();
+		ImGui::Text("Multi-threading:");
+		ImGui::SliderInt("Min cull entities", &ctx.settings.min_parallel_cull_entities, 0, 4096);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Minimum mesh entities to enable parallel cpu frustum culling.\n0 = always parallel");
+	}
+
 	// --- Anti-Aliasing ---
-	if (ImGui::CollapsingHeader("Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen)) {
+	if (ImGui::CollapsingHeader("Anti-Aliasing")) {
 		auto available = m_renderer.getAvailableSampleCounts();
 		int current = m_renderer.getCurrentSampleCountInt();
 
@@ -55,7 +133,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 	}
 
 	// --- Shadows ---
-	if (ImGui::CollapsingHeader("Shadows", ImGuiTreeNodeFlags_DefaultOpen)) {
+	if (ImGui::CollapsingHeader("Shadows")) {
 		ImGui::PushItemWidth(200.0f);
 		int shadow_mode_int = static_cast<int>(ctx.settings.shadow_mode);
 		if (ImGui::SliderInt("##shadow_slider", &shadow_mode_int, 0, 3, ""))
@@ -160,7 +238,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 	}
 
 	// --- Ambient Occlusion ---
-	if (ImGui::CollapsingHeader("Ambient Occlusion", ImGuiTreeNodeFlags_DefaultOpen)) {
+	if (ImGui::CollapsingHeader("Ambient Occlusion")) {
 		ImGui::Checkbox("GTAO", &ctx.settings.gtao_enabled);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Ground Truth Ambient Occlusion:\ndarkens corners, crevices, and contact areas.\nRequires depth pre-pass enabled.");
@@ -181,48 +259,6 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		}
 	}
 
-	// --- Culling ---
-	if (ImGui::CollapsingHeader("Culling", ImGuiTreeNodeFlags_DefaultOpen)) {
-		if (ImGui::Checkbox("Depth Pre-pass", &ctx.settings.depth_prepass_enabled))
-			m_event_bus.emitImmediate(DepthPrePassChangedEvent{ctx.settings.depth_prepass_enabled});
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Early depth pass. Required by GTAO, shadow mask, and Hi-Z occlusion culling.");
-		ImGui::Checkbox("Frustum culling", &ctx.settings.enable_frustum_culling);
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Skip drawing objects outside the camera view");
-		ImGui::Checkbox("GPU Culling", &ctx.settings.gpu_culling_enabled);
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("GPU-driven frustum culling via compute shader.\n Improves performance for large scenes.");
-		if (ctx.settings.gpu_culling_enabled) {
-			ImGui::Indent();
-			ImGui::Checkbox("Hi-Z Occlusion Culling", &ctx.settings.hiz_occlusion_enabled);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Skips objects occluded by depth buffer.\nRequires depth pre-pass enabled.");
-			ImGui::Checkbox("Meshlet Culling", &ctx.settings.meshlet_culling_enabled);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Sub-object meshlet culling (frustum + backface cone + Hi-Z).\nReduces triangle count for partially-visible large meshes.\n More overhead on Apple silicon.");
-			if (ctx.settings.meshlet_culling_enabled) {
-				ImGui::Indent();
-				if (ImGui::Checkbox("Object Culled Shadows", &ctx.settings.meshlet_gpu_shadow_fallback))
-					m_event_bus.emitImmediate(GpuShadowFallbackChangedEvent{ctx.settings.meshlet_gpu_shadow_fallback});
-				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("Use object-level GPU culling for shadows instead of meshlet culling.");
-				ImGui::Unindent();
-			}
-			ImGui::Unindent();
-		}
-		if (ImGui::Checkbox("Clustered Lighting", &ctx.settings.cluster_enabled))
-			m_event_bus.emitImmediate(ClusterEnabledChangedEvent{ctx.settings.cluster_enabled});
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Use 3D cluster grid to cull lights per-fragment");
-
-		ImGui::Separator();
-		ImGui::Text("Multi-threading:");
-		ImGui::SliderInt("Min cull entities", &ctx.settings.min_parallel_cull_entities, 0, 4096);
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Minimum mesh entities to enable parallel cpu frustum culling.\n0 = always parallel");
-	}
-
 	// --- LOD ---
 	if (ImGui::CollapsingHeader("Level of Detail")) {
 		const char* lod_items[] = {"Auto", "LOD 0", "LOD 1", "LOD 2", "LOD 3"};
@@ -240,7 +276,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 	}
 
 	// --- Post Processing ---
-	if (ImGui::CollapsingHeader("Post Processing", ImGuiTreeNodeFlags_DefaultOpen)) {
+	if (ImGui::CollapsingHeader("Post Processing")) {
 		ImGui::SliderInt("Blur Radius", &ctx.settings.blur_radius, 0, 10);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Gaussian blur kernel size.\n0 = No blur, higher values = stronger blur effect");
@@ -307,42 +343,6 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			ImGui::EndDisabled();
 		ImGui::SameLine();
 		ImGui::TextDisabled("(reallocates GPU buffers)");
-	}
-
-	// --- Display ---
-	if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen)) {
-		ImGui::SliderFloat("FOV (Degrees)", &ctx.settings.fov, 30.0f, 120.0f, "%.1f");
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Field of View in degrees.");
-
-		if (ImGui::Checkbox("Enable VSync", &ctx.settings.vsync))
-			m_renderer.setVSync(ctx.settings.vsync);
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Synchronizes frame rate with display refresh rate.\nEliminates screen tearing but may increase input latency.");
-
-		bool hdr_supported = m_renderer.hasHdrSupport();
-		if (!hdr_supported)
-			ImGui::BeginDisabled();
-		if (ImGui::Checkbox("Enable HDR", &ctx.settings.hdr_enabled))
-			m_renderer.setHdrEnabled(ctx.settings.hdr_enabled);
-		if (hdr_supported && ctx.settings.hdr_enabled) {
-			const char* mode_str = m_renderer.getHDRColorModeString();
-			if (mode_str[0] != '\0') {
-				ImGui::SameLine();
-				ImGui::TextDisabled("| Selected Mode: %s", mode_str);
-			}
-		}
-		if (!hdr_supported) {
-			ImGui::EndDisabled();
-			ImGui::SameLine();
-			ImGui::TextDisabled("(Not supported by device)");
-		}
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("High Dynamic Range.\nRequires compatible HDR display.");
-
-		ImGui::Separator();
-		auto extent = m_renderer.getExtent();
-		ImGui::Text("Resolution: %d x %d", extent.width, extent.height);
 	}
 
 	// --- Physics ---

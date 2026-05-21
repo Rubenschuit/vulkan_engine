@@ -9,7 +9,8 @@
 // ---------------------------------------------------------------------------
 
 struct ObjectDataGPU {
-	float4 bounding_sphere;             // local-space center (xyz), radius (w)
+	float4 aabb_min; // w = padding
+	float4 aabb_max;
 	uint   vertex_offset;
 	uint   material_index;
 	uint   material_flags;
@@ -113,6 +114,94 @@ bool frustumTest(CullParams params, float3 center, float radius) {
 			return false;
 	}
 	return true;
+}
+
+void transformAabbCorners(float4x4 m, float3 local_min, float3 local_max, out float3 corners[8]) {
+	corners[0] = mul(m, float4(local_min.x, local_min.y, local_min.z, 1.0)).xyz;
+	corners[1] = mul(m, float4(local_max.x, local_min.y, local_min.z, 1.0)).xyz;
+	corners[2] = mul(m, float4(local_min.x, local_max.y, local_min.z, 1.0)).xyz;
+	corners[3] = mul(m, float4(local_max.x, local_max.y, local_min.z, 1.0)).xyz;
+	corners[4] = mul(m, float4(local_min.x, local_min.y, local_max.z, 1.0)).xyz;
+	corners[5] = mul(m, float4(local_max.x, local_min.y, local_max.z, 1.0)).xyz;
+	corners[6] = mul(m, float4(local_min.x, local_max.y, local_max.z, 1.0)).xyz;
+	corners[7] = mul(m, float4(local_max.x, local_max.y, local_max.z, 1.0)).xyz;
+}
+
+void aabbBounds(float3 corners[8], out float3 bmin, out float3 bmax) {
+	bmin = corners[0];
+	bmax = corners[0];
+	for (int i = 1; i < 8; i++) {
+		bmin = min(bmin, corners[i]);
+		bmax = max(bmax, corners[i]);
+	}
+}
+
+bool aabbFrustumTest(CullParams params, float3 world_min, float3 world_max) {
+	for (int p = 0; p < 6; p++) {
+		float4 plane = params.frustum_planes[p];
+		float3 pv = float3(
+			plane.x >= 0.0 ? world_max.x : world_min.x,
+			plane.y >= 0.0 ? world_max.y : world_min.y,
+			plane.z >= 0.0 ? world_max.z : world_min.z);
+		if (dot(plane.xyz, pv) + plane.w < 0.0)
+			return false;
+	}
+	return true;
+}
+
+bool hizOcclusionTestAabb(CullParams params, Texture2D<float> hiz_tex, SamplerState hiz_smp,
+                          float3 corners_world[8]) {
+	float2 ndc_min = float2(1e30, 1e30);
+	float2 ndc_max = float2(-1e30, -1e30);
+	float z_nearest = -1e30;
+
+	for (int i = 0; i < 8; i++) {
+		float3 cv = mul(params.view, float4(corners_world[i], 1.0)).xyz;
+		if (-cv.z <= 0.0)
+			return true;
+
+		float3 pv = mul(params.prev_view, float4(corners_world[i], 1.0)).xyz;
+		if (-pv.z <= 0.0)
+			return true;
+
+		float inv = 1.0 / -pv.z;
+		float nx = params.p00 * pv.x * inv;
+		float ny = params.p11 * pv.y * inv;
+		ndc_min = min(ndc_min, float2(nx, ny));
+		ndc_max = max(ndc_max, float2(nx, ny));
+
+		if (pv.z > z_nearest)
+			z_nearest = pv.z;
+	}
+
+	float2 uv_min = ndc_min * 0.5 + 0.5;
+	float2 uv_max = ndc_max * 0.5 + 0.5;
+
+	if (uv_min.x < 0.0 || uv_min.y < 0.0 || uv_max.x > 1.0 || uv_max.y > 1.0)
+		return true;
+
+	float2 aabb_pixels = (uv_max - uv_min) * params.hiz_size;
+	float max_dim = max(aabb_pixels.x, aabb_pixels.y);
+	if (max_dim <= 0.0)
+		return true;
+
+	float mip = ceil(log2(max_dim));
+	mip = clamp(mip, 0.0, float(params.hiz_mip_count - 1));
+
+	float2 huv_min = uv_min * params.hiz_uv_scale;
+	float2 huv_max = uv_max * params.hiz_uv_scale;
+	float2 huv_ctr = (huv_min + huv_max) * 0.5;
+
+	float hiz_depth = hiz_tex.SampleLevel(hiz_smp, huv_ctr, int(mip));
+	float d00 = hiz_tex.SampleLevel(hiz_smp, huv_min, int(mip));
+	float d11 = hiz_tex.SampleLevel(hiz_smp, huv_max, int(mip));
+	float d01 = hiz_tex.SampleLevel(hiz_smp, float2(huv_min.x, huv_max.y), int(mip));
+	float d10 = hiz_tex.SampleLevel(hiz_smp, float2(huv_max.x, huv_min.y), int(mip));
+	hiz_depth = min(min(d00, d11), min(min(d01, d10), hiz_depth));
+
+	float nearest_ndc_z = (params.p22 * z_nearest + params.p32) / (-z_nearest);
+
+	return nearest_ndc_z >= hiz_depth;
 }
 
 // Projects a world-space bounding sphere into the previous frame's screen space

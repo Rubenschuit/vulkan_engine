@@ -9,7 +9,7 @@ struct ClusterParams {
 	float4x4 view;
 	float z_near;
 	float z_far;
-	float log_depth_ratio;   // log(z_far / z_near)
+	float z_slice_scale;     // grid_dims.z / log(z_far / z_near)
 	uint num_lights;
 	uint2 screen_size;
 	uint2 tile_size;
@@ -26,7 +26,7 @@ uint getClusterIndex(float2 screen_pos, float linear_depth, ClusterParams params
 	tile = min(tile, params.grid_dims.xy - uint2(1, 1));
 
 	float z_ratio = max(linear_depth, params.z_near) / params.z_near;
-	uint z_slice = uint(log(z_ratio) / params.log_depth_ratio * float(params.grid_dims.z));
+	uint z_slice = uint(log(z_ratio) * params.z_slice_scale);
 	z_slice = min(z_slice, params.grid_dims.z - 1);
 
 	return tile.x
@@ -96,7 +96,7 @@ float3 clusterHeatmapColor(float2 screen_pos, float linear_depth, uint count, Cl
 	uint2 tile = uint2(screen_pos) / params.tile_size;
 	tile = min(tile, params.grid_dims.xy - uint2(1, 1));
 	float z_ratio = max(linear_depth, params.z_near) / params.z_near;
-	uint z_slice = uint(log(z_ratio) / params.log_depth_ratio * float(params.grid_dims.z));
+	uint z_slice = uint(log(z_ratio) * params.z_slice_scale);
 	z_slice = min(z_slice, params.grid_dims.z - 1);
 	float checker = ((tile.x + tile.y + z_slice) & 1u) == 0 ? 1.0 : 0.8;
 
