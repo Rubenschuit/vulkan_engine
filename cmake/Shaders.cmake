@@ -60,6 +60,9 @@ function(add_slang_spirv_target TARGET)
 		# Collect .slangh headers so shaders recompile when shared headers change
 		file(GLOB _SLANG_HEADERS "${PROJECT_SOURCE_DIR}/shaders/*.slangh")
 
+		# spvGroupNonUniform* capabilities are auto-derived by slangc when wave
+		# intrinsics are used (gpu_cull_comp.slang etc.). Listing them explicitly
+		# breaks older slangc bundled with Vulkan SDKs that predate those atom names.
 		set(_SLANG_CAPABILITIES
 			spvDerivativeControl
 			spvImageQuery
@@ -67,11 +70,6 @@ function(add_slang_spirv_target TARGET)
 			spvMinLod
 			spvSparseResidency
 			spvFragmentFullyCoveredEXT
-			spvGroupNonUniform
-			spvGroupNonUniformArithmetic
-			spvGroupNonUniformBallot
-			spvGroupNonUniformShuffle
-			spvGroupNonUniformVote
 			SPV_KHR_non_semantic_info
 			SPV_GOOGLE_user_type
 		)
