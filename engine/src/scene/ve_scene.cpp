@@ -1,7 +1,6 @@
 #include "scene/ve_scene.hpp"
 #include "scene/ve_component.hpp"
-#include "resources/ve_model.hpp"
-#include "utils/ve_log.hpp"
+#include "scene/scene_manager.hpp"
 
 #define GLM_FORCE_RADIANS
 #include <glm/gtc/matrix_transform.hpp>
@@ -10,24 +9,16 @@ namespace ve {
 
 VeScene::VeScene(const SceneContext& ctx, const std::string& name)
     : m_device(ctx.device), m_resource_manager(ctx.resource_manager),
+      m_event_bus(ctx.event_bus),
       m_name(name), m_num_lights(0), m_num_shadow_casting_lights(0) {}
 
 VeScene::~VeScene() = default;
 
-void VeScene::addModel(const std::filesystem::path& gltf_path) {
-	auto model = VeModel::load(m_resource_manager, gltf_path.lexically_normal(),
-		/*extract_lights=*/true, /*flip_tex_coord_v=*/false);
-
-	if (model) {
-		model->addToScene(m_registry, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f});
-		m_models.push_back(std::move(model));
-	} else {
-		VE_LOGE("Failed to load GLTF model: " << gltf_path);
-	}
+void VeScene::placeModel(const AddModelRequestedEvent& request) {
+	m_event_bus.emitImmediate(request);
 }
 
 void VeScene::update(float dt) {
-	// Update animations
 	for (auto& animator : m_registry.animators())
 		animator.update(dt);
 

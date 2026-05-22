@@ -1,7 +1,7 @@
 /* VeMaterial - PBR material resource
  * Inherits from Resource for use with VeResourceManager.
- * Holds albedo, normal, metallic-roughness, occlusion, emissive textures.
- * Material data reaches shaders via MaterialSSBOManager (bindless lookup by index).
+ * Holds 7 texture handles; material data reaches shaders via 
+ * MaterialSSBOManager (bindless lookup by index).
  */
 #pragma once
 #include "ve_export.hpp"
@@ -10,20 +10,24 @@
 #include "resources/ve_texture.hpp"
 #include "resources/ve_material_properties.hpp"
 
-#include <filesystem>
-
 namespace ve {
+
+// Texture handles for a PBR material. Empty slots are substituted with engine
+// defaults by VeResourceManager::createMaterial.
+struct MaterialTextures {
+	ResourceHandle<VeTexture> albedo;
+	ResourceHandle<VeTexture> normal;
+	ResourceHandle<VeTexture> metallic_roughness;
+	ResourceHandle<VeTexture> occlusion;
+	ResourceHandle<VeTexture> emissive;
+	ResourceHandle<VeTexture> specular;
+	ResourceHandle<VeTexture> specular_color;
+};
 
 class VENGINE_API VeMaterial : public Resource {
 public:
-	VeMaterial(VeResourceManager& resource_manager, const std::string& resource_id,
-	           const std::filesystem::path& albedo_path,
-	           const std::filesystem::path& normal_path,
-	           const std::filesystem::path& metallic_roughness_path,
-	           const std::filesystem::path& occlusion_path,
-	           const std::filesystem::path& emissive_path,
-	           const std::filesystem::path& specular_path,
-	           const std::filesystem::path& specular_color_path,
+	VeMaterial(const std::string& resource_id,
+	           MaterialTextures textures,
 	           MaterialAlphaProps alpha_props,
 	           MaterialFactors factors,
 	           bool flip_tex_coord_v = false);
@@ -39,40 +43,24 @@ public:
 	// When true, vertex shader flips tex coord v. Required for some gltf exporters.
 	bool getFlipTexCoordV() const { return m_flip_tex_coord_v; }
 
-	// Texture access for editor UI (read-only display)
-	const ResourceHandle<VeTexture>& getAlbedoTexture() const { return m_albedo_texture; }
-	const ResourceHandle<VeTexture>& getNormalTexture() const { return m_normal_texture; }
-	const ResourceHandle<VeTexture>& getMetallicRoughnessTexture() const { return m_metallic_roughness_texture; }
-	const ResourceHandle<VeTexture>& getOcclusionTexture() const { return m_occlusion_texture; }
-	const ResourceHandle<VeTexture>& getEmissiveTexture() const { return m_emissive_texture; }
-	const ResourceHandle<VeTexture>& getSpecularTexture() const { return m_specular_texture; }
-	const ResourceHandle<VeTexture>& getSpecularColorTexture() const { return m_specular_color_texture; }
+	const ResourceHandle<VeTexture>& getAlbedoTexture() const { return m_textures.albedo; }
+	const ResourceHandle<VeTexture>& getNormalTexture() const { return m_textures.normal; }
+	const ResourceHandle<VeTexture>& getMetallicRoughnessTexture() const { return m_textures.metallic_roughness; }
+	const ResourceHandle<VeTexture>& getOcclusionTexture() const { return m_textures.occlusion; }
+	const ResourceHandle<VeTexture>& getEmissiveTexture() const { return m_textures.emissive; }
+	const ResourceHandle<VeTexture>& getSpecularTexture() const { return m_textures.specular; }
+	const ResourceHandle<VeTexture>& getSpecularColorTexture() const { return m_textures.specular_color; }
 
 protected:
-	bool doLoad() override;
-	void doUnload() override;
+	bool doLoad() override { return true; }
+	void doUnload() override {}
 	void emitUnloadingEvent(EventBus& bus) override;
 
 private:
-	VeResourceManager* m_resource_manager;
-	std::filesystem::path m_albedo_path;
-	std::filesystem::path m_normal_path;
-	std::filesystem::path m_metallic_roughness_path;
-	std::filesystem::path m_occlusion_path;
-	std::filesystem::path m_emissive_path;
-	std::filesystem::path m_specular_path;
-	std::filesystem::path m_specular_color_path;
+	MaterialTextures m_textures;
 	MaterialAlphaProps m_alpha_props;
 	MaterialFactors m_factors;
 	bool m_flip_tex_coord_v{false};
-
-	ResourceHandle<VeTexture> m_albedo_texture;
-	ResourceHandle<VeTexture> m_normal_texture;
-	ResourceHandle<VeTexture> m_metallic_roughness_texture;
-	ResourceHandle<VeTexture> m_occlusion_texture;
-	ResourceHandle<VeTexture> m_emissive_texture;
-	ResourceHandle<VeTexture> m_specular_texture;
-	ResourceHandle<VeTexture> m_specular_color_texture;
 };
 
 } // namespace ve

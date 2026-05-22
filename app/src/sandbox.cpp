@@ -22,14 +22,12 @@ Sandbox::Sandbox(const std::filesystem::path& working_dir)
 	registerScene("Simple", [this](const SceneContext& ctx) {
 		return std::make_unique<SimpleScene>(ctx, m_paths);
 	});
-	registerGltfScene("Sponza", m_paths.sponza_model(),
-		[this](const SceneContext& ctx, std::unique_ptr<VeModel> model) {
-			return std::make_unique<SponzaScene>(ctx, std::move(model), m_paths);
-		});
-	registerGltfScene("Bistro", m_paths.bistro_model(),
-		[](const SceneContext& ctx, std::unique_ptr<VeModel> model) {
-			return std::make_unique<BistroScene>(ctx, std::move(model));
-		}, true, true);
+	registerScene("Sponza", [this](const SceneContext& ctx) {
+		return std::make_unique<SponzaScene>(ctx, m_paths);
+	});
+	registerScene("Bistro", [this](const SceneContext& ctx) {
+		return std::make_unique<BistroScene>(ctx, m_paths);
+	});
 
 	m_fireworks = std::make_unique<effects::Fireworks>(
 		*renderServices().particles, resourceManager(), sceneManager(), eventBus(),

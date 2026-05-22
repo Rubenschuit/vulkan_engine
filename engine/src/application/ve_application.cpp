@@ -33,7 +33,7 @@ VeApplication::VeApplication(const EngineConfig& config)
 	  m_input_controller(m_ve_window, m_event_bus),
 	  m_config(config) {
 
-	m_render_resources = std::make_unique<RenderResources>(m_ve_device, m_resource_manager);
+	m_render_resources = std::make_unique<RenderResources>(m_ve_device, m_resource_manager, m_event_bus);
 	m_render_pipeline = std::make_unique<RenderPipeline>(
 		m_ve_device, m_ve_renderer, m_resource_manager, *m_render_resources, m_event_bus, m_config);
 	m_scene_manager = std::make_unique<SceneManager>(m_resource_manager, *m_render_resources, m_event_bus);
@@ -154,14 +154,6 @@ const CameraView& VeApplication::cameraView() const {
 void VeApplication::registerScene(std::string name,
                                   std::function<std::unique_ptr<VeScene>(const SceneContext&)> factory) {
 	m_scene_manager->registerScene(std::move(name), std::move(factory));
-}
-
-void VeApplication::registerGltfScene(std::string name,
-                                      std::filesystem::path gltf_path,
-                                      std::function<std::unique_ptr<VeScene>(const SceneContext&, std::unique_ptr<VeModel>)> factory,
-                                      bool extract_lights, bool flip_tex_coord_v) {
-	m_scene_manager->registerGltfScene(std::move(name), std::move(gltf_path), std::move(factory),
-	                                   extract_lights, flip_tex_coord_v);
 }
 
 void VeApplication::loadDefaultScene(int index) {

@@ -1,26 +1,11 @@
 #include "pch.hpp"
 #include "scene/gltf_scene.hpp"
-#include "resources/ve_model.hpp"
+#include "scene/ve_component.hpp"
 
 namespace ve {
 
 GltfScene::GltfScene(const SceneContext& ctx)
 	: VeScene(ctx, "Empty Scene") {
-	createDirectionalLight();
-}
-
-GltfScene::GltfScene(const SceneContext& ctx, const std::filesystem::path& gltf_path)
-	: VeScene(ctx, "GLTF: " + gltf_path.filename().string()) {
-	addModel(gltf_path);
-	createDirectionalLight();
-}
-
-GltfScene::GltfScene(const SceneContext& ctx, std::unique_ptr<VeModel> model, const std::string& name)
-	: VeScene(ctx, "GLTF: " + name) {
-	if (model) {
-		model->addToScene(m_registry, {0.f, 0.f, 0.f}, {0.f, 0.f, 0.f}, {1.f, 1.f, 1.f});
-		m_models.push_back(std::move(model));
-	}
 	createDirectionalLight();
 }
 

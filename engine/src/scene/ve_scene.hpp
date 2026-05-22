@@ -6,17 +6,16 @@
 #include "resources/ve_material_properties.hpp"
 #include "resources/ve_resource_manager.hpp"
 #include <string>
-#include <filesystem>
-#include <memory>
-#include <vector>
 
 namespace ve {
 
-class VeModel;
+class EventBus;
+struct AddModelRequestedEvent;
 
 struct VENGINE_API SceneContext {
     VeDevice& device;
     VeResourceManager& resource_manager;
+    EventBus& event_bus;
 };
 
 class VENGINE_API VeScene {
@@ -32,9 +31,6 @@ public:
 
     const std::string& getName() const { return m_name; }
 
-    // Load a GLTF model and add it to the scene.
-    void addModel(const std::filesystem::path& gltf_path);
-
     virtual void update(float dt);
 
     // Per-scene ambient light defaults (color RGB, intensity in w)
@@ -45,14 +41,16 @@ public:
     virtual uint32_t getParticleCapacity() const { return 0; }
 
 protected:
+    // Async load a gltf and instantiate it into this scene's registry.
+    void placeModel(const AddModelRequestedEvent& request);
+
     VeDevice& m_device;
     VeResourceManager& m_resource_manager;
+    EventBus& m_event_bus;
     std::string m_name;
     Registry m_registry;
 	uint32_t m_num_lights;
 	uint32_t m_num_shadow_casting_lights;
-
-    std::vector<std::unique_ptr<VeModel>> m_models;
 };
 
 }

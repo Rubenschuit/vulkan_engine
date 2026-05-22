@@ -19,10 +19,13 @@ class VeDescriptorPool;
 class VeDescriptorSetLayout;
 struct SceneContext;
 
+class EventBus;
+
 class VENGINE_API RenderResources {
 public:
 	RenderResources(VeDevice& device,
-	                VeResourceManager& resource_manager);
+	                VeResourceManager& resource_manager,
+	                EventBus& event_bus);
 	~RenderResources();
 
 	RenderResources(const RenderResources&) = delete;
@@ -41,6 +44,7 @@ private:
 
 	VeDevice& m_ve_device;
 	VeResourceManager& m_resource_manager;
+	EventBus& m_event_bus;
 
 	std::shared_ptr<VeDescriptorPool> m_global_pool;
 	std::unique_ptr<VeDescriptorSetLayout> m_global_set_layout;

@@ -12,10 +12,13 @@
 #include <stb_image.h>
 #include <filesystem>
 #include <memory>
+#include <unordered_map>
 
 namespace ve {
 
 struct DecodedTexture;
+struct GpuCaps;
+struct UploadContext;
 
 enum class TextureType {
 	ALBEDO,
@@ -27,18 +30,30 @@ enum class TextureType {
 	SPECULAR_COLOR,   // KHR_materials_specular: RGB = color tint
 };
 
-// Holds decoded pixel data or raw KTX bytes for images embedded in .glb files.
+// Raw bytes for an image embedded in a .glb file
 struct EmbeddedImageData {
-	std::vector<uint8_t> pixels; // decoded RGBA or raw KTX bytes
-	uint32_t width{};
-	uint32_t height{};
+	std::vector<uint8_t> bytes;
 	bool is_ktx{};
 };
+
+using EmbeddedImageCache = std::unordered_map<std::string, EmbeddedImageData>;
 
 class VENGINE_API VeTexture : public Resource {
 public:
 	// For ResourceManager: stores id, does not load. Call load() to load.
 	VeTexture(VeDevice& device, const std::string& resource_id);
+
+	// Constructs texture from generated pixel data
+	VeTexture(VeDevice& device, uint32_t width, uint32_t height, TextureType type);
+
+	// Constructs a texture from pre-decoded CPU-side data (loader worker output).
+	// Performs GPU upload immediately; must be called on the main thread.
+	VeTexture(VeDevice& device, const std::string& resource_id, const DecodedTexture& decoded);
+
+	// Same, but records the upload into ctx instead of submit-and-wait. Caller
+	// owns submit + sync.
+	VeTexture(VeDevice& device, const std::string& resource_id, const DecodedTexture& decoded, UploadContext& ctx);
+
 	~VeTexture() override;
 
 	VeTexture(const VeTexture&) = delete;
@@ -61,16 +76,20 @@ public:
 
 	// Create a default texture (4x4 placeholder for albedo/normal/metallic-roughness)
 	static std::shared_ptr<VeTexture> createDefault(VeDevice& device, TextureType type);
-	// Load texture via ResourceManager; returns default if path is placeholder or missing
-	static ResourceHandle<VeTexture> loadOrDefault(VeResourceManager& resource_manager, const std::filesystem::path& path, TextureType fallback_type);
+	
+	// Resolve a filesystem path to a texture handle via the resource manager.
+	static ResourceHandle<VeTexture> loadFromPath(VeResourceManager& resource_manager, const std::filesystem::path& path, TextureType fallback_type);
 
-	// Embedded image cache for .glb support
-	static void registerEmbedded(const std::string& key, EmbeddedImageData data);
-	static bool hasEmbedded(const std::string& key);
-	static void clearEmbeddedCache();
+	// Resource-manager cache key used by loadFromPath. Same key is used to
+	// register pre-decoded textures so subsequent loadFromPath calls hit the cache.
+	static std::string makeResourceKey(const std::filesystem::path& path, TextureType type);
 
-	// For createDefault - constructs texture from generated pixel data
-	VeTexture(VeDevice& device, uint32_t width, uint32_t height, TextureType type);
+	// Worker-thread-safe decode. For glb-embedded images, pass the per-image
+	// EmbeddedImageData
+	static DecodedTexture decode(const std::filesystem::path& path, TextureType type,
+	                             const GpuCaps& gpu_caps,
+	                             const EmbeddedImageData* embedded = nullptr);
+
 
 	//debug
 	void printDebugInfo() const {
@@ -83,13 +102,9 @@ protected:
 	void emitUnloadingEvent(EventBus& bus) override;
 
 private:
-	bool createTextureImage(const std::filesystem::path& texture_path, vk::Format format_hint = vk::Format::eUndefined);
-	bool createTextureImageFromKtxMemory(const uint8_t* data, size_t size, vk::Format format_hint = vk::Format::eUndefined);
-	bool uploadKtxTexture(void* k_texture_ptr, vk::Format format_hint);
-	bool createTextureImageSTB(const std::filesystem::path& texture_path, vk::Format format = vk::Format::eR8G8B8A8Srgb);
-	void createTextureImageFromPixels(uint32_t width, uint32_t height, const stbi_uc* pixels, vk::Format format);
+	bool recordDecodedTexture(const DecodedTexture& decoded, UploadContext& ctx);
 	void createTextureSampler();
-	stbi_uc* generateDefaultTexture(int width, int height, TextureType type);
+	static stbi_uc* generateDefaultTexture(int width, int height, TextureType type);
 
 	ve::VeDevice& m_ve_device;
 	uint32_t m_width = 0;

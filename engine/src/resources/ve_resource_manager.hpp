@@ -13,7 +13,6 @@
 
 #include <cstdint>
 #include <deque>
-#include <filesystem>
 #include <memory>
 #include <string>
 #include <typeinfo>
@@ -27,9 +26,12 @@ class VeResourceManager;
 class VeMesh;
 class VeMaterial;
 class VeTexture;
+class VeModel;
 class EventBus;
 struct DecodedTexture;
 struct ProcessedMesh;
+struct UploadContext;
+struct MaterialTextures;
 
 /* RAII handle that keeps a resource loaded.
  * Copy increments ref count, destroy decrements. When ref count hits 0, resource is unloaded.
@@ -51,6 +53,7 @@ public:
 	const std::string& getId() const { return m_resource_id; }
 
 	T* operator->() const { return m_cached; }
+	T& operator*() const { return *m_cached; }
 	explicit operator bool() const { return isValid(); }
 
 private:
@@ -72,6 +75,10 @@ public:
 
 	template <typename T>
 	ResourceHandle<T> load(const std::string& resource_id);
+
+	// Cache-only lookup. Returns an empty handle if not cached
+	template <typename T>
+	ResourceHandle<T> tryGetHandle(const std::string& resource_id);
 
 	template <typename T>
 	T* getResource(const std::string& resource_id) const;
@@ -95,20 +102,38 @@ public:
 	                                  const std::vector<uint32_t>& indices,
 	                                  const std::vector<std::vector<uint32_t>>& lod_indices);
 
-	ResourceHandle<VeMaterial> createMaterial(const std::string& resource_id,
-	                                         const std::filesystem::path& albedo_path,
-	                                         const std::filesystem::path& normal_path,
-	                                         const std::filesystem::path& metallic_roughness_path,
-	                                         const std::filesystem::path& occlusion_path,
-	                                         const std::filesystem::path& emissive_path,
-	                                         const std::filesystem::path& specular_path,
-	                                         const std::filesystem::path& specular_color_path,
-	                                         MaterialAlphaProps alpha_props,
-	                                         MaterialFactors factors,
-	                                         bool flip_tex_coord_v = false);
+	// Synchronously load the first primitive of the first mesh from a glTF/GLB
+	// file. Skips materials, textures, animations, lights, and the rest of the
+	// scene graph.
+	ResourceHandle<VeMesh> loadMesh(const std::filesystem::path& gltf_path);
 
+	// Synchronously load a full glTF/GLB model: parse, decode textures, upload
+	// meshes/materials, and return a VeModel handle. Use this when
+	// you need to instantiate the same model multiple times or want to keep it
+	// alive across scene swaps. For async loading, prefer VeScene::placeModel.
+	ResourceHandle<VeModel> loadModel(const std::filesystem::path& gltf_path,
+	                                  bool extract_lights = true,
+	                                  bool flip_tex_coord_v = false);
+
+	// Create a material from already-loaded texture handles. Any slot whose
+	// handle is invalid is filled with the engine default
+	ResourceHandle<VeMaterial> createMaterial(const std::string& resource_id,
+	                                          MaterialTextures textures,
+	                                          MaterialAlphaProps alpha_props,
+	                                          MaterialFactors factors,
+	                                          bool flip_tex_coord_v = false);
+
+	// Register a VeMesh built from pre-decoded CPU data; records all buffer
+	// copies into ctx.transfer_cmd. Caller owns submit + sync.
 	ResourceHandle<VeMesh> createMeshFromData(const std::string& resource_id,
-	                                          const ProcessedMesh& data);
+	                                          ProcessedMesh& data,
+	                                          UploadContext& ctx);
+
+	// Register a VeTexture built from pre-decoded CPU data; records transitions
+	// + copy into ctx CBs. Caller owns submit + sync.
+	ResourceHandle<VeTexture> createTextureFromData(const std::string& resource_id,
+	                                                const DecodedTexture& data,
+	                                                UploadContext& ctx);
 
 	// Forcibly unload all resources regardless of reference count.
 	void unloadAll();
@@ -253,6 +278,18 @@ inline ResourceHandle<T> VeResourceManager::load(const std::string& resource_id)
 
 	type_resources[resource_id] = std::move(resource);
 	m_ref_counts[type_idx][resource_id] = 1;
+	return ResourceHandle<T>(resource_id, this);
+}
+
+template <typename T>
+inline ResourceHandle<T> VeResourceManager::tryGetHandle(const std::string& resource_id) {
+	auto type_idx = typeid(T).hash_code();
+	auto type_it = m_resources.find(type_idx);
+	if (type_it == m_resources.end())
+		return {};
+	if (type_it->second.find(resource_id) == type_it->second.end())
+		return {};
+	m_ref_counts[type_idx][resource_id]++;
 	return ResourceHandle<T>(resource_id, this);
 }
 

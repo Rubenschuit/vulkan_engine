@@ -34,6 +34,7 @@ struct SceneUnloadedEvent {};
 struct AssetLoadCompleteEvent {
 	std::string model_name;
 	std::filesystem::path source_path;
+	Entity wrapper_entity;
 };
 
 // ── Physics collisions ──────────────────────────────────────────────────────

@@ -186,6 +186,12 @@ void VeDevice::createCommandPools() {
 		.queueFamilyIndex = m_queue_index
 	};
 	m_command_pool = vk::raii::CommandPool(m_device, pool_info);
+	vk::CommandPoolCreateInfo pool_info_graphics_transient{
+		.sType = vk::StructureType::eCommandPoolCreateInfo,
+		.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer | vk::CommandPoolCreateFlagBits::eTransient,
+		.queueFamilyIndex = m_queue_index
+	};
+	m_command_pool_graphics_transient = vk::raii::CommandPool(m_device, pool_info_graphics_transient);
 	assert(m_transfer_queue_index != UINT32_MAX && "Cannot create command pool: invalid transfer queue index");
 	vk::CommandPoolCreateInfo pool_info_transfer{
 		.sType = vk::StructureType::eCommandPoolCreateInfo,
@@ -201,6 +207,7 @@ void VeDevice::createCommandPools() {
 	};
 	m_command_pool_compute = vk::raii::CommandPool(m_device, pool_info_compute);
 	setDebugName(*this, m_command_pool, "Device Graphics Pool");
+	setDebugName(*this, m_command_pool_graphics_transient, "Device Graphics Transient Pool");
 	setDebugName(*this, m_command_pool_transfer, "Device Transfer Pool");
 	setDebugName(*this, m_command_pool_compute, "Device Compute Pool");
 }
@@ -584,20 +591,21 @@ vk::Format VeDevice::findDepthFormat() {
 	);
 }
 
-void VeDevice::copyBuffer(vk::Buffer src_buffer, vk::Buffer dst_buffer, vk::DeviceSize size) {
+void VeDevice::copyBuffer(vk::raii::CommandBuffer& cmd,
+	vk::Buffer src_buffer, vk::Buffer dst_buffer,
+	vk::DeviceSize size, vk::DeviceSize src_offset, vk::DeviceSize dst_offset) {
 	assert(size > 0 && "Buffer size must be greater than zero");
 	assert(src_buffer && "Source buffer must be valid");
 	assert(dst_buffer && "Destination buffer must be valid");
-	auto cmd = beginSingleTimeCommands(QueueKind::Transfer);
-	cmd->copyBuffer(src_buffer, dst_buffer, vk::BufferCopy{ 0, 0, size });
-	endSingleTimeCommands(*cmd, QueueKind::Transfer);
+	cmd.copyBuffer(src_buffer, dst_buffer, vk::BufferCopy{ src_offset, dst_offset, size });
 }
 
-void VeDevice::copyBufferToImage(vk::Buffer src_buffer, vk::Image dst_image, uint32_t width, uint32_t height, uint32_t array_layers) {
+void VeDevice::copyBufferToImage(vk::raii::CommandBuffer& cmd,
+	vk::Buffer src_buffer, vk::Image dst_image,
+	uint32_t width, uint32_t height, uint32_t array_layers) {
 	assert(width > 0 && height > 0 && "Image width and height must be greater than zero");
 	assert(src_buffer && "Source buffer must be valid");
 	assert(dst_image && "Destination image must be valid");
-	auto cmd = beginSingleTimeCommands(QueueKind::Transfer);
 	vk::BufferImageCopy copy_region{
 		.bufferOffset = 0,
 		.bufferRowLength = 0,
@@ -606,16 +614,15 @@ void VeDevice::copyBufferToImage(vk::Buffer src_buffer, vk::Image dst_image, uin
 		.imageOffset = { 0, 0, 0 },
 		.imageExtent = { width, height, 1 }
 	};
-	cmd->copyBufferToImage(src_buffer, dst_image, vk::ImageLayout::eTransferDstOptimal, copy_region);
-	endSingleTimeCommands(*cmd, QueueKind::Transfer);
+	cmd.copyBufferToImage(src_buffer, dst_image, vk::ImageLayout::eTransferDstOptimal, copy_region);
 }
 
-void VeDevice::copyBufferToImageWithMipmaps(vk::Buffer src_buffer, vk::Image dst_image,
+void VeDevice::copyBufferToImageWithMipmaps(vk::raii::CommandBuffer& cmd,
+	vk::Buffer src_buffer, vk::Image dst_image,
 	uint32_t array_layers, uint32_t mip_levels,
 	const std::vector<vk::DeviceSize>& buffer_offsets,
 	const std::vector<vk::Extent3D>& extents) {
 	assert(mip_levels > 0 && buffer_offsets.size() >= mip_levels && extents.size() >= mip_levels);
-	auto cmd = beginSingleTimeCommands(QueueKind::Transfer);
 	std::vector<vk::BufferImageCopy> copy_regions;
 	copy_regions.reserve(mip_levels);
 	for (uint32_t level = 0; level < mip_levels; level++) {
@@ -628,7 +635,27 @@ void VeDevice::copyBufferToImageWithMipmaps(vk::Buffer src_buffer, vk::Image dst
 			.imageExtent = extents[level]
 		});
 	}
-	cmd->copyBufferToImage(src_buffer, dst_image, vk::ImageLayout::eTransferDstOptimal, copy_regions);
+	cmd.copyBufferToImage(src_buffer, dst_image, vk::ImageLayout::eTransferDstOptimal, copy_regions);
+}
+
+void VeDevice::copyBuffer(vk::Buffer src_buffer, vk::Buffer dst_buffer, vk::DeviceSize size) {
+	auto cmd = beginSingleTimeCommands(QueueKind::Transfer);
+	copyBuffer(*cmd, src_buffer, dst_buffer, size);
+	endSingleTimeCommands(*cmd, QueueKind::Transfer);
+}
+
+void VeDevice::copyBufferToImage(vk::Buffer src_buffer, vk::Image dst_image, uint32_t width, uint32_t height, uint32_t array_layers) {
+	auto cmd = beginSingleTimeCommands(QueueKind::Transfer);
+	copyBufferToImage(*cmd, src_buffer, dst_image, width, height, array_layers);
+	endSingleTimeCommands(*cmd, QueueKind::Transfer);
+}
+
+void VeDevice::copyBufferToImageWithMipmaps(vk::Buffer src_buffer, vk::Image dst_image,
+	uint32_t array_layers, uint32_t mip_levels,
+	const std::vector<vk::DeviceSize>& buffer_offsets,
+	const std::vector<vk::Extent3D>& extents) {
+	auto cmd = beginSingleTimeCommands(QueueKind::Transfer);
+	copyBufferToImageWithMipmaps(*cmd, src_buffer, dst_image, array_layers, mip_levels, buffer_offsets, extents);
 	endSingleTimeCommands(*cmd, QueueKind::Transfer);
 }
 
@@ -636,7 +663,7 @@ void VeDevice::copyBufferToImageWithMipmaps(vk::Buffer src_buffer, vk::Image dst
 [[nodiscard]] std::unique_ptr<vk::raii::CommandBuffer> VeDevice::beginSingleTimeCommands(QueueKind kind) {
 	vk::CommandPool pool;
 	switch (kind) {
-		case QueueKind::Graphics: pool = *m_command_pool; break;
+		case QueueKind::Graphics: pool = *m_command_pool_graphics_transient; break;
 		case QueueKind::Compute:  pool = *m_command_pool_compute; break;
 		case QueueKind::Transfer: pool = *m_command_pool_transfer; break;
 	}

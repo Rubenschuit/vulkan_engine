@@ -12,9 +12,11 @@
 namespace ve {
 
 RenderResources::RenderResources(VeDevice& device,
-                                 VeResourceManager& resource_manager)
+                                 VeResourceManager& resource_manager,
+                                 EventBus& event_bus)
 	: m_ve_device(device),
-	  m_resource_manager(resource_manager) {
+	  m_resource_manager(resource_manager),
+	  m_event_bus(event_bus) {
 	createDescriptors();
 }
 
@@ -49,7 +51,7 @@ void RenderResources::createDescriptors() {
 }
 
 SceneContext RenderResources::makeSceneContext() {
-	return {m_ve_device, m_resource_manager};
+	return {m_ve_device, m_resource_manager, m_event_bus};
 }
 
 } // namespace ve

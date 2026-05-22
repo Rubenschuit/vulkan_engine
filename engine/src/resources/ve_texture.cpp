@@ -1,7 +1,9 @@
 #include "pch.hpp"
 #include "resources/ve_texture.hpp"
-#include "resources/loaded_asset_data.hpp"
+#include "resources/internal/loaded_asset_data.hpp"
+#include "resources/internal/upload_context.hpp"
 #include "vulkan/ve_buffer.hpp"
+#include "vulkan/ve_device.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
 
@@ -40,11 +42,81 @@ namespace {
 			default: return f;
 		}
 	}
-}
 
-// Static cache for embedded images from .glb files.
-// Not thread-safe.
-static std::unordered_map<std::string, ve::EmbeddedImageData> s_embedded_cache;
+	// Transcodes (if needed) and copies the ktxTexture's pixel data + format/mip
+	// layout into a DecodedTexture
+	bool populateDecodedFromKtx(ktxTexture* k_texture, vk::Format format_hint,
+	                            const ve::GpuCaps& caps, ve::DecodedTexture& out) {
+		out.width = k_texture->baseWidth;
+		out.height = k_texture->baseHeight;
+		if (out.width == 0 || out.height == 0)
+			return false;
+		out.is_cubemap = k_texture->isCubemap;
+		out.array_layers = out.is_cubemap ? 6u : 1u;
+		out.mip_levels = k_texture->numLevels;
+
+		if (k_texture->classId == ktxTexture2_c) {
+			ktxTexture2* ktx2 = reinterpret_cast<ktxTexture2*>(k_texture);
+			if (ktxTexture2_NeedsTranscoding(ktx2)) {
+				ktx_transcode_fmt_e target = KTX_TTF_RGBA32;
+				if (caps.supports_bc)
+					target = KTX_TTF_BC7_RGBA;
+				else if (caps.supports_astc)
+					target = KTX_TTF_ASTC_4x4_RGBA;
+				if (ktxTexture2_TranscodeBasis(ktx2, target, 0) != KTX_SUCCESS)
+					return false;
+			}
+		}
+
+		vk::Format texture_format = vk::Format::eR8G8B8A8Unorm;
+		if (k_texture->classId == ktxTexture2_c) {
+			auto* ktx2 = reinterpret_cast<ktxTexture2*>(k_texture);
+			texture_format = static_cast<vk::Format>(ktx2->vkFormat);
+			if (texture_format == vk::Format::eUndefined)
+				texture_format = vk::Format::eR8G8B8A8Unorm;
+		} else if (k_texture->classId == ktxTexture1_c) {
+			texture_format = static_cast<vk::Format>(ktxTexture1_GetVkFormat(reinterpret_cast<ktxTexture1*>(k_texture)));
+			if (texture_format == vk::Format::eUndefined)
+				texture_format = vk::Format::eR8G8B8A8Unorm;
+		}
+
+		bool is_uncompressed_8bit = (texture_format == vk::Format::eR8G8B8Srgb ||
+		                             texture_format == vk::Format::eR8G8B8Unorm ||
+		                             texture_format == vk::Format::eR8G8B8A8Srgb ||
+		                             texture_format == vk::Format::eR8G8B8A8Unorm);
+		bool has_format_hint = (format_hint == vk::Format::eR8G8B8A8Srgb || format_hint == vk::Format::eR8G8B8A8Unorm);
+		if (has_format_hint && is_uncompressed_8bit) {
+			texture_format = format_hint;
+		} else if (has_format_hint && isBlockCompressed(texture_format)) {
+			bool want_srgb = (format_hint == vk::Format::eR8G8B8A8Srgb);
+			texture_format = want_srgb ? toSrgbBC(texture_format) : toUnormBC(texture_format);
+		}
+		out.format = texture_format;
+
+		const bool use_mipmap_copy = (out.mip_levels > 1);
+		if (use_mipmap_copy) {
+			out.mip_offsets.reserve(out.mip_levels);
+			out.mip_extents.reserve(out.mip_levels);
+			for (uint32_t level = 0; level < out.mip_levels; level++) {
+				ktx_size_t offset = 0;
+				ktxTexture_GetImageOffset(k_texture, level, 0, 0, &offset);
+				out.mip_offsets.push_back(offset);
+				uint32_t w = std::max(1u, out.width >> level);
+				uint32_t h = std::max(1u, out.height >> level);
+				out.mip_extents.push_back({ w, h, 1u });
+			}
+			ktx_size_t total = ktxTexture_GetDataSize(k_texture);
+			const uint8_t* src = ktxTexture_GetData(k_texture);
+			out.pixels.assign(src, src + total);
+		} else {
+			ktx_size_t image_size = ktxTexture_GetImageSize(k_texture, 0);
+			size_t total = static_cast<size_t>(image_size) * static_cast<size_t>(out.array_layers);
+			const uint8_t* src = ktxTexture_GetData(k_texture);
+			out.pixels.assign(src, src + total);
+		}
+		return true;
+	}
+}
 
 namespace ve {
 
@@ -53,11 +125,42 @@ VeTexture::VeTexture(VeDevice& ve_device, const std::string& resource_id)
 }
 
 VeTexture::VeTexture(VeDevice& ve_device, uint32_t width, uint32_t height, TextureType type)
-	: Resource("default"), m_ve_device(ve_device), m_width(width), m_height(height) {
+	: Resource("default"), m_ve_device(ve_device) {
+	DecodedTexture decoded;
+	decoded.width = width;
+	decoded.height = height;
+	decoded.format = (type == TextureType::ALBEDO) ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
+	decoded.mip_levels = 1;
+	decoded.array_layers = 1;
 	stbi_uc* pixels = generateDefaultTexture(static_cast<int>(width), static_cast<int>(height), type);
-	vk::Format format = (type == TextureType::ALBEDO) ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
-	createTextureImageFromPixels(width, height, pixels, format);
+	const size_t byte_count = static_cast<size_t>(width) * static_cast<size_t>(height) * 4u;
+	decoded.pixels.assign(pixels, pixels + byte_count);
 	free(pixels);
+
+	SyncUploadScope scope(ve_device, std::max<vk::DeviceSize>(decoded.pixels.size(), 4096));
+	if (!recordDecodedTexture(decoded, scope.ctx))
+		return;
+	createTextureSampler();
+	setLoaded(true);
+}
+
+VeTexture::VeTexture(VeDevice& ve_device, const std::string& resource_id, const DecodedTexture& decoded)
+	: Resource(resource_id), m_ve_device(ve_device) {
+	SyncUploadScope scope(ve_device);
+	if (!recordDecodedTexture(decoded, scope.ctx)) {
+		VE_LOGE("VeTexture upload from decoded data failed: " << resource_id);
+		return;
+	}
+	createTextureSampler();
+	setLoaded(true);
+}
+
+VeTexture::VeTexture(VeDevice& ve_device, const std::string& resource_id, const DecodedTexture& decoded, UploadContext& ctx)
+	: Resource(resource_id), m_ve_device(ve_device) {
+	if (!recordDecodedTexture(decoded, ctx)) {
+		VE_LOGE("VeTexture record from decoded data failed: " << resource_id);
+		return;
+	}
 	createTextureSampler();
 	setLoaded(true);
 }
@@ -66,45 +169,105 @@ std::shared_ptr<VeTexture> VeTexture::createDefault(VeDevice& device, TextureTyp
 	return std::make_shared<VeTexture>(device, 4, 4, type);
 }
 
-ResourceHandle<VeTexture> VeTexture::loadOrDefault(VeResourceManager& resource_manager, const std::filesystem::path& path, TextureType fallback_type) {
-	std::string key = path.lexically_normal().generic_string();
-	auto fn = path.filename().string();
-	bool is_default = (fn == "default_albedo.png" || fn == "default_normal.png" || fn == "default_metallic_roughness.png" ||
-	                   fn == "default_occlusion.png" || fn == "default_emissive.png" || fn == "default_mr_unit.png" ||
-	                   fn == "default_specular.png" || fn == "default_specular_color.png" ||
-	                   fn == "white.png" || fn == "black.png");
-	if (is_default || (!std::filesystem::exists(path) && !hasEmbedded(key))) {
-		if (fn == "default_mr_unit.png")
-			return resource_manager.load<VeTexture>("default_mr_unit");
-		const char* default_id = "default_metallic_roughness";
-		if (fallback_type == TextureType::ALBEDO) default_id = "default_albedo";
-		else if (fallback_type == TextureType::NORMAL) default_id = "default_normal";
-		else if (fallback_type == TextureType::OCCLUSION) default_id = "default_occlusion";
-		else if (fallback_type == TextureType::EMISSIVE) default_id = "default_emissive";
-		else if (fallback_type == TextureType::SPECULAR) default_id = "default_specular";
-		else if (fallback_type == TextureType::SPECULAR_COLOR) default_id = "default_specular_color";
-		return resource_manager.load<VeTexture>(default_id);
+ResourceHandle<VeTexture> VeTexture::loadFromPath(VeResourceManager& resource_manager,
+                                                  const std::filesystem::path& path,
+                                                  TextureType fallback_type) {
+	return resource_manager.load<VeTexture>(makeResourceKey(path, fallback_type));
+}
+
+std::string VeTexture::makeResourceKey(const std::filesystem::path& path, TextureType type) {
+	// Format hint has only two buckets currently
+	const char* suffix = (type == TextureType::ALBEDO || type == TextureType::SPECULAR_COLOR) ? "|srgb" : "|linear";
+	return path.lexically_normal().generic_string() + suffix;
+}
+
+DecodedTexture VeTexture::decode(const std::filesystem::path& path, TextureType type,
+                                 const GpuCaps& gpu_caps,
+                                 const EmbeddedImageData* embedded) {
+	DecodedTexture out;
+	out.resource_id = path.lexically_normal().generic_string();
+	out.file_path = path;
+	out.type = type;
+
+	vk::Format format_hint = (type == TextureType::ALBEDO || type == TextureType::SPECULAR_COLOR)
+	                         ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
+
+	if (embedded) {
+		if (embedded->is_ktx) {
+			ktxTexture* k = nullptr;
+			KTX_error_code res = ktxTexture_CreateFromMemory(
+				embedded->bytes.data(), embedded->bytes.size(),
+				KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &k);
+			if (res != KTX_SUCCESS) {
+				VE_LOGE("KTX embedded load failed: " << out.resource_id);
+				return out;
+			}
+			if (!populateDecodedFromKtx(k, format_hint, gpu_caps, out)) {
+				ktxTexture_Destroy(k);
+				return out;
+			}
+			ktxTexture_Destroy(k);
+		} else {
+			// Encoded image (PNG/JPEG/etc.): decode via stb
+			int w = 0, h = 0, ch = 0;
+			stbi_uc* pixels = stbi_load_from_memory(
+				embedded->bytes.data(), static_cast<int>(embedded->bytes.size()),
+				&w, &h, &ch, STBI_rgb_alpha);
+			if (!pixels) {
+				const char* reason = stbi_failure_reason();
+				VE_LOGE("STB embedded decode failed: " << out.resource_id
+					<< " (" << (reason ? reason : "unknown") << ")");
+				return out;
+			}
+			out.width = static_cast<uint32_t>(w);
+			out.height = static_cast<uint32_t>(h);
+			out.format = format_hint;
+			out.mip_levels = 1;
+			out.array_layers = 1;
+			size_t byte_count = static_cast<size_t>(out.width) * static_cast<size_t>(out.height) * 4u;
+			out.pixels.assign(pixels, pixels + byte_count);
+			stbi_image_free(pixels);
+		}
+		return out;
 	}
-	const char* suffix = "|mr";
-	if (fallback_type == TextureType::ALBEDO) suffix = "|albedo";
-	else if (fallback_type == TextureType::NORMAL) suffix = "|normal";
-	else if (fallback_type == TextureType::OCCLUSION) suffix = "|occlusion";
-	else if (fallback_type == TextureType::EMISSIVE) suffix = "|emissive";
-	else if (fallback_type == TextureType::SPECULAR) suffix = "|specular";
-	else if (fallback_type == TextureType::SPECULAR_COLOR) suffix = "|specular_color";
-	return resource_manager.load<VeTexture>(key + suffix);
-}
 
-void VeTexture::registerEmbedded(const std::string& key, EmbeddedImageData data) {
-	s_embedded_cache[key] = std::move(data);
-}
+	if (!std::filesystem::exists(path))
+		return out;
 
-bool VeTexture::hasEmbedded(const std::string& key) {
-	return s_embedded_cache.find(key) != s_embedded_cache.end();
-}
+	auto ext = path.extension().string();
+	if (ext == ".ktx" || ext == ".ktx2") {
+		ktxTexture* k = nullptr;
+		KTX_error_code res = ktxTexture_CreateFromNamedFile(
+			path.string().c_str(),
+			KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &k);
+		if (res != KTX_SUCCESS) {
+			VE_LOGE("KTX load failed: " << path.string() << " (error " << static_cast<int>(res) << ")");
+			return out;
+		}
+		if (!populateDecodedFromKtx(k, format_hint, gpu_caps, out)) {
+			ktxTexture_Destroy(k);
+			return out;
+		}
+		ktxTexture_Destroy(k);
+		return out;
+	}
 
-void VeTexture::clearEmbeddedCache() {
-	s_embedded_cache.clear();
+	int w = 0, h = 0, channels = 0;
+	stbi_uc* pixels = stbi_load(path.string().c_str(), &w, &h, &channels, STBI_rgb_alpha);
+	if (!pixels) {
+		const char* reason = stbi_failure_reason();
+		VE_LOGE("STB load failed: " << path << " (" << (reason ? reason : "unknown") << ")");
+		return out;
+	}
+	out.width = static_cast<uint32_t>(w);
+	out.height = static_cast<uint32_t>(h);
+	out.mip_levels = 1;
+	out.array_layers = 1;
+	out.format = format_hint;
+	size_t byte_count = static_cast<size_t>(out.width) * static_cast<size_t>(out.height) * 4u;
+	out.pixels.assign(pixels, pixels + byte_count);
+	stbi_image_free(pixels);
+	return out;
 }
 
 VeTexture::~VeTexture() {
@@ -113,11 +276,8 @@ VeTexture::~VeTexture() {
 
 bool VeTexture::doLoad() {
 	// Default placeholder textures
-	static const struct {
-		const char* id;
-		TextureType type;
-		vk::Format format;
-	} defaults[] = {
+	struct DefaultEntry { const char* id; TextureType type; vk::Format format; };
+	static constexpr DefaultEntry defaults[] = {
 		{"default_albedo",              TextureType::ALBEDO,              vk::Format::eR8G8B8A8Srgb},
 		{"default_normal",              TextureType::NORMAL,              vk::Format::eR8G8B8A8Unorm},
 		{"default_metallic_roughness",  TextureType::METALLIC_ROUGHNESS,  vk::Format::eR8G8B8A8Unorm},
@@ -128,92 +288,78 @@ bool VeTexture::doLoad() {
 		{"default_specular_color",      TextureType::SPECULAR_COLOR,      vk::Format::eR8G8B8A8Srgb},
 		{"default_particle",            TextureType::EMISSIVE,            vk::Format::eR8G8B8A8Unorm},
 	};
-	for (const auto& def : defaults) {
-		if (m_resource_id != def.id)
-			continue;
-		stbi_uc* pixels;
-		uint32_t w = 4, h = 4;
+	DecodedTexture decoded;
+	const DefaultEntry* def = nullptr;
+	for (const auto& e : defaults)
+		if (m_resource_id == e.id) { def = &e; break; }
+
+	if (def) {
+		decoded.resource_id = m_resource_id;
+		decoded.type = def->type;
+		decoded.format = def->format;
+		decoded.mip_levels = 1;
+		decoded.array_layers = 1;
+		decoded.width = 4;
+		decoded.height = 4;
 		if (m_resource_id == "default_mr_unit") {
 			// Full metallic (B=255) and full roughness (G=255) so MaterialFactors alone control the values
-			pixels = (stbi_uc*)malloc(4 * 4 * 4);
+			decoded.pixels.resize(decoded.width * decoded.height * 4);
 			for (size_t i = 0; i < 16; i++) {
-				pixels[i * 4 + 0] = 0;
-				pixels[i * 4 + 1] = 255;  // roughness = 1.0
-				pixels[i * 4 + 2] = 255;  // metallic = 1.0
-				pixels[i * 4 + 3] = 255;
+				decoded.pixels[i * 4 + 0] = 0;
+				decoded.pixels[i * 4 + 1] = 255;  // roughness = 1.0
+				decoded.pixels[i * 4 + 2] = 255;  // metallic = 1.0
+				decoded.pixels[i * 4 + 3] = 255;
 			}
 		} else if (m_resource_id == "default_particle") {
 			// Soft radial gradient
-			w = 64;
-			h = 64;
-			pixels = (stbi_uc*)malloc(w * h * 4);
-			const float cx = (w - 1) * 0.5f;
-			const float cy = (h - 1) * 0.5f;
+			decoded.width = 64;
+			decoded.height = 64;
+			decoded.pixels.resize(decoded.width * decoded.height * 4);
+			const float cx = static_cast<float>(decoded.width - 1) * 0.5f;
+			const float cy = static_cast<float>(decoded.height - 1) * 0.5f;
 			const float r_max = cx;
-			for (uint32_t y = 0; y < h; ++y) {
-				for (uint32_t x = 0; x < w; ++x) {
-					float dx = (float)x - cx;
-					float dy = (float)y - cy;
+			for (uint32_t y = 0; y < decoded.height; ++y) {
+				for (uint32_t x = 0; x < decoded.width; ++x) {
+					float dx = static_cast<float>(x) - cx;
+					float dy = static_cast<float>(y) - cy;
 					float d = std::sqrt(dx * dx + dy * dy) / r_max;
 					float t = std::clamp(1.0f - d, 0.0f, 1.0f);
 					float a = t * t * (3.0f - 2.0f * t); // smoothstep
-					size_t i = (y * w + x) * 4;
-					pixels[i + 0] = 255;
-					pixels[i + 1] = 255;
-					pixels[i + 2] = 255;
-					pixels[i + 3] = (stbi_uc)(a * 255.0f);
+					size_t i = (y * decoded.width + x) * 4;
+					decoded.pixels[i + 0] = 255;
+					decoded.pixels[i + 1] = 255;
+					decoded.pixels[i + 2] = 255;
+					decoded.pixels[i + 3] = static_cast<uint8_t>(a * 255.0f);
 				}
 			}
 		} else {
-			pixels = generateDefaultTexture(4, 4, def.type);
-		}
-		createTextureImageFromPixels(w, h, pixels, def.format);
-		free(pixels);
-		createTextureSampler();
-		return true;
-	}
-
-	// Path with format suffix (e.g. "path/to/tex.png|albedo") for explicit format
-	std::string path_str = m_resource_id;
-	vk::Format format = vk::Format::eR8G8B8A8Srgb;  // default
-	size_t pipe = path_str.find('|');
-	if (pipe != std::string::npos) {
-		std::string suffix = path_str.substr(pipe + 1);
-		path_str = path_str.substr(0, pipe);
-		if (suffix == "normal" || suffix == "mr" || suffix == "occlusion" || suffix == "emissive" || suffix == "specular")
-			format = vk::Format::eR8G8B8A8Unorm;
-	}
-
-	// Check embedded image cache (glb support)
-	auto emb_it = s_embedded_cache.find(path_str);
-	if (emb_it != s_embedded_cache.end()) {
-		auto& data = emb_it->second;
-		bool ok;
-		if (data.is_ktx) {
-			ok = createTextureImageFromKtxMemory(data.pixels.data(), data.pixels.size(), format);
-		} else {
-			m_width = data.width;
-			m_height = data.height;
-			createTextureImageFromPixels(data.width, data.height, data.pixels.data(), format);
-			ok = true;
-		}
-		if (ok)
-			createTextureSampler();
-		return ok;
-	}
-
-	std::filesystem::path path(path_str);
-	if (path.extension() == ".ktx" || path.extension() == ".ktx2") {
-		if (!createTextureImage(path, format)) {
-			VE_LOGE("Failed to load KTX texture: " << path.string());
-			return false;
+			stbi_uc* pixels = generateDefaultTexture(static_cast<int>(decoded.width), static_cast<int>(decoded.height), def->type);
+			const size_t byte_count = static_cast<size_t>(decoded.width) * static_cast<size_t>(decoded.height) * 4u;
+			decoded.pixels.assign(pixels, pixels + byte_count);
+			free(pixels);
 		}
 	} else {
-		if (!createTextureImageSTB(path, format)) {
-			VE_LOGE("Failed to load image: " << path.string());
+		// Resource id is "<path>|srgb" or "<path>|linear" (see makeResourceKey).
+		// Pick a representative TextureType so decode() applies the right format hint.
+		std::string path_str = m_resource_id;
+		TextureType type = TextureType::ALBEDO;  // srgb bucket
+		if (size_t pipe = path_str.find('|'); pipe != std::string::npos) {
+			std::string suffix = path_str.substr(pipe + 1);
+			path_str = path_str.substr(0, pipe);
+			if (suffix == "linear")
+				type = TextureType::NORMAL;  // linear bucket
+		}
+		GpuCaps caps{m_ve_device.supportsBC(), m_ve_device.supportsASTC()};
+		decoded = decode(std::filesystem::path(path_str), type, caps, nullptr);
+		if (decoded.pixels.empty()) {
+			VE_LOGE("Failed to load texture: " << path_str);
 			return false;
 		}
 	}
+
+	SyncUploadScope scope(m_ve_device, std::max<vk::DeviceSize>(decoded.pixels.size(), 4096));
+	if (!recordDecodedTexture(decoded, scope.ctx))
+		return false;
 	createTextureSampler();
 	return true;
 }
@@ -236,228 +382,79 @@ const vk::raii::Sampler& VeTexture::getSampler() const {
 	return *m_texture_sampler;
 }
 
-// Loads a texture from a .ktx or .ktx2 file and creates Vulkan image resources.
-bool VeTexture::createTextureImage(const std::filesystem::path& texture_path, vk::Format format_hint) {
-	ktxTexture* k_texture;
-	KTX_error_code result = ktxTexture_CreateFromNamedFile(
-		texture_path.string().c_str(),
-		KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
-		&k_texture);
-
-	if (result != KTX_SUCCESS) {
-		VE_LOGE("KTX load failed: " << texture_path << " (error " << static_cast<int>(result) << ")");
+bool VeTexture::recordDecodedTexture(const DecodedTexture& decoded, UploadContext& ctx) {
+	if (decoded.pixels.empty() || decoded.width == 0 || decoded.height == 0) {
+		VE_LOGE("recordDecodedTexture: empty payload for " << m_resource_id);
 		return false;
 	}
 
-	return uploadKtxTexture(k_texture, format_hint);
-}
+	m_width = decoded.width;
+	m_height = decoded.height;
+	const uint32_t mip_levels = std::max(1u, decoded.mip_levels);
+	const uint32_t array_layers = std::max(1u, decoded.array_layers);
+	const bool use_mipmap_copy = (mip_levels > 1) || !decoded.mip_extents.empty();
 
-// Loads a KTX/KTX2 texture from raw bytes in memory (for .glb embedded images).
-bool VeTexture::createTextureImageFromKtxMemory(const uint8_t* mem_data, size_t mem_size, vk::Format format_hint) {
-	ktxTexture* k_texture;
-	KTX_error_code result = ktxTexture_CreateFromMemory(
-		mem_data, mem_size,
-		KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
-		&k_texture);
+	const size_t total_size = decoded.pixels.size();
+	auto src = ctx.arena.write(decoded.pixels.data(), total_size);
 
-	if (result != KTX_SUCCESS) {
-		VE_LOGE("KTX load from memory failed (error " << static_cast<int>(result) << ")");
-		return false;
-	}
-
-	return uploadKtxTexture(k_texture, format_hint);
-}
-
-// Shared KTX upload: transcodes, stages, and uploads a ktxTexture to GPU.
-// Takes ownership of k_texture and destroys it before returning.
-bool VeTexture::uploadKtxTexture(void* k_texture_ptr, vk::Format format_hint) {
-	auto* k_texture = static_cast<ktxTexture*>(k_texture_ptr);
-	bool is_cubemap = k_texture->isCubemap;
-	m_width = k_texture->baseWidth;
-	m_height = k_texture->baseHeight;
-
-	if (m_width == 0 || m_height == 0) {
-		VE_LOGE("KTX texture has invalid dimensions: " << m_width << "x" << m_height);
-		ktxTexture_Destroy(k_texture);
-		return false;
-	}
-
-	// Handle transcoding for compressed KTX2 textures (BasisLZ / UASTC)
-	if (k_texture->classId == ktxTexture2_c) {
-		ktxTexture2* ktx2 = reinterpret_cast<ktxTexture2*>(k_texture);
-		if (ktxTexture2_NeedsTranscoding(ktx2)) {
-			ktx_transcode_fmt_e target = KTX_TTF_RGBA32;
-			if (m_ve_device.supportsBC())
-				target = KTX_TTF_BC7_RGBA;
-			else if (m_ve_device.supportsASTC())
-				target = KTX_TTF_ASTC_4x4_RGBA;
-			KTX_error_code result = ktxTexture2_TranscodeBasis(ktx2, target, 0);
-			if (result != KTX_SUCCESS) {
-				VE_LOGE("KTX2 transcoding failed (error " << static_cast<int>(result) << ")");
-				ktxTexture_Destroy(k_texture);
-				return false;
-			}
-		}
-	}
-
-	uint32_t num_levels = k_texture->numLevels;
-	ktx_uint8_t* data = ktxTexture_GetData(k_texture);
-
-	vk::Format texture_format;
-	if (k_texture->classId == ktxTexture2_c) {
-		auto* ktx2 = reinterpret_cast<ktxTexture2*>(k_texture);
-		texture_format = static_cast<vk::Format>(ktx2->vkFormat);
-		if (texture_format == vk::Format::eUndefined)
-			texture_format = vk::Format::eR8G8B8A8Unorm;
-	} else if (k_texture->classId == ktxTexture1_c) {
-		texture_format = static_cast<vk::Format>(ktxTexture1_GetVkFormat(reinterpret_cast<ktxTexture1*>(k_texture)));
-		if (texture_format == vk::Format::eUndefined)
-			texture_format = vk::Format::eR8G8B8A8Unorm;
-	} else {
-		texture_format = vk::Format::eR8G8B8A8Unorm;
-	}
-
-	// Apply format_hint (sRGB vs linear) to the transcoded format.
-	// For uncompressed 8-bit: override directly. For block-compressed: convert to sRGB/Unorm variant.
-	bool is_uncompressed_8bit = (texture_format == vk::Format::eR8G8B8Srgb || texture_format == vk::Format::eR8G8B8Unorm ||
-	                            texture_format == vk::Format::eR8G8B8A8Srgb || texture_format == vk::Format::eR8G8B8A8Unorm);
-	bool has_format_hint = (format_hint == vk::Format::eR8G8B8A8Srgb || format_hint == vk::Format::eR8G8B8A8Unorm);
-	if (has_format_hint && is_uncompressed_8bit)
-		texture_format = format_hint;
-	else if (has_format_hint && isBlockCompressed(texture_format)) {
-		bool want_srgb = (format_hint == vk::Format::eR8G8B8A8Srgb);
-		texture_format = want_srgb ? toSrgbBC(texture_format) : toUnormBC(texture_format);
-	}
-
-	const uint32_t array_layers = is_cubemap ? 6 : 1;
-	const uint32_t effective_levels = num_levels;
-	const bool use_mipmap_copy = (effective_levels > 1);
-
-	ktx_size_t total_size = 0;
+	// Per-mip offsets are relative to the start of decoded.pixels
 	std::vector<vk::DeviceSize> buffer_offsets;
 	std::vector<vk::Extent3D> extents;
 	if (use_mipmap_copy) {
-		for (uint32_t level = 0; level < effective_levels; level++) {
-			ktx_size_t offset = 0;
-			ktxTexture_GetImageOffset(k_texture, level, 0, 0, &offset);
-			buffer_offsets.push_back(offset);
-			uint32_t w = std::max(1u, m_width >> level);
-			uint32_t h = std::max(1u, m_height >> level);
-			extents.push_back({ w, h, 1 });
-		}
-		total_size = ktxTexture_GetDataSize(k_texture);
+		buffer_offsets.reserve(decoded.mip_offsets.size());
+		for (vk::DeviceSize off : decoded.mip_offsets)
+			buffer_offsets.push_back(off + src.offset);
+		extents = decoded.mip_extents;
 	} else {
-		ktx_size_t image_size = ktxTexture_GetImageSize(k_texture, 0);
-		total_size = image_size * array_layers;
-		buffer_offsets.push_back(0);
+		buffer_offsets.push_back(src.offset);
 		extents.push_back({ m_width, m_height, 1 });
 	}
 
-	ve::VeBuffer staging_buffer(
-		m_ve_device, total_size, 1,
-		vk::BufferUsageFlagBits::eTransferSrc,
-		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-	staging_buffer.map();
-	staging_buffer.writeToBuffer(data, static_cast<size_t>(total_size));
-
 	m_texture_image = std::make_unique<ve::VeImage>(
 		m_ve_device, m_width, m_height,
-		vk::SampleCountFlagBits::e1, texture_format,
+		vk::SampleCountFlagBits::e1, decoded.format,
 		vk::ImageTiling::eOptimal,
 		vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		vk::ImageAspectFlagBits::eColor,
-		is_cubemap, array_layers, effective_levels);
+		decoded.is_cubemap, array_layers, mip_levels);
 
 	m_texture_image->transitionImageLayout(
+		ctx.transfer_cmd,
 		vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
 		{}, vk::AccessFlagBits2::eTransferWrite,
 		vk::PipelineStageFlagBits2::eTopOfPipe, vk::PipelineStageFlagBits2::eTransfer);
+	ctx.transfer_has_work = true;
 
 	if (use_mipmap_copy) {
-		m_ve_device.copyBufferToImageWithMipmaps(
-			staging_buffer.getBuffer(), m_texture_image->getImage(),
-			array_layers, effective_levels, buffer_offsets, extents);
+		VeDevice::copyBufferToImageWithMipmaps(
+			ctx.transfer_cmd, src.buffer, m_texture_image->getImage(),
+			array_layers, mip_levels, buffer_offsets, extents);
 	} else {
-		m_ve_device.copyBufferToImage(
-			staging_buffer.getBuffer(), m_texture_image->getImage(),
-			m_width, m_height, array_layers);
+		// Single-mip path: emit one BufferImageCopy with the arena offset.
+		vk::BufferImageCopy copy_region{
+			.bufferOffset = src.offset,
+			.bufferRowLength = 0,
+			.bufferImageHeight = 0,
+			.imageSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, array_layers },
+			.imageOffset = { 0, 0, 0 },
+			.imageExtent = { m_width, m_height, 1 }
+		};
+		ctx.transfer_cmd.copyBufferToImage(src.buffer, m_texture_image->getImage(),
+			vk::ImageLayout::eTransferDstOptimal, copy_region);
 	}
+	ctx.transfer_has_work = true;
 
 	m_texture_image->transitionImageLayout(
+		ctx.graphics_cmd,
 		vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
 		vk::AccessFlagBits2::eTransferWrite, vk::AccessFlagBits2::eShaderRead,
 		vk::PipelineStageFlagBits2::eTransfer, vk::PipelineStageFlagBits2::eFragmentShader);
+	ctx.graphics_has_work = true;
+
 	m_texture_image->setDebugName(m_resource_id.c_str());
 
-	ktxTexture_Destroy(k_texture);
-	return true;
-}
-
-void VeTexture::createTextureImageFromPixels(uint32_t width, uint32_t height, const stbi_uc* pixels, vk::Format format) {
-	uint32_t pixel_count = static_cast<uint32_t>(width * height);
-	ve::VeBuffer staging_buffer(
-		m_ve_device,
-		4,
-		pixel_count,
-		vk::BufferUsageFlagBits::eTransferSrc,
-		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
-	);
-	staging_buffer.map();
-	staging_buffer.writeToBuffer(pixels);
-	m_texture_image = std::make_unique<ve::VeImage>(
-		m_ve_device,
-		static_cast<uint32_t>(width),
-		static_cast<uint32_t>(height),
-		vk::SampleCountFlagBits::e1,
-		format,
-		vk::ImageTiling::eOptimal,
-		vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
-		vk::MemoryPropertyFlagBits::eDeviceLocal,
-		vk::ImageAspectFlagBits::eColor,
-		false,
-		1
-	);
-	m_texture_image->transitionImageLayout(
-		vk::ImageLayout::eUndefined,
-		vk::ImageLayout::eTransferDstOptimal,
-		{},
-		vk::AccessFlagBits2::eTransferWrite,
-		vk::PipelineStageFlagBits2::eTopOfPipe,
-		vk::PipelineStageFlagBits2::eTransfer);
-	m_ve_device.copyBufferToImage(
-		staging_buffer.getBuffer(),
-		m_texture_image->getImage(),
-		static_cast<uint32_t>(width),
-		static_cast<uint32_t>(height));
-	m_texture_image->transitionImageLayout(
-		vk::ImageLayout::eTransferDstOptimal,
-		vk::ImageLayout::eShaderReadOnlyOptimal,
-		vk::AccessFlagBits2::eTransferWrite,
-		vk::AccessFlagBits2::eShaderRead,
-		vk::PipelineStageFlagBits2::eTransfer,
-		vk::PipelineStageFlagBits2::eFragmentShader);
-	m_texture_image->setDebugName(m_resource_id.c_str());
-}
-
-// Loads a texture from a file using stb_image.
-bool VeTexture::createTextureImageSTB(const std::filesystem::path& texture_path, vk::Format format) {
-	int channels, width, height;
-	stbi_uc* pixels = stbi_load(texture_path.string().c_str(), &width, &height, &channels, STBI_rgb_alpha);
-
-	if (!pixels) {
-		const char* reason = stbi_failure_reason();
-		VE_LOGE("STB load failed: " << texture_path << " (" << (reason ? reason : "unknown") << ")");
-		return false;
-	}
-
-	(void)channels;
-	m_width = static_cast<uint32_t>(width);
-	m_height = static_cast<uint32_t>(height);
-	VE_LOGD("Texture width x height: " << m_width << " x " << m_height);
-
-	createTextureImageFromPixels(m_width, m_height, pixels, format);
-	stbi_image_free(pixels);
+	ctx.bytes_in_flight += total_size;
 	return true;
 }
 

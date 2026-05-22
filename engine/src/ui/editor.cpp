@@ -132,8 +132,15 @@ void Editor::renderUI(UIContext& context, Registry* registry) {
 		}
 
 		// Loading overlay (renders on top of everything)
-		if (m_context.scene_manager)
-			m_loading_overlay.render(m_context.scene_manager->assetLoader());
+		if (m_context.scene_manager) {
+			ImVec2 vp_min(0.f, 0.f);
+			ImVec2 vp_max(0.f, 0.f);
+			if (editor_mode && m_state.show_viewport && m_viewport_panel.isImageValid()) {
+				vp_min = m_viewport_panel.getImageMin();
+				vp_max = m_viewport_panel.getImageMax();
+			}
+			m_loading_overlay.render(m_context.scene_manager->assetLoader(), vp_min, vp_max);
+		}
 	});
 
 	// Cache AABB offset for gizmo/debug shape placement

@@ -68,6 +68,7 @@ public:
 	vk::raii::Device& getDevice() { return m_device; }
 	vk::raii::Queue& getQueue() { return m_queue; }
 	vk::raii::Queue& getComputeQueue() { return m_compute_queue; }
+	vk::raii::Queue& getTransferQueue() { return m_transfer_queue; }
 	vk::raii::SurfaceKHR* getSurface() { return &m_surface; }
 	vk::raii::Instance& getInstance() { return m_instance; }
 	vk::raii::PhysicalDevice& getPhysicalDevice() { return m_physical_device; }
@@ -85,6 +86,19 @@ public:
 	void copyBuffer(vk::Buffer src_buffer, vk::Buffer dst_buffer, vk::DeviceSize size);
 	void copyBufferToImage(vk::Buffer src_buffer, vk::Image dst_image, uint32_t width, uint32_t height, uint32_t array_layers = 1);
 	void copyBufferToImageWithMipmaps(vk::Buffer src_buffer, vk::Image dst_image,
+		uint32_t array_layers, uint32_t mip_levels,
+		const std::vector<vk::DeviceSize>& buffer_offsets,
+		const std::vector<vk::Extent3D>& extents);
+
+	// Record-only variants
+	static void copyBuffer(vk::raii::CommandBuffer& cmd,
+		vk::Buffer src_buffer, vk::Buffer dst_buffer, vk::DeviceSize size,
+		vk::DeviceSize src_offset = 0, vk::DeviceSize dst_offset = 0);
+	static void copyBufferToImage(vk::raii::CommandBuffer& cmd,
+		vk::Buffer src_buffer, vk::Image dst_image,
+		uint32_t width, uint32_t height, uint32_t array_layers = 1);
+	static void copyBufferToImageWithMipmaps(vk::raii::CommandBuffer& cmd,
+		vk::Buffer src_buffer, vk::Image dst_image,
 		uint32_t array_layers, uint32_t mip_levels,
 		const std::vector<vk::DeviceSize>& buffer_offsets,
 		const std::vector<vk::Extent3D>& extents);
@@ -134,6 +148,7 @@ private:
 	vk::raii::PhysicalDevice m_physical_device{nullptr};
 
 	vk::raii::CommandPool m_command_pool{nullptr};
+	vk::raii::CommandPool m_command_pool_graphics_transient{nullptr}; // eTransient, for beginSingleTimeCommands(Graphics)
 	vk::raii::CommandPool m_command_pool_transfer{nullptr}; // eTransient
 	vk::raii::CommandPool m_command_pool_compute{nullptr};  // eTransient
 	vk::raii::Queue m_queue{nullptr};

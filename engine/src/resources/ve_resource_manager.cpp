@@ -2,12 +2,19 @@
 #include "resources/ve_mesh.hpp"
 #include "resources/ve_material.hpp"
 #include "resources/ve_texture.hpp"
-#include "resources/loaded_asset_data.hpp"
+#include "resources/ve_model.hpp"
+#include "resources/internal/loaded_asset_data.hpp"
+#include "resources/internal/asset_upload.hpp"
+#include "resources/internal/upload_context.hpp"
+#include "resources/internal/gltf_loader.hpp"
 #include "rendering/culling/meshlet_data.hpp"
 #include "vulkan/ve_descriptors.hpp"
+#include "utils/ve_log.hpp"
 #include "ve_config.hpp"
 
 #include <cassert>
+#include <cstddef>
+#include <limits>
 
 namespace ve {
 
@@ -133,13 +140,7 @@ ResourceHandle<VeMesh> VeResourceManager::createMesh(const std::string& resource
 }
 
 ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& resource_id,
-                                                             const std::filesystem::path& albedo_path,
-                                                             const std::filesystem::path& normal_path,
-                                                             const std::filesystem::path& metallic_roughness_path,
-                                                             const std::filesystem::path& occlusion_path,
-                                                             const std::filesystem::path& emissive_path,
-                                                             const std::filesystem::path& specular_path,
-                                                             const std::filesystem::path& specular_color_path,
+                                                             MaterialTextures textures,
                                                              MaterialAlphaProps alpha_props,
                                                              MaterialFactors factors,
                                                              bool flip_tex_coord_v) {
@@ -152,21 +153,31 @@ ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& 
 		return ResourceHandle<VeMaterial>(resource_id, this);
 	}
 
-	auto resource = std::make_shared<VeMaterial>(*this, resource_id,
-	                                            albedo_path, normal_path, metallic_roughness_path,
-	                                            occlusion_path, emissive_path,
-	                                            specular_path, specular_color_path,
-	                                            alpha_props, factors, flip_tex_coord_v);
-	if (!resource->load()) {
-		return ResourceHandle<VeMaterial>();
-	}
+	// Substitute defaults for any unbound slots
+	if (!textures.albedo.isValid())
+		textures.albedo = load<VeTexture>("default_albedo");
+	if (!textures.normal.isValid())
+		textures.normal = load<VeTexture>("default_normal");
+	if (!textures.metallic_roughness.isValid())
+		textures.metallic_roughness = load<VeTexture>("default_metallic_roughness");
+	if (!textures.occlusion.isValid())
+		textures.occlusion = load<VeTexture>("default_occlusion");
+	if (!textures.emissive.isValid())
+		textures.emissive = load<VeTexture>("default_emissive");
+	if (!textures.specular.isValid())
+		textures.specular = load<VeTexture>("default_specular");
+	if (!textures.specular_color.isValid())
+		textures.specular_color = load<VeTexture>("default_specular_color");
+
+	auto resource = std::make_shared<VeMaterial>(resource_id, std::move(textures),
+	                                             alpha_props, factors, flip_tex_coord_v);
 	type_resources[resource_id] = std::move(resource);
 	m_ref_counts[type_idx][resource_id] = 1;
 	return ResourceHandle<VeMaterial>(resource_id, this);
 }
 
 ResourceHandle<VeMesh> VeResourceManager::createMeshFromData(
-	const std::string& resource_id, const ProcessedMesh& data) {
+	const std::string& resource_id, ProcessedMesh& data, UploadContext& ctx) {
 	auto type_idx = typeid(VeMesh).hash_code();
 	auto& type_resources = m_resources[type_idx];
 	auto it = type_resources.find(resource_id);
@@ -176,10 +187,68 @@ ResourceHandle<VeMesh> VeResourceManager::createMeshFromData(
 		return ResourceHandle<VeMesh>(resource_id, this);
 	}
 
-	auto resource = std::make_shared<VeMesh>(m_device, data);
+	auto resource = std::make_shared<VeMesh>(m_device, data, ctx);
 	type_resources[resource_id] = std::move(resource);
 	m_ref_counts[type_idx][resource_id] = 1;
 	return ResourceHandle<VeMesh>(resource_id, this);
+}
+
+ResourceHandle<VeTexture> VeResourceManager::createTextureFromData(
+	const std::string& resource_id, const DecodedTexture& data, UploadContext& ctx) {
+	auto type_idx = typeid(VeTexture).hash_code();
+	auto& type_resources = m_resources[type_idx];
+	auto it = type_resources.find(resource_id);
+
+	if (it != type_resources.end()) {
+		m_ref_counts[type_idx][resource_id]++;
+		return ResourceHandle<VeTexture>(resource_id, this);
+	}
+
+	auto resource = std::make_shared<VeTexture>(m_device, resource_id, data, ctx);
+	if (!resource->isLoaded())
+		return ResourceHandle<VeTexture>();
+	type_resources[resource_id] = std::move(resource);
+	m_ref_counts[type_idx][resource_id] = 1;
+	return ResourceHandle<VeTexture>(resource_id, this);
+}
+
+ResourceHandle<VeMesh> VeResourceManager::loadMesh(const std::filesystem::path& gltf_path) {
+	return ve::gltf::loadFirstMesh(*this, gltf_path);
+}
+
+ResourceHandle<VeModel> VeResourceManager::loadModel(const std::filesystem::path& gltf_path,
+                                                     bool extract_lights, bool flip_tex_coord_v) {
+	std::string key = gltf_path.lexically_normal().generic_string();
+	auto type_idx = typeid(VeModel).hash_code();
+	auto& type_resources = m_resources[type_idx];
+	auto it = type_resources.find(key);
+	if (it != type_resources.end()) {
+		m_ref_counts[type_idx][key]++;
+		return ResourceHandle<VeModel>(key, this);
+	}
+
+	LoadProgress progress;
+	GpuCaps caps{ m_device.supportsBC(), m_device.supportsASTC() };
+	LoadedAssetData data = ve::gltf::load(gltf_path, extract_lights, flip_tex_coord_v, progress, caps);
+	if (progress.cpu_failed.load()) {
+		VE_LOGE("loadModel: CPU load failed for " << gltf_path);
+		return {};
+	}
+
+	UploadedHandles handles;
+	UploadCursor cursor;
+	{
+		SyncUploadScope scope(m_device);
+		uploadLoadedAssetStep(*this, data, cursor, handles,
+		                      std::numeric_limits<uint32_t>::max(),
+		                      std::numeric_limits<size_t>::max(),
+		                      scope.ctx);
+	}
+
+	auto model = std::make_shared<VeModel>(key, std::move(data), std::move(handles));
+	type_resources[key] = std::move(model);
+	m_ref_counts[type_idx][key] = 1;
+	return ResourceHandle<VeModel>(key, this);
 }
 
 // ---------------------------------------------------------------------------
@@ -188,23 +257,28 @@ ResourceHandle<VeMesh> VeResourceManager::createMeshFromData(
 template class VENGINE_API ResourceHandle<VeMesh>;
 template class VENGINE_API ResourceHandle<VeTexture>;
 template class VENGINE_API ResourceHandle<VeMaterial>;
+template class VENGINE_API ResourceHandle<VeModel>;
 
 template VENGINE_API ResourceHandle<VeTexture> VeResourceManager::load<VeTexture>(const std::string&);
 
 template VeTexture* VeResourceManager::getResource<VeTexture>(const std::string&) const;
 template VeMesh* VeResourceManager::getResource<VeMesh>(const std::string&) const;
 template VeMaterial* VeResourceManager::getResource<VeMaterial>(const std::string&) const;
+template VeModel* VeResourceManager::getResource<VeModel>(const std::string&) const;
 
 template bool VeResourceManager::hasResource<VeTexture>(const std::string&) const;
 template bool VeResourceManager::hasResource<VeMesh>(const std::string&) const;
 template bool VeResourceManager::hasResource<VeMaterial>(const std::string&) const;
+template bool VeResourceManager::hasResource<VeModel>(const std::string&) const;
 
 template void VeResourceManager::addRef<VeTexture>(const std::string&);
 template void VeResourceManager::addRef<VeMesh>(const std::string&);
 template void VeResourceManager::addRef<VeMaterial>(const std::string&);
+template void VeResourceManager::addRef<VeModel>(const std::string&);
 
 template void VeResourceManager::release<VeTexture>(const std::string&);
 template void VeResourceManager::release<VeMesh>(const std::string&);
 template void VeResourceManager::release<VeMaterial>(const std::string&);
+template void VeResourceManager::release<VeModel>(const std::string&);
 
 } // namespace ve

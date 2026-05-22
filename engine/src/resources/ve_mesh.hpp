@@ -21,6 +21,7 @@ namespace ve {
 
 struct CpuMeshletData;
 struct ProcessedMesh;
+struct UploadContext;
 
 class VENGINE_API VeMesh : public Resource {
 public:
@@ -65,8 +66,12 @@ public:
 	VeMesh(VeDevice& device, const std::string& resource_id,
 	       const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices,
 	       const std::vector<std::vector<uint32_t>>& lod_indices);
-	// Create mesh from pre-processed CPU data (async loading path)
-	VeMesh(VeDevice& device, const ProcessedMesh& data);
+	// Create mesh from pre-processed CPU data. Moves heavy fields (indices,
+	// meshlet_data, joint_mesh_local_extents) out of `data`.
+	VeMesh(VeDevice& device, ProcessedMesh& data);
+	// Same, but records buffer copies into the upload context's transfer CB.
+	// Caller owns submit + sync.
+	VeMesh(VeDevice& device, ProcessedMesh& data, UploadContext& ctx);
 	~VeMesh() override;
 
 	VeMesh(const VeMesh&) = delete;
@@ -115,12 +120,16 @@ protected:
 	void doUnload() override;
 
 private:
-	void createVertexBuffers(const std::vector<Vertex>& vertices, bool needs_storage_usage = false);
-	void createShadowVertexBuffer(const std::vector<Vertex>& vertices);
-	void createSkinVertexBuffer(const std::vector<SkinVertex>& skin_vertices);
-	void createIndexBuffers(const std::vector<uint32_t>& indices);
-	void createLodIndexBuffer(const std::vector<uint32_t>& indices);
 	void computeLocalAABB(const std::vector<Vertex>& vertices);
+	void initFromProcessedMesh(ProcessedMesh& data, UploadContext& ctx);
+
+	// Record copies into ctx.transfer_cmd, sourcing from ctx.arena. Caller must
+	// keep the arena alive until the GPU signals completion.
+	void recordVertexBuffers(const std::vector<Vertex>& vertices, bool needs_storage_usage, UploadContext& ctx);
+	void recordShadowVertexBuffer(const std::vector<glm::vec3>& positions, UploadContext& ctx);
+	void recordSkinVertexBuffer(const std::vector<SkinVertex>& skin_vertices, UploadContext& ctx);
+	void recordIndexBuffers(const std::vector<uint32_t>& indices, UploadContext& ctx);
+	void recordLodIndexBuffer(const std::vector<uint32_t>& indices, UploadContext& ctx);
 
 	VeDevice& m_ve_device;
 	std::unique_ptr<VeBuffer> m_vertex_buffer;

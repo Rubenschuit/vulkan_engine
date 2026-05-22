@@ -7,7 +7,7 @@
 #include "resources/ve_mesh.hpp"
 #include "resources/ve_texture.hpp"
 #include "resources/ve_material_properties.hpp"
-#include "resources/ve_model.hpp"
+#include "resources/model_data.hpp"
 #include "resources/ve_animation_clip.hpp"
 #include "rendering/culling/meshlet_data.hpp"
 
@@ -22,28 +22,47 @@
 #include <unordered_set>
 #include <vector>
 
-#define VULKAN_HPP_ENABLE_RAII
-#include <vulkan/vulkan_raii.hpp>
+#include <vulkan/vulkan.hpp>
 
 namespace ve {
+
+struct GpuCaps {
+	bool supports_bc = false;
+	bool supports_astc = false;
+};
 
 struct DecodedTexture {
 	std::string resource_id;
 	std::filesystem::path file_path;
 	TextureType type = TextureType::ALBEDO;
-	bool is_default = false;			// true = use engine default texture, skip decode
+
+	// Pre-decoded payload populated on the loader worker thread.
+	// Empty pixels vector means the decode failed; the upload stage skips the slot
+	// and createMaterial substitutes the engine default by type.
+	std::vector<uint8_t> pixels;
+	uint32_t width = 0;
+	uint32_t height = 0;
+	uint32_t mip_levels = 1;
+	uint32_t array_layers = 1;
+	bool is_cubemap = false;
+	vk::Format format = vk::Format::eUndefined;
+
+	// Per-mip byte offsets/extents into `pixels`. Empty => single-mip layout.
+	std::vector<vk::DeviceSize> mip_offsets;
+	std::vector<vk::Extent3D> mip_extents;
 };
 
 struct ProcessedMesh {
 	std::string resource_id;
 	std::vector<VeMesh::Vertex> vertices;
+	// Position-only mirror of vertices[].pos. Precomputed on the worker so the
+	// main-thread shadow-buffer upload is a memcpy, and reused as m_cpu_positions.
+	std::vector<glm::vec3> shadow_positions;
 	std::vector<VeMesh::SkinVertex> skin_vertices;  // empty if mesh has no JOINTS_0/WEIGHTS_0
 	std::vector<VeMesh::AABB> joint_mesh_local_extents;  // per joint index, in mesh-local space
 	std::vector<uint32_t> indices;
 	std::vector<std::vector<uint32_t>> lod_indices;
 	VeMesh::AABB local_aabb{};
-	std::vector<glm::vec3> cpu_positions;
-	std::vector<uint32_t> cpu_indices;
 	std::unique_ptr<CpuMeshletData> meshlet_data;
 
 	ProcessedMesh() = default;
@@ -68,20 +87,20 @@ struct ProcessedMaterial {
 	bool flip_tex_coord_v = false;
 };
 
-struct VENGINE_API LoadedAssetData {
+struct LoadedAssetData {
 	std::vector<DecodedTexture> textures;
 	std::vector<ProcessedMesh> meshes;
 	std::vector<ProcessedMaterial> materials;
 	std::vector<ModelNode> nodes;
 	std::vector<std::pair<uint32_t, uint32_t>> parent_links;	// (child_index, parent_index)
 	std::unordered_set<uint32_t> root_indices;
-	std::vector<VeModel::ExtractedLight> punctual_lights;
-	std::vector<VeModel::ExtractedLight> emissive_lights;
-	std::vector<VeModel::ExtractedCamera> cameras;
+	std::vector<ExtractedLight> punctual_lights;
+	std::vector<ExtractedLight> emissive_lights;
+	std::vector<ExtractedCamera> cameras;
 	std::unordered_map<int, uint32_t> gltf_to_loaded_idx;
 	std::vector<VeAnimationClip> animation_clips;
 	std::vector<ModelSkin> skins;
-	std::unordered_map<int, std::pair<glm::vec3, float>> geometry_center_extent;
+	EmbeddedImageCache embedded_images;
 
 	LoadedAssetData() = default;
 	LoadedAssetData(LoadedAssetData&&) = default;
@@ -93,7 +112,7 @@ struct VENGINE_API LoadedAssetData {
 // Thread-safe progress tracking for async loading.
 // Each texture decode, texture upload, mesh process, mesh upload, and material
 // creation counts as one item. Progress = completed_items / total_items.
-struct VENGINE_API LoadProgress {
+struct LoadProgress {
 	std::atomic<uint32_t> completed_items{0};
 	std::atomic<uint32_t> total_items{0};
 	std::atomic<bool> cancelled{false};

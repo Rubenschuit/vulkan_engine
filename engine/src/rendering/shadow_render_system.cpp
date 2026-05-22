@@ -51,6 +51,9 @@ ShadowRenderSystem::ShadowRenderSystem(
 	event_bus.subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
 		subscribeToRegistry(*e.registry);
 	});
+	event_bus.subscribe<AssetLoadCompleteEvent>([this](const AssetLoadCompleteEvent&) {
+		invalidateShadowDrawables();
+	});
 	event_bus.subscribe<ShadowAtlasResolutionChangedEvent>(
 		[this](const ShadowAtlasResolutionChangedEvent& e) {
 			resizeShadowAtlas(e.preset, e.pool);

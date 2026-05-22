@@ -14,6 +14,8 @@
 namespace ve {
 
 void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*context*/) {
+	invalidateImageRect();
+
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
 	bool open = ImGui::Begin("Viewport", &state.show_viewport, ImGuiWindowFlags_NoFocusOnAppearing);
 	ImGui::PopStyleVar();
@@ -35,6 +37,10 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 
 		// Capture image top-left for gizmo rect (after toolbar, before Image call)
 		ImVec2 image_pos = ImGui::GetCursorScreenPos();
+		if (size.x > 0.f && size.y > 0.f) {
+			m_image_min = image_pos;
+			m_image_max = ImVec2(image_pos.x + size.x, image_pos.y + size.y);
+		}
 
 		if (m_texture_id != VK_NULL_HANDLE && size.x > 0 && size.y > 0)
 			ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_texture_id)), size);

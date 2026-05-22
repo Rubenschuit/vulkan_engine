@@ -22,7 +22,6 @@ namespace ve {
 
 class Editor;
 class VeScene;
-class VeModel;
 class RenderPipeline;
 class RenderResources;
 struct SceneContext;
@@ -48,11 +47,6 @@ protected:
 	// --- Scene management ---
 	void registerScene(std::string name,
 	                   std::function<std::unique_ptr<VeScene>(const SceneContext&)> factory);
-	void registerGltfScene(std::string name,
-	                       std::filesystem::path gltf_path,
-	                       std::function<std::unique_ptr<VeScene>(const SceneContext&, std::unique_ptr<VeModel>)> factory,
-	                       bool extract_lights = true,
-	                       bool flip_tex_coord_v = false);
 	void loadDefaultScene(int index);
 	SceneManager& sceneManager() { return *m_scene_manager; }
 

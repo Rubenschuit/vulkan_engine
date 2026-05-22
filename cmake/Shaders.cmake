@@ -75,6 +75,9 @@ function(add_slang_spirv_target TARGET)
 		)
 		list(JOIN _SLANG_CAPABILITIES "+" _SLANG_CAPABILITY_FLAG)
 
+		# 41012 = "profile implicitly upgraded"
+		set(_SLANG_WARNINGS_DISABLE 41012)
+
 		if (_TYPE_UP STREQUAL "GRAPHICS")
 			add_custom_command(
 				OUTPUT ${_OUT_FILE}
@@ -84,6 +87,7 @@ function(add_slang_spirv_target TARGET)
 					-target spirv
 					-profile ${_PROFILE}
 					-capability ${_SLANG_CAPABILITY_FLAG}
+					-warnings-disable ${_SLANG_WARNINGS_DISABLE}
 					-fvk-use-gl-layout
 					-entry ${_VERT_ENTRY} -stage vertex
 					-entry ${_FRAG_ENTRY} -stage fragment
@@ -103,6 +107,7 @@ function(add_slang_spirv_target TARGET)
 					-target spirv
 					-profile ${_PROFILE}
 					-capability ${_SLANG_CAPABILITY_FLAG}
+					-warnings-disable ${_SLANG_WARNINGS_DISABLE}
 					-fvk-use-gl-layout
 					-entry ${_ENTRY} -stage compute
 					-emit-spirv-directly

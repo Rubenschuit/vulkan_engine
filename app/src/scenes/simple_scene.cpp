@@ -73,19 +73,18 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 		floor_factors.metallic_factor = 0.0f;
 		auto floor_mat = m_resource_manager.createMaterial(
 			"simple_scene::floor",
-			paths.grid_texture.lexically_normal(),
-			"default_normal.png",
-			"default_mr_unit.png",
-			"default_occlusion.png",
-			"default_emissive.png",
-			"default_specular.png",
-			"default_specular_color.png",
+			MaterialTextures{
+				.albedo = VeTexture::loadFromPath(m_resource_manager,
+				                                  paths.grid_texture.lexically_normal(),
+				                                  TextureType::ALBEDO),
+				.metallic_roughness = m_resource_manager.load<VeTexture>("default_mr_unit"),
+			},
 			MaterialAlphaProps{
 				.alpha_mode = AlphaMode::ALPHA_OPAQUE,
 				.alpha_cutoff = 0.5f,
 				.double_sided = true,
 				.use_spec_gloss_texture = false},
-			floor_factors		);
+			floor_factors);
 
 		Entity e = m_registry.createEntity("floor");
 		auto& tc = m_registry.addComponent<TransformComponent>(e);
@@ -97,25 +96,22 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 
 	// Textured quad
 	{
-		auto quad_data = VeModel::loadSingleMesh(m_resource_manager, paths.quad_model.lexically_normal());
-		if (quad_data) {
-			auto default_dir = paths.quad_model.parent_path();
+		auto quad_mesh = m_resource_manager.loadMesh(paths.quad_model.lexically_normal());
+		if (quad_mesh.isValid()) {
 			auto mat_handle = m_resource_manager.createMaterial(
 				"simple_scene::mots_quad",
-				paths.mots_texture.lexically_normal(),
-				default_dir / "default_normal.png",
-				default_dir / "default_metallic_roughness.png",
-				default_dir / "default_occlusion.png",
-				default_dir / "default_emissive.png",
-				default_dir / "default_specular.png",
-				default_dir / "default_specular_color.png",
+				MaterialTextures{
+					.albedo = VeTexture::loadFromPath(m_resource_manager,
+					                                  paths.mots_texture.lexically_normal(),
+					                                  TextureType::ALBEDO),
+				},
 				MaterialAlphaProps{AlphaMode::MASK, 0.5f, true}, MaterialFactors{});
 
 			Entity quad_entity = m_registry.createEntity("tex_quad");
 			auto& tc = m_registry.addComponent<TransformComponent>(quad_entity);
 			tc.setTranslation({0.0f, 60.0f, 40.0f});
 			tc.setScale({18.0f, 18.0f, 18.0f});
-			auto& mc = m_registry.addComponent<MeshComponent>(quad_entity, quad_data->mesh, mat_handle);
+			auto& mc = m_registry.addComponent<MeshComponent>(quad_entity, quad_mesh, mat_handle);
 			mc.has_texture = 1.0f;
 			mc.has_shadow = false;
 
@@ -136,8 +132,8 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 	                         glm::vec3 base_translation, glm::vec3 base_rotation, glm::vec3 base_scale,
 	                         float spacing_x, float spacing_y, float z_offset,
 	                         PhysicsShapeType shape_type = PhysicsShapeType::Box) {
-		auto mesh_data = VeModel::loadSingleMesh(m_resource_manager, model_path.lexically_normal());
-		if (!mesh_data)
+		auto mesh = m_resource_manager.loadMesh(model_path.lexically_normal());
+		if (!mesh.isValid())
 			return;
 
 		std::string name = model_path.stem().string();
@@ -152,13 +148,10 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 
 				auto mat_handle = m_resource_manager.createMaterial(
 					"pbr_grid::" + name + "_r" + std::to_string(j) + "_m" + std::to_string(i),
-					"default_albedo.png",
-					"default_normal.png",
-					"default_mr_unit.png",
-					"default_occlusion.png",
-					"default_emissive.png",
-					"default_specular.png",
-					"default_specular_color.png",
+					MaterialTextures{
+						// MaterialFactors alone drives metallic/roughness; use unit MR texture so factors are not multiplied by the standard default's 0/1
+						.metallic_roughness = m_resource_manager.load<VeTexture>("default_mr_unit"),
+					},
 					MaterialAlphaProps{
 						.alpha_mode = AlphaMode::ALPHA_OPAQUE,
 						.alpha_cutoff = 0.5f,
@@ -172,7 +165,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 				tc.setTranslation(base_translation + glm::vec3{(float)i * spacing_x, (float)j * spacing_y, z_offset});
 				tc.setRotationEuler(base_rotation);
 				tc.setScale(base_scale);
-				auto& mc = m_registry.addComponent<MeshComponent>(e, mesh_data->mesh, mat_handle);
+				auto& mc = m_registry.addComponent<MeshComponent>(e, mesh, mat_handle);
 				mc.has_texture = 1.0f;
 
 				auto& rb = m_registry.addComponent<RigidbodyComponent>(e);

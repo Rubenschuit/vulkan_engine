@@ -22,7 +22,6 @@
 #include "rendering/ve_frame_info.hpp"
 #include "scene/ve_component.hpp"
 #include "scene/camera_view.hpp"
-#include "resources/ve_model.hpp"
 #include "scene/ve_scene.hpp"
 #include "scene/gltf_scene.hpp"
 

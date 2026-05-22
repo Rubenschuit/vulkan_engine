@@ -40,14 +40,15 @@ VeBuffer::VeBuffer(VeDevice& ve_device,
 		.pQueueFamilyIndices = use_concurrent ? unique_families.data() : nullptr,
 	};
 
-	VmaAllocationCreateInfo alloc_info {
-		.flags = 0,
-		.usage = VMA_MEMORY_USAGE_AUTO,
-	};
+	VmaAllocationCreateInfo alloc_info{};
+	alloc_info.requiredFlags = static_cast<VkMemoryPropertyFlags>(memory_property_flags);
 
 	if (memory_property_flags & vk::MemoryPropertyFlagBits::eHostVisible) {
+		alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 		alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
 		                 | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+	} else {
+		alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
 	}
 
 	VkBuffer vk_buffer;

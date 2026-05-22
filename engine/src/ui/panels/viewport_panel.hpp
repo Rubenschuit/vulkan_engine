@@ -1,6 +1,7 @@
 #pragma once
 #include "ui/editor_panel.hpp"
 #include "ui/editor_state.hpp"
+#include <imgui.h>
 #include <vulkan/vulkan.h>
 
 namespace ve {
@@ -17,6 +18,11 @@ public:
 	void render(Registry* registry, EditorState& state, UIContext& context) override;
 	const char* getName() const override { return "Viewport"; }
 
+	ImVec2 getImageMin() const { return m_image_min; }
+	ImVec2 getImageMax() const { return m_image_max; }
+	bool isImageValid() const { return m_image_max.x > m_image_min.x && m_image_max.y > m_image_min.y; }
+	void invalidateImageRect() { m_image_min = ImVec2(0.f, 0.f); m_image_max = ImVec2(0.f, 0.f); }
+
 private:
 	void renderGizmoToolbar(EditorState& state);
 	void renderCameraSelector(Registry* registry, EditorState& state);
@@ -28,6 +34,8 @@ private:
 	PhysicsSystem* m_physics_system = nullptr;
 	Entity m_frozen_entity = Entity::null();
 	bool m_was_gizmo_active = false;
+	ImVec2 m_image_min{0.f, 0.f};
+	ImVec2 m_image_max{0.f, 0.f};
 };
 
-} // namespace ve
+}
