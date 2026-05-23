@@ -66,7 +66,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build xorg-dev \
             libxcb-xinerama0-dev libxcb-xinput-dev libxcb-cursor-dev \
-            libwayland-dev libxkbcommon-dev
+            libwayland-dev libxkbcommon-dev \
+            libvulkan-dev
 
       - name: Install Ninja (macOS)
         if: runner.os == 'macOS'

@@ -1,9 +1,9 @@
-/* 
- * Spawns N-1 std::jthread workers scoped to the call, reuses the calling
+/*
+ * Spawns N-1 std::thread workers scoped to the call, reuses the calling
  * thread as worker 0. Uses an atomic counter for dynamic work distribution
  *
- * Not a long-lived thread pool, workers exit on jthread destruction when 
- * out of scope
+ * Not a long-lived thread pool, workers exit when the index range is exhausted
+ * or `cancelled` is set, and are joined before returning
  */
 #pragma once
 
@@ -45,12 +45,13 @@ inline void forIndexed(size_t count, std::atomic<bool>& cancelled,
 		}
 	};
 
-	std::vector<std::jthread> threads;
+	std::vector<std::thread> threads;
 	threads.reserve(worker_count - 1);
 	for (uint32_t w = 1; w < worker_count; w++)
 		threads.emplace_back(worker);
 	worker();
-	// jthread destructors join here
+	for (auto& t : threads)
+		t.join();
 }
 
 } 
