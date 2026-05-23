@@ -69,7 +69,7 @@ public:
 
 	// --- Shadow map rendering (one of three paths is used per frame) ---
 
-	void renderShadowMaps(VeFrameInfo& frame_info);
+	void renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer& mega_buffer);
 
 	void createGpuShadowDescriptorSets(GpuCullingSystem& gpu_cull);
 	void renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
@@ -164,13 +164,11 @@ private:
 		const StripRegion* strip_clear = nullptr);
 	void renderShadowMap(VeFrameInfo& frame_info, uint32_t light_index,
 		const std::vector<ShadowInstanceGroup>& instance_groups,
+		const PbrMegaBuffer& mega_buffer,
 		bool include_skinned = false) const;
 	void populateSkinnedShadowDrawablesGpuPath(VeFrameInfo& frame_info);
 	void renderSkinnedShadowsForLayer(VeFrameInfo& frame_info, uint32_t layer) const;
 
-	// --- CPU-path mega-buffer ---
-
-	void rebuildMegaBuffers(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh*>& unique_meshes);
 	void growShadowInstanceBuffers(uint32_t new_capacity);
 
 	// --- CSM incremental scroll ---
@@ -232,25 +230,9 @@ private:
 	std::vector<SkinnedShadowDrawable> m_skinned_shadow_drawables;
 	bool m_static_drawables_dirty = true;
 	bool m_dynamic_drawables_dirty = true;
-	std::vector<VeMesh*> m_cached_unique_meshes;
 	std::vector<ShadowInstanceGroup> m_shadow_instance_groups;       // point/spot (all objects)
 	std::vector<ShadowInstanceGroup> m_static_csm_instance_groups;
 	std::vector<ShadowInstanceGroup> m_dynamic_csm_instance_groups;
-
-	std::unique_ptr<VeBuffer> m_mega_shadow_vbo;
-	std::unique_ptr<VeBuffer> m_mega_ibo;
-	uint32_t m_mega_total_vertices = 0;
-	uint32_t m_mega_total_indices = 0;
-
-	struct LodMegaEntry {
-		uint32_t first_index;
-		uint32_t index_count;
-	};
-	struct MeshMegaEntry {
-		uint32_t vertex_offset;
-		std::vector<LodMegaEntry> lod_entries;
-	};
-	std::unordered_map<VeMesh*, MeshMegaEntry> m_mega_entries;
 
 	// Per-cascade scroll tracking for incremental CSM updates
 	struct CascadeScrollState {

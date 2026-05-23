@@ -542,7 +542,6 @@ void ShadowRenderSystem::invalidateShadowDrawables() {
 	m_static_drawables_dirty = true;
 	m_dynamic_drawables_dirty = true;
 	m_force_full_rerender = true;
-	m_cached_unique_meshes.clear();
 }
 
 void ShadowRenderSystem::forceShadowRerender() {
@@ -922,89 +921,7 @@ void ShadowRenderSystem::growShadowInstanceBuffers(uint32_t new_capacity) {
 	createShadowPassDescriptorSets(m_descriptor_pool);
 }
 
-void ShadowRenderSystem::rebuildMegaBuffers(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh*>& unique_meshes) {
-	uint32_t total_vertices = 0;
-	uint32_t total_indices = 0;
-	for (VeMesh* mesh : unique_meshes) {
-		total_vertices += mesh->getVertexCount();
-		for (uint32_t lod = 0; lod < mesh->getLodCount(); lod++)
-			total_indices += mesh->getLodIndexCount(lod);
-	}
-
-	if (total_vertices == 0 || total_indices == 0) {
-		m_mega_entries.clear();
-		retireBuffer(std::move(m_mega_shadow_vbo));
-		retireBuffer(std::move(m_mega_ibo));
-		m_mega_total_vertices = 0;
-		m_mega_total_indices = 0;
-		return;
-	}
-
-	if (total_vertices != m_mega_total_vertices || !m_mega_shadow_vbo) {
-		retireBuffer(std::move(m_mega_shadow_vbo));
-		m_mega_shadow_vbo = std::make_unique<VeBuffer>(
-			m_ve_device,
-			sizeof(glm::vec3),
-			total_vertices,
-			vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
-			vk::MemoryPropertyFlagBits::eDeviceLocal
-		);
-		m_mega_total_vertices = total_vertices;
-	}
-	if (total_indices != m_mega_total_indices || !m_mega_ibo) {
-		retireBuffer(std::move(m_mega_ibo));
-		m_mega_ibo = std::make_unique<VeBuffer>(
-			m_ve_device,
-			sizeof(uint32_t),
-			total_indices,
-			vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst,
-			vk::MemoryPropertyFlagBits::eDeviceLocal
-		);
-		m_mega_total_indices = total_indices;
-	}
-
-	m_mega_entries.clear();
-	uint32_t vertex_offset = 0;
-	uint32_t index_offset = 0;
-
-	for (VeMesh* mesh : unique_meshes) {
-		uint32_t vc = mesh->getVertexCount();
-
-		vk::BufferCopy vbo_copy{
-			.srcOffset = 0,
-			.dstOffset = static_cast<vk::DeviceSize>(vertex_offset) * sizeof(glm::vec3),
-			.size = static_cast<vk::DeviceSize>(vc) * sizeof(glm::vec3)
-		};
-		cmd.copyBuffer(mesh->getShadowVertexBuffer().getBuffer(),
-		               m_mega_shadow_vbo->getBuffer(), vbo_copy);
-
-		MeshMegaEntry mega_entry;
-		mega_entry.vertex_offset = vertex_offset;
-		mega_entry.lod_entries.reserve(mesh->getLodCount());
-
-		for (uint32_t lod = 0; lod < mesh->getLodCount(); lod++) {
-			uint32_t ic = mesh->getLodIndexCount(lod);
-			vk::BufferCopy ibo_copy{
-				.srcOffset = 0,
-				.dstOffset = static_cast<vk::DeviceSize>(index_offset) * sizeof(uint32_t),
-				.size = static_cast<vk::DeviceSize>(ic) * sizeof(uint32_t)
-			};
-			cmd.copyBuffer(mesh->getLodIndexBuffer(lod).getBuffer(),
-			               m_mega_ibo->getBuffer(), ibo_copy);
-
-			mega_entry.lod_entries.push_back({index_offset, ic});
-			index_offset += ic;
-		}
-
-		m_mega_entries[mesh] = std::move(mega_entry);
-		vertex_offset += vc;
-	}
-
-	VE_LOGD("Shadow mega-buffer: " << unique_meshes.size() << " unique meshes, "
-	         << total_vertices << " verts, " << total_indices << " indices");
-}
-
-void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
+void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer& mega_buffer) {
 	flushRetiredBuffers();
 	const auto& light_views = m_light_views[frame_info.current_frame];
 
@@ -1051,45 +968,6 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 
 		m_static_drawables_dirty = false;
 		m_dynamic_drawables_dirty = false;
-
-		// Merge both lists for unique mesh tracking and mega-buffer rebuild
-		std::vector<VeMesh*> current_unique_meshes;
-		size_t total = m_static_shadow_drawables.size() + m_dynamic_shadow_drawables.size();
-		current_unique_meshes.reserve(total);
-		auto collectUnique = [&](const std::vector<ShadowDrawable>& list) {
-			for (const auto& d : list) {
-				VeMesh* m = d.mesh->getMesh();
-				if (current_unique_meshes.empty() || current_unique_meshes.back() != m)
-					current_unique_meshes.push_back(m);
-			}
-		};
-		collectUnique(m_static_shadow_drawables);
-		size_t boundary = current_unique_meshes.size();
-		collectUnique(m_dynamic_shadow_drawables);
-		std::inplace_merge(current_unique_meshes.begin(),
-		                   current_unique_meshes.begin() + static_cast<ptrdiff_t>(boundary),
-		                   current_unique_meshes.end());
-		auto last = std::unique(current_unique_meshes.begin(), current_unique_meshes.end());
-		current_unique_meshes.erase(last, current_unique_meshes.end());
-
-		if (current_unique_meshes != m_cached_unique_meshes) {
-			m_cached_unique_meshes = std::move(current_unique_meshes);
-			rebuildMegaBuffers(frame_info.cmd(), m_cached_unique_meshes);
-
-			vk::MemoryBarrier2 transfer_barrier{
-				.sType = vk::StructureType::eMemoryBarrier2,
-				.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-				.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-				.dstStageMask = vk::PipelineStageFlagBits2::eVertexInput,
-				.dstAccessMask = vk::AccessFlagBits2::eVertexAttributeRead | vk::AccessFlagBits2::eIndexRead,
-			};
-			vk::DependencyInfo transfer_dep{
-				.sType = vk::StructureType::eDependencyInfo,
-				.memoryBarrierCount = 1,
-				.pMemoryBarriers = &transfer_barrier,
-			};
-			frame_info.cmd().pipelineBarrier2(transfer_dep);
-		}
 	}
 
 	auto& registry = *frame_info.registry;
@@ -1189,10 +1067,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 	command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 	command_buffer.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
 
-	if (m_mega_shadow_vbo && m_mega_ibo) {
-		command_buffer.bindVertexBuffers(0, {m_mega_shadow_vbo->getBuffer()}, {vk::DeviceSize{0}});
-		command_buffer.bindIndexBuffer(m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
-	}
+	if (mega_buffer.isValid())
+		mega_buffer.bindShadow(command_buffer);
 
 	bool has_dynamics = !m_dynamic_csm_instance_groups.empty();
 	bool has_skinned = !m_skinned_shadow_drawables.empty();
@@ -1258,14 +1134,14 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 						if (!strip_groups.empty()) {
 							command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 							command_buffer.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
-							renderShadowMap(frame_info, c, strip_groups);
+							renderShadowMap(frame_info, c, strip_groups, mega_buffer);
 						}
 						command_buffer.endRendering();
 					}
 				} else {
 					// Full re-render with only static drawables
 					beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eClear);
-					renderShadowMap(frame_info, c, m_static_csm_instance_groups);
+					renderShadowMap(frame_info, c, m_static_csm_instance_groups, mega_buffer);
 					command_buffer.endRendering();
 				}
 
@@ -1380,7 +1256,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 				beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eLoad);
 				command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 				command_buffer.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
-				renderShadowMap(frame_info, c, m_dynamic_csm_instance_groups, /*include_skinned=*/true);
+				renderShadowMap(frame_info, c, m_dynamic_csm_instance_groups, mega_buffer, /*include_skinned=*/true);
 				command_buffer.endRendering();
 			}
 		}
@@ -1393,7 +1269,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 			assert(layer < MAX_SHADOW_LAYERS);
 			auto& region = m_atlas_regions[layer];
 			beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eClear);
-			renderShadowMap(frame_info, layer, m_shadow_instance_groups, /*include_skinned=*/true);
+			renderShadowMap(frame_info, layer, m_shadow_instance_groups, mega_buffer, /*include_skinned=*/true);
 			command_buffer.endRendering();
 		}
 	}
@@ -1403,6 +1279,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info) {
 
 void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light_index,
                                           const std::vector<ShadowInstanceGroup>& instance_groups,
+                                          const PbrMegaBuffer& mega_buffer,
                                           bool include_skinned) const {
 
 	const vk::raii::DescriptorSet& shadow_global_set = m_shadow_global_descriptor_sets[frame_info.current_frame][light_index];
@@ -1416,17 +1293,15 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 		{}
 	);
 
-	if (m_mega_shadow_vbo && m_mega_ibo && !m_mega_entries.empty()) {
-		cmd.bindVertexBuffers(0, {m_mega_shadow_vbo->getBuffer()}, {vk::DeviceSize{0}});
-		cmd.bindIndexBuffer(m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
+	if (mega_buffer.isValid()) {
+		mega_buffer.bindShadow(cmd);
 
 		for (const auto& group : instance_groups) {
-			auto it = m_mega_entries.find(group.mesh);
-			if (it == m_mega_entries.end())
+			const auto* entry = mega_buffer.getEntry(group.mesh);
+			if (!entry)
 				continue;
-			const auto& mega = it->second;
-			uint32_t lod = std::min(group.lod_level, static_cast<uint32_t>(mega.lod_entries.size()) - 1);
-			const auto& lod_entry = mega.lod_entries[lod];
+			uint32_t lod = std::min(group.lod_level, static_cast<uint32_t>(entry->lod_entries.size()) - 1);
+			const auto& lod_entry = entry->lod_entries[lod];
 
 			ShadowPushConstantData push{};
 			push.instance_offset = group.first_instance;
@@ -1439,7 +1314,7 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 
 			cmd.drawIndexed(
 				lod_entry.index_count, group.instance_count,
-				lod_entry.first_index, static_cast<int32_t>(mega.vertex_offset), 0);
+				lod_entry.first_index, static_cast<int32_t>(entry->vertex_offset), 0);
 		}
 	}
 

@@ -40,8 +40,8 @@ void CpuCullingBackend::renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
 }
 
 void CpuCullingBackend::renderShadows(VeFrameInfo& fi, ShadowRenderSystem& srs,
-                                      PbrMegaBuffer&, GpuSceneManager&) const {
-	srs.renderShadowMaps(fi);
+                                      PbrMegaBuffer& mega, GpuSceneManager&) const {
+	srs.renderShadowMaps(fi, mega);
 }
 
 void CpuCullingBackend::renderOpaque(VeFrameInfo& fi, PbrRenderSystem& pbr,
