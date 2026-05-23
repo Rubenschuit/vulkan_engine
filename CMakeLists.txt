@@ -4,6 +4,11 @@ message(STATUS "Local .env.cmake: ${LOCAL_ENV}")
 
 cmake_minimum_required(VERSION 3.20)
 
+# Apple Clang's libc++ gates std::jthread behind macOS 14 
+if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+	set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS deployment target")
+endif()
+
 set(NAME VeApp)
 
 # Enforce C++20 uniformly, so no permissive for msvc

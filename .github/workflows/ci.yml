@@ -86,7 +86,7 @@ jobs:
       # ── Vulkan SDK ─────────────────────────────────────────────────
 
       - name: Install Vulkan SDK
-        uses: jakoch/install-vulkan-sdk-action@v1.4.0
+        uses: jakoch/install-vulkan-sdk-action@v1.5.3
         with:
           vulkan_version: ${{ env.VULKAN_SDK_VERSION }}
           install_runtime: true
