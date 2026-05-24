@@ -321,7 +321,8 @@ void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Regist
 		std::sort(dirty_ids.begin(), dirty_ids.end());
 		copy_regions.reserve(dirty_ids.size());
 
-		for (uint32_t gpu_id : dirty_ids) {
+		for (size_t i = 0; i < dirty_ids.size(); i++) {
+			uint32_t gpu_id = dirty_ids[i];
 			dirty_set[gpu_id] = false;
 
 			auto entity_it = m_gpu_id_to_entity.find(gpu_id);
