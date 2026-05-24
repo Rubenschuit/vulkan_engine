@@ -581,16 +581,12 @@ void GpuCullingSystem::dispatchShadowCompaction(vk::raii::CommandBuffer& cmd, Gp
 	cmd.dispatch(wg_count, 1, 1);
 }
 
-void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
-                                          const glm::mat4& light_view_proj,
-                                          GpuSceneManager& scene_mgr,
-                                          uint32_t frame_index,
-                                          uint32_t shadow_buf_index,
-                                          int32_t lod_bias,
-                                          const CameraView* camera_view,
-                                          ShadowPassMode shadow_mode) {
+void GpuCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
+                                            const ShadowCullRequest* requests, uint32_t count,
+                                            GpuSceneManager& scene_mgr,
+                                            uint32_t frame_index) {
 	uint32_t object_count = scene_mgr.getObjectCount();
-	if (object_count == 0)
+	if (object_count == 0 || count == 0)
 		return;
 
 	vk::MemoryBarrier2 entry_barrier{
@@ -609,46 +605,57 @@ void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
 	vk::DependencyInfo entry_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &entry_barrier};
 	cmd.pipelineBarrier2(entry_dep);
 
-	FrustumPlane cpu_planes[6];
-	extractFrustumPlanes(light_view_proj, cpu_planes);
-
-	CullParams params{};
-	for (int i = 0; i < 6; i++)
-		params.frustum_planes[i] = cpu_planes[i].plane;
-	params.view_proj = light_view_proj;
-	params.object_count = object_count;
-	params.is_shadow_pass = static_cast<uint32_t>(shadow_mode);
-	params.lod_bias = lod_bias;
-
-	// Camera-space Hi-Z occlusion
-	if (camera_view != nullptr && m_hiz_enabled) {
-		params.hiz_enabled = 1;
-		params.view = camera_view->view;
-		params.prev_view = m_frame_views[(frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT];
-		const glm::mat4& proj = camera_view->proj;
-		params.p00 = proj[0][0];
-		params.p11 = proj[1][1];
-		params.p22 = proj[2][2];
-		params.p32 = proj[3][2];
-		params.hiz_size = m_hiz_size;
-		params.hiz_uv_scale = m_hiz_uv_scale;
-		params.hiz_mip_count = m_hiz_mip_count;
-	} else {
-		params.hiz_enabled = 0;
-	}
-	// Record UBO data into the command stream so each dispatch sees its own
-	// parameters even when the same slot is reused for static and dynamic passes.
-	cmd.updateBuffer<CullParams>(m_shadow_cull_param_ubos[frame_index][shadow_buf_index]->getBuffer(),
-		vk::DeviceSize{0}, params);
-
 	uint32_t total_groups = scene_mgr.getTotalGroups();
-	if (total_groups > 0) {
-		vk::DeviceSize copy_size = static_cast<vk::DeviceSize>(total_groups) * sizeof(VkDrawIndexedIndirectCommand);
-		cmd.copyBuffer(scene_mgr.getIndirectTemplateBuffer(frame_index).getBuffer(),
-		               m_shadow_indirect_buffers[frame_index][shadow_buf_index]->getBuffer(),
-		               vk::BufferCopy{0, 0, copy_size});
+	vk::DeviceSize copy_size = static_cast<vk::DeviceSize>(total_groups)
+	                         * sizeof(VkDrawIndexedIndirectCommand);
+
+	// Loop 1: write UBOs and copy indirect template for every request.
+	for (uint32_t r = 0; r < count; r++) {
+		const auto& req = requests[r];
+		uint32_t slot = req.slot;
+
+		FrustumPlane cpu_planes[6];
+		extractFrustumPlanes(req.view_proj, cpu_planes);
+
+		CullParams params{};
+		for (int i = 0; i < 6; i++)
+			params.frustum_planes[i] = cpu_planes[i].plane;
+		params.view_proj = req.view_proj;
+		params.object_count = object_count;
+		params.is_shadow_pass = static_cast<uint32_t>(req.shadow_mode);
+		params.lod_bias = req.lod_bias;
+
+		if (req.camera_view != nullptr && m_hiz_enabled) {
+			params.hiz_enabled = 1;
+			params.view = req.camera_view->view;
+			params.prev_view = m_frame_views[
+				(frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT];
+			const glm::mat4& proj = req.camera_view->proj;
+			params.p00 = proj[0][0];
+			params.p11 = proj[1][1];
+			params.p22 = proj[2][2];
+			params.p32 = proj[3][2];
+			params.hiz_size = m_hiz_size;
+			params.hiz_uv_scale = m_hiz_uv_scale;
+			params.hiz_mip_count = m_hiz_mip_count;
+		} else {
+			params.hiz_enabled = 0;
+		}
+
+		cmd.updateBuffer<CullParams>(
+			m_shadow_cull_param_ubos[frame_index][slot]->getBuffer(),
+			vk::DeviceSize{0}, params);
+
+		if (total_groups > 0) {
+			cmd.copyBuffer(scene_mgr.getIndirectTemplateBuffer(frame_index).getBuffer(),
+			               m_shadow_indirect_buffers[frame_index][slot]->getBuffer(),
+			               vk::BufferCopy{0, 0, copy_size});
+		}
+
+		m_shadow_dispatched_slots_mask |= (1u << slot);
 	}
 
+	// Single transfer -> compute barrier covering all UBO writes + copies.
 	vk::MemoryBarrier2 ubo_barrier{
 		.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
 		.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
@@ -660,20 +667,25 @@ void GpuCullingSystem::dispatchShadowCull(vk::raii::CommandBuffer& cmd,
 	vk::DependencyInfo ubo_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &ubo_barrier};
 	cmd.pipelineBarrier2(ubo_dep);
 
-	// Bind and dispatch
+	// Loop 2: bind pipeline once, dispatch per slot, no inter-dispatch barriers
+	// so successive cull dispatches can overlap on the GPU.
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
-	cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pipeline_layout,
-		0, {*m_shadow_compute_descriptor_sets[frame_index][shadow_buf_index]}, {});
-
 	uint32_t group_count = (object_count + GPU_CULL_WORKGROUP_SIZE - 1) / GPU_CULL_WORKGROUP_SIZE;
-	cmd.dispatch(group_count, 1, 1);
-
-	// No per-dispatch compute→draw barrier: caller calls flushShadowCullBarrier once for all slots.
+	for (uint32_t r = 0; r < count; r++) {
+		uint32_t slot = requests[r].slot;
+		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pipeline_layout,
+			0, {*m_shadow_compute_descriptor_sets[frame_index][slot]}, {});
+		cmd.dispatch(group_count, 1, 1);
+	}
+	// Caller must call flushShadowCullBarrier() before reading the output buffers.
 }
 
 void GpuCullingSystem::flushShadowCullBarrier(vk::raii::CommandBuffer& cmd, GpuSceneManager& scene_mgr,
                                                uint32_t frame_index) {
-	if (m_compaction_enabled) {
+	uint32_t mask = m_shadow_dispatched_slots_mask;
+	m_shadow_dispatched_slots_mask = 0;
+
+	if (m_compaction_enabled && mask != 0) {
 		// Barrier: all shadow cull compute writes -> compaction compute reads
 		vk::MemoryBarrier2 cull_to_compact{
 			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
@@ -687,11 +699,14 @@ void GpuCullingSystem::flushShadowCullBarrier(vk::raii::CommandBuffer& cmd, GpuS
 		vk::DependencyInfo barrier_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &cull_to_compact};
 		cmd.pipelineBarrier2(barrier_dep);
 
-		for (uint32_t slot = 0; slot < SHADOW_BUFFER_COUNT; slot++)
+		for (uint32_t slot = 0; slot < SHADOW_BUFFER_COUNT; slot++) {
+			if ((mask & (1u << slot)) == 0)
+				continue;
 			dispatchShadowCompaction(cmd, scene_mgr, frame_index, slot);
+		}
 	}
 
-	// Single global barrier: all shadow compute writes -> draw indirect + vertex shader reads
+	// Final compute->draw 
 	vk::MemoryBarrier2 draw_barrier{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,

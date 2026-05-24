@@ -68,7 +68,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		int backend = static_cast<int>(ctx.settings.culling_backend);
 		ImGui::RadioButton("CPU", &backend, static_cast<int>(CullingBackendMode::CPU));
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("CPU-side frustum + LOD culling. No GPU-side culling buffers allocated.");
+			ImGui::SetTooltip("CPU frustum culling");
 		ImGui::RadioButton("GPU", &backend, static_cast<int>(CullingBackendMode::GPU));
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("GPU-driven frustum culling via compute shader.\nImproves performance for large scenes.");
@@ -193,7 +193,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			if (ImGui::Combo("PCF Samples", &pcf_idx, "4\0" "8\0" "16\0" "32\0"))
 				ctx.settings.pcf_samples = pcf_values[pcf_idx];
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Poisson disk samples for PCF filtering.\nAlso used for PCSS blocker search.\nRequires pipeline recreation.");
+				ImGui::SetTooltip("Poisson disk samples for PCF filtering.\nAlso used for PCSS blocker search.");
 		}
 		if (ctx.settings.shadow_mode == ShadowMode::PCSS) {
 			static constexpr int pcss_values[] = {8, 16, 32};
@@ -204,7 +204,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			if (ImGui::Combo("PCSS Filter Samples", &pcss_idx, "8\0" "16\0" "32\0"))
 				ctx.settings.pcss_filter_samples = pcss_values[pcss_idx];
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Poisson disk samples for PCSS variable-radius filter.\nHigher = smoother soft shadows.\nRequires pipeline recreation.");
+				ImGui::SetTooltip("Poisson disk samples for PCSS variable-radius filter.\nHigher = smoother soft shadows.");
 		}
 		if (ctx.settings.shadow_mode != ShadowMode::DISABLED) {
 			ImGui::SliderFloat("Shadow Bias", &ctx.settings.shadow_bias, 0.0f, 0.01f, "%.5f");

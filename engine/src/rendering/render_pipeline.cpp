@@ -160,6 +160,7 @@ void RenderPipeline::initRenderSystems() {
 		shader("shadow_shader.spv"),
 		m_event_bus
 	);
+	m_shadow_render_system->setTracyContext(m_ve_renderer.getTracyGraphicsCtx());
 
 	m_depth_prepass_system = std::make_unique<DepthPrePassSystem>(
 		m_ve_device, m_resources.globalSetLayout().getDescriptorSetLayout(),

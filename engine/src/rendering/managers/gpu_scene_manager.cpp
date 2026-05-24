@@ -85,7 +85,10 @@ GpuSceneManager::GpuSceneManager(VeDevice& device) : m_ve_device(device) {
 		m_meshlet_object_info_staging[i]->map();
 	}
 
-	m_dirty_frame.resize(MAX_GPU_OBJECTS, 0);
+	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
+		m_id_in_dirty_set[f].assign(MAX_GPU_OBJECTS, false);
+		m_dirty_ids[f].reserve(1024);
+	}
 	m_object_lod_group_ids.resize(MAX_GPU_OBJECTS);
 	m_cpu_lod_data.resize(MAX_GPU_OBJECTS);
 	m_meshlet_object_info_cpu.resize(MAX_GPU_OBJECTS);
@@ -197,7 +200,12 @@ uint32_t GpuSceneManager::registerObject(Entity entity, const MeshComponent& mes
 	if (isDynamicEntity(registry, entity))
 		setDynamic(entity, true);
 
-	m_dirty_frame[gpu_id] = m_global_frame_counter;
+	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
+		if (!m_id_in_dirty_set[f][gpu_id]) {
+			m_id_in_dirty_set[f][gpu_id] = true;
+			m_dirty_ids[f].push_back(gpu_id);
+		}
+	}
 	m_object_data_dirty.fill(true);
 	m_draw_groups_dirty = true;
 
@@ -247,7 +255,13 @@ void GpuSceneManager::markTransformDirty(Entity entity) {
 	auto it = m_entity_to_gpu_id.find(entity.index());
 	if (it == m_entity_to_gpu_id.end())
 		return;
-	m_dirty_frame[it->second] = m_global_frame_counter;
+	uint32_t gpu_id = it->second;
+	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
+		if (!m_id_in_dirty_set[f][gpu_id]) {
+			m_id_in_dirty_set[f][gpu_id] = true;
+			m_dirty_ids[f].push_back(gpu_id);
+		}
+	}
 }
 
 void GpuSceneManager::markObjectDataDirty(Entity entity) {
@@ -298,23 +312,36 @@ void GpuSceneManager::setDynamic(Entity entity, bool is_dynamic) {
 
 void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Registry& registry,
                                              vk::raii::CommandBuffer& cmd) {
-	m_global_frame_counter++;
-	uint32_t last_written = m_buffer_last_written[current_frame];
+	auto& dirty_ids = m_dirty_ids[current_frame];
+	auto& dirty_set = m_id_in_dirty_set[current_frame];
 
 	std::vector<vk::BufferCopy> copy_regions;
-	copy_regions.reserve(64);
+	if (!dirty_ids.empty()) {
+		// Sort so consecutive gpu_ids coalesce into a single buffer copy.
+		std::sort(dirty_ids.begin(), dirty_ids.end());
+		copy_regions.reserve(dirty_ids.size());
 
-	for (auto& [entity_idx, gpu_id] : m_entity_to_gpu_id) {
-		if (m_dirty_frame[gpu_id] < last_written)
-			continue;
-		Entity entity = m_gpu_id_to_entity[gpu_id];
-		if (!registry.isAlive(entity))
-			continue;
+		for (uint32_t gpu_id : dirty_ids) {
+			dirty_set[gpu_id] = false;
 
-		writeTransform(gpu_id, current_frame, registry, entity);
+			auto entity_it = m_gpu_id_to_entity.find(gpu_id);
+			if (entity_it == m_gpu_id_to_entity.end())
+				continue;
+			Entity entity = entity_it->second;
+			if (!registry.isAlive(entity))
+				continue;
 
-		vk::DeviceSize offset = static_cast<vk::DeviceSize>(gpu_id) * sizeof(TransformGPU);
-		copy_regions.push_back({offset, offset, sizeof(TransformGPU)});
+			writeTransform(gpu_id, current_frame, registry, entity);
+
+			vk::DeviceSize offset = static_cast<vk::DeviceSize>(gpu_id) * sizeof(TransformGPU);
+			if (!copy_regions.empty()
+			    && copy_regions.back().srcOffset + copy_regions.back().size == offset) {
+				copy_regions.back().size += sizeof(TransformGPU);
+			} else {
+				copy_regions.push_back({offset, offset, sizeof(TransformGPU)});
+			}
+		}
+		dirty_ids.clear();
 	}
 	if (!copy_regions.empty()) {
 		cmd.copyBuffer(m_transform_staging[current_frame]->getBuffer(),
@@ -412,8 +439,6 @@ void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Regist
 		vk::DependencyInfo dep{.memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
 		cmd.pipelineBarrier2(dep);
 	}
-
-	m_buffer_last_written[current_frame] = m_global_frame_counter;
 }
 
 void GpuSceneManager::registerAllObjects(Registry& registry, const PbrMegaBuffer& mega_buffer,
@@ -484,15 +509,16 @@ void GpuSceneManager::reset() {
 	m_active_count = 0;
 	m_object_data_dirty.fill(false);
 	m_draw_groups_dirty = false;
-	std::fill(m_dirty_frame.begin(), m_dirty_frame.end(), 0);
+	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
+		m_dirty_ids[f].clear();
+		std::fill(m_id_in_dirty_set[f].begin(), m_id_in_dirty_set[f].end(), false);
+	}
 	for (auto& arr : m_object_lod_group_ids)
 		arr.fill(0);
 	for (auto& cpu : m_cpu_lod_data)
 		cpu = {};
 	for (auto& moi : m_meshlet_object_info_cpu)
 		moi = {};
-	std::fill(m_buffer_last_written.begin(), m_buffer_last_written.end(), 0);
-	m_global_frame_counter = 0;
 }
 
 uint32_t GpuSceneManager::allocateGpuId() {
@@ -643,6 +669,12 @@ void GpuSceneManager::rebuildDrawGroups() {
 		for (uint32_t l = cpu.lod_count; l < MAX_LOD_LEVELS; l++)
 			groups[l] = last_valid;
 	}
+
+	// Sort by LOD-0 draw group 
+	std::sort(active_gpu_ids.begin(), active_gpu_ids.end(),
+		[this](uint32_t a, uint32_t b) {
+			return m_object_lod_group_ids[a][0] < m_object_lod_group_ids[b][0];
+		});
 
 	// Build active IDs: one entry per object (including transparents for WBOIT)
 	for (uint32_t gpu_id : active_gpu_ids)

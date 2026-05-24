@@ -13,6 +13,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "ve_config.hpp"
+#include "ve_tracy.hpp"
 #include "rendering/ve_frame_info.hpp"
 #include "vulkan/ve_descriptors.hpp"
 
@@ -85,6 +86,9 @@ public:
 
 	void releaseGpuShadowDescriptorSets();
 	void releaseMeshletShadowDescriptorSets();
+
+	// Optional
+	void setTracyContext(TracyVkCtx ctx) { m_tracy_gfx_ctx = ctx; }
 
 	// --- Accessors ---
 
@@ -269,6 +273,8 @@ private:
 		uint32_t frames_remaining;
 	};
 	std::vector<RetiredBuffer> m_retired_buffers;
+
+	TracyVkCtx m_tracy_gfx_ctx = nullptr;
 };
 
 }

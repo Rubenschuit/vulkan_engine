@@ -223,11 +223,10 @@ private:
 	// Authoritative CPU-side MeshletObjectInfo source
 	std::vector<MeshletObjectInfo> m_meshlet_object_info_cpu;
 
-	// Per GPU object: frame number when transform was last dirtied
-	std::vector<uint32_t> m_dirty_frame; // indexed by gpu_id
-	// Per frame buffer: last global frame number that was fully written
-	std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> m_buffer_last_written{};
-	uint32_t m_global_frame_counter = 0;
+	// Per-frame dirty queue: gpu_ids whose transforms changed since the buffer
+	// for this frame index was last updated
+	std::array<std::vector<uint32_t>, MAX_FRAMES_IN_FLIGHT> m_dirty_ids;
+	std::array<std::vector<bool>, MAX_FRAMES_IN_FLIGHT> m_id_in_dirty_set;
 	std::array<bool, MAX_FRAMES_IN_FLIGHT> m_object_data_dirty{};
 	bool m_draw_groups_dirty = false;
 	bool m_dynamic_classification_changed = false;

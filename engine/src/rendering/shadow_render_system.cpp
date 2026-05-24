@@ -1014,6 +1014,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 		}
 	};
 
+	{
+	ZoneScopedN("CPU populate instance groups");
 	// CSM instance groups: static and dynamic, frustum-culled against outer cascade
 	m_static_csm_instance_groups.clear();
 	m_dynamic_csm_instance_groups.clear();
@@ -1031,6 +1033,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 	m_shadow_instance_groups.clear();
 	populateInstanceGroups(m_static_shadow_drawables, m_shadow_instance_groups, nullptr);
 	populateInstanceGroups(m_dynamic_shadow_drawables, m_shadow_instance_groups, nullptr);
+	}
 
 	// Skinned shadow casters: write one shadow InstanceData slot per entity. Cull
 	// against the outer CSM cascade
@@ -1062,7 +1065,10 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 
 	auto& command_buffer = frame_info.cmd();
 
-	transitionAtlasForRendering(command_buffer, csm_count);
+	{
+		TracyVkZone(m_tracy_gfx_ctx, *command_buffer, "Shadow: atlas transition");
+		transitionAtlasForRendering(command_buffer, csm_count);
+	}
 
 	command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 	command_buffer.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
@@ -1074,6 +1080,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 	bool has_skinned = !m_skinned_shadow_drawables.empty();
 
 	if (csm_count > 0 && (!m_static_csm_instance_groups.empty() || has_dynamics || has_skinned)) {
+		ZoneScopedN("CSM cascade loop");
+		TracyVkZone(m_tracy_gfx_ctx, *command_buffer, "Shadow: CSM cascade loop");
 		for (uint32_t c = 0; c < csm_count; c++) {
 			auto& region = m_atlas_regions[c];
 			auto& state = m_cascade_state[c];
@@ -1081,6 +1089,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 			if (c < NUM_CSM_CASCADES && state.dirty) {
 				// Static cache needs updating (scroll or static scene change)
 				if (state.incremental) {
+					TracyVkZone(m_tracy_gfx_ctx, *command_buffer, "Shadow: strips");
 					vk::MemoryBarrier2 pre_strip{
 						.sType = vk::StructureType::eMemoryBarrier2,
 						.srcStageMask = vk::PipelineStageFlagBits2::eTransfer
@@ -1140,6 +1149,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 					}
 				} else {
 					// Full re-render with only static drawables
+					TracyVkZone(m_tracy_gfx_ctx, *command_buffer, "Shadow: full static render");
 					beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eClear);
 					renderShadowMap(frame_info, c, m_static_csm_instance_groups, mega_buffer);
 					command_buffer.endRendering();
@@ -1147,6 +1157,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 
 				// Snapshot the clean static result into the cache
 				{
+					TracyVkZone(m_tracy_gfx_ctx, *command_buffer, "Shadow: snapshot to cache");
 					vk::ImageMemoryBarrier2 to_transfer_src{
 						.sType = vk::StructureType::eImageMemoryBarrier2,
 						.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
@@ -1212,6 +1223,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 				}
 			} else if (has_dynamics || has_skinned) {
 				// Static cache is clean but we need it in the atlas for the dynamic/skinned overlay
+				TracyVkZone(m_tracy_gfx_ctx, *command_buffer, "Shadow: cache restore");
 				vk::ImageMemoryBarrier2 atlas_to_dst{
 					.sType = vk::StructureType::eImageMemoryBarrier2,
 					.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
@@ -1253,6 +1265,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 
 			// Render dynamic + skinned objects on top using the full cascade VP (loadOp = eLoad)
 			if (has_dynamics || has_skinned) {
+				TracyVkZone(m_tracy_gfx_ctx, *command_buffer, "Shadow: dynamic+skinned overlay");
 				beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eLoad);
 				command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 				command_buffer.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
@@ -1264,6 +1277,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 
 	// Point/spot light shadows
 	if (!m_shadow_instance_groups.empty() || has_skinned) {
+		ZoneScopedN("Light shadows");
+		TracyVkZone(m_tracy_gfx_ctx, *command_buffer, "Shadow: light shadows");
 		for (size_t i = csm_count; i < light_views.size(); i++) {
 			uint32_t layer = NUM_CSM_CASCADES + static_cast<uint32_t>(i - csm_count);
 			assert(layer < MAX_SHADOW_LAYERS);
@@ -1274,7 +1289,10 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 		}
 	}
 
-	transitionAtlasPostRender(command_buffer);
+	{
+		TracyVkZone(m_tracy_gfx_ctx, *command_buffer, "Shadow: post-render transition");
+		transitionAtlasPostRender(command_buffer);
+	}
 }
 
 void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light_index,
@@ -1522,7 +1540,10 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		if (m_cascade_state[c].incremental) any_incremental = true;
 		else any_full_dirty = true;
 	}
-	populateSkinnedShadowDrawablesGpuPath(frame_info);
+	{
+		ZoneScopedN("Populate skinned drawables");
+		populateSkinnedShadowDrawablesGpuPath(frame_info);
+	}
 	bool has_skinned = !m_skinned_shadow_drawables.empty();
 	bool has_dynamics = scene_mgr.hasDynamicObjects();
 	bool any_dirty = any_incremental || any_full_dirty || num_shadow_lights > 0
@@ -1530,27 +1551,47 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 	if (!any_dirty)
 		return;
 
-	// Batch cull dispatches for full-dirty cascades (static only) and point/spot lights (all)
-	bool batched_cull_dispatched = false;
-	for (uint32_t c = 0; c < csm_count; c++) {
-		if (c < NUM_CSM_CASCADES && (!m_cascade_state[c].dirty || m_cascade_state[c].incremental))
+	// Batch cull dispatches for full-dirty cascades (static only) and point/spot
+	// lights (all)
+	std::array<GpuCullingSystem::ShadowCullRequest,
+	           GpuCullingSystem::SHADOW_BUFFER_COUNT> shadow_requests{};
+	uint32_t shadow_req_count = 0;
+
+	for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
+		if (!m_cascade_state[c].dirty || m_cascade_state[c].incremental)
 			continue;
 		glm::mat4 cascade_vp = m_light_projs[frame][c] * m_light_views[frame][c];
-		gpu_cull_system.dispatchShadowCull(cmd, cascade_vp, scene_mgr, frame, c,
-		                            static_cast<int32_t>(c) + 1, cam_for_hiz, ShadowPassMode::STATIC_ONLY);
-		batched_cull_dispatched = true;
+		shadow_requests[shadow_req_count++] = {
+			.view_proj   = cascade_vp,
+			.camera_view = cam_for_hiz,
+			.slot        = c,
+			.lod_bias    = static_cast<int32_t>(c) + 1,
+			.shadow_mode = ShadowPassMode::STATIC_ONLY,
+		};
 	}
 	for (uint32_t i = 0; i < num_shadow_lights; i++) {
-		uint32_t slot = NUM_CSM_CASCADES + i;
-		glm::mat4 light_vp = m_light_projs[frame][csm_count + i] * m_light_views[frame][csm_count + i];
-		gpu_cull_system.dispatchShadowCull(cmd, light_vp, scene_mgr, frame, slot, 2, cam_for_hiz,
-		                            ShadowPassMode::ALL_OBJECTS);
-		batched_cull_dispatched = true;
+		glm::mat4 light_vp = m_light_projs[frame][csm_count + i]
+		                   * m_light_views[frame][csm_count + i];
+		shadow_requests[shadow_req_count++] = {
+			.view_proj   = light_vp,
+			.camera_view = cam_for_hiz,
+			.slot        = NUM_CSM_CASCADES + i,
+			.lod_bias    = 2,
+			.shadow_mode = ShadowPassMode::ALL_OBJECTS,
+		};
 	}
-	if (batched_cull_dispatched)
+	if (shadow_req_count > 0) {
+		ZoneScopedN("Batched cull");
+		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: batched cull");
+		gpu_cull_system.dispatchShadowCulls(cmd,
+			shadow_requests.data(), shadow_req_count, scene_mgr, frame);
 		gpu_cull_system.flushShadowCullBarrier(cmd, scene_mgr, frame);
+	}
 
-	transitionAtlasForRendering(cmd, csm_count);
+	{
+		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: atlas transition");
+		transitionAtlasForRendering(cmd, csm_count);
+	}
 
 	ShadowPushConstantData push{.instance_offset = 0};
 
@@ -1583,17 +1624,29 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 	};
 
 	// Per-cascade: render static, snapshot to cache, then dynamic overlay
+	{
+	ZoneScopedN("CSM cascade loop");
+	TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: CSM cascade loop");
 	for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
 		auto& region = m_atlas_regions[c];
 
 		if (m_cascade_state[c].dirty) {
 			if (m_cascade_state[c].incremental) {
 				// Per-strip cull + render (static only)
+				ZoneScopedN("Cascade strips");
+				TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: strips");
 				auto strips = computeStripRegions(c);
 				for (auto& strip : strips) {
+					TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: strip cull+render");
 					glm::mat4 strip_vp = computeStripFrustumVP(c, strip, frame);
-					gpu_cull_system.dispatchShadowCull(cmd, strip_vp, scene_mgr, frame, c,
-						static_cast<int32_t>(c) + 1, cam_for_hiz, ShadowPassMode::STATIC_ONLY);
+					GpuCullingSystem::ShadowCullRequest strip_req{
+						.view_proj   = strip_vp,
+						.camera_view = cam_for_hiz,
+						.slot        = c,
+						.lod_bias    = static_cast<int32_t>(c) + 1,
+						.shadow_mode = ShadowPassMode::STATIC_ONLY,
+					};
+					gpu_cull_system.dispatchShadowCulls(cmd, &strip_req, 1, scene_mgr, frame);
 					gpu_cull_system.flushShadowCullBarrier(cmd, scene_mgr, frame);
 
 					beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad, &strip);
@@ -1605,6 +1658,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 				}
 			} else {
 				// Full re-render (static only, already dispatched above)
+				TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: full static render");
 				beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eClear);
 				rebindGraphicsState();
 				cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
@@ -1615,6 +1669,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 
 			// Snapshot static result to cache
 			{
+				TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: snapshot to cache");
 				vk::ImageMemoryBarrier2 to_src{
 					.sType = vk::StructureType::eImageMemoryBarrier2,
 					.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
@@ -1678,6 +1733,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 			}
 		} else if (has_dynamics || has_skinned) {
 			// Restore static cache to atlas for dynamic overlay
+			TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: cache restore");
 			vk::ImageMemoryBarrier2 atlas_dst{
 				.sType = vk::StructureType::eImageMemoryBarrier2,
 				.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
@@ -1717,9 +1773,16 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 
 		// Dynamic overlay: cull + render dynamic objects on top using full cascade VP
 		if (has_dynamics) {
+			TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: dynamic overlay");
 			glm::mat4 cascade_vp = m_light_projs[frame][c] * m_light_views[frame][c];
-			gpu_cull_system.dispatchShadowCull(cmd, cascade_vp, scene_mgr, frame, c,
-				static_cast<int32_t>(c) + 1, cam_for_hiz, ShadowPassMode::DYNAMIC_ONLY);
+			GpuCullingSystem::ShadowCullRequest dyn_req{
+				.view_proj   = cascade_vp,
+				.camera_view = cam_for_hiz,
+				.slot        = c,
+				.lod_bias    = static_cast<int32_t>(c) + 1,
+				.shadow_mode = ShadowPassMode::DYNAMIC_ONLY,
+			};
+			gpu_cull_system.dispatchShadowCulls(cmd, &dyn_req, 1, scene_mgr, frame);
 			gpu_cull_system.flushShadowCullBarrier(cmd, scene_mgr, frame);
 
 			beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad);
@@ -1730,19 +1793,26 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 			cmd.endRendering();
 		}
 	}
+	} // CSM cascade loop zone
 
 	// Point/spot light shadows (already culled with ALL_OBJECTS)
-	for (uint32_t i = 0; i < num_shadow_lights; i++) {
-		uint32_t slot = NUM_CSM_CASCADES + i;
-		beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eClear);
-		rebindGraphicsState();
-		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
-			0, {*m_gpu_shadow_descriptor_sets[frame][i]}, {});
-		drawIndirect(slot);
-		cmd.endRendering();
+	if (num_shadow_lights > 0) {
+		ZoneScopedN("Light shadows");
+		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: light shadows");
+		for (uint32_t i = 0; i < num_shadow_lights; i++) {
+			uint32_t slot = NUM_CSM_CASCADES + i;
+			beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eClear);
+			rebindGraphicsState();
+			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+				0, {*m_gpu_shadow_descriptor_sets[frame][i]}, {});
+			drawIndirect(slot);
+			cmd.endRendering();
+		}
 	}
 
 	if (has_skinned) {
+		ZoneScopedN("Skinned shadows");
+		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: skinned");
 		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
 			beginShadowRegionRender(cmd, m_atlas_regions[c], vk::AttachmentLoadOp::eLoad);
 			renderSkinnedShadowsForLayer(frame_info, c);
@@ -1756,7 +1826,10 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		}
 	}
 
-	transitionAtlasPostRender(cmd);
+	{
+		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: post-render transition");
+		transitionAtlasPostRender(cmd);
+	}
 }
 
 void ShadowRenderSystem::createMeshletShadowDescriptorSets(MeshletCullingSystem& meshlet_cull) {

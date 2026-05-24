@@ -64,21 +64,27 @@ public:
 
 	void dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame_info, GpuSceneManager& scene_mgr);
 
-	// Dispatches shadow culling for one independent shadow buffer slot.
-	// Call for every shadow layer (cascades 0..csm_count-1, then lights at NUM_CSM_CASCADES+i).
-	// If camera_view is provided and Hi-Z is enabled, camera-space occlusion culling is applied.
-	void dispatchShadowCull(vk::raii::CommandBuffer& cmd,
-	                        const glm::mat4& light_view_proj,
-	                        GpuSceneManager& scene_mgr,
-	                        uint32_t frame_index,
-	                        uint32_t shadow_buf_index,
-	                        int32_t lod_bias,
-	                        const CameraView* camera_view = nullptr,
-	                        ShadowPassMode shadow_mode = ShadowPassMode::ALL_OBJECTS);
+	struct ShadowCullRequest {
+		glm::mat4 view_proj;
+		const CameraView* camera_view = nullptr;
+		uint32_t slot;
+		int32_t lod_bias;
+		ShadowPassMode shadow_mode = ShadowPassMode::ALL_OBJECTS;
+	};
 
-	// Single global compute->draw barrier covering all shadow buffer slots.
-	// Call once after all dispatchShadowCull calls for a frame.
-	// If compaction is enabled, also dispatches shadow compaction passes before the barrier.
+	// Batched shadow culling. One entry barrier, all UBO writes + indirect template
+	// copies, one transfer->compute barrier, then all shadow dispatches.
+	// Marks each request's slot in the dispatched-slot bitmask so
+	// flushShadowCullBarrier only compacts slots that were actually culled.
+	void dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
+	                         const ShadowCullRequest* requests, uint32_t count,
+	                         GpuSceneManager& scene_mgr,
+	                         uint32_t frame_index);
+
+	// Global compute->draw barrier covering all shadow buffer slots.
+	// Call once after all dispatchShadowCulls calls for a frame.
+	// If compaction is enabled, also dispatches shadow compaction passes for the
+	// slots flagged by dispatchShadowCulls.
 	void flushShadowCullBarrier(vk::raii::CommandBuffer& cmd, GpuSceneManager& scene_mgr,
 	                            uint32_t frame_index);
 
@@ -172,6 +178,9 @@ private:
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_cull_param_ubos;
 	std::vector<std::vector<vk::raii::DescriptorSet>> m_shadow_compute_descriptor_sets; // [frame][slot]
 
+	static_assert(SHADOW_BUFFER_COUNT <= 32, "bitmask must hold all shadow slots");
+	uint32_t m_shadow_dispatched_slots_mask = 0;
+
 	// Draw command compaction (only when drawIndirectCount is supported)
 	struct CompactPushConstants {
 		uint32_t total_groups;
@@ -187,7 +196,7 @@ private:
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_compact_count_buffers;
 	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_compact_descriptor_sets =
 		makeNullArray<vk::raii::DescriptorSet>();
-		
+
 	// Shadow pass
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_compacted_indirect_buffers;
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_compact_count_buffers;
