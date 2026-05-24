@@ -8,21 +8,14 @@
 #include "rendering/shadow_render_system.hpp"
 #include "rendering/ve_renderer.hpp"
 #include "rendering/ve_frame_info.hpp"
-#include "events/event_bus.hpp"
-#include "events/engine_events.hpp"
 #include "rendering/frame_stats.hpp"
 
 namespace ve {
 
 MeshletCullingBackend::MeshletCullingBackend(MeshletCullingSystem& meshlet,
-                                             GpuCullingSystem& gpu_cull,
-                                             GpuSceneManager& gpu_scene,
-                                             EventBus& event_bus)
-	: m_meshlet_cull_system{meshlet}, m_gpu_cull{gpu_cull}, m_gpu_scene{gpu_scene} {
-	event_bus.subscribe<GpuShadowFallbackChangedEvent>([this](const GpuShadowFallbackChangedEvent& e) {
-		m_gpu_shadow_fallback = e.enabled;
-	});
-}
+                                             GpuCullingSystem* gpu_cull,
+                                             GpuSceneManager& gpu_scene)
+	: m_meshlet_cull_system{meshlet}, m_gpu_cull{gpu_cull}, m_gpu_scene{gpu_scene} {}
 
 void MeshletCullingBackend::cull(VeFrameInfo& fi, GpuSceneManager& gpu_scene) {
 	auto& cmd = fi.cmd();
@@ -41,8 +34,8 @@ void MeshletCullingBackend::renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& m
 void MeshletCullingBackend::renderShadows(VeFrameInfo& fi, ShadowRenderSystem& srs,
                                           PbrMegaBuffer& mega,
                                           GpuSceneManager& gpu_scene) const {
-	if (m_gpu_shadow_fallback)
-		srs.renderShadowMapsGpuCulled(fi, m_gpu_cull, mega, gpu_scene);
+	if (m_gpu_cull)
+		srs.renderShadowMapsGpuCulled(fi, *m_gpu_cull, mega, gpu_scene);
 	else
 		srs.renderShadowMapsGpuCulledMeshlets(fi, m_meshlet_cull_system, mega, gpu_scene);
 }

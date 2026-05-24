@@ -64,25 +64,30 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		ImGui::Checkbox("Frustum culling", &ctx.settings.enable_frustum_culling);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Skip drawing objects outside the camera view");
-		ImGui::Checkbox("GPU Culling", &ctx.settings.gpu_culling_enabled);
+		ImGui::Text("Culling Backend");
+		int backend = static_cast<int>(ctx.settings.culling_backend);
+		ImGui::RadioButton("CPU", &backend, static_cast<int>(CullingBackendMode::CPU));
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("GPU-driven frustum culling via compute shader.\n Improves performance for large scenes.");
-		if (ctx.settings.gpu_culling_enabled) {
+			ImGui::SetTooltip("CPU-side frustum + LOD culling. No GPU-side culling buffers allocated.");
+		ImGui::RadioButton("GPU", &backend, static_cast<int>(CullingBackendMode::GPU));
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("GPU-driven frustum culling via compute shader.\nImproves performance for large scenes.");
+		ImGui::RadioButton("Meshlet", &backend, static_cast<int>(CullingBackendMode::MESHLET));
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Sub-object meshlet culling (frustum + backface cone + Hi-Z).\nReduces triangle count for partially-visible large meshes.\nMore overhead on Apple silicon.");
+		ctx.settings.culling_backend = static_cast<CullingBackendMode>(backend);
+
+		ImGui::BeginDisabled(ctx.settings.culling_backend == CullingBackendMode::CPU);
+		ImGui::Checkbox("Hi-Z Occlusion Culling", &ctx.settings.hiz_occlusion_enabled);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Skips objects occluded by the depth buffer.\nRequires depth pre-pass and a GPU/Meshlet backend.");
+		ImGui::EndDisabled();
+
+		if (ctx.settings.culling_backend == CullingBackendMode::MESHLET) {
 			ImGui::Indent();
-			ImGui::Checkbox("Hi-Z Occlusion Culling", &ctx.settings.hiz_occlusion_enabled);
+			ImGui::Checkbox("Object Culled Shadows", &ctx.settings.meshlet_object_culled_shadows);
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Skips objects occluded by depth buffer.\nRequires depth pre-pass enabled.");
-			ImGui::Checkbox("Meshlet Culling", &ctx.settings.meshlet_culling_enabled);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Sub-object meshlet culling (frustum + backface cone + Hi-Z).\nReduces triangle count for partially-visible large meshes.\n More overhead on Apple silicon.");
-			if (ctx.settings.meshlet_culling_enabled) {
-				ImGui::Indent();
-				if (ImGui::Checkbox("Object Culled Shadows", &ctx.settings.meshlet_gpu_shadow_fallback))
-					m_event_bus.emitImmediate(GpuShadowFallbackChangedEvent{ctx.settings.meshlet_gpu_shadow_fallback});
-				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("Use object-level GPU culling for shadows instead of meshlet culling.");
-				ImGui::Unindent();
-			}
+				ImGui::SetTooltip("Also spin up the GPU culling system and use its object-level shadow path.\nFaster shadow culling in some cases (especially on MoltenVK),\nat the cost of extra VRAM.");
 			ImGui::Unindent();
 		}
 		if (ImGui::Checkbox("Clustered Lighting", &ctx.settings.cluster_enabled))

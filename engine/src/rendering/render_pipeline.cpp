@@ -74,6 +74,7 @@ RenderPipeline::RenderPipeline(VeDevice& device,
 	  m_event_bus(event_bus),
 	  m_config(config) {
 	m_scene_resources = std::make_unique<SceneResourceManager>(m_ve_device, m_event_bus, m_resource_manager);
+	m_scene_resources->subscribeToEvents(m_event_bus);
 	createPerFrameResources(m_scene_resources->getMaterialManager().getBuffer());
 	initRenderSystems();
 	m_settings_watcher = std::make_unique<SettingsWatcher>(
@@ -294,43 +295,6 @@ void RenderPipeline::initRenderSystems() {
 		m_event_bus
 	);
 
-	auto& gpu_scene = m_scene_resources->getGpuSceneManager();
-	m_gpu_culling_system = std::make_unique<GpuCullingSystem>(m_ve_device, m_config.shaders_dir);
-	m_gpu_culling_system->createDescriptorSets(*m_resources.pool(), gpu_scene);
-	m_gpu_culling_system->createShadowDescriptorSets(*m_resources.pool(), gpu_scene);
-	if (m_gpu_culling_system->compactionEnabled())
-		m_gpu_culling_system->createCompactionDescriptorSets(*m_resources.pool());
-	m_gpu_culling_system->createGlobalDescriptorSets(*m_resources.pool(), m_resources.globalSetLayout(),
-		m_uniform_buffers, m_scene_resources->getMaterialManager().getBuffer());
-
-	m_shadow_render_system->createGpuShadowDescriptorSets(*m_gpu_culling_system);
-
-	m_hiz_system = std::make_unique<HizSystem>(
-		m_ve_device, *m_resources.pool(), m_ve_renderer.getExtent(),
-		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage(),
-		m_config.shaders_dir, m_event_bus);
-	m_gpu_culling_system->createHizDescriptorSets(*m_resources.pool(), gpu_scene, *m_hiz_system);
-	m_gpu_culling_system->createShadowHizDescriptorSets(*m_resources.pool(), gpu_scene, *m_hiz_system);
-	m_gpu_culling_system->subscribeToEvents(m_event_bus, *m_hiz_system, gpu_scene);
-
-	// SceneResourceManager subscribes to scene lifecycle events.
-	// Must be before MeshletCullingSystem so the mega buffer is rebuilt before
-	// meshlet descriptors reference it.
-	m_scene_resources->subscribeToEvents(m_event_bus);
-
-	m_meshlet_culling_system = std::make_unique<MeshletCullingSystem>(
-		m_ve_device, m_config.shaders_dir, m_event_bus, *m_resources.pool(),
-		*m_scene_resources, m_scene_resources->getMegaBuffer(), *m_hiz_system);
-	m_meshlet_culling_system->createDescriptorSets(*m_resources.pool(),
-		gpu_scene, m_scene_resources->getMegaBuffer());
-	m_meshlet_culling_system->createHizDescriptorSets(*m_resources.pool(),
-		gpu_scene, m_scene_resources->getMegaBuffer(), *m_hiz_system);
-	m_meshlet_culling_system->createGlobalDescriptorSets(*m_resources.pool(), m_resources.globalSetLayout(),
-		m_uniform_buffers, m_scene_resources->getMaterialManager().getBuffer());
-	m_meshlet_culling_system->createShadowDescriptorSets(*m_resources.pool(),
-		gpu_scene, m_scene_resources->getMegaBuffer());
-	m_shadow_render_system->createMeshletShadowDescriptorSets(*m_meshlet_culling_system);
-
 	m_skinning_pre_pass = std::make_unique<SkinningPrePass>(
 		m_ve_device, *m_resources.pool(), shader("skinning_comp.spv"), m_event_bus);
 
@@ -343,10 +307,6 @@ void RenderPipeline::initRenderSystems() {
 		*m_culling_system, *m_pbr_render_system,
 		m_scene_resources->getMaterialManager(), m_settings,
 		m_global_descriptor_sets, m_ve_renderer.getThreadPool());
-	m_gpu_backend = std::make_unique<GpuCullingBackend>(
-		*m_gpu_culling_system, gpu_scene);
-	m_meshlet_backend = std::make_unique<MeshletCullingBackend>(
-		*m_meshlet_culling_system, *m_gpu_culling_system, gpu_scene, m_event_bus);
 	m_active_backend = m_cpu_backend.get();
 
 	m_event_bus.subscribe<TopologyChangedEvent>([this](const TopologyChangedEvent&) {
@@ -402,9 +362,10 @@ void RenderPipeline::renderFrame(VeScene& scene,
                                  float total_time) {
 	selectBackend();
 
-	bool gpu_culling = m_settings.gpu_culling_enabled
-		&& m_scene_resources->getGpuSceneManager().hasRegisteredObjects();
-	bool hiz_on = m_settings.hiz_occlusion_enabled && m_settings.depth_prepass_enabled && gpu_culling;
+	bool has_objects = m_scene_resources->getGpuSceneManager().hasRegisteredObjects();
+	bool any_gpu_culling = has_objects
+		&& m_settings.culling_backend != CullingBackendMode::CPU;
+	bool hiz_on = m_settings.hiz_occlusion_enabled && m_settings.depth_prepass_enabled && any_gpu_culling;
 	m_active_backend->setHizEnabled(hiz_on);
 
 	m_skybox_render_system->processPendingLoad();
@@ -423,22 +384,149 @@ void RenderPipeline::renderFrame(VeScene& scene,
 	collectStats(fi, scene.getRegistry());
 }
 
-void RenderPipeline::selectBackend() {
+void RenderPipeline::ensureHizInfrastructure() {
+	if (m_hiz_system)
+		return;
+	m_hiz_system = std::make_unique<HizSystem>(
+		m_ve_device, *m_resources.pool(), m_ve_renderer.getExtent(),
+		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage(),
+		m_config.shaders_dir, m_event_bus);
+}
+
+void RenderPipeline::ensureGpuCullingInfrastructure() {
+	if (m_gpu_culling_system)
+		return;
+	ensureHizInfrastructure();
+
 	auto& gpu_scene = m_scene_resources->getGpuSceneManager();
-	bool gpu_ok = m_settings.gpu_culling_enabled && gpu_scene.hasRegisteredObjects();
+	m_gpu_culling_system = std::make_unique<GpuCullingSystem>(m_ve_device, m_config.shaders_dir);
+	m_gpu_culling_system->createDescriptorSets(*m_resources.pool(), gpu_scene);
+	m_gpu_culling_system->createShadowDescriptorSets(*m_resources.pool(), gpu_scene);
+	if (m_gpu_culling_system->compactionEnabled())
+		m_gpu_culling_system->createCompactionDescriptorSets(*m_resources.pool());
+	m_gpu_culling_system->createGlobalDescriptorSets(*m_resources.pool(), m_resources.globalSetLayout(),
+		m_uniform_buffers, m_scene_resources->getMaterialManager().getBuffer());
+
+	m_shadow_render_system->createGpuShadowDescriptorSets(*m_gpu_culling_system);
+
+	m_gpu_culling_system->createHizDescriptorSets(*m_resources.pool(), gpu_scene, *m_hiz_system);
+	m_gpu_culling_system->createShadowHizDescriptorSets(*m_resources.pool(), gpu_scene, *m_hiz_system);
+	m_gpu_culling_system->subscribeToEvents(m_event_bus, *m_hiz_system, gpu_scene);
+
+	m_gpu_backend = std::make_unique<GpuCullingBackend>(*m_gpu_culling_system, gpu_scene);
+
+	if (m_meshlet_backend)
+		m_meshlet_backend->setGpuCull(m_gpu_culling_system.get());
+}
+
+void RenderPipeline::ensureMeshletCullingInfrastructure() {
+	if (m_meshlet_culling_system)
+		return;
+	ensureHizInfrastructure();
+
+	auto& gpu_scene = m_scene_resources->getGpuSceneManager();
+	m_meshlet_culling_system = std::make_unique<MeshletCullingSystem>(
+		m_ve_device, m_config.shaders_dir, m_event_bus, *m_resources.pool(),
+		*m_scene_resources, m_scene_resources->getMegaBuffer(), *m_hiz_system);
+	m_meshlet_culling_system->createDescriptorSets(*m_resources.pool(),
+		gpu_scene, m_scene_resources->getMegaBuffer());
+	m_meshlet_culling_system->createHizDescriptorSets(*m_resources.pool(),
+		gpu_scene, m_scene_resources->getMegaBuffer(), *m_hiz_system);
+	m_meshlet_culling_system->createGlobalDescriptorSets(*m_resources.pool(), m_resources.globalSetLayout(),
+		m_uniform_buffers, m_scene_resources->getMaterialManager().getBuffer());
+	m_meshlet_culling_system->createShadowDescriptorSets(*m_resources.pool(),
+		gpu_scene, m_scene_resources->getMegaBuffer());
+	m_shadow_render_system->createMeshletShadowDescriptorSets(*m_meshlet_culling_system);
+
+	m_meshlet_backend = std::make_unique<MeshletCullingBackend>(
+		*m_meshlet_culling_system, m_gpu_culling_system.get(), gpu_scene);
+}
+
+void RenderPipeline::tearDownHizInfrastructure() {
+	// Hi-Z is shared: only release once both backends are gone.
+	if (!m_hiz_system || m_gpu_culling_system || m_meshlet_culling_system)
+		return;
+	VE_LOGI("Tearing down Hi-Z infrastructure");
+	m_ve_renderer.waitIdle();
+	m_hiz_system.reset();
+}
+
+void RenderPipeline::tearDownMeshletCullingInfrastructure() {
+	if (!m_meshlet_culling_system)
+		return;
+	VE_LOGI("Tearing down meshlet culling infrastructure");
+	m_ve_renderer.waitIdle();
+	m_shadow_render_system->releaseMeshletShadowDescriptorSets();
+	if (m_active_backend == m_meshlet_backend.get())
+		m_active_backend = m_cpu_backend.get();
+	m_meshlet_backend.reset();
+	m_meshlet_culling_system.reset();
+	tearDownHizInfrastructure();
+}
+
+void RenderPipeline::tearDownGpuCullingInfrastructure() {
+	if (!m_gpu_culling_system)
+		return;
+	VE_LOGI("Tearing down GPU culling infrastructure");
+	m_ve_renderer.waitIdle();
+	// Detach the GPU system from the meshlet backend before destroying it
+	if (m_meshlet_backend)
+		m_meshlet_backend->setGpuCull(nullptr);
+	m_shadow_render_system->releaseGpuShadowDescriptorSets();
+	if (m_active_backend == m_gpu_backend.get())
+		m_active_backend = m_cpu_backend.get();
+	m_gpu_backend.reset();
+	m_gpu_culling_system.reset();
+	tearDownHizInfrastructure();
+}
+
+void RenderPipeline::selectBackend() {
+	static constexpr uint32_t CULLING_BACKEND_TEARDOWN_FRAMES = 60;
+
+	auto& gpu_scene = m_scene_resources->getGpuSceneManager();
+	bool has_objects = gpu_scene.hasRegisteredObjects();
+	CullingBackendMode mode = m_settings.culling_backend;
+	bool meshlet_ok = mode == CullingBackendMode::MESHLET && has_objects
+		&& m_scene_resources->getMegaBuffer().hasMeshletData();
+	bool gpu_selected = mode == CullingBackendMode::GPU && has_objects;
+	bool gpu_for_meshlet_shadows = meshlet_ok && m_settings.meshlet_object_culled_shadows;
 	CullingBackend* prev = m_active_backend;
 
-	if (gpu_ok && m_settings.meshlet_culling_enabled
-		&& m_meshlet_culling_system
-		&& m_scene_resources->getMegaBuffer().hasMeshletData())
+	if (meshlet_ok) {
+		if (gpu_for_meshlet_shadows)
+			ensureGpuCullingInfrastructure();
+		ensureMeshletCullingInfrastructure();
 		m_active_backend = m_meshlet_backend.get();
-	else if (gpu_ok)
+	}
+	else if (gpu_selected) {
+		ensureGpuCullingInfrastructure();
 		m_active_backend = m_gpu_backend.get();
-	else
+	}
+	else {
 		m_active_backend = m_cpu_backend.get();
+	}
+
+	// Delayed teardown
+	if (m_meshlet_culling_system) {
+		if (mode == CullingBackendMode::MESHLET)
+			m_meshlet_inactive_frames = 0;
+		else if (++m_meshlet_inactive_frames >= CULLING_BACKEND_TEARDOWN_FRAMES) {
+			tearDownMeshletCullingInfrastructure();
+			m_meshlet_inactive_frames = 0;
+		}
+	}
+	if (m_gpu_culling_system) {
+		bool gpu_needed = gpu_selected || gpu_for_meshlet_shadows;
+		if (gpu_needed)
+			m_gpu_inactive_frames = 0;
+		else if (++m_gpu_inactive_frames >= CULLING_BACKEND_TEARDOWN_FRAMES) {
+			tearDownGpuCullingInfrastructure();
+			m_gpu_inactive_frames = 0;
+		}
+	}
 
 	if (m_active_backend != prev)
-		m_event_bus.emitImmediate(BackendChangedEvent{});
+		m_event_bus.emitImmediate(CullingBackendChangedEvent{});
 }
 
 VeFrameInfo RenderPipeline::buildFrameInfo(VeScene& scene,

@@ -1,6 +1,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "ve_config.hpp"
+#include "events/event_bus.hpp"
 #include "rendering/culling/meshlet_data.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "vulkan/ve_compute_pipeline.hpp"
@@ -19,7 +20,6 @@ class VeImage;
 class GpuSceneManager;
 class PbrMegaBuffer;
 class HizSystem;
-class EventBus;
 class SceneResourceManager;
 struct VeFrameInfo;
 
@@ -238,6 +238,11 @@ private:
 
 	// Shadow global descriptor sets for vertex shader: [frame][slot]
 	std::vector<std::vector<vk::raii::DescriptorSet>> m_shadow_global_sets;
+
+	EventBus* m_event_bus = nullptr;
+	EventSubscriptionId m_scene_loaded_sub = 0;
+	EventSubscriptionId m_asset_load_sub = 0;
+	EventSubscriptionId m_resolution_sub = 0;
 };
 
 } // namespace ve

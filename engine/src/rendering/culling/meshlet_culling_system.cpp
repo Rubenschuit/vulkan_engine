@@ -19,7 +19,7 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
                                            EventBus& event_bus, VeDescriptorPool& pool,
                                            SceneResourceManager& scene_resources,
                                            PbrMegaBuffer& mega_buffer, HizSystem& hiz)
-	: m_ve_device(device) {
+	: m_ve_device(device), m_event_bus(&event_bus) {
 
 	auto rebuild = [this, &pool, &scene_resources, &mega_buffer, &hiz]() {
 		auto& gpu_scene = scene_resources.getGpuSceneManager();
@@ -27,12 +27,15 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 		createHizDescriptorSets(pool, gpu_scene, mega_buffer, hiz);
 		createShadowDescriptorSets(pool, gpu_scene, mega_buffer);
 	};
-	event_bus.subscribe<SceneLoadedEvent>([rebuild](const SceneLoadedEvent&) { rebuild(); });
-	event_bus.subscribe<AssetLoadCompleteEvent>([rebuild](const AssetLoadCompleteEvent&) { rebuild(); });
-	event_bus.subscribe<ResolutionChangedEvent>([this, &pool, &scene_resources, &mega_buffer, &hiz](const ResolutionChangedEvent&) {
-		auto& gpu_scene = scene_resources.getGpuSceneManager();
-		createHizDescriptorSets(pool, gpu_scene, mega_buffer, hiz);
-	});
+	m_scene_loaded_sub = event_bus.subscribe<SceneLoadedEvent>(
+		[rebuild](const SceneLoadedEvent&) { rebuild(); });
+	m_asset_load_sub = event_bus.subscribe<AssetLoadCompleteEvent>(
+		[rebuild](const AssetLoadCompleteEvent&) { rebuild(); });
+	m_resolution_sub = event_bus.subscribe<ResolutionChangedEvent>(
+		[this, &pool, &scene_resources, &mega_buffer, &hiz](const ResolutionChangedEvent&) {
+			auto& gpu_scene = scene_resources.getGpuSceneManager();
+			createHizDescriptorSets(pool, gpu_scene, mega_buffer, hiz);
+		});
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		m_visible_objects[i] = std::make_unique<VeBuffer>(m_ve_device,
@@ -224,7 +227,16 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 	m_dummy_sampler = vk::raii::Sampler(m_ve_device.getDevice(), sampler_info);
 }
 
-MeshletCullingSystem::~MeshletCullingSystem() = default;
+MeshletCullingSystem::~MeshletCullingSystem() {
+	if (m_event_bus) {
+		if (m_scene_loaded_sub != 0)
+			m_event_bus->unsubscribe<SceneLoadedEvent>(m_scene_loaded_sub);
+		if (m_asset_load_sub != 0)
+			m_event_bus->unsubscribe<AssetLoadCompleteEvent>(m_asset_load_sub);
+		if (m_resolution_sub != 0)
+			m_event_bus->unsubscribe<ResolutionChangedEvent>(m_resolution_sub);
+	}
+}
 
 void MeshletCullingSystem::createPipelineLayouts() {
 	vk::DescriptorSetLayout pass1_raw = *m_pass1_layout->getDescriptorSetLayout();
@@ -602,12 +614,12 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 					std::memcpy(readback_counts[slot].data(), ptr,
 						MESHLET_SHADOW_BUCKET_COUNT * sizeof(uint32_t));
 
-					// Update high-water marks: jump directly to 2x actual + headroom
 					constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
-					for (uint32_t b = 0; b < MESHLET_SHADOW_BUCKET_COUNT; b++)
-						readback_hwm[slot][b] = std::min(
-							readback_counts[slot][b] * 2 + 1024,
-							SHADOW_MAX_PER_BUCKET);
+					for (uint32_t b = 0; b < MESHLET_SHADOW_BUCKET_COUNT; b++) {
+						uint32_t actual = readback_counts[slot][b];
+						uint32_t hwm = actual + actual / 2 + 512;
+						readback_hwm[slot][b] = std::min(hwm, SHADOW_MAX_PER_BUCKET);
+					}
 				}
 			}
 		}

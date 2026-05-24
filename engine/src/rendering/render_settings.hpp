@@ -8,6 +8,12 @@
 
 namespace ve {
 
+enum class CullingBackendMode : uint8_t {
+	CPU,
+	GPU,
+	MESHLET,
+};
+
 struct VENGINE_API RenderSettings {
 	// graphics
 	float fov = 75.0f;
@@ -49,10 +55,10 @@ struct VENGINE_API RenderSettings {
 
 	// culling
 	bool enable_frustum_culling = true;
-	bool gpu_culling_enabled = false;
+	CullingBackendMode culling_backend = CullingBackendMode::CPU;
 	bool hiz_occlusion_enabled = false;
-	bool meshlet_culling_enabled = false;
-	bool meshlet_gpu_shadow_fallback = true;
+	// fallback: enable the GpuCullingSystem to use for shadows
+	bool meshlet_object_culled_shadows = false;
 	int min_parallel_cull_entities = static_cast<int>(ve::MIN_PARALLEL_CULL_ENTITIES);
 
 	// lod

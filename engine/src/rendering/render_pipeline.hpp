@@ -94,6 +94,12 @@ private:
 	void emitResolutionChangedEvent();
 	void pushPerFrameSettings();
 	void selectBackend();
+	void ensureHizInfrastructure();
+	void ensureGpuCullingInfrastructure();
+	void ensureMeshletCullingInfrastructure();
+	void tearDownHizInfrastructure();
+	void tearDownGpuCullingInfrastructure();
+	void tearDownMeshletCullingInfrastructure();
 	VeFrameInfo buildFrameInfo(VeScene& scene,
 	                           const CameraView& camera_view,
 	                           const EditorState& editor_state,
@@ -148,6 +154,8 @@ private:
 	std::unique_ptr<GpuCullingBackend> m_gpu_backend;
 	std::unique_ptr<MeshletCullingBackend> m_meshlet_backend;
 	CullingBackend* m_active_backend = nullptr;
+	uint32_t m_gpu_inactive_frames = 0;
+	uint32_t m_meshlet_inactive_frames = 0;
 
 	std::unique_ptr<SettingsWatcher> m_settings_watcher;
 

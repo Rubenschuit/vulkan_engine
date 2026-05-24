@@ -95,10 +95,6 @@ struct DepthPrePassChangedEvent {
 	bool enabled;
 };
 
-struct GpuShadowFallbackChangedEvent {
-	bool enabled;
-};
-
 struct ClusterEnabledChangedEvent {
 	bool enabled;
 };
@@ -112,8 +108,6 @@ struct SwapChainRecreatedEvent {};
 // reacts and emits ResolutionChangedEvent (engine-internal, render_events.hpp)
 // including all the relevant data for subscribers.
 struct ViewportResizedEvent {};
-
-struct BackendChangedEvent {};
 
 struct SkyboxChangedEvent {
 	std::filesystem::path skybox_path;

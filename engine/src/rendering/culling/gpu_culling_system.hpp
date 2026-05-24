@@ -1,6 +1,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "ve_config.hpp"
+#include "events/event_bus.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "vulkan/ve_compute_pipeline.hpp"
 #include "vulkan/ve_descriptors.hpp"
@@ -16,7 +17,6 @@ class VeDevice;
 class VeImage;
 class GpuSceneManager;
 class HizSystem;
-class EventBus;
 struct VeFrameInfo;
 struct CameraView;
 
@@ -192,6 +192,10 @@ private:
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_compacted_indirect_buffers;
 	std::array<ShadowBufSet, MAX_FRAMES_IN_FLIGHT> m_shadow_compact_count_buffers;
 	std::vector<std::vector<vk::raii::DescriptorSet>> m_shadow_compact_descriptor_sets; // [frame][slot]
+
+	EventBus* m_event_bus = nullptr;
+	EventSubscriptionId m_resolution_sub = 0;
+	EventSubscriptionId m_scene_unloaded_sub = 0;
 };
 
 }

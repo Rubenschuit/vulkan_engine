@@ -155,7 +155,7 @@ private:
 
 	std::shared_mutex m_handler_mutex;
 	std::unordered_map<std::type_index, std::unique_ptr<HandlerBase>> m_handlers;
-	EventSubscriptionId m_next_id = 0;
+	EventSubscriptionId m_next_id = 1;
 
 	std::mutex m_queue_mutex;
 	std::unordered_map<std::type_index, std::unique_ptr<QueueBase>> m_queues;

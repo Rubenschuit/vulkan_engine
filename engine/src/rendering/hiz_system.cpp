@@ -45,11 +45,12 @@ HizSystem::HizSystem(
 	vk::Image depth_image,
 	const std::filesystem::path& shaders_dir,
 	EventBus& event_bus)
-	: m_ve_device(device) {
+	: m_ve_device(device), m_event_bus(&event_bus) {
 
-	event_bus.subscribe<ResolutionChangedEvent>([this](const ResolutionChangedEvent& e) {
-		recreate(e.pool, e.extent, e.depth_image_view, e.depth_image);
-	});
+	m_resolution_sub = event_bus.subscribe<ResolutionChangedEvent>(
+		[this](const ResolutionChangedEvent& e) {
+			recreate(e.pool, e.extent, e.depth_image_view, e.depth_image);
+		});
 
 	m_depth_image = depth_image;
 	m_depth_image_view = *depth_image_view;
@@ -68,7 +69,10 @@ HizSystem::HizSystem(
 	         << ", " << m_mip_levels << " mips, " << m_pass_count << " passes)");
 }
 
-HizSystem::~HizSystem() = default;
+HizSystem::~HizSystem() {
+	if (m_event_bus && m_resolution_sub != 0)
+		m_event_bus->unsubscribe<ResolutionChangedEvent>(m_resolution_sub);
+}
 
 void HizSystem::createHizImages(vk::Extent2D extent) {
 	m_screen_width = extent.width;

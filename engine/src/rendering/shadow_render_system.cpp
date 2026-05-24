@@ -45,7 +45,7 @@ ShadowRenderSystem::ShadowRenderSystem(
 	event_bus.subscribe<DepthBiasChangedEvent>([this](const DepthBiasChangedEvent&) {
 		forceShadowRerender();
 	});
-	event_bus.subscribe<BackendChangedEvent>([this](const BackendChangedEvent&) {
+	event_bus.subscribe<CullingBackendChangedEvent>([this](const CullingBackendChangedEvent&) {
 		forceShadowRerender();
 	});
 	event_bus.subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
@@ -1486,6 +1486,11 @@ void ShadowRenderSystem::createGpuShadowDescriptorSets(GpuCullingSystem& gpu_cul
 		m_gpu_cascade_descriptor_sets, m_gpu_shadow_descriptor_sets);
 }
 
+void ShadowRenderSystem::releaseGpuShadowDescriptorSets() {
+	m_gpu_cascade_descriptor_sets.clear();
+	m_gpu_shadow_descriptor_sets.clear();
+}
+
 void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
                                                     GpuCullingSystem& gpu_cull_system,
                                                     PbrMegaBuffer& mega_buffer,
@@ -1760,6 +1765,11 @@ void ShadowRenderSystem::createMeshletShadowDescriptorSets(MeshletCullingSystem&
 			return meshlet_cull.getShadowInstanceBuffer(f, s);
 		},
 		m_meshlet_cascade_descriptor_sets, m_meshlet_shadow_descriptor_sets);
+}
+
+void ShadowRenderSystem::releaseMeshletShadowDescriptorSets() {
+	m_meshlet_cascade_descriptor_sets.clear();
+	m_meshlet_shadow_descriptor_sets.clear();
 }
 
 void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_info,

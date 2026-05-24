@@ -58,4 +58,10 @@ struct ResolutionChangedEvent : ImmediateOnly {
 	bool gtao_half_res;
 };
 
+// Emitted when RenderPipeline switches its active culling backend.
+// Subscribers MUST NOT cache pointers or views into GpuCullingSystem /
+// MeshletCullingSystem / HizSystem: backend teardown is debounced +-60 frames
+// after this event, after which those pointers dangle.
+struct CullingBackendChangedEvent {};
+
 }

@@ -83,6 +83,9 @@ public:
 	                                       PbrMegaBuffer& mega_buffer,
 	                                       GpuSceneManager& scene_mgr);
 
+	void releaseGpuShadowDescriptorSets();
+	void releaseMeshletShadowDescriptorSets();
+
 	// --- Accessors ---
 
 	vk::raii::DescriptorSet& getShadowDescriptorSet(uint32_t frame_index) {

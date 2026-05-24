@@ -153,7 +153,14 @@ GpuCullingSystem::GpuCullingSystem(VeDevice& device, const std::filesystem::path
 		<< BUCKET_COUNT << " buckets, compaction=" << (m_compaction_enabled ? "on" : "off") << ")");
 }
 
-GpuCullingSystem::~GpuCullingSystem() = default;
+GpuCullingSystem::~GpuCullingSystem() {
+	if (m_event_bus) {
+		if (m_resolution_sub != 0)
+			m_event_bus->unsubscribe<ResolutionChangedEvent>(m_resolution_sub);
+		if (m_scene_unloaded_sub != 0)
+			m_event_bus->unsubscribe<SceneUnloadedEvent>(m_scene_unloaded_sub);
+	}
+}
 
 void GpuCullingSystem::createPipelineLayout() {
 	std::array<vk::DescriptorSetLayout, 1> set_layouts{
@@ -719,13 +726,16 @@ void GpuCullingSystem::clearReadback() {
 }
 
 void GpuCullingSystem::subscribeToEvents(EventBus& event_bus, HizSystem& hiz, GpuSceneManager& scene_mgr) {
-	event_bus.subscribe<ResolutionChangedEvent>([this, &hiz, &scene_mgr](const ResolutionChangedEvent& e) {
-		createHizDescriptorSets(e.pool, scene_mgr, hiz);
-		createShadowHizDescriptorSets(e.pool, scene_mgr, hiz);
-	});
-	event_bus.subscribe<SceneUnloadedEvent>([this](const SceneUnloadedEvent&) {
-		clearReadback();
-	});
+	m_event_bus = &event_bus;
+	m_resolution_sub = event_bus.subscribe<ResolutionChangedEvent>(
+		[this, &hiz, &scene_mgr](const ResolutionChangedEvent& e) {
+			createHizDescriptorSets(e.pool, scene_mgr, hiz);
+			createShadowHizDescriptorSets(e.pool, scene_mgr, hiz);
+		});
+	m_scene_unloaded_sub = event_bus.subscribe<SceneUnloadedEvent>(
+		[this](const SceneUnloadedEvent&) {
+			clearReadback();
+		});
 }
 
 } // namespace ve

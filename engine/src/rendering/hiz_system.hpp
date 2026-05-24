@@ -1,6 +1,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "ve_config.hpp"
+#include "events/event_bus.hpp"
 
 #include <memory>
 #include <array>
@@ -12,7 +13,6 @@ class VeImage;
 class VeDescriptorPool;
 class VeDescriptorSetLayout;
 class VeComputePipeline;
-class EventBus;
 }
 
 namespace ve {
@@ -93,6 +93,9 @@ private:
 
 	vk::Image m_depth_image{};
 	vk::ImageView m_depth_image_view{};
+
+	EventBus* m_event_bus = nullptr;
+	EventSubscriptionId m_resolution_sub = 0;
 };
 
 } // namespace ve
