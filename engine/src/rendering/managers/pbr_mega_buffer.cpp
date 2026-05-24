@@ -17,6 +17,7 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 	m_mega_vbo.reset();
 	m_mega_shadow_vbo.reset();
 	m_mega_ibo.reset();
+	m_mega_skin_vbo.reset();
 	m_meshlet_ibo.reset();
 	m_meshlet_ssbo.reset();
 	m_meshlet_ssbo_staging.reset();
@@ -27,10 +28,13 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 
 	uint32_t total_vertices = 0;
 	uint32_t total_indices = 0;
+	uint32_t total_skin_vertices = 0;
 	for (VeMesh* mesh : meshes) {
 		total_vertices += mesh->getVertexCount();
 		for (uint32_t lod = 0; lod < mesh->getLodCount(); lod++)
 			total_indices += mesh->getLodIndexCount(lod);
+		if (mesh->hasSkinning())
+			total_skin_vertices += mesh->getVertexCount();
 	}
 
 	if (total_vertices == 0 || total_indices == 0)
@@ -38,12 +42,14 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 
 	m_mega_vbo = std::make_unique<VeBuffer>(m_ve_device,
 		sizeof(VeMesh::Vertex), total_vertices,
-		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer
+			| vk::BufferUsageFlagBits::eTransferDst,
 		vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 	m_mega_shadow_vbo = std::make_unique<VeBuffer>(m_ve_device,
 		sizeof(glm::vec3), total_vertices,
-		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer
+			| vk::BufferUsageFlagBits::eTransferDst,
 		vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 	m_mega_ibo = std::make_unique<VeBuffer>(m_ve_device,
@@ -51,8 +57,16 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 		vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst,
 		vk::MemoryPropertyFlagBits::eDeviceLocal);
 
+	if (total_skin_vertices > 0) {
+		m_mega_skin_vbo = std::make_unique<VeBuffer>(m_ve_device,
+			sizeof(VeMesh::SkinVertex), total_skin_vertices,
+			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eDeviceLocal);
+	}
+
 	uint32_t vertex_offset = 0;
 	uint32_t index_offset = 0;
+	uint32_t skin_vertex_offset = 0;
 
 	for (VeMesh* mesh : meshes) {
 		uint32_t vc = mesh->getVertexCount();
@@ -76,6 +90,18 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 		MeshEntry entry;
 		entry.vertex_offset = vertex_offset;
 		entry.lod_entries.reserve(mesh->getLodCount());
+
+		if (mesh->hasSkinning() && m_mega_skin_vbo) {
+			vk::BufferCopy skin_copy{
+				.srcOffset = 0,
+				.dstOffset = static_cast<vk::DeviceSize>(skin_vertex_offset) * sizeof(VeMesh::SkinVertex),
+				.size = static_cast<vk::DeviceSize>(vc) * sizeof(VeMesh::SkinVertex)
+			};
+			cmd.copyBuffer(mesh->getSkinVertexBuffer().getBuffer(),
+				m_mega_skin_vbo->getBuffer(), skin_copy);
+			entry.skin_vertex_offset = skin_vertex_offset;
+			skin_vertex_offset += vc;
+		}
 
 		for (uint32_t lod = 0; lod < mesh->getLodCount(); lod++) {
 			uint32_t ic = mesh->getLodIndexCount(lod);
@@ -188,6 +214,7 @@ void PbrMegaBuffer::clear() {
 	m_mega_vbo.reset();
 	m_mega_shadow_vbo.reset();
 	m_mega_ibo.reset();
+	m_mega_skin_vbo.reset();
 	m_meshlet_ibo.reset();
 	m_meshlet_ssbo.reset();
 	m_meshlet_ssbo_staging.reset();

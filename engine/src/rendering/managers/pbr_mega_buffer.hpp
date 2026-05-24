@@ -13,12 +13,15 @@ class VeMesh;
 
 class VENGINE_API PbrMegaBuffer {
 public:
+	static constexpr uint32_t NO_SKIN_OFFSET = UINT32_MAX;
+
 	struct LodEntry {
 		uint32_t first_index;
 		uint32_t index_count;
 	};
 	struct MeshEntry {
 		uint32_t vertex_offset;
+		uint32_t skin_vertex_offset = NO_SKIN_OFFSET; // UINT32_MAX iff mesh is non-skinned
 		std::vector<LodEntry> lod_entries;
 	};
 
@@ -45,8 +48,12 @@ public:
 
 	bool isValid() const { return m_mega_vbo != nullptr; }
 	bool hasMeshletData() const { return m_meshlet_ssbo != nullptr; }
+	bool hasSkinData() const { return m_mega_skin_vbo != nullptr; }
 
 	VeBuffer* getMeshletSsbo() const { return m_meshlet_ssbo.get(); }
+	VeBuffer* getMegaVbo() const { return m_mega_vbo.get(); }
+	VeBuffer* getMegaShadowVbo() const { return m_mega_shadow_vbo.get(); }
+	VeBuffer* getMegaSkinVbo() const { return m_mega_skin_vbo.get(); }
 
 	void clear();
 	void bind(vk::raii::CommandBuffer& cmd) const;
@@ -60,6 +67,8 @@ private:
 	std::unique_ptr<VeBuffer> m_mega_vbo;
 	std::unique_ptr<VeBuffer> m_mega_shadow_vbo;
 	std::unique_ptr<VeBuffer> m_mega_ibo;
+	
+	std::unique_ptr<VeBuffer> m_mega_skin_vbo; // Sparse
 
 	std::unique_ptr<VeBuffer> m_meshlet_ibo;
 	std::unique_ptr<VeBuffer> m_meshlet_ssbo;

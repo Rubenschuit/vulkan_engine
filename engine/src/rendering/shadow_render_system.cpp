@@ -938,9 +938,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 		for (auto [entity, mesh, tc] : view) {
 			if (!mesh.getMesh() || !mesh.has_shadow)
 				continue;
-			// Skinned meshes go through the per-instance skinned shadow path; their
-			// vertex data lives in SkinningPrePass output buffers, not the static
-			// shadow mega-buffer.
+			// Skinned meshes go through the per-instance skinned shadow path, which
+			// reads SkinningPrePass output buffers instead of the mega buffer.
 			if (registry.hasComponent<SkinComponent>(entity))
 				continue;
 			uint32_t shadow_lod = std::min(std::max(1u, mesh.cached_lod + 1),
@@ -1865,7 +1864,10 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		}
 	}
 
-	populateSkinnedShadowDrawablesGpuPath(frame_info);
+	{
+		ZoneScopedN("Populate skinned drawables");
+		populateSkinnedShadowDrawablesGpuPath(frame_info);
+	}
 	bool has_skinned = !m_skinned_shadow_drawables.empty();
 	bool has_dynamics = scene_mgr.hasDynamicObjects();
 	bool any_dirty = num_shadow_lights > 0 || has_dynamics || has_skinned;
@@ -1901,11 +1903,17 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		});
 	}
 
-	if (!requests.empty())
+	if (!requests.empty()) {
+		ZoneScopedN("Batched cull");
+		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: batched cull");
 		meshlet_cull.dispatchShadowCulls(cmd, requests.data(),
 			static_cast<uint32_t>(requests.size()), scene_mgr, frame);
+	}
 
-	transitionAtlasForRendering(cmd, csm_count);
+	{
+		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: atlas transition");
+		transitionAtlasForRendering(cmd, csm_count);
+	}
 
 	ShadowPushConstantData push{.instance_offset = 0};
 	constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
@@ -1941,17 +1949,22 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		}
 	};
 
+	ZoneScopedN("CSM cascade loop");
+	TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: CSM meshlet cascade loop");
 	// Per-cascade: render static, snapshot to cache, then dynamic overlay
 	for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
 		auto& region = m_atlas_regions[c];
 
 		if (m_cascade_state[c].dirty) {
 			if (m_cascade_state[c].incremental) {
+				ZoneScopedN("Cascade strips");
+				TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: strips");
 				auto strips = computeStripRegions(c);
 				const glm::mat4& lv = m_light_views[frame][c];
 				glm::vec3 light_dir = -glm::vec3(lv[0][2], lv[1][2], lv[2][2]);
 
 				for (auto& strip : strips) {
+					TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: strip cull+render");
 					glm::mat4 strip_vp = computeStripFrustumVP(c, strip, frame);
 					MeshletCullingSystem::ShadowCullRequest strip_req{
 						.view_proj    = strip_vp,
@@ -1970,6 +1983,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 					cmd.endRendering();
 				}
 			} else {
+				TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: full static render");
 				beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eClear);
 				cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 					0, {*m_meshlet_cascade_descriptor_sets[frame][c]}, {});
@@ -1979,6 +1993,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 
 			// Snapshot static result to cache
 			{
+				TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: snapshot to cache");
 				vk::ImageMemoryBarrier2 to_src{
 					.sType = vk::StructureType::eImageMemoryBarrier2,
 					.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
@@ -2041,6 +2056,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 				cmd.pipelineBarrier2({.imageMemoryBarrierCount = 2, .pImageMemoryBarriers = post_barriers});
 			}
 		} else if (has_dynamics || has_skinned) {
+			TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: cache restore");
 			// Restore static cache to atlas for dynamic overlay
 			vk::ImageMemoryBarrier2 atlas_dst{
 				.sType = vk::StructureType::eImageMemoryBarrier2,
@@ -2081,6 +2097,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 
 		// Dynamic overlay: cull + render dynamic objects on top using full cascade VP
 		if (has_dynamics) {
+			TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: dynamic overlay");
 			const glm::mat4& lv = m_light_views[frame][c];
 			glm::vec3 light_dir = -glm::vec3(lv[0][2], lv[1][2], lv[2][2]);
 			MeshletCullingSystem::ShadowCullRequest dyn_req{
@@ -2102,16 +2119,22 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 	}
 
 	// Point/spot light shadows (already culled with ALL_OBJECTS)
-	for (uint32_t i = 0; i < num_shadow_lights; i++) {
-		uint32_t slot = NUM_CSM_CASCADES + i;
-		beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eClear);
-		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
-			0, {*m_meshlet_shadow_descriptor_sets[frame][i]}, {});
-		drawMeshletIndirect(slot);
-		cmd.endRendering();
+	if (num_shadow_lights > 0) {
+		ZoneScopedN("Light shadows");
+		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: light shadows");
+		for (uint32_t i = 0; i < num_shadow_lights; i++) {
+			uint32_t slot = NUM_CSM_CASCADES + i;
+			beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eClear);
+			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+				0, {*m_meshlet_shadow_descriptor_sets[frame][i]}, {});
+			drawMeshletIndirect(slot);
+			cmd.endRendering();
+		}
 	}
 
 	if (has_skinned) {
+		ZoneScopedN("Skinned shadows");
+		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: skinned");
 		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
 			beginShadowRegionRender(cmd, m_atlas_regions[c], vk::AttachmentLoadOp::eLoad);
 			renderSkinnedShadowsForLayer(frame_info, c);
@@ -2125,7 +2148,10 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		}
 	}
 
-	transitionAtlasPostRender(cmd);
+	{
+		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: post-render transition");
+		transitionAtlasPostRender(cmd);
+	}
 }
 
 } // namespace ve

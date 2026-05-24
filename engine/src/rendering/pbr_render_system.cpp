@@ -140,8 +140,8 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		MeshComponent* mesh = entry.mesh;
 		if (!mesh || !registry.getComponent<TransformComponent>(entry.entity))
 			continue;
-		// Skinned entities are handled by prepareSkinnedFrame; they must not enter
-		// the static draw path because their mesh lives outside the mega-buffer.
+		// Skinned entities draw from per-instance SkinningPrePass output buffers via
+		// prepareSkinnedFrame, not the mega buffer.
 		if (registry.hasComponent<SkinComponent>(entry.entity))
 			continue;
 		auto* mat = mesh->getMaterial();

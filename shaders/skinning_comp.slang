@@ -1,13 +1,16 @@
 // Per-vertex linear blend skinning. One dispatch per skinned mesh instance.
 //
-// Inputs:  48B VeMesh::Vertex stream + 16B SkinVertex stream + joint palette (mat4 array).
-// Outputs: 48B post-skin vertex stream (PBR consumer) AND 12B post-skin position stream
+// in_vertices / in_skin point at the whole shared mega VBO / mega skin VBO; each
+// dispatch reads its mesh's slice starting at input_vertex_offset / input_skin_offset.
+// Outputs remain per-instance (out_vertices 48B + out_positions 12B).
 //
 // Palette is in mesh-entity-local space.
 
 struct SkinPush {
 	uint vertex_count;
-	uint palette_offset; // in matrices
+	uint palette_offset;       // in matrices
+	uint input_vertex_offset;
+	uint input_skin_offset;
 };
 
 [[vk::push_constant]] SkinPush push;
@@ -24,10 +27,13 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 	if (v >= push.vertex_count)
 		return;
 
+	uint in_v = push.input_vertex_offset + v;
+	uint in_s = push.input_skin_offset + v;
+
 	// Read 48B vertex as three float4:
-	float4 chunk0 = in_vertices[v * 3 + 0];
-	float4 chunk1 = in_vertices[v * 3 + 1];
-	float4 chunk2 = in_vertices[v * 3 + 2];
+	float4 chunk0 = in_vertices[in_v * 3 + 0];
+	float4 chunk1 = in_vertices[in_v * 3 + 1];
+	float4 chunk2 = in_vertices[in_v * 3 + 2];
 
 	float3 pos     = chunk0.xyz;
 	float3 normal  = float3(chunk0.w, chunk1.x, chunk1.y);
@@ -35,7 +41,7 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 	float4 tangent = chunk2;
 
 	// Decode SkinVertex: 4 uint16 joints
-	uint4 packed = in_skin[v];
+	uint4 packed = in_skin[in_s];
 	uint joints[4] = {
 		packed.x & 0xFFFFu, (packed.x >> 16) & 0xFFFFu,
 		packed.y & 0xFFFFu, (packed.y >> 16) & 0xFFFFu,

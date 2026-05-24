@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "rendering/skinning_pre_pass.hpp"
+#include "rendering/managers/pbr_mega_buffer.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "vulkan/ve_descriptors.hpp"
@@ -22,6 +23,8 @@ namespace {
 struct SkinPushConstant {
 	uint32_t vertex_count;
 	uint32_t palette_offset;
+	uint32_t input_vertex_offset;
+	uint32_t input_skin_offset;
 };
 
 SkinningPrePass::SkinningPrePass(VeDevice& device, VeDescriptorPool& descriptor_pool,
@@ -172,7 +175,8 @@ SkinningPrePass::InstanceFrame& SkinningPrePass::getOrAllocateOutputs(
 	VkBuffer new_vbo = input_vertex_buf.getBuffer();
 	VkBuffer new_skin = input_skin_buf.getBuffer();
 	bool needs_realloc = !slot.out_full
-		|| slot.vertex_count != vertex_count
+		|| slot.vertex_count != vertex_count;
+	bool needs_rewrite = needs_realloc
 		|| slot.input_vertex_buf != new_vbo
 		|| slot.input_skin_buf != new_skin;
 	if (needs_realloc) {
@@ -189,6 +193,8 @@ SkinningPrePass::InstanceFrame& SkinningPrePass::getOrAllocateOutputs(
 			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer,
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
 		slot.vertex_count = vertex_count;
+	}
+	if (needs_rewrite) {
 		slot.input_vertex_buf = new_vbo;
 		slot.input_skin_buf = new_skin;
 		writeDescriptor(slot, frame_index, input_vertex_buf, input_skin_buf);
@@ -214,16 +220,19 @@ void SkinningPrePass::writeDescriptor(InstanceFrame& inst, uint32_t frame_index,
 		.build(inst.descriptor_set);
 }
 
-void SkinningPrePass::dispatch(VeFrameInfo& fi) {
+void SkinningPrePass::dispatch(VeFrameInfo& fi, PbrMegaBuffer& mega_buffer) {
 	uint32_t frame = fi.current_frame;
 	const auto& dispatches = m_pending_dispatches[frame];
-	if (dispatches.empty())
+	if (dispatches.empty() || !mega_buffer.isValid() || !mega_buffer.hasSkinData())
 		return;
 
 	auto& cmd = fi.compute_command_buffer;
 	auto& registry = *fi.registry;
 
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
+
+	VeBuffer& mega_vbo = *mega_buffer.getMegaVbo();
+	VeBuffer& mega_skin_vbo = *mega_buffer.getMegaSkinVbo();
 
 	for (const SkinDispatch& d : dispatches) {
 		Entity entity = d.entity;
@@ -236,8 +245,12 @@ void SkinningPrePass::dispatch(VeFrameInfo& fi) {
 		if (!mesh || !mesh->hasSkinning())
 			continue;
 
+		const auto* entry = mega_buffer.getEntry(mesh);
+		if (!entry || entry->skin_vertex_offset == PbrMegaBuffer::NO_SKIN_OFFSET)
+			continue;
+
 		auto& inst = getOrAllocateOutputs(entity, frame, d.vertex_count,
-		                                  mesh->getVertexBuffer(), mesh->getSkinVertexBuffer());
+		                                  mega_vbo, mega_skin_vbo);
 
 		std::array<vk::DescriptorSet, 1> sets{*inst.descriptor_set};
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pipeline_layout, 0, sets, {});
@@ -245,6 +258,8 @@ void SkinningPrePass::dispatch(VeFrameInfo& fi) {
 		SkinPushConstant pc{
 			.vertex_count = d.vertex_count,
 			.palette_offset = d.palette_offset,
+			.input_vertex_offset = entry->vertex_offset,
+			.input_skin_offset = entry->skin_vertex_offset,
 		};
 		cmd.pushConstants<SkinPushConstant>(*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eCompute, 0, pc);

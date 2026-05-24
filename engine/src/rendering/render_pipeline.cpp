@@ -655,7 +655,7 @@ void RenderPipeline::dispatchCompute(VeFrameInfo& fi) {
 			ZoneScopedN("Skinning Dispatch");
 			ScopedDebugLabel skin_label(fi.compute_command_buffer, "Skinning Dispatch", {0.9f, 0.6f, 0.9f, 1.0f});
 			TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Skinning Dispatch");
-			m_skinning_pre_pass->dispatch(fi);
+			m_skinning_pre_pass->dispatch(fi, m_scene_resources->getMegaBuffer());
 		}
 		{
 			ZoneScopedN("Particle Dispatch");
@@ -916,26 +916,57 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		profiler.beginCpuTimer(ProfileTimer::SCENE_RENDER);
 		profiler.beginGpuTimer(active_cb, ProfileTimer::SCENE_RENDER);
 		m_ve_renderer.beginSceneRender(active_cb, m_settings.depth_prepass_enabled);
-		m_active_backend->renderOpaque(fi, *m_pbr_render_system, bindless_set);
-		m_pbr_render_system->renderSkinned(fi, *m_skinning_pre_pass, bindless_set);
-		m_skybox_render_system->render(fi);
-		if (!fi.gpu_culling_active)
+		{
+			ZoneScopedN("Opaque");
+			TracyVkZone(tracy_gfx, *active_cb, "Opaque");
+			m_active_backend->renderOpaque(fi, *m_pbr_render_system, bindless_set);
+		}
+		{
+			ZoneScopedN("Skinned");
+			TracyVkZone(tracy_gfx, *active_cb, "Skinned");
+			m_pbr_render_system->renderSkinned(fi, *m_skinning_pre_pass, bindless_set);
+		}
+		{
+			ZoneScopedN("Skybox");
+			TracyVkZone(tracy_gfx, *active_cb, "Skybox");
+			m_skybox_render_system->render(fi);
+		}
+		if (!fi.gpu_culling_active) {
+			ZoneScopedN("Transparent (inline)");
+			TracyVkZone(tracy_gfx, *active_cb, "Transparent (inline)");
 			m_pbr_render_system->renderTransparent(fi, bindless_set);
-		m_particle_backend->render(fi);
-		if (m_settings.show_axes)
-			m_axes_render_system->render(fi);
-		if (m_settings.show_aabb_debug)
-			m_aabb_debug_render_system->render(fi);
-		if (m_settings.show_skinned_points)
-			m_skinned_points_render_system->render(fi, *m_skinning_pre_pass);
-		m_light_system->render(fi);
+		}
+		{
+			ZoneScopedN("Particles");
+			TracyVkZone(tracy_gfx, *active_cb, "Particles");
+			m_particle_backend->render(fi);
+		}
+		if (m_settings.show_axes || m_settings.show_aabb_debug || m_settings.show_skinned_points) {
+			ZoneScopedN("Debug Overlays");
+			TracyVkZone(tracy_gfx, *active_cb, "Debug Overlays");
+			if (m_settings.show_axes)
+				m_axes_render_system->render(fi);
+			if (m_settings.show_aabb_debug)
+				m_aabb_debug_render_system->render(fi);
+			if (m_settings.show_skinned_points)
+				m_skinned_points_render_system->render(fi, *m_skinning_pre_pass);
+		}
+		{
+			ZoneScopedN("Light Billboards");
+			TracyVkZone(tracy_gfx, *active_cb, "Light Billboards");
+			m_light_system->render(fi);
+		}
 		m_ve_renderer.endSceneRender(active_cb);
 		profiler.endGpuTimer(active_cb, ProfileTimer::SCENE_RENDER);
 		profiler.endCpuTimer(ProfileTimer::SCENE_RENDER);
 	}
 
-	m_active_backend->renderTransparency(fi, *m_pbr_render_system, bindless_set,
-		gpu_scene, m_ve_renderer);
+	{
+		ZoneScopedN("Transparent (WBOIT)");
+		TracyVkZone(tracy_gfx, *active_cb, "Transparent (WBOIT)");
+		m_active_backend->renderTransparency(fi, *m_pbr_render_system, bindless_set,
+			gpu_scene, m_ve_renderer);
+	}
 
 	bool outline_active = editor_state.outline_enabled && !fi.selected_entity.isNull();
 	if (outline_active) {

@@ -27,6 +27,7 @@ namespace ve {
 	class VeComputePipeline;
 	class Registry;
 	class EventBus;
+	class PbrMegaBuffer;
 }
 
 namespace ve {
@@ -42,7 +43,7 @@ public:
 
 	void updatePalette(Registry& registry, uint32_t frame_index);
 
-	void dispatch(VeFrameInfo& fi);
+	void dispatch(VeFrameInfo& fi, PbrMegaBuffer& mega_buffer);
 
 	VeBuffer* getOutputFullBuffer(Entity entity, uint32_t frame_index) const;
 	VeBuffer* getOutputPositionBuffer(Entity entity, uint32_t frame_index) const;
