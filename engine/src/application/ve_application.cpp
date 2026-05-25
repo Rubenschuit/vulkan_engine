@@ -108,8 +108,8 @@ void VeApplication::run() {
 
 		if (!scene) {
 			m_editor->beginFrame();
-			m_ve_renderer.beginUIRecording(m_editor->isEditorMode());
-			m_editor->renderUI(ui, nullptr);
+			if (m_ve_renderer.beginUIRecording(m_editor->isEditorMode()))
+				m_editor->renderUI(ui, nullptr);
 			m_ve_renderer.endFrame();
 			continue;
 		}
@@ -128,8 +128,8 @@ void VeApplication::run() {
 		bool editor_mode = m_editor->isEditorMode();
 		{
 			ZoneScopedN("UI");
-			m_ve_renderer.beginUIRecording(editor_mode);
-			m_editor->renderUI(ui, &scene->getRegistry());
+			if (m_ve_renderer.beginUIRecording(editor_mode))
+				m_editor->renderUI(ui, &scene->getRegistry());
 		}
 
 		{

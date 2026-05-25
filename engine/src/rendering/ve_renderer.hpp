@@ -49,9 +49,9 @@ public:
 	uint32_t getCurrentImageIndex() const { assert(m_is_frame_started); return m_current_image_index; }
 	vk::raii::CommandBuffer& getCurrentCommandBuffer();
 	vk::raii::CommandBuffer& getCurrentComputeCommandBuffer();
-	vk::raii::CommandBuffer& getCurrentGraphics2CommandBuffer();
-	vk::raii::CommandBuffer& getCurrentGraphics3CommandBuffer();
-	vk::raii::CommandBuffer& getCurrentCompute2CommandBuffer();
+	vk::raii::CommandBuffer& getShadowGraphicsCommandBuffer();
+	vk::raii::CommandBuffer& getSwapGraphicsCommandBuffer();
+	vk::raii::CommandBuffer& getDepthComputeCommandBuffer();
 	vk::raii::CommandBuffer& getCurrentUICommandBuffer();
 	const vk::raii::ImageView& getSwapChainImageView(size_t index) const { return m_ve_swap_chain->getSwapChainImageViews()[index]; }
 	const vk::raii::ImageView& getResolveTargetImageView() const { return m_ve_swap_chain->getResolveTargetImageView(); }
@@ -66,8 +66,7 @@ public:
 	const vk::raii::ImageView& getWboitAccumImageView() const { return m_wboit_accum->getImageView(); }
 	const vk::raii::ImageView& getWboitRevealageImageView() const { return m_wboit_revealage->getImageView(); }
 
-	// Begin a new frame. Returns true if a frame was acquired and recording can start.
-	// When false is returned (e.g. swap chain out of date), the command buffer is not valid for use.
+	// Begin a new frame. Always returns true currently, TODO: rework
 	bool beginFrame();
 	void submitCompute(vk::raii::CommandBuffer& compute_command_buffer);
 	void beginDepthPrePass(vk::raii::CommandBuffer& command_buffer,
@@ -86,12 +85,13 @@ public:
 	void endWboitComposite(vk::raii::CommandBuffer& command_buffer);
 
 	// Start rendering to the swapchain (editor_mode=false) or viewport image (editor_mode=true).
-	void beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode = false);
+	// Returns false if acquire failed mid-frame
+	bool beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode = false);
 	void endPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode = false);
 
 	// Prepare the UI command buffer for recording (barrier/transition).
-	// Call before ImGuiLayer::renderUI().
-	void beginUIRecording(bool editor_mode);
+	// Call before ImGuiLayer::renderUI(). Returns false if acquire failed
+	bool beginUIRecording(bool editor_mode);
 
 	// Scene render extent (editor viewport resolution)
 	void resizeSceneRender(uint32_t w, uint32_t h);
@@ -107,11 +107,12 @@ public:
 	// End scene + UI command buffers, submit both, present, and advance the frame.
 	void endFrame();
 
-	// Split async submission
-	void submitGraphicsPhase1();
-	void submitShadowPhase(vk::raii::CommandBuffer& shadow_cb);
-	void submitComputePhase2(vk::raii::CommandBuffer& compute2_cb);
-	void setSplitActive(bool active);
+	void markSceneFrame() { m_scene_frame = true; }
+
+	// Scene-frame split submission. Called mid-frame when early_submit is on.
+	void submitPreSwapGraphics(bool depth_compute_follows);
+	void submitShadowGraphics(vk::raii::CommandBuffer& shadow_cb);
+	void submitDepthCompute(vk::raii::CommandBuffer& depth_compute_cb);
 
 	// only max or none MSAA supported for now
 	void setMSAAEnabled(bool enabled) { m_msaa_enabled = enabled; m_desired_num_samples = enabled ? m_ve_device.getSampleCount() : vk::SampleCountFlagBits::e1; m_swap_chain_needs_recreation = true; }
@@ -165,6 +166,7 @@ private:
 	void createViewportResources();
 	void recreateWboitImages();
 	void transitionToPresent(vk::raii::CommandBuffer& command_buffer);
+	bool ensureImageAcquired();
 
 	VeDevice& m_ve_device;
 	CommandResourceManager m_command_manager;
@@ -177,7 +179,10 @@ private:
 	uint32_t m_current_image_index;
 	bool m_is_frame_started = false;
 	bool m_swap_chain_needs_recreation = false;
-	bool m_split_active = false;
+	bool m_image_acquired_this_frame = false;
+	bool m_frame_aborted = false;
+	bool m_pre_swap_submitted_this_frame = false;
+	bool m_scene_frame = false;
 
 	bool m_msaa_enabled = false;
 	bool m_hdr_enabled = false;

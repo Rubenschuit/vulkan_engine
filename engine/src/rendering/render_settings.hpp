@@ -29,10 +29,16 @@ struct VENGINE_API RenderSettings {
 	float depth_bias_slope = ve::SHADOW_DEPTH_BIAS_SLOPE;
 	float depth_bias_clamp = 0.0f;
 	Topology topology = Topology::TRIANGLE_LIST;
-	RenderMode render_mode = RenderMode::BRDF_MICROFACET; 
+	RenderMode render_mode = RenderMode::BRDF_MICROFACET;
 	bool hdr_enabled = false;
 	bool msaa = false;
 	bool vsync = false;
+	// Submit pre_swap_graphics mid-frame
+#ifdef __APPLE__
+	bool early_submit = false;
+#else
+	bool early_submit = true;
+#endif
 
 	// lighting
 	glm::vec3 ambient_light_color = glm::vec3(1.0f);

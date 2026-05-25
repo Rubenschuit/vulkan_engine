@@ -69,9 +69,9 @@ vk::Result VeSwapChain::acquireNextImage(uint32_t* image_index) {
 	return result;
 }
 
-void VeSwapChain::submitComputeWork(vk::CommandBuffer command_buffer) {
-	// Wait for the previous frame's compute work to finish
-	uint64_t wait_value = m_compute1_signal_value - 1;
+void VeSwapChain::submitCompute(vk::CommandBuffer command_buffer) {
+	// Wait for the previous frame's compute submit to finish.
+	uint64_t wait_value = m_compute_signal_value - 1;
 	bool has_previous = wait_value > 0;
 	vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eComputeShader;
 
@@ -81,7 +81,7 @@ void VeSwapChain::submitComputeWork(vk::CommandBuffer command_buffer) {
 		.waitSemaphoreValueCount = has_previous ? 1u : 0u,
 		.pWaitSemaphoreValues = has_previous ? &wait_value : nullptr,
 		.signalSemaphoreValueCount = 1,
-		.pSignalSemaphoreValues = &m_compute1_signal_value,
+		.pSignalSemaphoreValues = &m_compute_signal_value,
 	};
 	vk::SubmitInfo submit_info{
 		.pNext = &timeline_info,
@@ -97,8 +97,10 @@ void VeSwapChain::submitComputeWork(vk::CommandBuffer command_buffer) {
 	m_ve_device.getComputeQueue().submit(submit_info, nullptr);
 }
 
-// Returns result of queue.presentKHR()
-vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* image_index) {
+// Single-submit scene fallback: scene_cb (everything: cull, depth, shadows, render, post)
+// + ui_cb in one submit.
+vk::Result VeSwapChain::submitSceneAndPresent(
+	vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* image_index) {
 	vk::PipelineStageFlags wait_stages[2] = {
 		vk::PipelineStageFlagBits::eColorAttachmentOutput,
 		vk::PipelineStageFlagBits::eDrawIndirect
@@ -106,13 +108,9 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer scene_cb, vk::Command
 			| vk::PipelineStageFlagBits::eFragmentShader,
 	};
 
-	uint64_t graphics_wait = m_split_active ? m_compute2_signal_value : m_compute1_signal_value;
-	std::array<uint64_t, 2> wait_values{ uint64_t{0}, graphics_wait };
+	std::array<uint64_t, 2> wait_values{ uint64_t{0}, m_compute_signal_value };
 	uint64_t signal_value{0};
-
 	vk::TimelineSemaphoreSubmitInfo timeline_info{
-		.sType = vk::StructureType::eTimelineSemaphoreSubmitInfo,
-		.pNext = nullptr,
 		.waitSemaphoreValueCount = static_cast<uint32_t>(wait_values.size()),
 		.pWaitSemaphoreValues = wait_values.data(),
 		.signalSemaphoreValueCount = 1,
@@ -121,7 +119,7 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer scene_cb, vk::Command
 
 	std::array<vk::Semaphore, 2> wait_sems{ *m_image_available_semaphores[m_current_frame], *m_frame_timeline };
 	vk::Semaphore render_finished = *m_render_finished_semaphores[*image_index];
-	std::array<vk::CommandBuffer, 2> cbs = {scene_cb, ui_cb};
+	std::array<vk::CommandBuffer, 2> cbs{ scene_cb, ui_cb };
 	vk::SubmitInfo submit_info{
 		.pNext = &timeline_info,
 		.waitSemaphoreCount = static_cast<uint32_t>(wait_sems.size()),
@@ -133,22 +131,51 @@ vk::Result VeSwapChain::submitAndPresent(vk::CommandBuffer scene_cb, vk::Command
 		.pSignalSemaphores = &render_finished,
 	};
 
-	// Submit the command buffer to the graphics queue and signal the per-frame fence to ensure safe CB reuse
 	m_ve_device.getQueue().submit(submit_info, *m_in_flight_fences[m_current_frame]);
 
-	// Present waits on the binary render-finished semaphore (GPU-side)
-	std::array<vk::Semaphore, 1> present_waits{ render_finished };
 	const vk::PresentInfoKHR present_info{
-		.pNext = nullptr,
-		.waitSemaphoreCount = static_cast<uint32_t>(present_waits.size()),
-		.pWaitSemaphores = present_waits.data(),
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &render_finished,
 		.swapchainCount = 1,
 		.pSwapchains = &*m_swap_chain,
 		.pImageIndices = image_index,
-		.pResults = nullptr
 	};
 
-	// Present the image to the screen
+	try {
+		return m_ve_device.getQueue().presentKHR(present_info);
+	} catch (const vk::OutOfDateKHRError& e) {
+		VE_LOGD("PresentKHR threw eErrorOutOfDateKHR" << e.what());
+		return vk::Result::eErrorOutOfDateKHR;
+	}
+}
+
+// Submit only a UI command buffer (used by the no-scene editor path).
+// No timeline involvement: waits on image_available, signals render_finished + fence, presents.
+vk::Result VeSwapChain::submitUIOnly(vk::CommandBuffer ui_cb, uint32_t* image_index) {
+	vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+	vk::Semaphore wait_sem = *m_image_available_semaphores[m_current_frame];
+	vk::Semaphore render_finished = *m_render_finished_semaphores[*image_index];
+
+	vk::SubmitInfo submit_info{
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &wait_sem,
+		.pWaitDstStageMask = &wait_stage,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &ui_cb,
+		.signalSemaphoreCount = 1,
+		.pSignalSemaphores = &render_finished,
+	};
+
+	m_ve_device.getQueue().submit(submit_info, *m_in_flight_fences[m_current_frame]);
+
+	const vk::PresentInfoKHR present_info{
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &render_finished,
+		.swapchainCount = 1,
+		.pSwapchains = &*m_swap_chain,
+		.pImageIndices = image_index,
+	};
+
 	try {
 		return m_ve_device.getQueue().presentKHR(present_info);
 	} catch (const vk::OutOfDateKHRError& e) {
@@ -481,18 +508,21 @@ void VeSwapChain::advanceFrame() {
 }
 
 void VeSwapChain::beginTimelineFrame() {
-	m_compute1_signal_value = ++m_frame_timeline_value;
-	m_split_active = false;
+	m_compute_signal_value = ++m_frame_timeline_value;
 }
 
-void VeSwapChain::activateSplitTimeline() {
-	m_graphics1_signal_value = ++m_frame_timeline_value;
-	m_compute2_signal_value = ++m_frame_timeline_value;
-	m_split_active = true;
+void VeSwapChain::prepareSubmitValues(bool depth_compute_follows) {
+	m_pre_swap_signal_value = ++m_frame_timeline_value;
+	if (depth_compute_follows) {
+		m_depth_compute_signal_value = ++m_frame_timeline_value;
+		m_swap_wait_value = m_depth_compute_signal_value;
+	} else {
+		m_swap_wait_value = m_pre_swap_signal_value;
+	}
 }
 
-void VeSwapChain::submitGraphicsPhase1(vk::CommandBuffer cb) {
-	// Waits: image_available (binary) + compute1 (timeline). Signals: graphics1 (timeline).
+void VeSwapChain::submitPreSwapGraphics(vk::CommandBuffer cb) {
+	// Waits on compute + image_available; signals pre_swap.
 	vk::PipelineStageFlags wait_stages[2] = {
 		vk::PipelineStageFlagBits::eColorAttachmentOutput,
 		vk::PipelineStageFlagBits::eDrawIndirect
@@ -500,12 +530,12 @@ void VeSwapChain::submitGraphicsPhase1(vk::CommandBuffer cb) {
 			| vk::PipelineStageFlagBits::eFragmentShader,
 	};
 
-	std::array<uint64_t, 2> wait_values{ uint64_t{0}, m_compute1_signal_value };
+	std::array<uint64_t, 2> wait_values{ uint64_t{0}, m_compute_signal_value };
 	vk::TimelineSemaphoreSubmitInfo timeline_info{
 		.waitSemaphoreValueCount = static_cast<uint32_t>(wait_values.size()),
 		.pWaitSemaphoreValues = wait_values.data(),
 		.signalSemaphoreValueCount = 1,
-		.pSignalSemaphoreValues = &m_graphics1_signal_value,
+		.pSignalSemaphoreValues = &m_pre_swap_signal_value,
 	};
 
 	std::array<vk::Semaphore, 2> wait_sems{ *m_image_available_semaphores[m_current_frame], *m_frame_timeline };
@@ -523,8 +553,8 @@ void VeSwapChain::submitGraphicsPhase1(vk::CommandBuffer cb) {
 	m_ve_device.getQueue().submit(submit_info, nullptr);
 }
 
-void VeSwapChain::submitShadowPhase(vk::CommandBuffer cb) {
-	// Same-queue ordering guarantees execution after graphics phase 1 and before phase 2.
+void VeSwapChain::submitShadowGraphics(vk::CommandBuffer cb) {
+	// Same-queue ordering: runs after pre_swap_graphics, before swap_graphics.
 	vk::SubmitInfo submit_info{
 		.commandBufferCount = 1,
 		.pCommandBuffers = &cb,
@@ -532,16 +562,15 @@ void VeSwapChain::submitShadowPhase(vk::CommandBuffer cb) {
 	m_ve_device.getQueue().submit(submit_info, nullptr);
 }
 
-void VeSwapChain::submitComputePhase2(vk::CommandBuffer cb) {
-	// Waits: graphics1 (timeline)
-	// Signals: compute2 (timeline), no fence
+void VeSwapChain::submitDepthCompute(vk::CommandBuffer cb) {
+	// Waits on pre_swap (for depth output), signals depth_compute.
 	vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eComputeShader;
 
 	vk::TimelineSemaphoreSubmitInfo timeline_info{
 		.waitSemaphoreValueCount = 1,
-		.pWaitSemaphoreValues = &m_graphics1_signal_value,
+		.pWaitSemaphoreValues = &m_pre_swap_signal_value,
 		.signalSemaphoreValueCount = 1,
-		.pSignalSemaphoreValues = &m_compute2_signal_value,
+		.pSignalSemaphoreValues = &m_depth_compute_signal_value,
 	};
 
 	vk::SubmitInfo submit_info{
@@ -558,19 +587,18 @@ void VeSwapChain::submitComputePhase2(vk::CommandBuffer cb) {
 	m_ve_device.getComputeQueue().submit(submit_info, nullptr);
 }
 
-vk::Result VeSwapChain::submitGraphicsPhase2AndPresent(
+vk::Result VeSwapChain::submitSwapGraphicsAndPresent(
 	vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* image_index) {
-	// Waits: compute2 (timeline). Signals: render_finished (binary), fence.
+	// Waits on the last pre-swap timeline value
 	vk::PipelineStageFlags wait_stage =
 		vk::PipelineStageFlagBits::eDrawIndirect
 		| vk::PipelineStageFlagBits::eVertexInput
 		| vk::PipelineStageFlagBits::eFragmentShader;
 
-	uint64_t wait_value = m_compute2_signal_value;
 	uint64_t signal_value{0};
 	vk::TimelineSemaphoreSubmitInfo timeline_info{
 		.waitSemaphoreValueCount = 1,
-		.pWaitSemaphoreValues = &wait_value,
+		.pWaitSemaphoreValues = &m_swap_wait_value,
 		.signalSemaphoreValueCount = 1,
 		.pSignalSemaphoreValues = &signal_value,
 	};
@@ -590,10 +618,9 @@ vk::Result VeSwapChain::submitGraphicsPhase2AndPresent(
 
 	m_ve_device.getQueue().submit(submit_info, *m_in_flight_fences[m_current_frame]);
 
-	std::array<vk::Semaphore, 1> present_waits{ render_finished };
 	const vk::PresentInfoKHR present_info{
-		.waitSemaphoreCount = static_cast<uint32_t>(present_waits.size()),
-		.pWaitSemaphores = present_waits.data(),
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &render_finished,
 		.swapchainCount = 1,
 		.pSwapchains = &*m_swap_chain,
 		.pImageIndices = image_index,

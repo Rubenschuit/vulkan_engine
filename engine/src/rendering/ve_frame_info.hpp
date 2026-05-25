@@ -172,7 +172,7 @@ struct VeFrameInfo {
 	// Command buffers
 	vk::raii::CommandBuffer* command_buffer;
 	vk::raii::CommandBuffer& compute_command_buffer;
-	vk::raii::CommandBuffer* compute2_command_buffer = nullptr;
+	vk::raii::CommandBuffer* depth_compute_command_buffer = nullptr;
 
 	// Descriptor sets bound during scene rendering
 	vk::raii::DescriptorSet& global_descriptor_set;                  // set 0 (UBO + per-instance SSBO + material SSBO)

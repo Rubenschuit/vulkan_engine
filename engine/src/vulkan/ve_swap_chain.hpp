@@ -3,15 +3,27 @@
 synchronization objects. Also sets the number of samples for MSAA.
  *
  * Frame submission (timeline semaphore = m_frame_timeline):
- *   Non-split: compute1 -> graphics (submitAndPresent).
- *   Split:     compute1 -> graphics1 -> shadow -> compute2 -> graphics3
+ *   Scene frame:
+ *     compute -> pre_swap_graphics -> [optional: shadow_graphics -> depth_compute]
+ *             -> swap_graphics + present
+ *   No-scene frame (editor UI only): submitUIOnly (no timeline involvement).
  *
- *   compute1: skinning pre-pass, particle backend, cluster light.
- *             Writes consumed by graphics at DrawIndirect (particles),
- *             VertexInput (particles + skinned), and FragmentShader (sampled).
- *   compute2: GTAO and Hi-Z. Both image outputs sampled at FragmentShader.
+ *   The two compute submits are distinguished by their data dependency:
+ *   - compute: skinning, particles, cluster lights. No graphics-output dependency, so
+ *     submits at frame start.
+ *   - depth_compute: GTAO and Hi-Z. Reads the depth buffer produced by pre_swap_graphics,
+ *     so submits after it. Only used when a dedicated compute queue family is available
+ *     (compute-capable but not graphics-capable); otherwise this work runs inline in
+ *     pre_swap_graphics on the single graphics+compute queue.
  *
- * Graphics-side timeline waits must therefore gate at
+ *   Graphics CBs:
+ *   - pre_swap_graphics: work that doesn't touch the swap image (culling, depth prepass,
+ *     and without a dedicated compute queue also shadows / shadow mask / GTAO / Hi-Z).
+ *     Submitted early so the GPU can start before the CPU blocks on acquireNextImage.
+ *   - swap_graphics: final composition (scene render, bloom, post-process). Waits on the
+ *     image_available binary semaphore.
+ *
+ * Graphics-side timeline waits gate at
  *   eDrawIndirect | eVertexInput | eFragmentShader
  */
 #pragma once
@@ -70,16 +82,22 @@ public:
 	void resizeOffscreenResources(vk::Extent2D extent);
 	bool compareSwapFormats(const VeSwapChain& other) const;
 	vk::Result acquireNextImage(uint32_t* imageIndex);
-	void submitComputeWork(vk::CommandBuffer commandBuffer);
-	vk::Result submitAndPresent(vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* imageIndex);
+	void submitCompute(vk::CommandBuffer commandBuffer);
 
-	// Split-submission for async depth consumers
-	void activateSplitTimeline();
-	void submitGraphicsPhase1(vk::CommandBuffer cb);
-	void submitShadowPhase(vk::CommandBuffer cb);
-	void submitComputePhase2(vk::CommandBuffer cb);
-	vk::Result submitGraphicsPhase2AndPresent(vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* imageIndex);
-	bool isSplitActive() const { return m_split_active; }
+	// Scene-frame submits. depth_compute_follows=true means a shadow_graphics + depth_compute
+	// pair will be submitted between pre_swap_graphics and swap_graphics, so swap_graphics
+	// will wait on depth_compute's signal instead of pre_swap_graphics's.
+	void prepareSubmitValues(bool depth_compute_follows);
+	void submitPreSwapGraphics(vk::CommandBuffer cb);
+	void submitShadowGraphics(vk::CommandBuffer cb);
+	void submitDepthCompute(vk::CommandBuffer cb);
+	vk::Result submitSwapGraphicsAndPresent(vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* imageIndex);
+
+	// Single-submit scene fallback 
+	vk::Result submitSceneAndPresent(vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* imageIndex);
+
+	// Submit only a UI command buffer (no scene work; no timeline involvement).
+	vk::Result submitUIOnly(vk::CommandBuffer ui_cb, uint32_t* imageIndex);
 
 	void waitForCurrentFence();
 	void resetCurrentFence();
@@ -137,10 +155,10 @@ private:
 	// Timeline semaphore shared by compute and graphics for async synchronization.
 	vk::raii::Semaphore m_frame_timeline{nullptr};
 	uint64_t m_frame_timeline_value = 0;
-	uint64_t m_compute1_signal_value;
-	uint64_t m_graphics1_signal_value = 0;  // only valid when split active
-	uint64_t m_compute2_signal_value = 0;   // only valid when split active
-	bool m_split_active = false;
+	uint64_t m_compute_signal_value = 0;
+	uint64_t m_pre_swap_signal_value = 0;
+	uint64_t m_depth_compute_signal_value = 0;   // set only when depth_compute_follows is true
+	uint64_t m_swap_wait_value = 0;              // pre_swap (default) or depth_compute (split)
 	std::vector<vk::raii::Fence> m_in_flight_fences;
 	// Per-swapchain-image binary semaphores signaled by graphics submit and waited by present
 	std::vector<vk::raii::Semaphore> m_render_finished_semaphores;

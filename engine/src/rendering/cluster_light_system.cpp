@@ -271,8 +271,6 @@ void ClusterLightSystem::dispatch(VeFrameInfo& frame_info, vk::Extent2D screen_e
 	cmd.dispatch(groups_xy, 1, CLUSTER_Z_SLICES);
 
 	// Make compute writes available before the semaphore signal.
-	// Cross-queue visibility (fragment shader reads) is handled by the
-	// semaphore wait in submitAndPresent.
 	vk::MemoryBarrier2 compute_to_frag{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderWrite,

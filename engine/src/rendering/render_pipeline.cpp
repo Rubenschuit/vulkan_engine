@@ -538,7 +538,7 @@ VeFrameInfo RenderPipeline::buildFrameInfo(VeScene& scene,
 	uint32_t current_frame = m_ve_renderer.getCurrentFrame();
 	auto& command_buffer = m_ve_renderer.getCurrentCommandBuffer();
 	auto& compute_command_buffer = m_ve_renderer.getCurrentComputeCommandBuffer();
-	auto& compute2_command_buffer = m_ve_renderer.getCurrentCompute2CommandBuffer();
+	auto& depth_compute_command_buffer = m_ve_renderer.getDepthComputeCommandBuffer();
 
 	vk::raii::DescriptorSet& shadow_desc_set = m_shadow_render_system->getShadowDescriptorSet(current_frame);
 
@@ -553,7 +553,7 @@ VeFrameInfo RenderPipeline::buildFrameInfo(VeScene& scene,
 	VeFrameInfo fi = {
 		.command_buffer = &command_buffer,
 		.compute_command_buffer = compute_command_buffer,
-		.compute2_command_buffer = &compute2_command_buffer,
+		.depth_compute_command_buffer = &depth_compute_command_buffer,
 		.global_descriptor_set = m_active_backend->getGlobalDescriptorSet(current_frame),
 		.cubemap_descriptor_set = m_skybox_render_system->getCubemapDescriptorSet(),
 		.shadow_descriptor_set = shadow_desc_set,
@@ -680,6 +680,7 @@ void RenderPipeline::dispatchCompute(VeFrameInfo& fi) {
 
 void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_state) {
 	ZoneScopedN("Render Frame");
+	m_ve_renderer.markSceneFrame();
 	auto& command_buffer = fi.cmd();
 	[[maybe_unused]] auto tracy_gfx = m_ve_renderer.getTracyGraphicsCtx();
 	[[maybe_unused]] auto tracy_compute = m_ve_renderer.getTracyComputeCtx();
@@ -765,65 +766,65 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		command_buffer.pipelineBarrier2(dep);
 
 		if (any_async_consumer) {
-			m_ve_renderer.submitGraphicsPhase1();
+			m_ve_renderer.submitPreSwapGraphics(/*depth_compute_follows=*/true);
 
-			auto& compute2_cb = *fi.compute2_command_buffer;
+			auto& depth_compute_cb = *fi.depth_compute_command_buffer;
 
 			if (gtao_active) {
-				ScopedDebugLabel label(compute2_cb, "GTAO", {0.2f, 0.7f, 0.7f, 1.0f});
+				ScopedDebugLabel label(depth_compute_cb, "GTAO", {0.2f, 0.7f, 0.7f, 1.0f});
 				ZoneScopedN("GTAO");
-				TracyVkZone(tracy_compute, *compute2_cb, "GTAO (async)");
+				TracyVkZone(tracy_compute, *depth_compute_cb, "GTAO (async)");
 				profiler.beginCpuTimer(ProfileTimer::GTAO);
-				profiler.beginGpuTimer(compute2_cb, ProfileTimer::GTAO);
-				m_gtao_system->dispatch(fi, compute2_cb);
-				profiler.endGpuTimer(compute2_cb, ProfileTimer::GTAO);
+				profiler.beginGpuTimer(depth_compute_cb, ProfileTimer::GTAO);
+				m_gtao_system->dispatch(fi, depth_compute_cb);
+				profiler.endGpuTimer(depth_compute_cb, ProfileTimer::GTAO);
 				profiler.endCpuTimer(ProfileTimer::GTAO);
 				fi.ao_descriptor_set = &m_gtao_system->getOutputDescriptorSet(fi.current_frame);
 			}
 
 			if (hiz_active) {
-				ScopedDebugLabel label(compute2_cb, "Hi-Z", {0.4f, 0.4f, 0.8f, 1.0f});
+				ScopedDebugLabel label(depth_compute_cb, "Hi-Z", {0.4f, 0.4f, 0.8f, 1.0f});
 				ZoneScopedN("Hi-Z");
-				TracyVkZone(tracy_compute, *compute2_cb, "Hi-Z (async)");
+				TracyVkZone(tracy_compute, *depth_compute_cb, "Hi-Z (async)");
 				profiler.beginCpuTimer(ProfileTimer::HIZ);
-				profiler.beginGpuTimer(compute2_cb, ProfileTimer::HIZ);
-				m_hiz_system->generate(compute2_cb, fi.current_frame);
-				profiler.endGpuTimer(compute2_cb, ProfileTimer::HIZ);
+				profiler.beginGpuTimer(depth_compute_cb, ProfileTimer::HIZ);
+				m_hiz_system->generate(depth_compute_cb, fi.current_frame);
+				profiler.endGpuTimer(depth_compute_cb, ProfileTimer::HIZ);
 				profiler.endCpuTimer(ProfileTimer::HIZ);
 			}
 
-			auto& gfx2_cb = m_ve_renderer.getCurrentGraphics2CommandBuffer();
-			fi.command_buffer = &gfx2_cb;
+			auto& shadow_cb = m_ve_renderer.getShadowGraphicsCommandBuffer();
+			fi.command_buffer = &shadow_cb;
 
 			if (shadows_enabled) {
-				ScopedDebugLabel label(gfx2_cb, "Shadow Maps", {0.5f, 0.2f, 0.2f, 1.0f});
+				ScopedDebugLabel label(shadow_cb, "Shadow Maps", {0.5f, 0.2f, 0.2f, 1.0f});
 				ZoneScopedN("Shadow Maps");
-				TracyVkZone(tracy_gfx, *gfx2_cb, "Shadow Maps");
+				TracyVkZone(tracy_gfx, *shadow_cb, "Shadow Maps");
 				profiler.beginCpuTimer(ProfileTimer::SHADOW_MAPS);
-				profiler.beginGpuTimer(gfx2_cb, ProfileTimer::SHADOW_MAPS);
+				profiler.beginGpuTimer(shadow_cb, ProfileTimer::SHADOW_MAPS);
 				m_active_backend->renderShadows(fi, *m_shadow_render_system,
 					m_scene_resources->getMegaBuffer(), gpu_scene);
-				profiler.endGpuTimer(gfx2_cb, ProfileTimer::SHADOW_MAPS);
+				profiler.endGpuTimer(shadow_cb, ProfileTimer::SHADOW_MAPS);
 				profiler.endCpuTimer(ProfileTimer::SHADOW_MAPS);
 			}
 
 			if (fi.shadow_mask_active) {
-				ScopedDebugLabel label(gfx2_cb, "Shadow Mask", {0.5f, 0.3f, 0.5f, 1.0f});
+				ScopedDebugLabel label(shadow_cb, "Shadow Mask", {0.5f, 0.3f, 0.5f, 1.0f});
 				ZoneScopedN("Shadow Mask");
-				TracyVkZone(tracy_gfx, *gfx2_cb, "Shadow Mask");
+				TracyVkZone(tracy_gfx, *shadow_cb, "Shadow Mask");
 				profiler.beginCpuTimer(ProfileTimer::SHADOW_MASK);
-				profiler.beginGpuTimer(gfx2_cb, ProfileTimer::SHADOW_MASK);
+				profiler.beginGpuTimer(shadow_cb, ProfileTimer::SHADOW_MASK);
 				m_shadow_mask_system->dispatch(fi);
-				profiler.endGpuTimer(gfx2_cb, ProfileTimer::SHADOW_MASK);
+				profiler.endGpuTimer(shadow_cb, ProfileTimer::SHADOW_MASK);
 				profiler.endCpuTimer(ProfileTimer::SHADOW_MASK);
 				fi.shadow_mask_descriptor_set = &m_shadow_mask_system->getOutputDescriptorSet(fi.current_frame);
 			}
 
-			m_ve_renderer.submitShadowPhase(gfx2_cb);
-			m_ve_renderer.submitComputePhase2(compute2_cb);
+			m_ve_renderer.submitShadowGraphics(shadow_cb);
+			m_ve_renderer.submitDepthCompute(depth_compute_cb);
 
-			auto& gfx3_cb = m_ve_renderer.getCurrentGraphics3CommandBuffer();
-			fi.command_buffer = &gfx3_cb;
+			auto& swap_cb = m_ve_renderer.getSwapGraphicsCommandBuffer();
+			fi.command_buffer = &swap_cb;
 
 			vk::ImageMemoryBarrier2 depth_to_attach{
 				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
@@ -842,7 +843,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
 			};
 			vk::DependencyInfo dep2{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_attach};
-			gfx3_cb.pipelineBarrier2(dep2);
+			swap_cb.pipelineBarrier2(dep2);
 		} else {
 			if (fi.shadow_mask_active) {
 				ScopedDebugLabel label(command_buffer, "Shadow Mask", {0.5f, 0.3f, 0.5f, 1.0f});
@@ -878,7 +879,19 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 				profiler.endGpuTimer(command_buffer, ProfileTimer::HIZ);
 				profiler.endCpuTimer(ProfileTimer::HIZ);
 			}
+		}
+	}
 
+	if (!any_async_consumer) {
+		vk::raii::CommandBuffer* depth_barrier_target = &command_buffer;
+		if (m_settings.early_submit) {
+			m_ve_renderer.submitPreSwapGraphics(/*depth_compute_follows=*/false);
+			auto& swap_cb = m_ve_renderer.getSwapGraphicsCommandBuffer();
+			fi.command_buffer = &swap_cb;
+			depth_barrier_target = &swap_cb;
+		}
+
+		if (any_depth_consumer) {
 			vk::ImageMemoryBarrier2 depth_to_attach{
 				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 				.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
@@ -895,8 +908,8 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 				.image = m_ve_renderer.getResolvedDepthImage(),
 				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
 			};
-			vk::DependencyInfo dep2{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_attach};
-			command_buffer.pipelineBarrier2(dep2);
+			vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_attach};
+			depth_barrier_target->pipelineBarrier2(dep);
 		}
 	}
 
@@ -998,7 +1011,11 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		TracyVkZone(tracy_gfx, *active_cb, "Post Process");
 		profiler.beginCpuTimer(ProfileTimer::POST_PROCESS);
 		profiler.beginGpuTimer(active_cb, ProfileTimer::POST_PROCESS);
-		m_ve_renderer.beginPostProcessRender(active_cb, editor_mode);
+		if (!m_ve_renderer.beginPostProcessRender(active_cb, editor_mode)) {
+			profiler.endGpuTimer(active_cb, ProfileTimer::POST_PROCESS);
+			profiler.endCpuTimer(ProfileTimer::POST_PROCESS);
+			return;
+		}
 		m_post_process_system->render(active_cb, fi.post_process_push);
 		if (outline_active && m_outline_system->hasOutline())
 			m_outline_system->composite(active_cb, fi.current_frame,

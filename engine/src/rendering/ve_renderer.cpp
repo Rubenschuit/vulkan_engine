@@ -86,15 +86,15 @@ vk::raii::CommandBuffer& VeRenderer::getCurrentComputeCommandBuffer() {
 	assert(m_is_frame_started && "Frame is not in progress");
 	return m_command_manager.getComputePrimary(m_ve_swap_chain->getCurrentFrame());
 }
-vk::raii::CommandBuffer& VeRenderer::getCurrentGraphics2CommandBuffer() {
+vk::raii::CommandBuffer& VeRenderer::getShadowGraphicsCommandBuffer() {
 	assert(m_is_frame_started && "Frame is not in progress");
 	return m_command_manager.getGraphics2Primary(m_ve_swap_chain->getCurrentFrame());
 }
-vk::raii::CommandBuffer& VeRenderer::getCurrentGraphics3CommandBuffer() {
+vk::raii::CommandBuffer& VeRenderer::getSwapGraphicsCommandBuffer() {
 	assert(m_is_frame_started && "Frame is not in progress");
 	return m_command_manager.getGraphics3Primary(m_ve_swap_chain->getCurrentFrame());
 }
-vk::raii::CommandBuffer& VeRenderer::getCurrentCompute2CommandBuffer() {
+vk::raii::CommandBuffer& VeRenderer::getDepthComputeCommandBuffer() {
 	assert(m_is_frame_started && "Frame is not in progress");
 	return m_command_manager.getCompute2Primary(m_ve_swap_chain->getCurrentFrame());
 }
@@ -132,13 +132,15 @@ void VeRenderer::recreateSwapChain() {
 	m_event_bus.emitImmediate(SwapChainRecreatedEvent{});
 }
 
-// Begin a frame; returns true when a frame is started and command buffer can be used
-// Returns false if swap chain is out of date
-// throws runtime error if acquire fails for other reasons
+// Acquire is deferred to ensureImageAcquired() so phase 1 can submit before blocking.
 bool VeRenderer::beginFrame() {
 	assert(!m_is_frame_started && "Can't call beginFrame while already in progress");
 
-	// Wait until image is available (measure fence wait time)
+	m_image_acquired_this_frame = false;
+	m_frame_aborted = false;
+	m_pre_swap_submitted_this_frame = false;
+	m_scene_frame = false;
+
 	auto fence_start = std::chrono::steady_clock::now();
 	{
 		ZoneScopedN("Fence Wait");
@@ -148,10 +150,44 @@ bool VeRenderer::beginFrame() {
 	float fence_ms = std::chrono::duration<float, std::chrono::milliseconds::period>(fence_end - fence_start).count();
 	m_profiler.recordFenceWait(fence_ms);
 
-	// Cleanup
 	m_resource_manager.tickFrame();
 
-	// Acquire an image from the swap chain
+	m_is_frame_started = true;
+	m_ve_swap_chain->beginTimelineFrame();
+
+	uint32_t frame_index = m_ve_swap_chain->getCurrentFrame();
+	m_profiler.beginFrame(frame_index);
+	m_command_manager.resetPrimaries(frame_index);
+	m_thread_pool->resetFrame(frame_index);
+	m_command_manager.resetThreadFrame(m_command_manager.getMainThreadSlot(), frame_index);
+
+	vk::CommandBufferBeginInfo info{
+		.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit
+	};
+	auto& command_buffer = getCurrentCommandBuffer();
+	command_buffer.begin(info);
+	auto& compute_command_buffer = getCurrentComputeCommandBuffer();
+	compute_command_buffer.begin(info);
+	getShadowGraphicsCommandBuffer().begin(info);
+	getSwapGraphicsCommandBuffer().begin(info);
+	getDepthComputeCommandBuffer().begin(info);
+	auto& ui_command_buffer = getCurrentUICommandBuffer();
+	ui_command_buffer.begin(info);
+
+	TracyVkCollect(m_tracy_graphics_ctx, *command_buffer);
+	TracyVkCollect(m_tracy_compute_ctx, *compute_command_buffer);
+
+	m_profiler.resetAllQueries(command_buffer, compute_command_buffer, frame_index);
+	m_profiler.beginGpuTimer(command_buffer, ProfileTimer::FRAME_TOTAL);
+
+	return true;
+}
+
+// Sets m_frame_aborted on out-of-date; returns false.
+bool VeRenderer::ensureImageAcquired() {
+	if (m_image_acquired_this_frame)
+		return true;
+
 	vk::Result result;
 	auto acquire_start = std::chrono::steady_clock::now();
 	{
@@ -161,67 +197,37 @@ bool VeRenderer::beginFrame() {
 	auto acquire_end = std::chrono::steady_clock::now();
 	float acquire_ms = std::chrono::duration<float, std::chrono::milliseconds::period>(acquire_end - acquire_start).count();
 	m_profiler.recordAcquireWait(acquire_ms);
+
 	if (result == vk::Result::eErrorOutOfDateKHR) {
-		VE_LOGD("Result of acquireNextImage is eErrorOutOfDateKHR, setting flag.");
+		VE_LOGD("acquireNextImage eErrorOutOfDateKHR; aborting frame.");
 		m_swap_chain_needs_recreation = true;
+		m_frame_aborted = true;
 		return false;
 	}
 	if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) {
 		throw std::runtime_error("failed to acquire swap chain image!");
 	}
 	if (result == vk::Result::eSuboptimalKHR) {
-		VE_LOGD("Result of acquireNextImage is eSuboptimalKHR");
+		VE_LOGD("acquireNextImage eSuboptimalKHR");
 	}
 
-	// frame acquired
-	m_is_frame_started = true;
-	m_ve_swap_chain->resetCurrentFence();
-	m_ve_swap_chain->beginTimelineFrame();
-
-	// Begin command buffer for recording commands
-	auto& command_buffer = getCurrentCommandBuffer();
-	uint32_t frame_index = m_ve_swap_chain->getCurrentFrame();
-
-	// Resolve GPU timing results from the previous use of this frame slot
-	m_profiler.beginFrame(frame_index);
-
-	m_command_manager.resetPrimaries(frame_index);
-	m_thread_pool->resetFrame(frame_index);
-	m_command_manager.resetThreadFrame(m_command_manager.getMainThreadSlot(), frame_index);
-	vk::CommandBufferBeginInfo info{
-		.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit
-	};
-	command_buffer.begin(info);
-
-	// Also begin compute, phase-2 CBs, and UI command buffers
-	auto& compute_command_buffer = getCurrentComputeCommandBuffer();
-	compute_command_buffer.begin(info);
-
-	getCurrentGraphics2CommandBuffer().begin(info);
-	getCurrentGraphics3CommandBuffer().begin(info);
-	getCurrentCompute2CommandBuffer().begin(info);
-
-	auto& ui_command_buffer = getCurrentUICommandBuffer();
-	ui_command_buffer.begin(info);
-
-	TracyVkCollect(m_tracy_graphics_ctx, *command_buffer);
-	TracyVkCollect(m_tracy_compute_ctx, *compute_command_buffer);
-
-	m_profiler.resetAllQueries(command_buffer, compute_command_buffer, frame_index);
-
-	// Write FRAME_TOTAL start timestamp on graphics queue
-	m_profiler.beginGpuTimer(command_buffer, ProfileTimer::FRAME_TOTAL);
-
+	m_image_acquired_this_frame = true;
 	return true;
 }
 
-// End scene + UI command buffers, submit both, present, and advance the frame.
 void VeRenderer::endFrame() {
 	assert(m_is_frame_started && "Can't call endFrame while frame is not in progress");
 
-	auto& ui_cb = getCurrentUICommandBuffer();
+	// Abort path: wait for phase 1, skip submit + present.
+	// Fence is not reset on this path.
+	if (m_frame_aborted) {
+		m_ve_device.getDevice().waitIdle();
+		m_is_frame_started = false;
+		FrameMark;
+		return;
+	}
 
-	// Finalize UI CB: transition swapchain to present, then end
+	auto& ui_cb = getCurrentUICommandBuffer();
 	transitionToPresent(ui_cb);
 	endDebugLabel(ui_cb);
 	ui_cb.end();
@@ -229,37 +235,42 @@ void VeRenderer::endFrame() {
 	vk::Result result;
 	{
 		ZoneScopedN("Submit + Present");
-		if (m_split_active) {
-			// Split path: CB1 (depth) + CB2 (shadows) already submitted. End CB3 and present.
-			auto& gfx3_cb = getCurrentGraphics3CommandBuffer();
-			m_profiler.endGpuTimer(gfx3_cb, ProfileTimer::FRAME_TOTAL);
-			gfx3_cb.end();
-			result = m_ve_swap_chain->submitGraphicsPhase2AndPresent(*gfx3_cb, *ui_cb, &m_current_image_index);
-		} else {
-			// Non-split path: end graphics CB 1 and present normally.
+		if (m_pre_swap_submitted_this_frame) {
+			// Split path: pre_swap already submitted, finalize swap_graphics.
+			auto& swap_cb = getSwapGraphicsCommandBuffer();
+			m_profiler.endGpuTimer(swap_cb, ProfileTimer::FRAME_TOTAL);
+			swap_cb.end();
+			m_ve_swap_chain->resetCurrentFence();
+			result = m_ve_swap_chain->submitSwapGraphicsAndPresent(*swap_cb, *ui_cb, &m_current_image_index);
+		} else if (m_scene_frame) {
+			// Single-submit path: everything is in command_buffer.
 			auto& scene_cb = getCurrentCommandBuffer();
 			m_profiler.endGpuTimer(scene_cb, ProfileTimer::FRAME_TOTAL);
 			scene_cb.end();
-			result = m_ve_swap_chain->submitAndPresent(*scene_cb, *ui_cb, &m_current_image_index);
+			m_ve_swap_chain->resetCurrentFence();
+			result = m_ve_swap_chain->submitSceneAndPresent(*scene_cb, *ui_cb, &m_current_image_index);
+		} else {
+			// No-scene path: only UI was recorded.
+			assert(m_image_acquired_this_frame && "no-scene endFrame without acquired image");
+			m_ve_swap_chain->resetCurrentFence();
+			result = m_ve_swap_chain->submitUIOnly(*ui_cb, &m_current_image_index);
 		}
 	}
 
 	if (result == vk::Result::eErrorOutOfDateKHR) {
-		VE_LOGD("Result of present is eErrorOutOfDateKHR, setting flag.");
+		VE_LOGD("present eErrorOutOfDateKHR");
 		m_swap_chain_needs_recreation = true;
 	}
 	else if (result == vk::Result::eSuboptimalKHR) {
-		VE_LOGD("Result of present is eSuboptimalKHR, setting flag.");
+		VE_LOGD("present eSuboptimalKHR");
 		m_swap_chain_needs_recreation = true;
 	}
 	if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR && result != vk::Result::eErrorOutOfDateKHR) {
 		throw std::runtime_error("failed to present swap chain image!");
 	}
-	// Advance to the next frame
 	if (result == vk::Result::eSuccess)
 		m_ve_swap_chain->advanceFrame();
 	m_is_frame_started = false;
-	m_split_active = false;
 	FrameMark;
 }
 
@@ -363,7 +374,7 @@ void VeRenderer::endDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
 void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer,
 	bool load_depth, bool secondary_contents, bool resolve_msaa) {
 	assert(m_is_frame_started && "Can't call beginRender while frame is not in progress");
-	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer() || &command_buffer == &getCurrentGraphics3CommandBuffer())
+	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getShadowGraphicsCommandBuffer() || &command_buffer == &getSwapGraphicsCommandBuffer())
 		&& "Can't begin render on command buffer from a different frame");
 
 	beginDebugLabel(command_buffer, "Scene Render", {0.2f, 0.8f, 0.2f, 1.0f});
@@ -451,7 +462,7 @@ void VeRenderer::beginSceneRender(vk::raii::CommandBuffer& command_buffer,
 
 void VeRenderer::endSceneRender(vk::raii::CommandBuffer& command_buffer) {
 	assert(m_is_frame_started && "Can't call endRender while frame is not in progress");
-	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer() || &command_buffer == &getCurrentGraphics3CommandBuffer())
+	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getShadowGraphicsCommandBuffer() || &command_buffer == &getSwapGraphicsCommandBuffer())
 		&& "Can't end render on command buffer from a different frame");
 
 	command_buffer.endRendering();
@@ -672,9 +683,9 @@ void VeRenderer::endWboitComposite(vk::raii::CommandBuffer& command_buffer) {
 	endDebugLabel(command_buffer);
 }
 
-void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode) {
+bool VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode) {
 	assert(m_is_frame_started && "Can't call beginPostProcessRender while frame is not in progress");
-	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer() || &command_buffer == &getCurrentGraphics3CommandBuffer())
+	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getShadowGraphicsCommandBuffer() || &command_buffer == &getSwapGraphicsCommandBuffer())
 		&& "Can't begin post-process on command buffer from a different frame");
 
 	beginDebugLabel(command_buffer, "Post Process", {0.8f, 0.2f, 0.8f, 1.0f});
@@ -716,8 +727,13 @@ void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer,
 			.minDepth = 0.0f, .maxDepth = 1.0f
 		});
 		command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = vp_extent});
+		return true;
 	} else {
-		// Fullscreen mode: render to swapchain (current behavior)
+		// Fullscreen mode: render to swapchain. Acquire the image now.
+		if (!ensureImageAcquired()) {
+			endDebugLabel(command_buffer);
+			return false;
+		}
 		auto extent = m_ve_swap_chain->getSwapChainExtent();
 
 		m_ve_swap_chain->transitionImageLayout(
@@ -755,12 +771,13 @@ void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer,
 			.minDepth = 0.0f, .maxDepth = 1.0f
 		});
 		command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = extent});
+		return true;
 	}
 }
 
 void VeRenderer::endPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode) {
 	assert(m_is_frame_started && "Can't call endPostProcessRender while frame is not in progress");
-	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getCurrentGraphics2CommandBuffer() || &command_buffer == &getCurrentGraphics3CommandBuffer())
+	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getShadowGraphicsCommandBuffer() || &command_buffer == &getSwapGraphicsCommandBuffer())
 		&& "Can't end post-process on command buffer from a different frame");
 
 	command_buffer.endRendering();
@@ -780,15 +797,18 @@ void VeRenderer::endPostProcessRender(vk::raii::CommandBuffer& command_buffer, b
 	endDebugLabel(command_buffer);
 }
 
-void VeRenderer::beginUIRecording(bool editor_mode) {
+bool VeRenderer::beginUIRecording(bool editor_mode) {
 	assert(m_is_frame_started && "Can't call beginUIRecording while frame is not in progress");
+
+	// UI always references m_current_image_index
+	if (!ensureImageAcquired())
+		return false;
 
 	auto& ui_cb = getCurrentUICommandBuffer();
 	beginDebugLabel(ui_cb, "UI", {0.9f, 0.9f, 0.2f, 1.0f});
 
 	if (editor_mode) {
-		// Editor mode: scene rendered to viewport image, swapchain is untouched.
-		// Transition swapchain from eUndefined to eColorAttachmentOptimal for ImGui.
+		// Scene was rendered to viewport image; swapchain has not been touched yet.
 		m_ve_swap_chain->transitionImageLayout(
 			ui_cb,
 			m_current_image_index,
@@ -800,8 +820,7 @@ void VeRenderer::beginUIRecording(bool editor_mode) {
 			vk::PipelineStageFlagBits2::eColorAttachmentOutput
 		);
 	} else {
-		// Fullscreen mode: scene CB wrote to swapchain via post-process.
-		// Memory barrier ensures scene writes are visible before UI renders on top.
+		// Post-process wrote to swapchain; barrier so UI sees those writes.
 		vk::MemoryBarrier2 barrier{
 			.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
 			.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
@@ -811,6 +830,7 @@ void VeRenderer::beginUIRecording(bool editor_mode) {
 		vk::DependencyInfo dep{.memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
 		ui_cb.pipelineBarrier2(dep);
 	}
+	return true;
 }
 
 void VeRenderer::recreateWboitImages() {
@@ -996,36 +1016,32 @@ void VeRenderer::submitCompute(vk::raii::CommandBuffer& compute_command_buffer) 
 	m_profiler.endGpuTimer(compute_command_buffer, ProfileTimer::COMPUTE_TOTAL);
 	compute_command_buffer.end();
 
-	m_ve_swap_chain->submitComputeWork(*compute_command_buffer);
+	m_ve_swap_chain->submitCompute(*compute_command_buffer);
 }
 
-void VeRenderer::submitGraphicsPhase1() {
-	assert(m_is_frame_started && "Can't call submitGraphicsPhase1 while frame is not in progress");
+void VeRenderer::submitPreSwapGraphics(bool depth_compute_follows) {
+	assert(m_is_frame_started && "Frame is not in progress");
 
-	auto& gfx1_cb = getCurrentCommandBuffer();
-	gfx1_cb.end();
+	auto& pre_swap_cb = getCurrentCommandBuffer();
+	pre_swap_cb.end();
 
-	m_ve_swap_chain->activateSplitTimeline();
-	m_ve_swap_chain->submitGraphicsPhase1(*gfx1_cb);
-	m_split_active = true;
+	m_ve_swap_chain->prepareSubmitValues(depth_compute_follows);
+	m_ve_swap_chain->submitPreSwapGraphics(*pre_swap_cb);
+	m_pre_swap_submitted_this_frame = true;
 }
 
-void VeRenderer::submitShadowPhase(vk::raii::CommandBuffer& shadow_cb) {
-	assert(m_is_frame_started && "Can't call submitShadowPhase while frame is not in progress");
+void VeRenderer::submitShadowGraphics(vk::raii::CommandBuffer& shadow_cb) {
+	assert(m_is_frame_started && "Frame is not in progress");
 
 	shadow_cb.end();
-	m_ve_swap_chain->submitShadowPhase(*shadow_cb);
+	m_ve_swap_chain->submitShadowGraphics(*shadow_cb);
 }
 
-void VeRenderer::submitComputePhase2(vk::raii::CommandBuffer& compute2_cb) {
-	assert(m_is_frame_started && "Can't call submitComputePhase2 while frame is not in progress");
+void VeRenderer::submitDepthCompute(vk::raii::CommandBuffer& depth_compute_cb) {
+	assert(m_is_frame_started && "Frame is not in progress");
 
-	compute2_cb.end();
-	m_ve_swap_chain->submitComputePhase2(*compute2_cb);
-}
-
-void VeRenderer::setSplitActive(bool active) {
-	m_split_active = active;
+	depth_compute_cb.end();
+	m_ve_swap_chain->submitDepthCompute(*depth_compute_cb);
 }
 
 // --- App-facing wrappers ---
