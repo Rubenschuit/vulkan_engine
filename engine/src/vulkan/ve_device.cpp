@@ -100,6 +100,16 @@ void VeDevice::createInstance() {
 			.apiVersion         = vk::ApiVersion13
 	};
 
+	// MoltenVK and async compute: by default MoltenVK exposes 4 queue families all
+	// flagged Graphics+Compute+Transfer. Setting MVK_CONFIG_SPECIALIZED_QUEUE_FAMILIES=1
+	// makes MoltenVK expose one family as compute-only, in theory allowing for async
+	// compute. A quick test showed that setting this and enabling the async compute path
+	// slightly regressed performance.
+	//
+	// #ifdef __APPLE__
+	// 	setenv("MVK_CONFIG_SPECIALIZED_QUEUE_FAMILIES", "1", 0);
+	// #endif
+
 	// Get the required layers
 	std::vector<char const*> required_layers;
 	if (enable_validation_layers) {

@@ -70,8 +70,9 @@ vk::Result VeSwapChain::acquireNextImage(uint32_t* image_index) {
 }
 
 void VeSwapChain::submitCompute(vk::CommandBuffer command_buffer) {
-	// Wait for the previous frame's compute submit to finish.
-	uint64_t wait_value = m_compute_signal_value - 1;
+	// Wait on previous compute submit: particle compute reads from a ping-pong slot
+	uint64_t wait_value = m_compute_signal_value;      // previous successful compute signal (0 if first)
+	m_compute_signal_value = ++m_frame_timeline_value; // value this submit will signal
 	bool has_previous = wait_value > 0;
 	vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eComputeShader;
 
@@ -507,10 +508,6 @@ void VeSwapChain::advanceFrame() {
 	m_current_frame = (m_current_frame + 1) % ve::MAX_FRAMES_IN_FLIGHT;
 }
 
-void VeSwapChain::beginTimelineFrame() {
-	m_compute_signal_value = ++m_frame_timeline_value;
-}
-
 void VeSwapChain::prepareSubmitValues(bool depth_compute_follows) {
 	m_pre_swap_signal_value = ++m_frame_timeline_value;
 	if (depth_compute_follows) {
@@ -522,28 +519,23 @@ void VeSwapChain::prepareSubmitValues(bool depth_compute_follows) {
 }
 
 void VeSwapChain::submitPreSwapGraphics(vk::CommandBuffer cb) {
-	// Waits on compute + image_available; signals pre_swap.
-	vk::PipelineStageFlags wait_stages[2] = {
-		vk::PipelineStageFlagBits::eColorAttachmentOutput,
-		vk::PipelineStageFlagBits::eDrawIndirect
-			| vk::PipelineStageFlagBits::eVertexInput
-			| vk::PipelineStageFlagBits::eFragmentShader,
-	};
+	// Waits on compute timeline only; signals pre_swap.
+	vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eDrawIndirect
+		| vk::PipelineStageFlagBits::eVertexInput
+		| vk::PipelineStageFlagBits::eFragmentShader;
 
-	std::array<uint64_t, 2> wait_values{ uint64_t{0}, m_compute_signal_value };
 	vk::TimelineSemaphoreSubmitInfo timeline_info{
-		.waitSemaphoreValueCount = static_cast<uint32_t>(wait_values.size()),
-		.pWaitSemaphoreValues = wait_values.data(),
+		.waitSemaphoreValueCount = 1,
+		.pWaitSemaphoreValues = &m_compute_signal_value,
 		.signalSemaphoreValueCount = 1,
 		.pSignalSemaphoreValues = &m_pre_swap_signal_value,
 	};
 
-	std::array<vk::Semaphore, 2> wait_sems{ *m_image_available_semaphores[m_current_frame], *m_frame_timeline };
 	vk::SubmitInfo submit_info{
 		.pNext = &timeline_info,
-		.waitSemaphoreCount = static_cast<uint32_t>(wait_sems.size()),
-		.pWaitSemaphores = wait_sems.data(),
-		.pWaitDstStageMask = wait_stages,
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &*m_frame_timeline,
+		.pWaitDstStageMask = &wait_stage,
 		.commandBufferCount = 1,
 		.pCommandBuffers = &cb,
 		.signalSemaphoreCount = 1,
@@ -554,7 +546,7 @@ void VeSwapChain::submitPreSwapGraphics(vk::CommandBuffer cb) {
 }
 
 void VeSwapChain::submitShadowGraphics(vk::CommandBuffer cb) {
-	// Same-queue ordering: runs after pre_swap_graphics, before swap_graphics.
+	// No semaphore: shadow_graphics' writes are consumed by swap_graphics on the same queue
 	vk::SubmitInfo submit_info{
 		.commandBufferCount = 1,
 		.pCommandBuffers = &cb,
@@ -589,27 +581,32 @@ void VeSwapChain::submitDepthCompute(vk::CommandBuffer cb) {
 
 vk::Result VeSwapChain::submitSwapGraphicsAndPresent(
 	vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* image_index) {
-	// Waits on the last pre-swap timeline value
-	vk::PipelineStageFlags wait_stage =
+	// Waits on image_available (at color-attachment-output) + frame_timeline (at swap_wait_value).
+	// image_available is signaled by acquireNextImage which has already run by this point
+	vk::PipelineStageFlags wait_stages[2] = {
+		vk::PipelineStageFlagBits::eColorAttachmentOutput,
 		vk::PipelineStageFlagBits::eDrawIndirect
-		| vk::PipelineStageFlagBits::eVertexInput
-		| vk::PipelineStageFlagBits::eFragmentShader;
+			| vk::PipelineStageFlagBits::eVertexInput
+			| vk::PipelineStageFlagBits::eEarlyFragmentTests,
+	};
 
+	std::array<uint64_t, 2> wait_values{ uint64_t{0}, m_swap_wait_value };
 	uint64_t signal_value{0};
 	vk::TimelineSemaphoreSubmitInfo timeline_info{
-		.waitSemaphoreValueCount = 1,
-		.pWaitSemaphoreValues = &m_swap_wait_value,
+		.waitSemaphoreValueCount = static_cast<uint32_t>(wait_values.size()),
+		.pWaitSemaphoreValues = wait_values.data(),
 		.signalSemaphoreValueCount = 1,
 		.pSignalSemaphoreValues = &signal_value,
 	};
 
+	std::array<vk::Semaphore, 2> wait_sems{ *m_image_available_semaphores[m_current_frame], *m_frame_timeline };
 	vk::Semaphore render_finished = *m_render_finished_semaphores[*image_index];
 	std::array<vk::CommandBuffer, 2> cbs = {scene_cb, ui_cb};
 	vk::SubmitInfo submit_info{
 		.pNext = &timeline_info,
-		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = &*m_frame_timeline,
-		.pWaitDstStageMask = &wait_stage,
+		.waitSemaphoreCount = static_cast<uint32_t>(wait_sems.size()),
+		.pWaitSemaphores = wait_sems.data(),
+		.pWaitDstStageMask = wait_stages,
 		.commandBufferCount = static_cast<uint32_t>(cbs.size()),
 		.pCommandBuffers = cbs.data(),
 		.signalSemaphoreCount = 1,

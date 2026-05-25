@@ -153,8 +153,6 @@ bool VeRenderer::beginFrame() {
 	m_resource_manager.tickFrame();
 
 	m_is_frame_started = true;
-	m_ve_swap_chain->beginTimelineFrame();
-
 	uint32_t frame_index = m_ve_swap_chain->getCurrentFrame();
 	m_profiler.beginFrame(frame_index);
 	m_command_manager.resetPrimaries(frame_index);

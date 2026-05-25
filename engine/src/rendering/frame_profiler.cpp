@@ -103,7 +103,7 @@ void FrameProfiler::beginGpuTimer(vk::raii::CommandBuffer& cmd, ProfileTimer tim
 	if (!m_gpu_enabled && !isTotalTimer(timer))
 		return;
 	uint32_t idx = queryIndex(m_current_frame, timer, false);
-	cmd.writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, *m_query_pool, idx);
+	cmd.writeTimestamp(vk::PipelineStageFlagBits::eComputeShader, *m_query_pool, idx);
 	m_gpu_active[m_current_frame][static_cast<uint32_t>(timer)] = true;
 }
 

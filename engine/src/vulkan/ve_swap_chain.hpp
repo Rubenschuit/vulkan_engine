@@ -102,7 +102,6 @@ public:
 	void waitForCurrentFence();
 	void resetCurrentFence();
 	void advanceFrame();
-	void beginTimelineFrame();
 	void transitionImageLayout(
 		vk::raii::CommandBuffer& command_buffer,
 		uint32_t image_index,
