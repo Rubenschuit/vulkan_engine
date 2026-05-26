@@ -465,16 +465,15 @@ public:
 	bool isActive() const { return m_active; }
 	void setActive(bool v) { m_active = v; }
 
-	EmitterParams params{};
+	EmitterParams params{}; // uploaded to gpu
 
 	// Optional sprite/atlas texture overwrite.
 	ResourceHandle<VeTexture> texture;
 
-	// CPU-driven emission. Either or both can be active simultaneously.
-	float rate = 0.0f;          // particles/sec; 0 = no rate-based emission
-	uint32_t burst_count = 0;   // particles per burst trigger (0 = no burst)
-	float burst_period = 0.0f;  // seconds between bursts; 0 = manual trigger only
-
+	// CPU-driven emission params
+	float rate = 0.0f;          // particles/sec
+	uint32_t burst_count = 0;   // particles per burst trigger
+	float burst_period = 0.0f;  // seconds between bursts
 	float scale = 1.0f;
 
 	// System internal accumulators
