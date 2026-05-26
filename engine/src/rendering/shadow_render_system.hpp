@@ -174,7 +174,7 @@ private:
 		const PbrMegaBuffer& mega_buffer,
 		bool include_skinned = false) const;
 	void populateSkinnedShadowDrawablesGpuPath(VeFrameInfo& frame_info);
-	void renderSkinnedShadowsForLayer(VeFrameInfo& frame_info, uint32_t layer) const;
+	void renderSkinnedShadowsForLayer(VeFrameInfo& frame_info, const PbrMegaBuffer& mega_buffer, uint32_t layer) const;
 
 	void growShadowInstanceBuffers(uint32_t new_capacity);
 

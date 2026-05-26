@@ -15,6 +15,7 @@ namespace ve {
 	class VePipeline;
 	class SkinningPrePass;
 	class EventBus;
+	class PbrMegaBuffer;
 }
 
 namespace ve {
@@ -33,7 +34,7 @@ public:
 	SkinnedPointsRenderSystem(const SkinnedPointsRenderSystem&) = delete;
 	SkinnedPointsRenderSystem& operator=(const SkinnedPointsRenderSystem&) = delete;
 
-	void render(VeFrameInfo& fi, const SkinningPrePass& prepass);
+	void render(VeFrameInfo& fi, const SkinningPrePass& prepass, const PbrMegaBuffer& mega_buffer);
 	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count);
 
 	void setPointSize(float px) { m_point_size = px; }

@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "rendering/skinned_points_render_system.hpp"
 #include "rendering/skinning_pre_pass.hpp"
+#include "rendering/managers/pbr_mega_buffer.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "vulkan/ve_pipeline.hpp"
@@ -79,8 +80,8 @@ void SkinnedPointsRenderSystem::recreatePipeline(vk::Format color_format, vk::Sa
 	createPipeline(color_format, sample_count);
 }
 
-void SkinnedPointsRenderSystem::render(VeFrameInfo& fi, const SkinningPrePass& prepass) {
-	if (!fi.registry)
+void SkinnedPointsRenderSystem::render(VeFrameInfo& fi, const SkinningPrePass& prepass, const PbrMegaBuffer& mega_buffer) {
+	if (!fi.registry || !mega_buffer.isValid())
 		return;
 	auto& cmd = fi.cmd();
 	auto& registry = *fi.registry;
@@ -89,12 +90,16 @@ void SkinnedPointsRenderSystem::render(VeFrameInfo& fi, const SkinningPrePass& p
 	std::array<vk::DescriptorSet, 1> sets{*fi.global_descriptor_set};
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout, 0, sets, {});
 
+	vk::Buffer buffers[] = {mega_buffer.getMegaShadowVbo()->getBuffer()};
+	vk::DeviceSize offsets[] = {0};
+	cmd.bindVertexBuffers(0, buffers, offsets);
+
 	for (auto [entity, mc, sc] : registry.view<MeshComponent, SkinComponent>()) {
 		VeMesh* mesh = mc.getMesh();
 		if (!mesh || !mesh->hasSkinning())
 			continue;
-		VeBuffer* pos_buf = prepass.getOutputPositionBuffer(entity, fi.current_frame);
-		if (!pos_buf)
+		uint32_t vo = prepass.getSkinnedVertexOffset(entity, fi.current_frame, mega_buffer);
+		if (vo == SkinningPrePass::INVALID_OFFSET)
 			continue;
 
 		// Color from low-bit hash of entity id (yellow-ish bias for visibility on dark background).
@@ -110,10 +115,7 @@ void SkinnedPointsRenderSystem::render(VeFrameInfo& fi, const SkinningPrePass& p
 		cmd.pushConstants<DebugPushConstant>(*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex, 0, pc);
 
-		vk::Buffer buffers[] = {pos_buf->getBuffer()};
-		vk::DeviceSize offsets[] = {0};
-		cmd.bindVertexBuffers(0, buffers, offsets);
-		cmd.draw(mesh->getVertexCount(), 1, 0, 0);
+		cmd.draw(mesh->getVertexCount(), 1, vo, 0);
 	}
 }
 

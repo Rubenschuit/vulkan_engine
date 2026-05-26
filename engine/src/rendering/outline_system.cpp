@@ -13,6 +13,7 @@
 #include "events/engine_events.hpp"
 #include "events/render_events.hpp"
 #include "rendering/skinning_pre_pass.hpp"
+#include "rendering/managers/pbr_mega_buffer.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -364,7 +365,8 @@ void OutlineSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 	}
 }
 
-void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_entity) {
+void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_entity,
+                                const PbrMegaBuffer& mega_buffer) {
 	if (root_entity.isNull() || !registry.isAlive(root_entity)) {
 		m_has_outline = false;
 		return;
@@ -476,18 +478,20 @@ void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_
 			*m_mask_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
 			vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
 
-		// Skinned entities have to use their per-frame post-skin position buffer
-		// or the outline traces the bind pose
-		VeBuffer* skin_pos = nullptr;
-		if (fi.skinning_pre_pass && registry.hasComponent<SkinComponent>(e))
-			skin_pos = fi.skinning_pre_pass->getOutputPositionBuffer(e, fi.current_frame);
+		// Skinned entities source their post-skin position from the mega VBO's
+		// dynamic region via the slot offset
+		bool is_skinned = fi.skinning_pre_pass && registry.hasComponent<SkinComponent>(e);
 
-		if (skin_pos) {
-			vk::Buffer vbos[] = {skin_pos->getBuffer()};
-			vk::DeviceSize offsets[] = {0};
-			cmd.bindVertexBuffers(0, vbos, offsets);
-			cmd.bindIndexBuffer(mesh->getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
-			cmd.drawIndexed(mesh->getIndexCount(), 1, 0, 0, 0);
+		if (is_skinned) {
+			const auto* entry = mega_buffer.isValid() ? mega_buffer.getEntry(mesh) : nullptr;
+			if (entry && !entry->lod_entries.empty()) {
+				uint32_t vo = fi.skinning_pre_pass->getSkinnedVertexOffset(e, fi.current_frame, mega_buffer);
+				if (vo != SkinningPrePass::INVALID_OFFSET) {
+					mega_buffer.bindShadow(cmd);
+					const auto& lod = entry->lod_entries[0];
+					cmd.drawIndexed(lod.index_count, 1, lod.first_index, static_cast<int32_t>(vo), 0);
+				}
+			}
 			bound_mesh = nullptr;  // force rebind on next static mesh
 		} else {
 			if (mesh != bound_mesh) {

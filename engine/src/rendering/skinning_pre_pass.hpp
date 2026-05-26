@@ -1,10 +1,10 @@
-/* Compute pre-pass that produces post-skin vertex streams.
+/* Compute pre-pass that skins per-entity vertex streams.
  *
- * For each entity with MeshComponent + SkinComponent, allocates two ring-buffered
- * output buffers (48B full vertex + 12B position-only) and dispatches a compute
- * shader that reads the input vertex stream + skin attributes + joint palette
- * and writes both outputs in one pass. Output buffers are usable directly as
- * vertex buffers by downstream graphics passes
+ * For each entity with MeshComponent + SkinComponent, a slot is allocated in the
+ * dynamic region of PbrMegaBuffer's mega VBO + mega shadow VBO (one ping-pong
+ * per frame in flight). The compute shader reads each entity's bind-pose vertices
+ * + skin attributes from the static / sparse skin region of the mega buffer and
+ * writes the post-skin 48 B vertex + 12 B position outputs into that slot.
  */
 #pragma once
 #include "ve_export.hpp"
@@ -13,7 +13,6 @@
 #include "scene/ve_entity.hpp"
 
 #include <array>
-#include <deque>
 #include <filesystem>
 #include <memory>
 #include <unordered_map>
@@ -28,6 +27,8 @@ namespace ve {
 	class Registry;
 	class EventBus;
 	class PbrMegaBuffer;
+	class MeshComponent;
+	class VeMesh;
 }
 
 namespace ve {
@@ -45,17 +46,17 @@ public:
 
 	void dispatch(VeFrameInfo& fi, PbrMegaBuffer& mega_buffer);
 
-	VeBuffer* getOutputFullBuffer(Entity entity, uint32_t frame_index) const;
-	VeBuffer* getOutputPositionBuffer(Entity entity, uint32_t frame_index) const;
+	// Returns the absolute offset (in vertices) into the mega VBO + mega shadow VBO
+	// where this entity's post-skin output sits for the given frame, or UINT32_MAX
+	// if the entity has no active slot 
+	static constexpr uint32_t INVALID_OFFSET = UINT32_MAX;
+	uint32_t getSkinnedVertexOffset(Entity entity, uint32_t frame_index,
+	                                 const PbrMegaBuffer& mega_buffer) const;
 
 private:
-	struct InstanceFrame {
-		std::unique_ptr<VeBuffer> out_full;     // 48B/vertex, STORAGE+VERTEX
-		std::unique_ptr<VeBuffer> out_pos;      // 12B/vertex, STORAGE+VERTEX
-		uint32_t vertex_count = 0;
-		VkBuffer input_vertex_buf = VK_NULL_HANDLE;
-		VkBuffer input_skin_buf = VK_NULL_HANDLE;
-		vk::raii::DescriptorSet descriptor_set{nullptr};
+	struct SubspaceSlot {
+		uint32_t offset;        // in [0, MAX_SKINNED_VERTICES_PER_FRAME)
+		uint32_t vertex_count;
 	};
 
 	struct SkinDispatch {
@@ -68,19 +69,16 @@ private:
 	void createPipelineLayout();
 	void createPipeline();
 	void subscribeToRegistry(Registry& registry);
-	void freeEntityOutputs(Entity entity);
-	uint64_t makeKey(Entity entity, uint32_t frame_index) const {
-		return (static_cast<uint64_t>(entity.id()) << 32) | frame_index;
-	}
-	InstanceFrame& getOrAllocateOutputs(Entity entity, uint32_t frame_index,
-	                                    uint32_t vertex_count,
-	                                    VeBuffer& input_vertex_buf, VeBuffer& input_skin_buf);
-	void writeDescriptor(InstanceFrame& inst, uint32_t frame_index,
-	                     VeBuffer& input_vertex_buf, VeBuffer& input_skin_buf);
+	void refreshDescriptors(uint32_t frame_index, PbrMegaBuffer& mega_buffer);
+
+	bool allocateSlotForEntity(Entity entity, VeMesh* mesh);
+	void freeSlotForEntity(Entity entity);
+	void resetAllocator();
 
 	VeDevice& m_ve_device;
 	VeDescriptorPool& m_descriptor_pool;
 	std::filesystem::path m_shader_path;
+	Registry* m_registry = nullptr;
 
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_palette_ssbos;
 	std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> m_palette_count{}; // matrices currently used per frame
@@ -89,17 +87,18 @@ private:
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VeComputePipeline> m_compute_pipeline;
 
-	std::unordered_map<uint64_t, InstanceFrame> m_instance_outputs;
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_descriptor_sets{
+		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
+	std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> m_cached_mega_vbo{};
+	std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> m_cached_mega_skin_vbo{};
+	std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> m_cached_mega_shadow_vbo{};
+
+	// Slot allocator (works in the per-frame subspace [0, MAX_SKINNED_VERTICES_PER_FRAME)).
+	std::unordered_map<uint32_t, SubspaceSlot> m_slots; // keyed by entity.index()
+	std::vector<SubspaceSlot> m_free_ranges;            // sorted by offset, disjoint
 
 	// Per-frame dispatch list, populated by updatePalette and consumed by dispatch.
 	std::array<std::vector<SkinDispatch>, MAX_FRAMES_IN_FLIGHT> m_pending_dispatches;
-
-	struct PendingFree {
-		uint64_t release_frame;
-		InstanceFrame frame;
-	};
-	std::deque<PendingFree> m_graveyard;
-	uint64_t m_frame_counter = 0;
 };
 
 } // namespace ve

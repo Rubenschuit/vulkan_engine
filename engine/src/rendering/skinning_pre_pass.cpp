@@ -13,18 +13,20 @@
 #include "events/engine_events.hpp"
 #include "utils/ve_log.hpp"
 
+#include <algorithm>
+
 namespace ve {
 
-namespace {
-	constexpr uint32_t MAX_PALETTE_MATRICES = 4096;
-	constexpr uint32_t WORKGROUP_SIZE = 64;
-}
+constexpr uint32_t MAX_PALETTE_MATRICES = 4096 * 2;
+constexpr uint32_t WORKGROUP_SIZE = 64;
+
 
 struct SkinPushConstant {
 	uint32_t vertex_count;
 	uint32_t palette_offset;
 	uint32_t input_vertex_offset;
 	uint32_t input_skin_offset;
+	uint32_t output_vertex_offset;
 };
 
 SkinningPrePass::SkinningPrePass(VeDevice& device, VeDescriptorPool& descriptor_pool,
@@ -45,14 +47,25 @@ SkinningPrePass::SkinningPrePass(VeDevice& device, VeDescriptorPool& descriptor_
 	createSetLayout();
 	createPipelineLayout();
 	createPipeline();
+	resetAllocator();
 
 	event_bus.subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
 		subscribeToRegistry(*e.registry);
 	});
 	event_bus.subscribe<SceneUnloadedEvent>([this](const SceneUnloadedEvent&) {
-		// Registry's event dispatcher dies with the scene
-		m_instance_outputs.clear();
-		m_graveyard.clear();
+		m_registry = nullptr;
+		resetAllocator();
+	});
+	event_bus.subscribe<AssetLoadCompleteEvent>([this](const AssetLoadCompleteEvent&) {
+		if (!m_registry)
+			return;
+		uint32_t added = 0;
+		for (auto [entity, mc, sc] : m_registry->view<MeshComponent, SkinComponent>()) {
+			if (m_slots.count(entity.index()))
+				continue;
+			if (allocateSlotForEntity(entity, mc.getMesh()))
+				added++;
+		}
 	});
 }
 
@@ -60,11 +73,10 @@ SkinningPrePass::~SkinningPrePass() = default;
 
 void SkinningPrePass::createSetLayout() {
 	m_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
-		.addBinding(0, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // input vertices
-		.addBinding(1, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // input skin attribs
+		.addBinding(0, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // mega VBO (read bind-pose + write skinned output)
+		.addBinding(1, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // mega skin VBO (read joints + weights)
 		.addBinding(2, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // palette
-		.addBinding(3, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // output full vertex
-		.addBinding(4, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // output position
+		.addBinding(3, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // mega shadow VBO (write skinned position-only)
 		.build();
 }
 
@@ -90,30 +102,115 @@ void SkinningPrePass::createPipeline() {
 }
 
 void SkinningPrePass::subscribeToRegistry(Registry& registry) {
+	m_registry = &registry;
+	resetAllocator();
+
+	// Seed slots for entities that already have Mesh+Skin at scene-load time
+	for (auto [entity, mc, sc] : registry.view<MeshComponent, SkinComponent>())
+		allocateSlotForEntity(entity, mc.getMesh());
+
 	registry.events().subscribe<EntityDestroyedEvent>(
-		[this](const EntityDestroyedEvent& e) { freeEntityOutputs(e.entity); });
+		[this](const EntityDestroyedEvent& e) { freeSlotForEntity(e.entity); });
+
 	registry.events().subscribe<ComponentRemovedEvent<SkinComponent>>(
-		[this](const ComponentRemovedEvent<SkinComponent>& e) { freeEntityOutputs(e.entity); });
+		[this](const ComponentRemovedEvent<SkinComponent>& e) { freeSlotForEntity(e.entity); });
+	registry.events().subscribe<ComponentRemovedEvent<MeshComponent>>(
+		[this](const ComponentRemovedEvent<MeshComponent>& e) { freeSlotForEntity(e.entity); });
+
+	registry.events().subscribe<ComponentAddedEvent<SkinComponent>>(
+		[this](const ComponentAddedEvent<SkinComponent>& e) {
+			if (!m_registry)
+				return;
+			auto* mc = m_registry->getComponent<MeshComponent>(e.entity);
+			if (mc && mc->hasMesh())
+				allocateSlotForEntity(e.entity, mc->getMesh());
+		});
+	registry.events().subscribe<ComponentAddedEvent<MeshComponent>>(
+		[this](const ComponentAddedEvent<MeshComponent>& e) {
+			if (!m_registry || !e.component.hasMesh())
+				return;
+			if (m_registry->hasComponent<SkinComponent>(e.entity))
+				allocateSlotForEntity(e.entity, e.component.getMesh());
+		});
+
+	registry.events().subscribe<MeshDataChangedEvent>(
+		[this](const MeshDataChangedEvent& e) {
+			if (!m_registry)
+				return;
+			if (!m_registry->hasComponent<SkinComponent>(e.entity))
+				return;
+			auto* mc = m_registry->getComponent<MeshComponent>(e.entity);
+			if (!mc || !mc->hasMesh())
+				return;
+			freeSlotForEntity(e.entity);
+			allocateSlotForEntity(e.entity, mc->getMesh());
+		});
 }
 
-void SkinningPrePass::freeEntityOutputs(Entity entity) {
-	const uint64_t hi = static_cast<uint64_t>(entity.id()) << 32;
-	const uint64_t release_frame = m_frame_counter + MAX_FRAMES_IN_FLIGHT;
-	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
-		auto it = m_instance_outputs.find(hi | f);
-		if (it == m_instance_outputs.end())
+void SkinningPrePass::resetAllocator() {
+	m_slots.clear();
+	m_free_ranges.clear();
+	m_free_ranges.push_back({0, MAX_SKINNED_VERTICES_PER_FRAME});
+}
+
+bool SkinningPrePass::allocateSlotForEntity(Entity entity, VeMesh* mesh) {
+	if (!mesh || !mesh->hasSkinning())
+		return false;
+	const uint32_t key = entity.index();
+	if (m_slots.count(key))
+		return true;
+
+	const uint32_t need = mesh->getVertexCount();
+	if (need == 0)
+		return false;
+
+	for (auto it = m_free_ranges.begin(); it != m_free_ranges.end(); ++it) {
+		if (it->vertex_count < need)
 			continue;
-		m_graveyard.push_back({release_frame, std::move(it->second)});
-		m_instance_outputs.erase(it);
+		SubspaceSlot s{it->offset, need};
+		m_slots[key] = s;
+		if (it->vertex_count == need) {
+			m_free_ranges.erase(it);
+		} else {
+			it->offset += need;
+			it->vertex_count -= need;
+		}
+		return true;
+	}
+
+	VE_LOGW("SkinningPrePass: dynamic region overflow allocating " << need
+		<< " vertices for entity " << entity.id()
+		<< " (cap=" << MAX_SKINNED_VERTICES_PER_FRAME << "); entity will not render");
+	return false;
+}
+
+void SkinningPrePass::freeSlotForEntity(Entity entity) {
+	const uint32_t key = entity.index();
+	auto it = m_slots.find(key);
+	if (it == m_slots.end())
+		return;
+	SubspaceSlot s = it->second;
+	m_slots.erase(it);
+
+	auto pos = std::upper_bound(m_free_ranges.begin(), m_free_ranges.end(), s.offset,
+		[](uint32_t off, const SubspaceSlot& r) { return off < r.offset; });
+	pos = m_free_ranges.insert(pos, s);
+
+	auto next = std::next(pos);
+	if (next != m_free_ranges.end() && pos->offset + pos->vertex_count == next->offset) {
+		pos->vertex_count += next->vertex_count;
+		m_free_ranges.erase(next);
+	}
+	if (pos != m_free_ranges.begin()) {
+		auto prev = std::prev(pos);
+		if (prev->offset + prev->vertex_count == pos->offset) {
+			prev->vertex_count += pos->vertex_count;
+			m_free_ranges.erase(pos);
+		}
 	}
 }
 
 void SkinningPrePass::updatePalette(Registry& registry, uint32_t frame_index) {
-	// Handle graveyard entries
-	++m_frame_counter;
-	while (!m_graveyard.empty() && m_graveyard.front().release_frame <= m_frame_counter)
-		m_graveyard.pop_front();
-
 	auto& dispatches = m_pending_dispatches[frame_index];
 	dispatches.clear();
 
@@ -128,6 +225,10 @@ void SkinningPrePass::updatePalette(Registry& registry, uint32_t frame_index) {
 		const auto& joints = sc.getJointEntities();
 		const auto& ibms = sc.getInverseBindMatrices();
 		if (joints.empty() || joints.size() != ibms.size())
+			continue;
+
+		// Skip entities thatdo not have a slot allocated
+		if (!m_slots.count(entity.index()))
 			continue;
 
 		uint32_t joint_count = static_cast<uint32_t>(joints.size());
@@ -165,59 +266,30 @@ void SkinningPrePass::updatePalette(Registry& registry, uint32_t frame_index) {
 	m_palette_count[frame_index] = palette_cursor;
 }
 
-SkinningPrePass::InstanceFrame& SkinningPrePass::getOrAllocateOutputs(
-		Entity entity, uint32_t frame_index, uint32_t vertex_count,
-		VeBuffer& input_vertex_buf, VeBuffer& input_skin_buf) {
+void SkinningPrePass::refreshDescriptors(uint32_t frame_index, PbrMegaBuffer& mega_buffer) {
+	VkBuffer vbo = mega_buffer.getMegaVbo()->getBuffer();
+	VkBuffer skin = mega_buffer.getMegaSkinVbo()->getBuffer();
+	VkBuffer shadow = mega_buffer.getMegaShadowVbo()->getBuffer();
+	if (m_cached_mega_vbo[frame_index] == vbo
+		&& m_cached_mega_skin_vbo[frame_index] == skin
+		&& m_cached_mega_shadow_vbo[frame_index] == shadow)
+		return;
 
-	uint64_t key = makeKey(entity, frame_index);
-	auto& slot = m_instance_outputs[key];
-
-	VkBuffer new_vbo = input_vertex_buf.getBuffer();
-	VkBuffer new_skin = input_skin_buf.getBuffer();
-	bool needs_realloc = !slot.out_full
-		|| slot.vertex_count != vertex_count;
-	bool needs_rewrite = needs_realloc
-		|| slot.input_vertex_buf != new_vbo
-		|| slot.input_skin_buf != new_skin;
-	if (needs_realloc) {
-		slot.out_full = std::make_unique<VeBuffer>(
-			m_ve_device,
-			sizeof(VeMesh::Vertex),
-			vertex_count,
-			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer,
-			vk::MemoryPropertyFlagBits::eDeviceLocal);
-		slot.out_pos = std::make_unique<VeBuffer>(
-			m_ve_device,
-			sizeof(glm::vec3),
-			vertex_count,
-			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer,
-			vk::MemoryPropertyFlagBits::eDeviceLocal);
-		slot.vertex_count = vertex_count;
-	}
-	if (needs_rewrite) {
-		slot.input_vertex_buf = new_vbo;
-		slot.input_skin_buf = new_skin;
-		writeDescriptor(slot, frame_index, input_vertex_buf, input_skin_buf);
-	}
-
-	return slot;
-}
-
-void SkinningPrePass::writeDescriptor(InstanceFrame& inst, uint32_t frame_index,
-                                      VeBuffer& input_vertex_buf, VeBuffer& input_skin_buf) {
-	auto vbo_info = input_vertex_buf.getDescriptorInfo();
-	auto skin_info = input_skin_buf.getDescriptorInfo();
+	auto vbo_info = mega_buffer.getMegaVbo()->getDescriptorInfo();
+	auto skin_info = mega_buffer.getMegaSkinVbo()->getDescriptorInfo();
 	auto palette_info = m_palette_ssbos[frame_index]->getDescriptorInfo();
-	auto out_full_info = inst.out_full->getDescriptorInfo();
-	auto out_pos_info = inst.out_pos->getDescriptorInfo();
+	auto shadow_info = mega_buffer.getMegaShadowVbo()->getDescriptorInfo();
 
 	VeDescriptorWriter(*m_set_layout, m_descriptor_pool)
 		.writeBuffer(0, &vbo_info)
 		.writeBuffer(1, &skin_info)
 		.writeBuffer(2, &palette_info)
-		.writeBuffer(3, &out_full_info)
-		.writeBuffer(4, &out_pos_info)
-		.build(inst.descriptor_set);
+		.writeBuffer(3, &shadow_info)
+		.build(m_descriptor_sets[frame_index]);
+
+	m_cached_mega_vbo[frame_index] = vbo;
+	m_cached_mega_skin_vbo[frame_index] = skin;
+	m_cached_mega_shadow_vbo[frame_index] = shadow;
 }
 
 void SkinningPrePass::dispatch(VeFrameInfo& fi, PbrMegaBuffer& mega_buffer) {
@@ -226,13 +298,18 @@ void SkinningPrePass::dispatch(VeFrameInfo& fi, PbrMegaBuffer& mega_buffer) {
 	if (dispatches.empty() || !mega_buffer.isValid() || !mega_buffer.hasSkinData())
 		return;
 
+	refreshDescriptors(frame, mega_buffer);
+
 	auto& cmd = fi.compute_command_buffer;
 	auto& registry = *fi.registry;
 
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
+	std::array<vk::DescriptorSet, 1> sets{*m_descriptor_sets[frame]};
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pipeline_layout, 0, sets, {});
 
-	VeBuffer& mega_vbo = *mega_buffer.getMegaVbo();
-	VeBuffer& mega_skin_vbo = *mega_buffer.getMegaSkinVbo();
+	const uint32_t dynamic_base = mega_buffer.getDynamicRegionBase();
+	const uint32_t dynamic_capacity = mega_buffer.getDynamicRegionCapacity();
+	const uint32_t frame_subspace_offset = dynamic_base + frame * dynamic_capacity;
 
 	for (const SkinDispatch& d : dispatches) {
 		Entity entity = d.entity;
@@ -249,17 +326,16 @@ void SkinningPrePass::dispatch(VeFrameInfo& fi, PbrMegaBuffer& mega_buffer) {
 		if (!entry || entry->skin_vertex_offset == PbrMegaBuffer::NO_SKIN_OFFSET)
 			continue;
 
-		auto& inst = getOrAllocateOutputs(entity, frame, d.vertex_count,
-		                                  mega_vbo, mega_skin_vbo);
-
-		std::array<vk::DescriptorSet, 1> sets{*inst.descriptor_set};
-		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pipeline_layout, 0, sets, {});
+		auto slot_it = m_slots.find(entity.index());
+		if (slot_it == m_slots.end())
+			continue;
 
 		SkinPushConstant pc{
 			.vertex_count = d.vertex_count,
 			.palette_offset = d.palette_offset,
 			.input_vertex_offset = entry->vertex_offset,
 			.input_skin_offset = entry->skin_vertex_offset,
+			.output_vertex_offset = frame_subspace_offset + slot_it->second.offset,
 		};
 		cmd.pushConstants<SkinPushConstant>(*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eCompute, 0, pc);
@@ -282,14 +358,14 @@ void SkinningPrePass::dispatch(VeFrameInfo& fi, PbrMegaBuffer& mega_buffer) {
 	cmd.pipelineBarrier2(dep);
 }
 
-VeBuffer* SkinningPrePass::getOutputFullBuffer(Entity entity, uint32_t frame_index) const {
-	auto it = m_instance_outputs.find(makeKey(entity, frame_index));
-	return (it != m_instance_outputs.end()) ? it->second.out_full.get() : nullptr;
-}
-
-VeBuffer* SkinningPrePass::getOutputPositionBuffer(Entity entity, uint32_t frame_index) const {
-	auto it = m_instance_outputs.find(makeKey(entity, frame_index));
-	return (it != m_instance_outputs.end()) ? it->second.out_pos.get() : nullptr;
+uint32_t SkinningPrePass::getSkinnedVertexOffset(Entity entity, uint32_t frame_index,
+                                                  const PbrMegaBuffer& mega_buffer) const {
+	auto it = m_slots.find(entity.index());
+	if (it == m_slots.end() || !mega_buffer.isValid())
+		return INVALID_OFFSET;
+	return mega_buffer.getDynamicRegionBase()
+	     + frame_index * mega_buffer.getDynamicRegionCapacity()
+	     + it->second.offset;
 }
 
 } // namespace ve

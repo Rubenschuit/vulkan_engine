@@ -139,29 +139,31 @@ void DepthPrePassSystem::renderGpuCulled(
 
 void DepthPrePassSystem::renderSkinned(
 	VeFrameInfo& frame_info,
+	PbrMegaBuffer& mega_buffer,
 	const std::vector<PbrRenderSystem::Drawable>& skinned_drawables) const {
 
-	if (skinned_drawables.empty() || !frame_info.skinning_pre_pass)
+	if (skinned_drawables.empty() || !frame_info.skinning_pre_pass || !mega_buffer.isValid())
 		return;
 
 	auto& cmd = frame_info.cmd();
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		0, {**frame_info.cpu_global_descriptor_set}, {});
+	mega_buffer.bindShadow(cmd);
 
 	for (const auto& d : skinned_drawables) {
 		if (!d.mesh_ptr)
 			continue;
-		VeBuffer* pos_buf = frame_info.skinning_pre_pass->getOutputPositionBuffer(
-			d.entity, frame_info.current_frame);
-		if (!pos_buf)
+		const auto* entry = mega_buffer.getEntry(d.mesh_ptr);
+		if (!entry || entry->lod_entries.empty())
+			continue;
+		uint32_t vo = frame_info.skinning_pre_pass->getSkinnedVertexOffset(
+			d.entity, frame_info.current_frame, mega_buffer);
+		if (vo == SkinningPrePass::INVALID_OFFSET)
 			continue;
 		cmd.setCullMode(d.double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
-		vk::Buffer vbos[] = {pos_buf->getBuffer()};
-		vk::DeviceSize offsets[] = {0};
-		cmd.bindVertexBuffers(0, vbos, offsets);
-		cmd.bindIndexBuffer(d.mesh_ptr->getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
-		cmd.drawIndexed(d.mesh_ptr->getIndexCount(), 1, 0, 0, d.ssbo_index);
+		const auto& lod = entry->lod_entries[0];
+		cmd.drawIndexed(lod.index_count, 1, lod.first_index, static_cast<int32_t>(vo), d.ssbo_index);
 	}
 }
 

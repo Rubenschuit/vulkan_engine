@@ -609,10 +609,9 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info, const vk::raii::Desc
 	}
 }
 
-// TODO: consider switch to a skinned mega-buffer + drawIndexedIndirect. 
 void PbrRenderSystem::renderSkinned(VeFrameInfo& frame_info, const SkinningPrePass& pre_pass,
                                     const vk::raii::DescriptorSet& bindless_set) const {
-	if (m_skinned_drawables.empty())
+	if (m_skinned_drawables.empty() || !m_mega_buffer.isValid())
 		return;
 	auto& cmd = frame_info.cmd();
 	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
@@ -622,23 +621,23 @@ void PbrRenderSystem::renderSkinned(VeFrameInfo& frame_info, const SkinningPrePa
 	bindPbrResources(frame_info, bindless_set, frame_info.cpu_global_descriptor_set);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
 	cmd.setDepthWriteEnable(VK_TRUE);
+	m_mega_buffer.bind(cmd);
 
 	for (const auto& d : m_skinned_drawables) {
 		if (!d.mesh_ptr)
 			continue;
-		VeBuffer* vbo = pre_pass.getOutputFullBuffer(d.entity, frame_info.current_frame);
-		if (!vbo)
+		const auto* entry = m_mega_buffer.getEntry(d.mesh_ptr);
+		if (!entry || entry->lod_entries.empty())
+			continue;
+		uint32_t vo = pre_pass.getSkinnedVertexOffset(d.entity, frame_info.current_frame, m_mega_buffer);
+		if (vo == SkinningPrePass::INVALID_OFFSET)
 			continue;
 		bool is_mask = (d.alpha_mode == AlphaMode::MASK);
 		cmd.setCullMode(d.double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
 		cmd.setDepthCompareOp(
 			(m_depth_prepass_active || is_mask) ? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
-
-		vk::Buffer vbos[] = {vbo->getBuffer()};
-		vk::DeviceSize offsets[] = {0};
-		cmd.bindVertexBuffers(0, vbos, offsets);
-		cmd.bindIndexBuffer(d.mesh_ptr->getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
-		cmd.drawIndexed(d.mesh_ptr->getIndexCount(), 1, 0, 0, d.ssbo_index);
+		const auto& lod = entry->lod_entries[0];
+		cmd.drawIndexed(lod.index_count, 1, lod.first_index, static_cast<int32_t>(vo), d.ssbo_index);
 	}
 }
 

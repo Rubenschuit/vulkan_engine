@@ -1336,15 +1336,17 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 	}
 
 	if (include_skinned && !m_skinned_shadow_drawables.empty() && frame_info.skinning_pre_pass) {
+		mega_buffer.bindShadow(cmd);
 		for (const auto& sd : m_skinned_shadow_drawables) {
 			if (!sd.mesh)
 				continue;
-			VeBuffer* pos_buf = frame_info.skinning_pre_pass->getOutputPositionBuffer(
-				sd.entity, frame_info.current_frame);
-			if (!pos_buf)
+			const auto* entry = mega_buffer.getEntry(sd.mesh);
+			if (!entry || entry->lod_entries.empty())
 				continue;
-			cmd.bindVertexBuffers(0, {pos_buf->getBuffer()}, {vk::DeviceSize{0}});
-			cmd.bindIndexBuffer(sd.mesh->getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
+			uint32_t vo = frame_info.skinning_pre_pass->getSkinnedVertexOffset(
+				sd.entity, frame_info.current_frame, mega_buffer);
+			if (vo == SkinningPrePass::INVALID_OFFSET)
+				continue;
 
 			ShadowPushConstantData push{};
 			push.instance_offset = sd.instance_offset;
@@ -1354,7 +1356,8 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 				0,
 				vk::ArrayProxy<const uint8_t>(sizeof(ShadowPushConstantData), reinterpret_cast<const uint8_t*>(&push))
 			);
-			cmd.drawIndexed(sd.mesh->getIndexCount(), 1, 0, 0, 0);
+			const auto& lod = entry->lod_entries[0];
+			cmd.drawIndexed(lod.index_count, 1, lod.first_index, static_cast<int32_t>(vo), 0);
 		}
 	}
 }
@@ -1398,8 +1401,8 @@ void ShadowRenderSystem::populateSkinnedShadowDrawablesGpuPath(VeFrameInfo& fram
 	}
 }
 
-void ShadowRenderSystem::renderSkinnedShadowsForLayer(VeFrameInfo& frame_info, uint32_t layer) const {
-	if (m_skinned_shadow_drawables.empty() || !frame_info.skinning_pre_pass)
+void ShadowRenderSystem::renderSkinnedShadowsForLayer(VeFrameInfo& frame_info, const PbrMegaBuffer& mega_buffer, uint32_t layer) const {
+	if (m_skinned_shadow_drawables.empty() || !frame_info.skinning_pre_pass || !mega_buffer.isValid())
 		return;
 	auto& cmd = frame_info.cmd();
 	uint32_t frame = frame_info.current_frame;
@@ -1408,21 +1411,24 @@ void ShadowRenderSystem::renderSkinnedShadowsForLayer(VeFrameInfo& frame_info, u
 	cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		0, {*m_shadow_global_descriptor_sets[frame][layer]}, {});
+	mega_buffer.bindShadow(cmd);
 
 	for (const auto& sd : m_skinned_shadow_drawables) {
 		if (!sd.mesh)
 			continue;
-		VeBuffer* pos_buf = frame_info.skinning_pre_pass->getOutputPositionBuffer(sd.entity, frame);
-		if (!pos_buf)
+		const auto* entry = mega_buffer.getEntry(sd.mesh);
+		if (!entry || entry->lod_entries.empty())
 			continue;
-		cmd.bindVertexBuffers(0, {pos_buf->getBuffer()}, {vk::DeviceSize{0}});
-		cmd.bindIndexBuffer(sd.mesh->getIndexBuffer().getBuffer(), 0, vk::IndexType::eUint32);
+		uint32_t vo = frame_info.skinning_pre_pass->getSkinnedVertexOffset(sd.entity, frame, mega_buffer);
+		if (vo == SkinningPrePass::INVALID_OFFSET)
+			continue;
 		ShadowPushConstantData push{};
 		push.instance_offset = sd.instance_offset;
 		cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
 			vk::ArrayProxy<const uint8_t>(sizeof(ShadowPushConstantData),
 				reinterpret_cast<const uint8_t*>(&push)));
-		cmd.drawIndexed(sd.mesh->getIndexCount(), 1, 0, 0, 0);
+		const auto& lod = entry->lod_entries[0];
+		cmd.drawIndexed(lod.index_count, 1, lod.first_index, static_cast<int32_t>(vo), 0);
 	}
 }
 
@@ -1814,13 +1820,13 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: skinned");
 		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
 			beginShadowRegionRender(cmd, m_atlas_regions[c], vk::AttachmentLoadOp::eLoad);
-			renderSkinnedShadowsForLayer(frame_info, c);
+			renderSkinnedShadowsForLayer(frame_info, mega_buffer, c);
 			cmd.endRendering();
 		}
 		for (uint32_t i = 0; i < num_shadow_lights; i++) {
 			uint32_t slot = NUM_CSM_CASCADES + i;
 			beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eLoad);
-			renderSkinnedShadowsForLayer(frame_info, slot);
+			renderSkinnedShadowsForLayer(frame_info, mega_buffer, slot);
 			cmd.endRendering();
 		}
 	}
@@ -2137,13 +2143,13 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: skinned");
 		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
 			beginShadowRegionRender(cmd, m_atlas_regions[c], vk::AttachmentLoadOp::eLoad);
-			renderSkinnedShadowsForLayer(frame_info, c);
+			renderSkinnedShadowsForLayer(frame_info, mega_buffer, c);
 			cmd.endRendering();
 		}
 		for (uint32_t i = 0; i < num_shadow_lights; i++) {
 			uint32_t slot = NUM_CSM_CASCADES + i;
 			beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eLoad);
-			renderSkinnedShadowsForLayer(frame_info, slot);
+			renderSkinnedShadowsForLayer(frame_info, mega_buffer, slot);
 			cmd.endRendering();
 		}
 	}

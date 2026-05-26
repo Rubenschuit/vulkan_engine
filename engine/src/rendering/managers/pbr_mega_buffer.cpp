@@ -22,6 +22,7 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 	m_meshlet_ssbo.reset();
 	m_meshlet_ssbo_staging.reset();
 	m_meshlet_ibo_staging.reset();
+	m_static_vertex_count = 0;
 
 	if (meshes.empty())
 		return;
@@ -40,14 +41,19 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 	if (total_vertices == 0 || total_indices == 0)
 		return;
 
+	m_static_vertex_count = total_vertices;
+
+	const uint32_t dynamic_capacity = MAX_SKINNED_VERTICES_PER_FRAME * MAX_FRAMES_IN_FLIGHT;
+	const uint32_t total_vbo_vertices = total_vertices + dynamic_capacity;
+
 	m_mega_vbo = std::make_unique<VeBuffer>(m_ve_device,
-		sizeof(VeMesh::Vertex), total_vertices,
+		sizeof(VeMesh::Vertex), total_vbo_vertices,
 		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer
 			| vk::BufferUsageFlagBits::eTransferDst,
 		vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 	m_mega_shadow_vbo = std::make_unique<VeBuffer>(m_ve_device,
-		sizeof(glm::vec3), total_vertices,
+		sizeof(glm::vec3), total_vbo_vertices,
 		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer
 			| vk::BufferUsageFlagBits::eTransferDst,
 		vk::MemoryPropertyFlagBits::eDeviceLocal);
@@ -219,6 +225,7 @@ void PbrMegaBuffer::clear() {
 	m_meshlet_ssbo.reset();
 	m_meshlet_ssbo_staging.reset();
 	m_meshlet_ibo_staging.reset();
+	m_static_vertex_count = 0;
 }
 
 const PbrMegaBuffer::MeshEntry* PbrMegaBuffer::getEntry(VeMesh* mesh) const {
@@ -246,6 +253,12 @@ void PbrMegaBuffer::bindShadow(vk::raii::CommandBuffer& cmd) const {
 	vk::Buffer buffers[] = {m_mega_shadow_vbo->getBuffer()};
 	vk::DeviceSize offsets[] = {0};
 	cmd.bindVertexBuffers(0, buffers, offsets);
+	cmd.bindIndexBuffer(m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
+}
+
+void PbrMegaBuffer::bindIbo(vk::raii::CommandBuffer& cmd) const {
+	if (!m_mega_ibo)
+		return;
 	cmd.bindIndexBuffer(m_mega_ibo->getBuffer(), 0, vk::IndexType::eUint32);
 }
 

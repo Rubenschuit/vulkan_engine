@@ -23,6 +23,7 @@ class VePipeline;
 class VeDescriptorPool;
 class VeDescriptorSetLayout;
 class EventBus;
+class PbrMegaBuffer;
 }
 
 namespace ve {
@@ -43,7 +44,8 @@ public:
 	OutlineSystem& operator=(const OutlineSystem&) = delete;
 
 	// Collects selected entity + all descendants with MeshComponent.
-	void renderMask(VeFrameInfo& frame_info, Registry& registry, Entity root_entity);
+	void renderMask(VeFrameInfo& frame_info, Registry& registry, Entity root_entity,
+	                const PbrMegaBuffer& mega_buffer);
 
 	// Called on graphics cmd buffer after mask.
 	void dispatchJFA(VeFrameInfo& frame_info, float outline_width);

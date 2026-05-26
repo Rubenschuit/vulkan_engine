@@ -722,7 +722,8 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		m_ve_renderer.beginDepthPrePass(command_buffer);
 		m_active_backend->renderDepthPrePass(fi, m_scene_resources->getMegaBuffer(),
 			*m_depth_prepass_system);
-		m_depth_prepass_system->renderSkinned(fi, m_pbr_render_system->getSkinnedDrawables());
+		m_depth_prepass_system->renderSkinned(fi, m_scene_resources->getMegaBuffer(),
+			m_pbr_render_system->getSkinnedDrawables());
 		m_ve_renderer.endDepthPrePass(command_buffer);
 		profiler.endGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
 		profiler.endCpuTimer(ProfileTimer::DEPTH_PREPASS);
@@ -962,7 +963,8 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 			if (m_settings.show_aabb_debug)
 				m_aabb_debug_render_system->render(fi);
 			if (m_settings.show_skinned_points)
-				m_skinned_points_render_system->render(fi, *m_skinning_pre_pass);
+				m_skinned_points_render_system->render(fi, *m_skinning_pre_pass,
+					m_scene_resources->getMegaBuffer());
 		}
 		{
 			ZoneScopedN("Light Billboards");
@@ -988,7 +990,8 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		TracyVkZone(tracy_gfx, *active_cb, "Selection Outline");
 		profiler.beginCpuTimer(ProfileTimer::OUTLINE);
 		profiler.beginGpuTimer(active_cb, ProfileTimer::OUTLINE);
-		m_outline_system->renderMask(fi, *fi.registry, fi.selected_entity);
+		m_outline_system->renderMask(fi, *fi.registry, fi.selected_entity,
+			m_scene_resources->getMegaBuffer());
 		if (m_outline_system->hasOutline())
 			m_outline_system->dispatchJFA(fi, editor_state.outline_width);
 		profiler.endGpuTimer(active_cb, ProfileTimer::OUTLINE);

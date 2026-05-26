@@ -144,6 +144,11 @@ constexpr uint32_t MAX_LOD_INSTANCE_SLOTS = MAX_GPU_OBJECTS * MAX_LOD_LEVELS; //
 // Hi-Z occlusion culling
 constexpr uint32_t MAX_HIZ_MIPS = 13;
 
+// Dynamic region of the mega VBO that holds skinning compute outputs.
+// Reserves 2 (ping-pong) × MAX_SKINNED_VERTICES_PER_FRAME × (48 + 12) bytes in
+// the mega VBO + shadow VBO.
+constexpr uint32_t MAX_SKINNED_VERTICES_PER_FRAME = 256 * 1024;
+
 // Meshlet culling (keep in sync with ve_constants.slangh)
 constexpr uint32_t MESHLET_MAX_VERTICES        = 64;
 constexpr uint32_t MESHLET_MAX_TRIANGLES       = 124;

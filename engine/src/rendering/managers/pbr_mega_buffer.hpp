@@ -1,5 +1,6 @@
 #pragma once
 #include "ve_export.hpp"
+#include "ve_config.hpp"
 #include "vulkan/ve_buffer.hpp"
 
 #include <memory>
@@ -55,9 +56,13 @@ public:
 	VeBuffer* getMegaShadowVbo() const { return m_mega_shadow_vbo.get(); }
 	VeBuffer* getMegaSkinVbo() const { return m_mega_skin_vbo.get(); }
 
+	uint32_t getDynamicRegionBase() const { return m_static_vertex_count; }
+	uint32_t getDynamicRegionCapacity() const { return MAX_SKINNED_VERTICES_PER_FRAME; }
+
 	void clear();
 	void bind(vk::raii::CommandBuffer& cmd) const;
 	void bindShadow(vk::raii::CommandBuffer& cmd) const;
+	void bindIbo(vk::raii::CommandBuffer& cmd) const;
 	void bindMeshletIbo(vk::raii::CommandBuffer& cmd) const;
 	void bindShadowMeshletIbo(vk::raii::CommandBuffer& cmd) const;
 
@@ -69,6 +74,7 @@ private:
 	std::unique_ptr<VeBuffer> m_mega_ibo;
 	
 	std::unique_ptr<VeBuffer> m_mega_skin_vbo; // Sparse
+	uint32_t m_static_vertex_count = 0;
 
 	std::unique_ptr<VeBuffer> m_meshlet_ibo;
 	std::unique_ptr<VeBuffer> m_meshlet_ssbo;
