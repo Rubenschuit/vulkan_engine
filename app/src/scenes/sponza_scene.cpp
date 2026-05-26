@@ -9,8 +9,7 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
     : VeScene(ctx, "Sponza Scene") {
 
 	const float sponza_scale = 2.0f;
-	const glm::vec3 sponza_translation = {0.0f, 0.0f, 300.0f};
-	const glm::vec3 root_translation = glm::vec3{0.0f, 0.0f, -350.0f} + sponza_translation;
+	const glm::vec3 root_translation = glm::vec3{0.0f, 0.0f, -50.0f};
 	auto sponzaPos = [&](glm::vec3 local) {
 		return local * sponza_scale + root_translation;
 	};
@@ -67,16 +66,16 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 			EmitterParams p{};
 			p.color_start = glm::vec4(1.0f, 0.85f, 0.4f, 1.0f);
 			p.color_end   = glm::vec4(1.0f, 0.2f, 0.02f, 0.0f);
-			p.gravity     = -3.0f;
-			p.drag        = 1.5f;
-			p.stddev      = 1.0f;
+			p.gravity     = -1.0f;
+			p.drag        = 4.5f;
+			p.stddev      = 0.4f;
 			p.min_life    = 0.5f;
 			p.max_life    = 1.2f;
 			auto& ec = m_registry.addComponent<ParticleEmitterComponent>(light);
 			ec.params = p;
 			ec.texture = fire_tex;
-			ec.rate = 40.0f;
-			ec.scale = 0.4f;
+			ec.rate = 45.0f;
+			ec.scale = 0.2f;
 		}
 		{
 			Entity smoke = m_registry.createEntity(m_registry.getName(light) + " Smoke");
@@ -85,8 +84,8 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 			EmitterParams p{};
 			p.color_start = glm::vec4(0.7f, 0.65f, 0.6f, 0.9f);
 			p.color_end   = glm::vec4(0.25f, 0.25f, 0.25f, 0.4f);
-			p.gravity     = -1.0f;
-			p.drag        = 0.8f;
+			p.gravity     = -0.3f;
+			p.drag        = 4.8f;
 			p.stddev      = 0.4f;
 			p.min_life    = 3.0f;
 			p.max_life    = 5.0f;
@@ -94,7 +93,7 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 			auto& ec = m_registry.addComponent<ParticleEmitterComponent>(smoke);
 			ec.params = p;
 			ec.texture = smoke_tex;
-			ec.rate = 6.0f;
+			ec.rate = 8.0f;
 		}
 	};
 
@@ -106,17 +105,17 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 	};
 	for (int i = 0; i < 4; ++i) {
 		Entity e = makeLight(10.0f, 1.0f, glm::vec3(1.0f, .1f, .02f),
-			"Fire " + std::to_string(i + 1), fire_positions[i], false, false);
+			"Fire " + std::to_string(i + 1), fire_positions[i], false, false, glm::vec3(0.1f));
 		attachFireEmitters(e);
 	}
 
     // lion eyes
-	makeLight(5.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f), "Green eye (left)",
+	makeLight(2.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f), "Green eye (left)",
 		sponzaPos({10.136f, 0.116f,  1.504f}), false, false,
-		glm::vec3{.3f, .3f, .3f});
-	makeLight(5.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f), "Green eye (right)",
+		glm::vec3(0.03f));
+	makeLight(2.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f), "Green eye (right)",
 		sponzaPos({10.136f, 0.4864f, 1.504f}), false, false,
-		glm::vec3{.3f, .3f, .3f});
+		glm::vec3(0.03f));
 }
 
 void SponzaScene::update(float dt) {

@@ -65,10 +65,6 @@ public:
 	void renderTransparent(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
 	                       const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 
-	void prepareSkinnedFrame(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr) const;
-	void renderSkinned(VeFrameInfo& frame_info, const SkinningPrePass& pre_pass,
-	                   const vk::raii::DescriptorSet& bindless_set) const;
-
 	// WBOIT: GPU-driven transparent rendering
 	void initWboit(const vk::raii::ImageView& accum_view, const vk::raii::ImageView& revealage_view,
 	               vk::Format resolve_format);
@@ -112,8 +108,8 @@ public:
 		bool double_sided = false;
 		uint32_t ssbo_index = 0;
 		uint32_t lod_level = 0;
+		bool is_skinned = false;
 	};
-	const std::vector<Drawable>& getSkinnedDrawables() const { return m_skinned_drawables; }
 
 private:
 	bool m_depth_prepass_active = true;
@@ -167,7 +163,6 @@ private:
 	mutable std::vector<VkDrawIndexedIndirectCommand> m_indirect_cmds;
 	mutable std::vector<Drawable> m_opaque_drawables;
 	mutable std::vector<Drawable> m_transparent_drawables;
-	mutable std::vector<Drawable> m_skinned_drawables;
 
 	mutable bool m_warned_skinned_blend = false;
 };

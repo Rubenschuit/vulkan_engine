@@ -25,6 +25,10 @@ enum class ProfileTimer : uint32_t {
 	OUTLINE,
 	COMPUTE_TOTAL,
 	PHYSICS,
+	UI,
+	SKINNING,
+	CLUSTER_LIGHTS,
+	PARTICLES,
 	COUNT
 };
 
@@ -43,6 +47,10 @@ inline const char* profileTimerName(ProfileTimer timer) {
 		case ProfileTimer::OUTLINE:        return "Outline";
 		case ProfileTimer::COMPUTE_TOTAL:  return "Compute Total";
 		case ProfileTimer::PHYSICS:        return "Physics";
+		case ProfileTimer::UI:             return "UI";
+		case ProfileTimer::SKINNING:       return "Skinning";
+		case ProfileTimer::CLUSTER_LIGHTS: return "Cluster Lights";
+		case ProfileTimer::PARTICLES:      return "Particles";
 		default:                           return "Unknown";
 	}
 }

@@ -39,6 +39,10 @@ struct VENGINE_API FrameStats {
 	float cpu_shadow_mask = 0.0f;
 	float cpu_outline = 0.0f;
 	float cpu_physics = 0.0f;
+	float cpu_ui = 0.0f;
+	float cpu_skinning = 0.0f;
+	float cpu_cluster_lights = 0.0f;
+	float cpu_particles = 0.0f;
 
 	// Culling / scene counters
 	uint32_t cull_total_objects = 0;

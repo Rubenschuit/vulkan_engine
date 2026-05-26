@@ -21,6 +21,7 @@ class GpuSceneManager;
 class PbrMegaBuffer;
 class HizSystem;
 class SceneResourceManager;
+class SkinningPrePass;
 struct VeFrameInfo;
 
 class VENGINE_API MeshletCullingSystem {
@@ -28,7 +29,8 @@ public:
 	MeshletCullingSystem(VeDevice& device, const std::filesystem::path& shaders_dir,
 	                     EventBus& event_bus, VeDescriptorPool& pool,
 	                     SceneResourceManager& scene_resources,
-	                     PbrMegaBuffer& mega_buffer, HizSystem& hiz);
+	                     PbrMegaBuffer& mega_buffer, HizSystem& hiz,
+	                     SkinningPrePass& skinning_pre_pass);
 	~MeshletCullingSystem();
 
 	MeshletCullingSystem(const MeshletCullingSystem&) = delete;
@@ -37,13 +39,15 @@ public:
 	// Build frustum-only descriptor sets (call before HizSystem exists).
 	void createDescriptorSets(VeDescriptorPool& pool,
 	                          GpuSceneManager& scene_mgr,
-	                          const PbrMegaBuffer& mega_buffer);
+	                          const PbrMegaBuffer& mega_buffer,
+	                          SkinningPrePass& skinning_pre_pass);
 
 	// Recreate descriptor sets with real Hi-Z bound (call after HizSystem init and on resize).
 	void createHizDescriptorSets(VeDescriptorPool& pool,
 	                             GpuSceneManager& scene_mgr,
 	                             const PbrMegaBuffer& mega_buffer,
-	                             HizSystem& hiz);
+	                             HizSystem& hiz,
+	                             SkinningPrePass& skinning_pre_pass);
 
 	// Create global descriptor sets (set 0 in vertex shaders) bound to this system's instance buffer.
 	void createGlobalDescriptorSets(VeDescriptorPool& pool,
@@ -60,7 +64,8 @@ public:
 	// Build shadow descriptor sets (dummy Hi-Z; call before HizSystem exists).
 	void createShadowDescriptorSets(VeDescriptorPool& pool,
 	                                GpuSceneManager& scene_mgr,
-	                                const PbrMegaBuffer& mega_buffer);
+	                                const PbrMegaBuffer& mega_buffer,
+	                                SkinningPrePass& skinning_pre_pass);
 
 	// Create shadow global descriptor sets (set 0 for shadow vertex shaders).
 	void createShadowGlobalDescriptorSets(VeDescriptorPool& pool,
@@ -140,7 +145,7 @@ private:
 
 	void writeCullDescriptorSets(
 		VeDescriptorPool& pool, GpuSceneManager& scene_mgr, const PbrMegaBuffer& mega_buffer,
-		uint32_t frame,
+		SkinningPrePass& skinning_pre_pass, uint32_t frame,
 		vk::DescriptorImageInfo& hiz_img, vk::DescriptorImageInfo& hiz_smp_info,
 		VeBuffer& cull_params, VeBuffer& visible_objects, VeBuffer& counts,
 		VeBuffer& instance_buf, VeBuffer& meshlet_object_map, VeBuffer& dispatch_indirect,

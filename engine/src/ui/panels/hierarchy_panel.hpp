@@ -56,7 +56,7 @@ private:
 	// Auto-expand and scroll-to for selection changes
 	std::unordered_set<uint32_t> m_force_open_entities;
 	bool m_scroll_to_selected = false;
-	bool m_show_lights_in_tree = false;
+	bool m_show_lights_in_tree = true;
 
 	std::unordered_set<uint32_t> m_joint_entity_ids;
 

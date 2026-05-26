@@ -168,6 +168,8 @@ public:
 	const glm::mat4& getWorldTransform(Entity e) const;
 	const glm::mat3& getWorldNormal(Entity e) const;
 	void invalidateWorldTransform(Entity e);
+	// Ensures the world-transform cache entry for e is populated
+	void primeWorldTransform(Entity e) const { (void)getWorldTransform(e); }
 
 	// Cloning
 	Entity cloneEntity(Entity source);

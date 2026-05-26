@@ -33,6 +33,13 @@ Sandbox::Sandbox(const std::filesystem::path& working_dir)
 		*renderServices().particles, resourceManager(), sceneManager(), eventBus(),
 		m_paths.fire_texture, m_paths.smoke_texture);
 
+	m_scene_loaded_sub = eventBus().subscribe<SceneLoadedEvent>(
+		[this](const SceneLoadedEvent& e) {
+			m_flashlight = Entity::null();
+			if (e.registry)
+				createFlashlight(*e.registry);
+		});
+
 	loadDefaultScene(0);
 
 	registerInputActions();
@@ -40,6 +47,7 @@ Sandbox::Sandbox(const std::filesystem::path& working_dir)
 
 Sandbox::~Sandbox() {
 	eventBus().unsubscribe<InputActionEvent>(m_input_sub);
+	eventBus().unsubscribe<SceneLoadedEvent>(m_scene_loaded_sub);
 }
 
 // ─── Input Actions ───────────────────────────────────────────────────────────
@@ -65,6 +73,12 @@ void Sandbox::registerInputActions() {
 		.description = "Toggle fireworks parameter panel"
 	});
 
+	ic.registerAction({
+		.name = "Toggle Flashlight", .key = GLFW_KEY_L,
+		.trigger = TriggerType::OnPress, .context = InputContext::Always,
+		.description = "Toggle camera-mounted flashlight"
+	});
+
 	m_input_sub = eventBus().subscribe<InputActionEvent>(
 		[this](const InputActionEvent& e) {
 			if (e.name == "Launch Firework" && m_fireworks)
@@ -73,6 +87,12 @@ void Sandbox::registerInputActions() {
 				m_show_controls = !m_show_controls;
 			else if (e.name == "Toggle Fireworks Panel")
 				m_show_fireworks_panel = !m_show_fireworks_panel;
+			else if (e.name == "Toggle Flashlight") {
+				m_flashlight_on = !m_flashlight_on;
+				Registry* reg = sceneManager().getActiveRegistry();
+				if (reg && !m_flashlight.isNull() && reg->isAlive(m_flashlight))
+					reg->setActive(m_flashlight, m_flashlight_on);
+			}
 		});
 }
 
@@ -81,6 +101,40 @@ void Sandbox::registerInputActions() {
 void Sandbox::update() {
 	if (m_fireworks)
 		m_fireworks->update(frameTime(), totalTime());
+
+	updateFlashlight();
+}
+
+// ─── Flashlight ──────────────────────────────────────────────────────────────
+
+void Sandbox::createFlashlight(Registry& registry) {
+	m_flashlight = registry.createSpotLight(
+		/*intensity*/ 80.0f,
+		/*radius*/    1.0f,
+		/*color*/     glm::vec3(1.0f, 0.97f, 0.9f),
+		/*direction*/ glm::vec3(0.0f, 0.0f, -1.0f),
+		/*inner*/     glm::radians(12.0f),
+		/*outer*/     glm::radians(22.0f));
+	registry.setName(m_flashlight, "Flashlight");
+	registry.getComponent<SpotLightComponent>(m_flashlight)->setShowBillboard(false);
+	registry.setActive(m_flashlight, m_flashlight_on);
+}
+
+void Sandbox::updateFlashlight() {
+	if (!m_flashlight_on || m_flashlight.isNull())
+		return;
+	Registry* reg = sceneManager().getActiveRegistry();
+	if (!reg || !reg->isAlive(m_flashlight))
+		return;
+
+	const CameraView& cam = cameraView();
+	auto* tc = reg->getComponent<TransformComponent>(m_flashlight);
+	auto* sl = reg->getComponent<SpotLightComponent>(m_flashlight);
+	if (!tc || !sl)
+		return;
+
+	tc->setTranslation(cam.position);
+	sl->setDirection(cam.forward);
 }
 
 // ─── UI Rendering ────────────────────────────────────────────────────────────
@@ -116,6 +170,8 @@ void Sandbox::renderGameModeOverlay() {
 		keyLabel("C", "Down");
 		ImGui::Separator();
 		keyLabel("F", "Launch Firework");
+		ImGui::SameLine(0.0f, 16.0f);
+		keyLabel("L", "Flashlight");
 		ImGui::SameLine(0.0f, 16.0f);
 		keyLabel("G", "Settings");
 		ImGui::Separator();

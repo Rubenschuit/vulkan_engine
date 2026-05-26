@@ -4,6 +4,7 @@
 #include "rendering/managers/gpu_scene_manager.hpp"
 #include "rendering/managers/pbr_mega_buffer.hpp"
 #include "rendering/hiz_system.hpp"
+#include "rendering/skinning_pre_pass.hpp"
 #include "rendering/ve_frame_info.hpp"
 #include "vulkan/ve_image.hpp"
 #include "utils/ve_frustum.hpp"
@@ -18,23 +19,24 @@ namespace ve {
 MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesystem::path& shaders_dir,
                                            EventBus& event_bus, VeDescriptorPool& pool,
                                            SceneResourceManager& scene_resources,
-                                           PbrMegaBuffer& mega_buffer, HizSystem& hiz)
+                                           PbrMegaBuffer& mega_buffer, HizSystem& hiz,
+                                           SkinningPrePass& skinning_pre_pass)
 	: m_ve_device(device), m_event_bus(&event_bus) {
 
-	auto rebuild = [this, &pool, &scene_resources, &mega_buffer, &hiz]() {
+	auto rebuild = [this, &pool, &scene_resources, &mega_buffer, &hiz, &skinning_pre_pass]() {
 		auto& gpu_scene = scene_resources.getGpuSceneManager();
-		createDescriptorSets(pool, gpu_scene, mega_buffer);
-		createHizDescriptorSets(pool, gpu_scene, mega_buffer, hiz);
-		createShadowDescriptorSets(pool, gpu_scene, mega_buffer);
+		createDescriptorSets(pool, gpu_scene, mega_buffer, skinning_pre_pass);
+		createHizDescriptorSets(pool, gpu_scene, mega_buffer, hiz, skinning_pre_pass);
+		createShadowDescriptorSets(pool, gpu_scene, mega_buffer, skinning_pre_pass);
 	};
 	m_scene_loaded_sub = event_bus.subscribe<SceneLoadedEvent>(
 		[rebuild](const SceneLoadedEvent&) { rebuild(); });
 	m_asset_load_sub = event_bus.subscribe<AssetLoadCompleteEvent>(
 		[rebuild](const AssetLoadCompleteEvent&) { rebuild(); });
 	m_resolution_sub = event_bus.subscribe<ResolutionChangedEvent>(
-		[this, &pool, &scene_resources, &mega_buffer, &hiz](const ResolutionChangedEvent&) {
+		[this, &pool, &scene_resources, &mega_buffer, &hiz, &skinning_pre_pass](const ResolutionChangedEvent&) {
 			auto& gpu_scene = scene_resources.getGpuSceneManager();
-			createHizDescriptorSets(pool, gpu_scene, mega_buffer, hiz);
+			createHizDescriptorSets(pool, gpu_scene, mega_buffer, hiz, skinning_pre_pass);
 		});
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
@@ -180,7 +182,8 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 		.build();
 
 	// Pass 2 layout: visible_objects, meshlet_object_map, counts, meshlet_ssbo, objects, transforms,
-	//                cull_params, hiz_image, hiz_sampler, indirect_cmds(RW), draw_counts(RW)
+	//                cull_params, hiz_image, hiz_sampler, indirect_cmds(RW), draw_counts(RW),
+	//                skinned_dynamic_offsets
 	m_pass2_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0,  vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
 		.addBinding(1,  vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
@@ -193,6 +196,7 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 		.addBinding(8,  vk::DescriptorType::eSampler,       vk::ShaderStageFlagBits::eCompute)
 		.addBinding(9,  vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
 		.addBinding(10, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
+		.addBinding(11, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
 		.build();
 
 	createPipelineLayouts();
@@ -256,7 +260,7 @@ void MeshletCullingSystem::createPipelineLayouts() {
 
 void MeshletCullingSystem::writeCullDescriptorSets(
 		VeDescriptorPool& pool, GpuSceneManager& scene_mgr, const PbrMegaBuffer& mega_buffer,
-		uint32_t frame,
+		SkinningPrePass& skinning_pre_pass, uint32_t frame,
 		vk::DescriptorImageInfo& hiz_img, vk::DescriptorImageInfo& hiz_smp_info,
 		VeBuffer& cull_params, VeBuffer& visible_objects, VeBuffer& counts,
 		VeBuffer& instance_buf, VeBuffer& meshlet_object_map, VeBuffer& dispatch_indirect,
@@ -292,6 +296,7 @@ void MeshletCullingSystem::writeCullDescriptorSets(
 		auto msbo_info = mega_buffer.getMeshletSsbo()->getDescriptorInfo();
 		auto ind_info  = meshlet_indirect.getDescriptorInfo();
 		auto dc_info   = meshlet_draw_counts.getDescriptorInfo();
+		auto skin_off_info = skinning_pre_pass.getSkinnedOffsetBuffer(frame).getDescriptorInfo();
 
 		VeDescriptorWriter(*m_pass2_layout, pool)
 			.writeBuffer(0,  &vis_info)
@@ -305,18 +310,20 @@ void MeshletCullingSystem::writeCullDescriptorSets(
 			.writeImage(8,   &hiz_smp_info)
 			.writeBuffer(9,  &ind_info)
 			.writeBuffer(10, &dc_info)
+			.writeBuffer(11, &skin_off_info)
 			.build(out_pass2);
 	}
 }
 
 void MeshletCullingSystem::createDescriptorSets(VeDescriptorPool& pool,
                                                 GpuSceneManager& scene_mgr,
-                                                const PbrMegaBuffer& mega_buffer) {
+                                                const PbrMegaBuffer& mega_buffer,
+                                                SkinningPrePass& skinning_pre_pass) {
 	vk::DescriptorImageInfo dummy_img{.imageView = *m_dummy_image->getImageView(), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
 	vk::DescriptorImageInfo dummy_smp_info{.sampler = *m_dummy_sampler};
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-		writeCullDescriptorSets(pool, scene_mgr, mega_buffer, i,
+		writeCullDescriptorSets(pool, scene_mgr, mega_buffer, skinning_pre_pass, i,
 			dummy_img, dummy_smp_info,
 			*m_cull_param_ubos[i], *m_visible_objects[i], *m_counts[i],
 			*m_instance_buffers[i], *m_meshlet_object_map[i], *m_dispatch_indirect[i],
@@ -327,7 +334,8 @@ void MeshletCullingSystem::createDescriptorSets(VeDescriptorPool& pool,
 void MeshletCullingSystem::createHizDescriptorSets(VeDescriptorPool& pool,
                                                    GpuSceneManager& scene_mgr,
                                                    const PbrMegaBuffer& mega_buffer,
-                                                   HizSystem& hiz) {
+                                                   HizSystem& hiz,
+                                                   SkinningPrePass& skinning_pre_pass) {
 	m_hiz_size      = glm::vec2(static_cast<float>(hiz.getScreenWidth()),
 	                             static_cast<float>(hiz.getScreenHeight()));
 	m_hiz_uv_scale  = glm::vec2(
@@ -340,7 +348,7 @@ void MeshletCullingSystem::createHizDescriptorSets(VeDescriptorPool& pool,
 		vk::DescriptorImageInfo hiz_img{.imageView = *hiz.getHizImageView(prev_frame), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
 		vk::DescriptorImageInfo hiz_smp_info{.sampler = *hiz.getSampler()};
 
-		writeCullDescriptorSets(pool, scene_mgr, mega_buffer, i,
+		writeCullDescriptorSets(pool, scene_mgr, mega_buffer, skinning_pre_pass, i,
 			hiz_img, hiz_smp_info,
 			*m_cull_param_ubos[i], *m_visible_objects[i], *m_counts[i],
 			*m_instance_buffers[i], *m_meshlet_object_map[i], *m_dispatch_indirect[i],
@@ -505,7 +513,8 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 
 void MeshletCullingSystem::createShadowDescriptorSets(VeDescriptorPool& pool,
                                                        GpuSceneManager& scene_mgr,
-                                                       const PbrMegaBuffer& mega_buffer) {
+                                                       const PbrMegaBuffer& mega_buffer,
+                                                       SkinningPrePass& skinning_pre_pass) {
 	vk::DescriptorImageInfo dummy_img{.imageView = *m_dummy_image->getImageView(), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
 	vk::DescriptorImageInfo dummy_smp_info{.sampler = *m_dummy_sampler};
 
@@ -519,7 +528,7 @@ void MeshletCullingSystem::createShadowDescriptorSets(VeDescriptorPool& pool,
 		for (uint32_t slot = 0; slot < SHADOW_BUFFER_COUNT; slot++) {
 			vk::raii::DescriptorSet ds1{nullptr};
 			vk::raii::DescriptorSet ds2{nullptr};
-			writeCullDescriptorSets(pool, scene_mgr, mega_buffer, i,
+			writeCullDescriptorSets(pool, scene_mgr, mega_buffer, skinning_pre_pass, i,
 				dummy_img, dummy_smp_info,
 				*m_shadow_cull_param_ubos[i][slot], *m_shadow_visible_objects[i][slot],
 				*m_shadow_counts[i][slot], *m_shadow_instance_buffers[i][slot],

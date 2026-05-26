@@ -80,6 +80,7 @@ public:
 	                 const EditorState& editor_state,
 	                 float frame_time,
 	                 float total_time);
+	void finalizeFrameTimings();
 
 	const RenderServices& services() const { return m_services; }
 

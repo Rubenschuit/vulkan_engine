@@ -107,12 +107,14 @@ public:
 	float getRange() const { return m_range; }
 	bool getRotates() const { return m_rotates; }
 	bool getCastsShadow() const { return m_casts_shadow; }
+	bool getShowBillboard() const { return m_show_billboard; }
 
 	void setIntensity(float v);
 	void setColor(const glm::vec3& v);
 	void setRange(float v);
 	void setRotates(bool v);
 	void setCastsShadow(bool v);
+	void setShowBillboard(bool v) { m_show_billboard = v; }
 
 	/// Returns range if explicitly set, otherwise derives from intensity/color
 	/// using the KHR_lights_punctual cutoff threshold. Cached until dirty.
@@ -128,6 +130,7 @@ private:
 	float m_range{0.0f};
 	bool m_rotates{false};
 	bool m_casts_shadow{false};
+	bool m_show_billboard{true};
 
 	mutable float m_effective_range{0.0f};
 	mutable bool m_range_dirty{true};
@@ -178,12 +181,14 @@ public:
 	const glm::vec3& getColor() const { return m_color; }
 	float getIntensity() const { return m_intensity; }
 	bool getCastsShadow() const { return m_casts_shadow; }
+	bool getShowBillboard() const { return m_show_billboard; }
 	CelestialType getCelestialType() const { return m_celestial_type; }
 
 	void setDirection(const glm::vec3& v);
 	void setColor(const glm::vec3& v);
 	void setIntensity(float v);
 	void setCastsShadow(bool v);
+	void setShowBillboard(bool v) { m_show_billboard = v; }
 	void setCelestialType(CelestialType t);
 
 private:
@@ -191,6 +196,7 @@ private:
 	glm::vec3 m_color{1.f};
 	float m_intensity{1.f};
 	bool m_casts_shadow{false};
+	bool m_show_billboard{true};
 	CelestialType m_celestial_type{CelestialType::Sun};
 };
 
@@ -206,6 +212,7 @@ public:
 	float getInnerConeAngle() const { return m_inner_cone_angle; }
 	float getOuterConeAngle() const { return m_outer_cone_angle; }
 	bool getCastsShadow() const { return m_casts_shadow; }
+	bool getShowBillboard() const { return m_show_billboard; }
 
 	void setIntensity(float v);
 	void setColor(const glm::vec3& v);
@@ -214,6 +221,7 @@ public:
 	void setInnerConeAngle(float radians);
 	void setOuterConeAngle(float radians);
 	void setCastsShadow(bool v);
+	void setShowBillboard(bool v) { m_show_billboard = v; }
 
 	/// Returns range if explicitly set, otherwise derives from intensity
 	float getEffectiveRange() const;
@@ -228,6 +236,7 @@ private:
 	float m_inner_cone_angle{glm::radians(25.0f)};
 	float m_outer_cone_angle{glm::radians(35.0f)};
 	bool m_casts_shadow{false};
+	bool m_show_billboard{true};
 
 	mutable float m_effective_range{0.0f};
 	mutable bool m_range_dirty{true};
@@ -408,14 +417,12 @@ public:
 	const std::vector<glm::mat4>& getInverseBindMatrices() const { return m_inverse_bind_matrices; }
 	const std::vector<VeMesh::AABB>& getJointLocalExtents() const { return m_joint_local_extents; }
 	Entity getSkeletonRoot() const { return m_skeleton_root; }
-	uint32_t getPaletteOffset() const { return m_palette_offset_cache; }
 	size_t jointCount() const { return m_joint_entities.size(); }
 
 	void setJointEntities(std::vector<Entity> joints) { m_joint_entities = std::move(joints); }
 	void setInverseBindMatrices(std::vector<glm::mat4> ibms) { m_inverse_bind_matrices = std::move(ibms); }
 	void setJointLocalExtents(std::vector<VeMesh::AABB> extents) { m_joint_local_extents = std::move(extents); }
 	void setSkeletonRoot(Entity e) { m_skeleton_root = e; }
-	void setPaletteOffset(uint32_t off) { m_palette_offset_cache = off; }
 
 	void remapEntities(const std::unordered_map<uint32_t, Entity>& old_to_new);
 
@@ -424,7 +431,6 @@ private:
 	std::vector<glm::mat4> m_inverse_bind_matrices;
 	std::vector<VeMesh::AABB> m_joint_local_extents;  // joint-local space, IBM applied
 	Entity m_skeleton_root;
-	uint32_t m_palette_offset_cache = 0;
 };
 
 // ---------------------------------------------------------------------------

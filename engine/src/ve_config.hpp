@@ -118,20 +118,19 @@ constexpr uint32_t MIN_PARALLEL_CULL_ENTITIES = 64; // below this, single-thread
 constexpr uint32_t MAX_BINDLESS_TEXTURES = 16384;
 constexpr uint32_t MAX_GPU_MATERIALS = 8192;
 
-// Material flags (bits 0-5, stored in MaterialGPU::material_flags and ObjectDataGPU::material_flags)
 namespace MaterialFlag {
-	constexpr uint32_t ALPHA_MODE_MASK = 0x3;  // bits 0-1: 0=OPAQUE, 1=MASK, 2=BLEND
-	constexpr uint32_t DOUBLE_SIDED    = 0x4;  // bit 2
-	constexpr uint32_t FLIP_TEX_V      = 0x8;  // bit 3
-	constexpr uint32_t SPEC_GLOSS      = 0x10; // bit 4
-	constexpr uint32_t HAS_TEXTURE     = 0x20; // bit 5 (MaterialGPU only: has albedo texture)
+	constexpr uint32_t ALPHA_MODE_MASK = 0x3;  // 0=OPAQUE, 1=MASK, 2=BLEND
+	constexpr uint32_t DOUBLE_SIDED    = 0x4;
+	constexpr uint32_t FLIP_TEX_V      = 0x8;
+	constexpr uint32_t SPEC_GLOSS      = 0x10;
+	constexpr uint32_t HAS_TEXTURE     = 0x20;
 }
 
-// Object flags (per-object rendering behavior, stored in ObjectDataGPU::object_flags)
 namespace ObjectFlag {
-	constexpr uint32_t IS_TRANSPARENT = 0x1; // bit 0: alpha_mode == BLEND
-	constexpr uint32_t NO_SHADOW      = 0x2; // bit 1
-	constexpr uint32_t DYNAMIC        = 0x4; // bit 2
+	constexpr uint32_t IS_TRANSPARENT = 0x1;
+	constexpr uint32_t NO_SHADOW      = 0x2;
+	constexpr uint32_t DYNAMIC        = 0x4;
+	constexpr uint32_t SKINNED        = 0x8;
 }
 
 // GPU-driven culling

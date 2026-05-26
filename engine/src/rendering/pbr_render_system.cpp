@@ -140,18 +140,24 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		MeshComponent* mesh = entry.mesh;
 		if (!mesh || !registry.getComponent<TransformComponent>(entry.entity))
 			continue;
-		// Skinned entities draw from per-instance SkinningPrePass output buffers via
-		// prepareSkinnedFrame, not the mega buffer.
-		if (registry.hasComponent<SkinComponent>(entry.entity))
-			continue;
 		auto* mat = mesh->getMaterial();
 		VeMesh* mesh_ptr = mesh->getMesh();
 		MaterialAlphaProps alpha_props = mat->getAlphaProps();
 		float transmission = mat->getMaterialFactors().transmission_factor;
 		bool use_transparent_pass = (alpha_props.alpha_mode == AlphaMode::BLEND) || (transmission > 0.0f);
+		bool is_skinned = registry.hasComponent<SkinComponent>(entry.entity);
+		if (is_skinned && use_transparent_pass) {
+			if (!m_warned_skinned_blend) {
+				VE_LOGW("Skinned mesh with BLEND/transmissive material skipped (no transparent skinned path)");
+				m_warned_skinned_blend = true;
+			}
+			continue;
+		}
 		const auto& aabb = mesh->getWorldAABB();
 		glm::vec3 obj_pos = (aabb.min + aabb.max) * 0.5f;
 		float dist = glm::dot(obj_pos - camera_pos, camera_fwd);
+		// For now, skinned meshes only have LOD 0's vertices in the dynamic region
+		uint32_t lod_level = is_skinned ? 0u : entry.lod_level;
 		Drawable d{
 			.entity = entry.entity,
 			.mesh = mesh,
@@ -161,7 +167,8 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 			.alpha_mode = alpha_props.alpha_mode,
 			.double_sided = alpha_props.double_sided,
 			.ssbo_index = 0,
-			.lod_level = entry.lod_level
+			.lod_level = lod_level,
+			.is_skinned = is_skinned,
 		};
 		if (use_transparent_pass)
 			m_transparent_drawables.push_back(d);
@@ -169,15 +176,16 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 			m_opaque_drawables.push_back(d);
 	}
 
-	// Sort opaques: (is_mask, double_sided, material, mesh_ptr, lod_level)
-	// Grouping by material keeps NonUniformResourceIndex effectively uniform within each
-	// draw call, avoiding GPU waterfall/divergence on bindless texture fetches.
+	// Sort opaques: (is_mask, double_sided, material, mesh_ptr, lod_level).
+	// Static drawables come before skinned within each bucket so the
+	// indirect-cmd build can batch statics first then emit one cmd per skinned entity.
 	std::sort(m_opaque_drawables.begin(), m_opaque_drawables.end(),
 		[](const Drawable& a, const Drawable& b) {
 			bool a_mask = (a.alpha_mode == AlphaMode::MASK);
 			bool b_mask = (b.alpha_mode == AlphaMode::MASK);
 			if (a_mask != b_mask) return !a_mask;
 			if (a.double_sided != b.double_sided) return !a.double_sided;
+			if (a.is_skinned != b.is_skinned) return !a.is_skinned;
 			if (a.material_ptr != b.material_ptr) return a.material_ptr < b.material_ptr;
 			if (a.mesh_ptr != b.mesh_ptr) return a.mesh_ptr < b.mesh_ptr;
 			return a.lod_level < b.lod_level;
@@ -231,16 +239,32 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		const auto& lod = entry->lod_entries[d.lod_level];
 		uint32_t first_instance = d.ssbo_index;
 		uint32_t instance_count = 1;
+		int32_t vertex_offset = static_cast<int32_t>(entry->vertex_offset);
 
-		size_t j = i + 1;
-		while (j < m_opaque_drawables.size()) {
-			auto& d2 = m_opaque_drawables[j];
-			if (d2.mesh_ptr != d.mesh_ptr || d2.lod_level != d.lod_level
-				|| d2.alpha_mode != d.alpha_mode || d2.double_sided != is_double
-				|| d2.material_ptr != d.material_ptr)
-				break;
-			instance_count++;
-			j++;
+		if (d.is_skinned) {
+			uint32_t vo = frame_info.skinning_pre_pass
+				? frame_info.skinning_pre_pass->getSkinnedVertexOffset(
+					d.entity, frame_info.current_frame, m_mega_buffer)
+				: SkinningPrePass::INVALID_OFFSET;
+			if (vo == SkinningPrePass::INVALID_OFFSET) {
+				i++;
+				continue;
+			}
+			vertex_offset = static_cast<int32_t>(vo);
+		} else {
+			// Batch consecutive static drawables sharing (mesh, material, lod). Skinned
+			// drawables never batch: each entity has a unique per-frame vertex_offset.
+			size_t j = i + 1;
+			while (j < m_opaque_drawables.size()) {
+				auto& d2 = m_opaque_drawables[j];
+				if (d2.is_skinned
+					|| d2.mesh_ptr != d.mesh_ptr || d2.lod_level != d.lod_level
+					|| d2.alpha_mode != d.alpha_mode || d2.double_sided != is_double
+					|| d2.material_ptr != d.material_ptr)
+					break;
+				instance_count++;
+				j++;
+			}
 		}
 
 		uint32_t bucket = (is_mask ? 2u : 0u) + (is_double ? 1u : 0u);
@@ -252,10 +276,10 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 			.indexCount = lod.index_count,
 			.instanceCount = instance_count,
 			.firstIndex = lod.first_index,
-			.vertexOffset = static_cast<int32_t>(entry->vertex_offset),
-			.firstInstance = first_instance
+			.vertexOffset = vertex_offset,
+			.firstInstance = first_instance,
 		});
-		i = j;
+		i += instance_count;
 	}
 	m_total_indirect_count = static_cast<uint32_t>(m_indirect_cmds.size());
 
@@ -300,68 +324,6 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 			| (alpha.use_spec_gloss_texture ? MaterialFlag::SPEC_GLOSS : 0u);
 	}
 
-}
-
-void PbrRenderSystem::prepareSkinnedFrame(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr) const {
-	m_skinned_drawables.clear();
-	auto& registry = *frame_info.registry;
-
-	FrustumPlane planes[6];
-	extractFrustumPlanes(frame_info.camera_view.proj * frame_info.camera_view.view, planes);
-
-	for (auto [entity, mc, sc] : registry.view<MeshComponent, SkinComponent>()) {
-		if (!mc.hasMesh() || !mc.hasMaterial())
-			continue;
-		if (!registry.transforms().has(entity.index()))
-			continue;
-		if (!isAABBInFrustum(mc.getWorldAABB(), planes))
-			continue;
-		auto* mat = mc.getMaterial();
-		MaterialAlphaProps alpha_props = mat->getAlphaProps();
-		float transmission = mat->getMaterialFactors().transmission_factor;
-		// No WBOIT-skinned path yet
-		if (alpha_props.alpha_mode == AlphaMode::BLEND || transmission > 0.0f) {
-			if (!m_warned_skinned_blend) {
-				VE_LOGW("Skinned mesh with BLEND/transmissive material skipped (no transparent skinned path)");
-				m_warned_skinned_blend = true;
-			}
-			continue;
-		}
-		m_skinned_drawables.push_back({
-			.entity = entity,
-			.mesh = &mc,
-			.mesh_ptr = mc.getMesh(),
-			.material_ptr = mat,
-			.dist_sq = 0.0f,
-			.alpha_mode = alpha_props.alpha_mode,
-			.double_sided = alpha_props.double_sided,
-			.ssbo_index = 0,
-			.lod_level = 0,
-		});
-	}
-
-	for (auto& d : m_skinned_drawables) {
-		if (frame_info.instance_count >= frame_info.instance_capacity) {
-			VE_LOGW("Instance buffer full, skipping remaining skinned objects");
-			break;
-		}
-		uint32_t idx = frame_info.instance_count++;
-		d.ssbo_index = idx;
-		const glm::mat3 nrm = registry.getWorldNormal(d.entity);
-		auto& inst = frame_info.instance_data[idx];
-		inst.transform = registry.getWorldTransform(d.entity);
-		inst.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
-		inst.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
-		inst.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
-		inst.material_index = mat_mgr.indexFor(d.material_ptr);
-		inst.lod_level = 0;
-		inst.depth_offset = (d.alpha_mode == AlphaMode::MASK) ? MASK_DEPTH_OFFSET : 0.0f;
-		MaterialAlphaProps alpha = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};
-		inst.material_flags = static_cast<uint32_t>(alpha.alpha_mode)
-			| (alpha.double_sided ? MaterialFlag::DOUBLE_SIDED : 0u)
-			| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? MaterialFlag::FLIP_TEX_V : 0u)
-			| (alpha.use_spec_gloss_texture ? MaterialFlag::SPEC_GLOSS : 0u);
-	}
 }
 
 void PbrRenderSystem::prepareTransparents(VeFrameInfo& frame_info, MaterialSSBOManager& mat_mgr,
@@ -606,38 +568,6 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info, const vk::raii::Desc
 			m_bucket_offsets[bucket] * sizeof(VkDrawIndexedIndirectCommand),
 			m_bucket_counts[bucket],
 			sizeof(VkDrawIndexedIndirectCommand));
-	}
-}
-
-void PbrRenderSystem::renderSkinned(VeFrameInfo& frame_info, const SkinningPrePass& pre_pass,
-                                    const vk::raii::DescriptorSet& bindless_set) const {
-	if (m_skinned_drawables.empty() || !m_mega_buffer.isValid())
-		return;
-	auto& cmd = frame_info.cmd();
-	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
-	bool mask = frame_info.shadow_mask_active;
-	auto& pipeline = mask ? m_pipelines_mask[mode] : m_pipelines[mode];
-	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->getPipeline());
-	bindPbrResources(frame_info, bindless_set, frame_info.cpu_global_descriptor_set);
-	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
-	cmd.setDepthWriteEnable(VK_TRUE);
-	m_mega_buffer.bind(cmd);
-
-	for (const auto& d : m_skinned_drawables) {
-		if (!d.mesh_ptr)
-			continue;
-		const auto* entry = m_mega_buffer.getEntry(d.mesh_ptr);
-		if (!entry || entry->lod_entries.empty())
-			continue;
-		uint32_t vo = pre_pass.getSkinnedVertexOffset(d.entity, frame_info.current_frame, m_mega_buffer);
-		if (vo == SkinningPrePass::INVALID_OFFSET)
-			continue;
-		bool is_mask = (d.alpha_mode == AlphaMode::MASK);
-		cmd.setCullMode(d.double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
-		cmd.setDepthCompareOp(
-			(m_depth_prepass_active || is_mask) ? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
-		const auto& lod = entry->lod_entries[0];
-		cmd.drawIndexed(lod.index_count, 1, lod.first_index, static_cast<int32_t>(vo), d.ssbo_index);
 	}
 }
 

@@ -806,6 +806,10 @@ void InspectorPanel::renderPointLight(PointLightComponent& light) {
 	bool rotates = light.getRotates();
 	if (ImGui::Checkbox("Rotates", &rotates))
 		light.setRotates(rotates);
+
+	bool show_billboard = light.getShowBillboard();
+	if (ImGui::Checkbox("Show Billboard", &show_billboard))
+		light.setShowBillboard(show_billboard);
 }
 
 void InspectorPanel::renderSpotLight(SpotLightComponent& light) {
@@ -853,6 +857,10 @@ void InspectorPanel::renderSpotLight(SpotLightComponent& light) {
 	bool casts_shadow = light.getCastsShadow();
 	if (ImGui::Checkbox("Casts Shadow", &casts_shadow))
 		light.setCastsShadow(casts_shadow);
+
+	bool show_billboard = light.getShowBillboard();
+	if (ImGui::Checkbox("Show Billboard", &show_billboard))
+		light.setShowBillboard(show_billboard);
 }
 
 void InspectorPanel::renderDirectionalLight(DirectionalLightComponent& light) {
@@ -880,6 +888,10 @@ void InspectorPanel::renderDirectionalLight(DirectionalLightComponent& light) {
 	bool casts_shadow = light.getCastsShadow();
 	if (ImGui::Checkbox("Casts Shadow", &casts_shadow))
 		light.setCastsShadow(casts_shadow);
+
+	bool show_billboard = light.getShowBillboard();
+	if (ImGui::Checkbox("Show Billboard", &show_billboard))
+		light.setShowBillboard(show_billboard);
 
 	const char* celestial_types[] = { "Moon", "Sun" };
 	int ct = static_cast<int>(light.getCelestialType());

@@ -2,6 +2,7 @@
 #include "rendering/culling/gpu_culling_system.hpp"
 #include "rendering/managers/gpu_scene_manager.hpp"
 #include "rendering/hiz_system.hpp"
+#include "rendering/skinning_pre_pass.hpp"
 #include "rendering/ve_frame_info.hpp"
 #include "vulkan/ve_image.hpp"
 #include "scene/camera_view.hpp"
@@ -65,6 +66,7 @@ GpuCullingSystem::GpuCullingSystem(VeDevice& device, const std::filesystem::path
 		.addBinding(7, vk::DescriptorType::eSampler, vk::ShaderStageFlagBits::eCompute)       // hiz sampler
 		.addBinding(8, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // active IDs
 		.addBinding(9, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // draw groups
+		.addBinding(10, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // skinned vertex offsets
 		.build();
 
 	createPipelineLayout();
@@ -236,7 +238,8 @@ void GpuCullingSystem::createCompactionDescriptorSets(VeDescriptorPool& pool) {
 	}
 }
 
-void GpuCullingSystem::createDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr) {
+void GpuCullingSystem::createDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr,
+                                              SkinningPrePass& skinning_pre_pass) {
 	vk::DescriptorImageInfo dummy_img{
 		.imageView = *m_dummy_image->getImageView(),
 		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
@@ -252,6 +255,7 @@ void GpuCullingSystem::createDescriptorSets(VeDescriptorPool& pool, GpuSceneMana
 		auto count_info = m_draw_count_buffers[i]->getDescriptorInfo();
 		auto active_id_info = scene_mgr.getActiveIdBuffer(i).getDescriptorInfo();
 		auto draw_group_info = scene_mgr.getDrawGroupBuffer(i).getDescriptorInfo();
+		auto skin_off_info = skinning_pre_pass.getSkinnedOffsetBuffer(i).getDescriptorInfo();
 
 		VeDescriptorWriter(*m_compute_set_layout, pool)
 			.writeBuffer(0, &obj_info)
@@ -264,11 +268,13 @@ void GpuCullingSystem::createDescriptorSets(VeDescriptorPool& pool, GpuSceneMana
 			.writeImage(7, &dummy_smp)
 			.writeBuffer(8, &active_id_info)
 			.writeBuffer(9, &draw_group_info)
+			.writeBuffer(10, &skin_off_info)
 			.build(m_compute_descriptor_sets[i]);
 	}
 }
 
-void GpuCullingSystem::createShadowDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr) {
+void GpuCullingSystem::createShadowDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr,
+                                                    SkinningPrePass& skinning_pre_pass) {
 	vk::DescriptorImageInfo dummy_img{
 		.imageView = *m_dummy_image->getImageView(),
 		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
@@ -282,6 +288,7 @@ void GpuCullingSystem::createShadowDescriptorSets(VeDescriptorPool& pool, GpuSce
 		auto count_info = m_draw_count_buffers[i]->getDescriptorInfo();
 		auto active_id_info = scene_mgr.getActiveIdBuffer(i).getDescriptorInfo();
 		auto draw_group_info = scene_mgr.getDrawGroupBuffer(i).getDescriptorInfo();
+		auto skin_off_info = skinning_pre_pass.getSkinnedOffsetBuffer(i).getDescriptorInfo();
 
 		m_shadow_compute_descriptor_sets[i].clear();
 		for (uint32_t slot = 0; slot < SHADOW_BUFFER_COUNT; slot++) {
@@ -301,6 +308,7 @@ void GpuCullingSystem::createShadowDescriptorSets(VeDescriptorPool& pool, GpuSce
 				.writeImage(7, &dummy_smp)
 				.writeBuffer(8, &active_id_info)
 				.writeBuffer(9, &draw_group_info)
+				.writeBuffer(10, &skin_off_info)
 				.build(ds);
 			m_shadow_compute_descriptor_sets[i].push_back(std::move(ds));
 		}
@@ -308,7 +316,7 @@ void GpuCullingSystem::createShadowDescriptorSets(VeDescriptorPool& pool, GpuSce
 }
 
 void GpuCullingSystem::createShadowHizDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr,
-                                                      HizSystem& hiz) {
+                                                      HizSystem& hiz, SkinningPrePass& skinning_pre_pass) {
 	m_shadow_compute_descriptor_sets.resize(MAX_FRAMES_IN_FLIGHT);
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		auto obj_info = scene_mgr.getObjectDataBuffer(i).getDescriptorInfo();
@@ -316,6 +324,7 @@ void GpuCullingSystem::createShadowHizDescriptorSets(VeDescriptorPool& pool, Gpu
 		auto count_info = m_draw_count_buffers[i]->getDescriptorInfo();
 		auto active_id_info = scene_mgr.getActiveIdBuffer(i).getDescriptorInfo();
 		auto draw_group_info = scene_mgr.getDrawGroupBuffer(i).getDescriptorInfo();
+		auto skin_off_info = skinning_pre_pass.getSkinnedOffsetBuffer(i).getDescriptorInfo();
 
 		// Prev-frame Hi-Z (same image for all slots in a given frame)
 		uint32_t prev_frame = (i + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
@@ -343,6 +352,7 @@ void GpuCullingSystem::createShadowHizDescriptorSets(VeDescriptorPool& pool, Gpu
 				.writeImage(7, &sampler_info)
 				.writeBuffer(8, &active_id_info)
 				.writeBuffer(9, &draw_group_info)
+				.writeBuffer(10, &skin_off_info)
 				.build(ds);
 			m_shadow_compute_descriptor_sets[i].push_back(std::move(ds));
 		}
@@ -350,7 +360,7 @@ void GpuCullingSystem::createShadowHizDescriptorSets(VeDescriptorPool& pool, Gpu
 }
 
 void GpuCullingSystem::createHizDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr,
-                                                HizSystem& hiz) {
+                                                HizSystem& hiz, SkinningPrePass& skinning_pre_pass) {
 	m_hiz_size = glm::vec2(static_cast<float>(hiz.getScreenWidth()),
 	                        static_cast<float>(hiz.getScreenHeight()));
 	m_hiz_uv_scale = glm::vec2(
@@ -362,6 +372,7 @@ void GpuCullingSystem::createHizDescriptorSets(VeDescriptorPool& pool, GpuSceneM
 		auto transform_info = scene_mgr.getTransformBuffer(i).getDescriptorInfo();
 		auto active_id_info = scene_mgr.getActiveIdBuffer(i).getDescriptorInfo();
 		auto draw_group_info = scene_mgr.getDrawGroupBuffer(i).getDescriptorInfo();
+		auto skin_off_info = skinning_pre_pass.getSkinnedOffsetBuffer(i).getDescriptorInfo();
 
 		// Prev-frame Hi-Z
 		uint32_t prev_frame = (i + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT;
@@ -389,6 +400,7 @@ void GpuCullingSystem::createHizDescriptorSets(VeDescriptorPool& pool, GpuSceneM
 			.writeImage(7, &sampler_info)
 			.writeBuffer(8, &active_id_info)
 			.writeBuffer(9, &draw_group_info)
+			.writeBuffer(10, &skin_off_info)
 			.build(m_hiz_descriptor_sets[i]);
 	}
 }
@@ -740,12 +752,13 @@ void GpuCullingSystem::clearReadback() {
 			(BUCKET_COUNT + 1) * sizeof(uint32_t));
 }
 
-void GpuCullingSystem::subscribeToEvents(EventBus& event_bus, HizSystem& hiz, GpuSceneManager& scene_mgr) {
+void GpuCullingSystem::subscribeToEvents(EventBus& event_bus, HizSystem& hiz, GpuSceneManager& scene_mgr,
+                                          SkinningPrePass& skinning_pre_pass) {
 	m_event_bus = &event_bus;
 	m_resolution_sub = event_bus.subscribe<ResolutionChangedEvent>(
-		[this, &hiz, &scene_mgr](const ResolutionChangedEvent& e) {
-			createHizDescriptorSets(e.pool, scene_mgr, hiz);
-			createShadowHizDescriptorSets(e.pool, scene_mgr, hiz);
+		[this, &hiz, &scene_mgr, &skinning_pre_pass](const ResolutionChangedEvent& e) {
+			createHizDescriptorSets(e.pool, scene_mgr, hiz, skinning_pre_pass);
+			createShadowHizDescriptorSets(e.pool, scene_mgr, hiz, skinning_pre_pass);
 		});
 	m_scene_unloaded_sub = event_bus.subscribe<SceneUnloadedEvent>(
 		[this](const SceneUnloadedEvent&) {

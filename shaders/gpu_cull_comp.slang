@@ -27,6 +27,8 @@
 // Draw group metadata (instance_base, max_instances per group)
 [[vk::binding(9, 0)]] StructuredBuffer<DrawGroupGPU> draw_groups;
 
+[[vk::binding(10, 0)]] StructuredBuffer<uint> skinned_dynamic_offsets;
+
 [numthreads(256, 1, 1)]
 void compMain(uint3 tid : SV_DispatchThreadID) {
 	if (tid.x >= cull_params.object_count)
@@ -111,10 +113,15 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 	uint draw_group_id = obj.lod_draw_group_id[lod];
 	DrawGroupGPU group = draw_groups[draw_group_id];
 
+	uint dyn = skinned_dynamic_offsets[idx];
+	uint vertex_offset_to_write = (dyn != 0u) ? dyn : obj.vertex_offset;
+	uint cmd_base = draw_group_id * 20;
+	indirect_cmds.Store(cmd_base + 12, vertex_offset_to_write);
+
 	// Wave-aggregated, bounded reservation of instanceCount.
 	// VkDrawIndexedIndirectCommand layout (20 bytes):
 	//   +0: indexCount, +4: instanceCount, +8: firstIndex, +12: vertexOffset, +16: firstInstance
-	uint cmd_byte_offset = draw_group_id * 20 + 4;
+	uint cmd_byte_offset = cmd_base + 4;
 	uint local_idx = 0;
 	bool got_slot = false;
 	bool pending = true;

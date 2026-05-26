@@ -639,7 +639,6 @@ void SkinComponent::remapEntities(const std::unordered_map<uint32_t, Entity>& ol
 		if (it != old_to_new.end())
 			m_skeleton_root = it->second;
 	}
-	m_palette_offset_cache = 0;
 }
 
 void AnimatorComponent::update(float delta_time) {

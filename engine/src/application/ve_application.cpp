@@ -88,8 +88,10 @@ void VeApplication::run() {
 			m_scene_manager->tick(m_frame_time);
 		}
 
-		// App per-frame logic (particle config, etc.)
-		update();
+		{
+			ZoneScopedN("App Update");
+			update();
+		}
 
 		VeScene* scene = m_scene_manager->getActiveScene();
 
@@ -101,22 +103,38 @@ void VeApplication::run() {
 			m_ve_renderer.getProfiler().endCpuTimer(ProfileTimer::PHYSICS);
 		}
 
-		// Handle all queued events before rendering
-		m_event_bus.flushEvents();
+		{
+			ZoneScopedN("Flush Events");
+			m_event_bus.flushEvents();
+		}
 
 		UIContext ui{m_render_pipeline->settings(), m_render_pipeline->stats(), m_sim};
 
 		if (!scene) {
-			m_editor->beginFrame();
-			if (m_ve_renderer.beginUIRecording(m_editor->isEditorMode()))
-				m_editor->renderUI(ui, nullptr);
+			{
+				ZoneScopedN("Editor BeginFrame");
+				m_editor->beginFrame();
+			}
+			if (m_ve_renderer.ensureImageAcquired()) {
+				ZoneScopedN("UI");
+				m_ve_renderer.beginUIRecording(m_editor->isEditorMode());
+				{
+					ZoneScopedN("Render UI");
+					m_editor->renderUI(ui, nullptr);
+				}
+			}
 			m_ve_renderer.endFrame();
 			continue;
 		}
 
-		// Render
-		m_render_pipeline->prepareFrame();
-		m_editor->beginFrame();
+		{
+			ZoneScopedN("Prepare Frame");
+			m_render_pipeline->prepareFrame();
+		}
+		{
+			ZoneScopedN("Editor BeginFrame");
+			m_editor->beginFrame();
+		}
 		Registry* reg = m_scene_manager->getActiveRegistry();
 		const CameraView& view = m_editor->resolveCameraView(
 			reg, m_ve_renderer.getExtentAspectRatio(),
@@ -126,11 +144,19 @@ void VeApplication::run() {
 			m_editor->getState(), m_frame_time, m_total_time);
 
 		bool editor_mode = m_editor->isEditorMode();
-		{
+		bool ui_ready = m_ve_renderer.ensureImageAcquired();
+		if (ui_ready) {
 			ZoneScopedN("UI");
-			if (m_ve_renderer.beginUIRecording(editor_mode))
+			m_ve_renderer.getProfiler().beginCpuTimer(ProfileTimer::UI);
+			m_ve_renderer.beginUIRecording(editor_mode);
+			{
+				ZoneScopedN("Render UI");
 				m_editor->renderUI(ui, &scene->getRegistry());
+			}
+			m_ve_renderer.getProfiler().endCpuTimer(ProfileTimer::UI);
 		}
+
+		m_render_pipeline->finalizeFrameTimings();
 
 		{
 			ZoneScopedN("End Frame");

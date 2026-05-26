@@ -23,6 +23,8 @@
 [[vk::binding(9,  0)]] RWByteAddressBuffer indirect_cmds;  // VkDrawIndexedIndirectCommand[]
 [[vk::binding(10, 0)]] RWByteAddressBuffer draw_counts;    // per-bucket surviving meshlet counts
 
+[[vk::binding(11, 0)]] StructuredBuffer<uint> skinned_dynamic_offsets;
+
 [numthreads(MESHLET_CULL_WORKGROUP_SIZE, 1, 1)]
 void compMain(uint3 tid : SV_DispatchThreadID) {
 	uint total_meshlets = min(counts.Load(4), cull_params.max_meshlet_draws);
@@ -88,13 +90,16 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 
 	uint abs_slot = bucket * max_per_bucket + slot;
 
+	uint dyn = skinned_dynamic_offsets[vis.gpu_id];
+	uint vertex_offset_to_write = (dyn != 0u) ? dyn : m.vertex_offset;
+
 	// Write VkDrawIndexedIndirectCommand (20 bytes):
 	//   +0: indexCount, +4: instanceCount, +8: firstIndex, +12: vertexOffset, +16: firstInstance
 	uint byte_off = abs_slot * 20;
 	indirect_cmds.Store(byte_off + 0,  m.index_count);
 	indirect_cmds.Store(byte_off + 4,  1u);
 	indirect_cmds.Store(byte_off + 8,  m.index_offset);
-	indirect_cmds.Store(byte_off + 12, m.vertex_offset); // vertex shader base; int32 but same bit pattern
+	indirect_cmds.Store(byte_off + 12, vertex_offset_to_write);
 	// Pack gpu_id (low 16) and meshlet local index (high 16) into firstInstance.
 	// Vertex shader unpacks: gpu_id = firstInstance & 0xFFFF, meshlet_id = firstInstance >> 16.
 	indirect_cmds.Store(byte_off + 16, (vis.gpu_id & 0xFFFFu) | ((local_idx & 0xFFFFu) << 16));

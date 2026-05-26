@@ -54,11 +54,6 @@ public:
 	                              const uint32_t* cpu_draw_counts = nullptr,
 	                              const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 
-
-	void renderSkinned(VeFrameInfo& frame_info,
-	                   PbrMegaBuffer& mega_buffer,
-	                   const std::vector<PbrRenderSystem::Drawable>& skinned_drawables) const;
-
 	void recreatePipeline(vk::SampleCountFlagBits sample_count);
 
 private:

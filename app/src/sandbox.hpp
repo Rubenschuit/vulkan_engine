@@ -36,11 +36,18 @@ private:
 	void renderGameModeOverlay();
 	void renderFireworksPanel();
 
+	void createFlashlight(Registry& registry);
+	void updateFlashlight();
+
 	bool m_show_controls = true;
 	bool m_show_fireworks_panel = false;
 	InputController::CursorCaptureToken m_fireworks_panel_token;
 	EventSubscriptionId m_input_sub = 0;
+	EventSubscriptionId m_scene_loaded_sub = 0;
 	std::unique_ptr<effects::Fireworks> m_fireworks;
+
+	Entity m_flashlight = Entity::null();
+	bool m_flashlight_on = false;
 };
 
 }

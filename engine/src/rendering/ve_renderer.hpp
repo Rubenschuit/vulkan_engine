@@ -84,14 +84,14 @@ public:
 	void beginWboitComposite(vk::raii::CommandBuffer& command_buffer);
 	void endWboitComposite(vk::raii::CommandBuffer& command_buffer);
 
+	bool ensureImageAcquired();
+
 	// Start rendering to the swapchain (editor_mode=false) or viewport image (editor_mode=true).
-	// Returns false if acquire failed mid-frame
-	bool beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode = false);
+	void beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode = false);
 	void endPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode = false);
 
 	// Prepare the UI command buffer for recording (barrier/transition).
-	// Call before ImGuiLayer::renderUI(). Returns false if acquire failed
-	bool beginUIRecording(bool editor_mode);
+	void beginUIRecording(bool editor_mode);
 
 	// Scene render extent (editor viewport resolution)
 	void resizeSceneRender(uint32_t w, uint32_t h);
@@ -166,7 +166,6 @@ private:
 	void createViewportResources();
 	void recreateWboitImages();
 	void transitionToPresent(vk::raii::CommandBuffer& command_buffer);
-	bool ensureImageAcquired();
 
 	VeDevice& m_ve_device;
 	CommandResourceManager m_command_manager;

@@ -164,6 +164,8 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 
 	auto& registry = *frame_info.registry;
 	for (auto [entity, pl, tc] : registry.view<PointLightComponent, TransformComponent>()) {
+		if (!pl.getShowBillboard())
+			continue;
 		SimplePushConstantData push{};
 		glm::vec3 world_pos = glm::vec3(registry.getWorldTransform(entity)[3]);
 		push.position = glm::vec4{world_pos, 1.0f};
@@ -182,6 +184,8 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 	// Celestial billboards for directional lights (sun/moon)
 	glm::vec3 cam_pos = frame_info.camera_view.position;
 	for (auto [entity, dl] : registry.view<DirectionalLightComponent>()) {
+		if (!dl.getShowBillboard())
+			continue;
 		glm::vec3 celestial_pos = cam_pos - glm::normalize(dl.getDirection()) * CELESTIAL_DISTANCE;
 
 		SimplePushConstantData push{};
@@ -200,6 +204,8 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 
 	// Spot light billboards
 	for (auto [entity, sl, tc] : registry.view<SpotLightComponent, TransformComponent>()) {
+		if (!sl.getShowBillboard())
+			continue;
 		SimplePushConstantData push{
 			.position = glm::vec4{glm::vec3(registry.getWorldTransform(entity)[3]), 1.0f},
 			.color = glm::vec4{sl.getColor(), sl.getIntensity()},
@@ -440,8 +446,13 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 
 		glm::vec3 color = sl.getColor();
 		float intensity = sl.getIntensity();
-		glm::vec3 world_pos = glm::vec3(registry.getWorldTransform(entity)[3]);
-		glm::vec3 world_dir = glm::normalize(glm::mat3(registry.getWorldTransform(entity)) * sl.getDirection());
+		const glm::mat4& world = registry.getWorldTransform(entity);
+		glm::vec3 world_pos = glm::vec3(world[3]);
+		glm::vec3 raw_dir = glm::mat3(world) * sl.getDirection();
+		float dir_len_sq = glm::dot(raw_dir, raw_dir);
+		glm::vec3 world_dir = (dir_len_sq > 1e-12f)
+			? raw_dir * (1.0f / std::sqrt(dir_len_sq))
+			: glm::normalize(sl.getDirection());
 
 		ubo.spot_lights[num_spot_lights].position = glm::vec4{world_pos, sl.getEffectiveRange()};
 		ubo.spot_lights[num_spot_lights].direction = glm::vec4{world_dir, std::cos(sl.getOuterConeAngle())};

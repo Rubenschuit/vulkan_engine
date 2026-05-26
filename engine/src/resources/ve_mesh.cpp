@@ -3,6 +3,8 @@
 #include "resources/internal/loaded_asset_data.hpp"
 #include "resources/internal/upload_context.hpp"
 #include "rendering/culling/meshlet_data.hpp"
+#include "events/event_bus.hpp"
+#include "events/engine_events.hpp"
 #include "ve_config.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -94,6 +96,21 @@ VeMesh::~VeMesh() {
 
 void VeMesh::setMeshletData(std::unique_ptr<CpuMeshletData> data) {
 	m_meshlet_data = std::move(data);
+}
+
+void VeMesh::emitUnloadingEvent(EventBus& bus) {
+	ResourceUnloadingEvent<VeMesh> ev{};
+	ev.resource = this;
+	bus.emitImmediate(ev);
+}
+
+void VeMesh::releaseGpuBuffers() {
+	m_vertex_buffer.reset();
+	m_shadow_vertex_buffer.reset();
+	m_skin_vertex_buffer.reset();
+	m_index_buffer.reset();
+	for (auto& lod : m_lod_levels)
+		lod.index_buffer.reset();
 }
 
 std::unique_ptr<CpuMeshletData> VeMesh::buildMeshletData(
@@ -242,6 +259,7 @@ void VeMesh::recordSkinVertexBuffer(const std::vector<SkinVertex>& skin_vertices
 	VeDevice::copyBuffer(ctx.transfer_cmd, src.buffer, m_skin_vertex_buffer->getBuffer(), total_size, src.offset);
 	ctx.bytes_in_flight += static_cast<size_t>(total_size);
 	ctx.transfer_has_work = true;
+	m_has_skinning = true;
 }
 
 void VeMesh::recordIndexBuffers(const std::vector<uint32_t>& indices, UploadContext& ctx) {

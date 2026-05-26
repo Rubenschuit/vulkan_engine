@@ -173,6 +173,7 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 	bool has_anim = registry.hasComponent<AnimatorComponent>(entity);
 	bool has_skin = registry.hasComponent<SkinComponent>(entity);
 	bool has_cam = registry.hasComponent<CameraComponent>(entity);
+	bool has_emitter = registry.hasComponent<ParticleEmitterComponent>(entity);
 	bool is_joint = m_joint_entity_ids.count(entity.id()) != 0;
 
 	// Check if has visible children
@@ -219,38 +220,42 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 		ImGui::PopStyleColor();
 
 	// Component badges on the same line
-	if (has_mesh || has_pl || has_sl || has_dl || has_anim || has_skin || is_joint || has_cam) {
+	if (has_mesh || has_pl || has_sl || has_dl || has_anim || has_skin || is_joint || has_cam || has_emitter) {
 		ImGui::SameLine();
 		if (has_mesh) {
 			ImGui::TextColored(ImVec4(0.5f, 0.8f, 0.5f, 1.0f), "[M]");
-			if (has_pl || has_sl || has_dl || has_anim || has_skin || is_joint || has_cam) ImGui::SameLine();
+			if (has_pl || has_sl || has_dl || has_anim || has_skin || is_joint || has_cam || has_emitter) ImGui::SameLine();
 		}
 		if (has_anim) {
 			ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "[A]");
-			if (has_pl || has_sl || has_dl || has_skin || is_joint || has_cam) ImGui::SameLine();
+			if (has_pl || has_sl || has_dl || has_skin || is_joint || has_cam || has_emitter) ImGui::SameLine();
 		}
 		if (has_skin) {
 			ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.9f, 1.0f), "[S]");
-			if (has_pl || has_sl || has_dl || is_joint || has_cam) ImGui::SameLine();
+			if (has_pl || has_sl || has_dl || is_joint || has_cam || has_emitter) ImGui::SameLine();
 		}
 		if (is_joint) {
 			ImGui::TextColored(ImVec4(0.7f, 0.5f, 0.9f, 1.0f), "[J]");
-			if (has_pl || has_sl || has_dl || has_cam) ImGui::SameLine();
+			if (has_pl || has_sl || has_dl || has_cam || has_emitter) ImGui::SameLine();
 		}
 		if (has_pl) {
 			ImGui::TextColored(ImVec4(1.0f, 0.9f, 0.4f, 1.0f), "[PL]");
-			if (has_sl || has_dl || has_cam) ImGui::SameLine();
+			if (has_sl || has_dl || has_cam || has_emitter) ImGui::SameLine();
 		}
 		if (has_sl) {
 			ImGui::TextColored(ImVec4(0.8f, 0.9f, 1.0f, 1.0f), "[SL]");
-			if (has_dl || has_cam) ImGui::SameLine();
+			if (has_dl || has_cam || has_emitter) ImGui::SameLine();
 		}
 		if (has_dl) {
 			ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.3f, 1.0f), "[DL]");
-			if (has_cam) ImGui::SameLine();
+			if (has_cam || has_emitter) ImGui::SameLine();
 		}
-		if (has_cam)
+		if (has_cam) {
 			ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.4f, 1.0f), "[C]");
+			if (has_emitter) ImGui::SameLine();
+		}
+		if (has_emitter)
+			ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.9f, 1.0f), "[E]");
 	}
 
 	// Handle selection

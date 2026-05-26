@@ -96,7 +96,7 @@ public:
 	VeBuffer& getShadowVertexBuffer() const { return *m_shadow_vertex_buffer; }
 	VeBuffer& getIndexBuffer() const { return *m_index_buffer; }
 
-	bool hasSkinning() const { return m_skin_vertex_buffer != nullptr; }
+	bool hasSkinning() const { return m_has_skinning; }
 	VeBuffer& getSkinVertexBuffer() const { return *m_skin_vertex_buffer; }
 
 	AABB getLocalAABB() const { return m_local_aabb; }
@@ -106,6 +106,9 @@ public:
 	const std::vector<uint32_t>& getCpuIndices() const { return m_cpu_indices; }
 	bool hasCpuGeometry() const { return !m_cpu_positions.empty(); }
 
+	// Release per-mesh GPU buffers
+	void releaseGpuBuffers();
+
 	void setMeshletData(std::unique_ptr<CpuMeshletData> data);
 	const CpuMeshletData* getMeshletData() const { return m_meshlet_data.get(); }
 
@@ -114,6 +117,8 @@ public:
 		const std::vector<Vertex>& vertices,
 		const std::vector<uint32_t>& base_indices,
 		const std::vector<std::vector<uint32_t>>& lod_indices = {});
+
+	void emitUnloadingEvent(EventBus& bus) override;
 
 protected:
 	bool doLoad() override;
@@ -144,6 +149,7 @@ private:
 	std::vector<uint32_t> m_cpu_indices;
 	std::unique_ptr<CpuMeshletData> m_meshlet_data;
 	std::vector<AABB> m_joint_mesh_local_extents;
+	bool m_has_skinning{false};
 };
 
 // Transform AABB by model matrix (transform 8 corners, take min/max of result).

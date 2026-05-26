@@ -123,7 +123,7 @@ void FrameProfiler::beginCpuTimer(ProfileTimer timer) {
 void FrameProfiler::endCpuTimer(ProfileTimer timer) {
 	auto end = clock::now();
 	auto start = m_cpu_starts[static_cast<size_t>(timer)];
-	m_results.cpu_ms[static_cast<size_t>(timer)] =
+	m_results.cpu_ms[static_cast<size_t>(timer)] +=
 		std::chrono::duration<float, std::chrono::milliseconds::period>(end - start).count();
 }
 

@@ -378,7 +378,16 @@ void RenderPipeline::renderFrame(VeScene& scene,
 	}
 	{
 		ZoneScopedN("Skinning Palette");
-		m_skinning_pre_pass->updatePalette(scene.getRegistry(), fi.current_frame);
+		auto& profiler = m_ve_renderer.getProfiler();
+		profiler.beginCpuTimer(ProfileTimer::SKINNING);
+		m_skinning_pre_pass->updatePalette(scene.getRegistry(), fi.current_frame,
+			&m_ve_renderer.getThreadPool());
+		m_skinning_pre_pass->updateSkinnedOffsets(
+			m_scene_resources->getGpuSceneManager(),
+			m_scene_resources->getMegaBuffer(),
+			fi.current_frame);
+		m_scene_resources->getGpuSceneManager().refreshSkinnedAabbs(scene.getRegistry());
+		profiler.endCpuTimer(ProfileTimer::SKINNING);
 	}
 	dispatchCompute(fi);
 	renderFrameBody(fi, editor_state);
@@ -400,9 +409,10 @@ void RenderPipeline::ensureGpuCullingInfrastructure() {
 	ensureHizInfrastructure();
 
 	auto& gpu_scene = m_scene_resources->getGpuSceneManager();
+	auto& skinning = *m_skinning_pre_pass;
 	m_gpu_culling_system = std::make_unique<GpuCullingSystem>(m_ve_device, m_config.shaders_dir);
-	m_gpu_culling_system->createDescriptorSets(*m_resources.pool(), gpu_scene);
-	m_gpu_culling_system->createShadowDescriptorSets(*m_resources.pool(), gpu_scene);
+	m_gpu_culling_system->createDescriptorSets(*m_resources.pool(), gpu_scene, skinning);
+	m_gpu_culling_system->createShadowDescriptorSets(*m_resources.pool(), gpu_scene, skinning);
 	if (m_gpu_culling_system->compactionEnabled())
 		m_gpu_culling_system->createCompactionDescriptorSets(*m_resources.pool());
 	m_gpu_culling_system->createGlobalDescriptorSets(*m_resources.pool(), m_resources.globalSetLayout(),
@@ -410,9 +420,9 @@ void RenderPipeline::ensureGpuCullingInfrastructure() {
 
 	m_shadow_render_system->createGpuShadowDescriptorSets(*m_gpu_culling_system);
 
-	m_gpu_culling_system->createHizDescriptorSets(*m_resources.pool(), gpu_scene, *m_hiz_system);
-	m_gpu_culling_system->createShadowHizDescriptorSets(*m_resources.pool(), gpu_scene, *m_hiz_system);
-	m_gpu_culling_system->subscribeToEvents(m_event_bus, *m_hiz_system, gpu_scene);
+	m_gpu_culling_system->createHizDescriptorSets(*m_resources.pool(), gpu_scene, *m_hiz_system, skinning);
+	m_gpu_culling_system->createShadowHizDescriptorSets(*m_resources.pool(), gpu_scene, *m_hiz_system, skinning);
+	m_gpu_culling_system->subscribeToEvents(m_event_bus, *m_hiz_system, gpu_scene, skinning);
 
 	m_gpu_backend = std::make_unique<GpuCullingBackend>(*m_gpu_culling_system, gpu_scene);
 
@@ -426,17 +436,18 @@ void RenderPipeline::ensureMeshletCullingInfrastructure() {
 	ensureHizInfrastructure();
 
 	auto& gpu_scene = m_scene_resources->getGpuSceneManager();
+	auto& skinning = *m_skinning_pre_pass;
 	m_meshlet_culling_system = std::make_unique<MeshletCullingSystem>(
 		m_ve_device, m_config.shaders_dir, m_event_bus, *m_resources.pool(),
-		*m_scene_resources, m_scene_resources->getMegaBuffer(), *m_hiz_system);
+		*m_scene_resources, m_scene_resources->getMegaBuffer(), *m_hiz_system, skinning);
 	m_meshlet_culling_system->createDescriptorSets(*m_resources.pool(),
-		gpu_scene, m_scene_resources->getMegaBuffer());
+		gpu_scene, m_scene_resources->getMegaBuffer(), skinning);
 	m_meshlet_culling_system->createHizDescriptorSets(*m_resources.pool(),
-		gpu_scene, m_scene_resources->getMegaBuffer(), *m_hiz_system);
+		gpu_scene, m_scene_resources->getMegaBuffer(), *m_hiz_system, skinning);
 	m_meshlet_culling_system->createGlobalDescriptorSets(*m_resources.pool(), m_resources.globalSetLayout(),
 		m_uniform_buffers, m_scene_resources->getMaterialManager().getBuffer());
 	m_meshlet_culling_system->createShadowDescriptorSets(*m_resources.pool(),
-		gpu_scene, m_scene_resources->getMegaBuffer());
+		gpu_scene, m_scene_resources->getMegaBuffer(), skinning);
 	m_shadow_render_system->createMeshletShadowDescriptorSets(*m_meshlet_culling_system);
 
 	m_meshlet_backend = std::make_unique<MeshletCullingBackend>(
@@ -642,11 +653,14 @@ void RenderPipeline::dispatchCompute(VeFrameInfo& fi) {
 	ZoneScopedN("Compute Dispatch");
 	auto current_frame = fi.current_frame;
 	auto extent = m_ve_renderer.getExtent();
+	auto& profiler = m_ve_renderer.getProfiler();
 
+	profiler.beginCpuTimer(ProfileTimer::CLUSTER_LIGHTS);
 	uint32_t cluster_light_count = m_cluster_light_system->uploadLightData(fi);
 	m_cluster_light_system->setLightCountActive(cluster_light_count > 0);
+	profiler.endCpuTimer(ProfileTimer::CLUSTER_LIGHTS);
 
-	m_ve_renderer.getProfiler().beginGpuTimer(fi.compute_command_buffer, ProfileTimer::COMPUTE_TOTAL);
+	profiler.beginGpuTimer(fi.compute_command_buffer, ProfileTimer::COMPUTE_TOTAL);
 
 	{
 		ScopedDebugLabel label(fi.compute_command_buffer, "Compute Dispatch", {0.2f, 0.6f, 0.9f, 1.0f});
@@ -661,15 +675,19 @@ void RenderPipeline::dispatchCompute(VeFrameInfo& fi) {
 			ZoneScopedN("Particle Dispatch");
 			ScopedDebugLabel particle_label(fi.compute_command_buffer, "Particle Dispatch", {0.9f, 0.4f, 0.2f, 1.0f});
 			TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Particle Dispatch");
+			profiler.beginCpuTimer(ProfileTimer::PARTICLES);
 			if (fi.registry)
 				m_particle_emitter_system->tick(*fi.registry, fi.frame_time);
 			m_particle_backend->recordComputeCommands(fi);
+			profiler.endCpuTimer(ProfileTimer::PARTICLES);
 		}
 		if (m_cluster_light_system->isEnabled()) {
 			ZoneScopedN("Cluster Light Dispatch");
 			ScopedDebugLabel cluster_label(fi.compute_command_buffer, "Cluster Light Dispatch", {0.4f, 0.7f, 0.5f, 1.0f});
 			TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Cluster Light Dispatch");
+			profiler.beginCpuTimer(ProfileTimer::CLUSTER_LIGHTS);
 			m_cluster_light_system->dispatch(fi, extent);
+			profiler.endCpuTimer(ProfileTimer::CLUSTER_LIGHTS);
 		}
 	}
 
@@ -701,7 +719,6 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		else
 			profiler.beginCpuTimer(ProfileTimer::CULLING);
 		m_active_backend->cull(fi, gpu_scene);
-		m_pbr_render_system->prepareSkinnedFrame(fi, material_mgr);
 		if (fi.gpu_culling_active)
 			profiler.endGpuTimer(command_buffer, ProfileTimer::CULLING);
 		else
@@ -722,8 +739,6 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		m_ve_renderer.beginDepthPrePass(command_buffer);
 		m_active_backend->renderDepthPrePass(fi, m_scene_resources->getMegaBuffer(),
 			*m_depth_prepass_system);
-		m_depth_prepass_system->renderSkinned(fi, m_scene_resources->getMegaBuffer(),
-			m_pbr_render_system->getSkinnedDrawables());
 		m_ve_renderer.endDepthPrePass(command_buffer);
 		profiler.endGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
 		profiler.endCpuTimer(ProfileTimer::DEPTH_PREPASS);
@@ -936,11 +951,6 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 			m_active_backend->renderOpaque(fi, *m_pbr_render_system, bindless_set);
 		}
 		{
-			ZoneScopedN("Skinned");
-			TracyVkZone(tracy_gfx, *active_cb, "Skinned");
-			m_pbr_render_system->renderSkinned(fi, *m_skinning_pre_pass, bindless_set);
-		}
-		{
 			ZoneScopedN("Skybox");
 			TracyVkZone(tracy_gfx, *active_cb, "Skybox");
 			m_skybox_render_system->render(fi);
@@ -1009,16 +1019,14 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		profiler.endCpuTimer(ProfileTimer::BLOOM);
 	}
 
+	if (!editor_mode && !m_ve_renderer.ensureImageAcquired())
+		return;
 	{
 		ZoneScopedN("Post Process");
 		TracyVkZone(tracy_gfx, *active_cb, "Post Process");
 		profiler.beginCpuTimer(ProfileTimer::POST_PROCESS);
 		profiler.beginGpuTimer(active_cb, ProfileTimer::POST_PROCESS);
-		if (!m_ve_renderer.beginPostProcessRender(active_cb, editor_mode)) {
-			profiler.endGpuTimer(active_cb, ProfileTimer::POST_PROCESS);
-			profiler.endCpuTimer(ProfileTimer::POST_PROCESS);
-			return;
-		}
+		m_ve_renderer.beginPostProcessRender(active_cb, editor_mode);
 		m_post_process_system->render(active_cb, fi.post_process_push);
 		if (outline_active && m_outline_system->hasOutline())
 			m_outline_system->composite(active_cb, fi.current_frame,
@@ -1031,7 +1039,6 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	auto& profiler = m_ve_renderer.getProfiler();
-	profiler.endCpuTimer(ProfileTimer::FRAME_TOTAL);
 
 	m_active_backend->collectStats(fi.current_frame, m_stats, registry);
 	m_stats.num_point_lights = registry.activePointLightCount();
@@ -1039,13 +1046,6 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	m_stats.num_spot_lights = registry.activeSpotLightCount();
 
 	const auto& results = profiler.getResults();
-	m_stats.fence_wait = results.fence_wait_ms;
-	m_stats.acquire_wait = results.acquire_wait_ms;
-	m_stats.cpu_time = results.cpu(ProfileTimer::FRAME_TOTAL) - results.fence_wait_ms - results.acquire_wait_ms;
-	m_stats.gpu_time = results.gpu(ProfileTimer::FRAME_TOTAL);
-	m_stats.compute_gpu_time = results.gpu(ProfileTimer::COMPUTE_TOTAL);
-	m_stats.gpu_overlap = results.gpu_overlap;
-
 	m_stats.gpu_culling = results.gpu(ProfileTimer::CULLING);
 	m_stats.gpu_shadow_maps = results.gpu(ProfileTimer::SHADOW_MAPS);
 	m_stats.gpu_depth_prepass = results.gpu(ProfileTimer::DEPTH_PREPASS);
@@ -1068,6 +1068,23 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	m_stats.cpu_shadow_mask = results.cpu(ProfileTimer::SHADOW_MASK);
 	m_stats.cpu_outline = results.cpu(ProfileTimer::OUTLINE);
 	m_stats.cpu_physics = results.cpu(ProfileTimer::PHYSICS);
+	m_stats.cpu_ui = results.cpu(ProfileTimer::UI);
+	m_stats.cpu_skinning = results.cpu(ProfileTimer::SKINNING);
+	m_stats.cpu_cluster_lights = results.cpu(ProfileTimer::CLUSTER_LIGHTS);
+	m_stats.cpu_particles = results.cpu(ProfileTimer::PARTICLES);
+}
+
+void RenderPipeline::finalizeFrameTimings() {
+	auto& profiler = m_ve_renderer.getProfiler();
+	profiler.endCpuTimer(ProfileTimer::FRAME_TOTAL);
+
+	const auto& results = profiler.getResults();
+	m_stats.fence_wait = results.fence_wait_ms;
+	m_stats.acquire_wait = results.acquire_wait_ms;
+	m_stats.cpu_time = results.cpu(ProfileTimer::FRAME_TOTAL) - results.fence_wait_ms - results.acquire_wait_ms;
+	m_stats.gpu_time = results.gpu(ProfileTimer::FRAME_TOTAL);
+	m_stats.compute_gpu_time = results.gpu(ProfileTimer::COMPUTE_TOTAL);
+	m_stats.gpu_overlap = results.gpu_overlap;
 }
 
 void RenderPipeline::writeUniformBuffer(uint32_t current_frame, const CameraView& view, UniformBufferObject& ubo) {

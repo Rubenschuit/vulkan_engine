@@ -29,6 +29,8 @@ namespace ve {
 	class PbrMegaBuffer;
 	class MeshComponent;
 	class VeMesh;
+	class GpuSceneManager;
+	class VeThreadPool;
 }
 
 namespace ve {
@@ -42,16 +44,27 @@ public:
 	SkinningPrePass(const SkinningPrePass&) = delete;
 	SkinningPrePass& operator=(const SkinningPrePass&) = delete;
 
-	void updatePalette(Registry& registry, uint32_t frame_index);
+	void updatePalette(Registry& registry, uint32_t frame_index, VeThreadPool* thread_pool);
+
+	// Writes m_skinned_offset_ssbos[frame_index][gpu_id] = absolute vertex offset
+	// in the mega VBO dynamic region for every entity that has a slot AND is
+	// registered with GpuSceneManager.
+	void updateSkinnedOffsets(const GpuSceneManager& gpu_scene,
+	                           const PbrMegaBuffer& mega_buffer,
+	                           uint32_t frame_index);
 
 	void dispatch(VeFrameInfo& fi, PbrMegaBuffer& mega_buffer);
 
 	// Returns the absolute offset (in vertices) into the mega VBO + mega shadow VBO
 	// where this entity's post-skin output sits for the given frame, or UINT32_MAX
-	// if the entity has no active slot 
+	// if the entity has no active slot
 	static constexpr uint32_t INVALID_OFFSET = UINT32_MAX;
 	uint32_t getSkinnedVertexOffset(Entity entity, uint32_t frame_index,
 	                                 const PbrMegaBuffer& mega_buffer) const;
+
+	VeBuffer& getSkinnedOffsetBuffer(uint32_t frame_index) const {
+		return *m_skinned_offset_ssbos[frame_index];
+	}
 
 private:
 	struct SubspaceSlot {
@@ -81,7 +94,15 @@ private:
 	Registry* m_registry = nullptr;
 
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_palette_ssbos;
-	std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> m_palette_count{}; // matrices currently used per frame
+	std::array<uint32_t, MAX_FRAMES_IN_FLIGHT> m_palette_count{};
+
+	// One entry per dispatched workgroup
+	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_wg_info_ssbos;
+
+	// gpu_id -> absolute vertex offset in the mega VBO dynamic region; 0 means "no
+	// live slot, cull shader falls back to the object's bind-pose vertex_offset".
+	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_skinned_offset_ssbos;
+	std::array<std::vector<uint32_t>, MAX_FRAMES_IN_FLIGHT> m_last_written_gpu_ids;
 
 	std::unique_ptr<VeDescriptorSetLayout> m_set_layout;
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};

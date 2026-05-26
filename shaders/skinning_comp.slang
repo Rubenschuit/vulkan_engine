@@ -1,4 +1,7 @@
-// Per-vertex linear blend skinning. One dispatch per skinned mesh instance.
+// Per-vertex linear blend skinning for all skinned entities in a single dispatch.
+//
+// One workgroup processes 64 vertices of one skinning slot. The CPU builds a
+// table `wg_info[]` with one entry per workgroup.
 //
 // Inputs live in the static / sparse-skin regions of the mega VBO:
 //   mega_vbo[input_vertex_offset + v]  — bind-pose VeMesh::Vertex (48 B)
@@ -6,32 +9,35 @@
 //   palette[palette_offset + joint]    — joint matrices (mesh-entity-local)
 //
 // Outputs are written into the dynamic region of the same mega VBOs at
-// output_vertex_offset.
+// output_vertex_offset. Slots are disjoint by construction.
 
-struct SkinPush {
-	uint vertex_count;
+struct SkinWorkgroupInfo {
+	uint vertex_count;          // total vertices in this slot
 	uint palette_offset;        // in matrices
 	uint input_vertex_offset;   // in vertices, into the mega VBO
 	uint input_skin_offset;     // in skin vertices, into the mega skin VBO
 	uint output_vertex_offset;  // in vertices, into the mega VBO dynamic region
+	uint local_vertex_base;     // first vertex index this workgroup handles (0, 64, 128, ...)
+	uint _pad0;
+	uint _pad1;
 };
-
-[[vk::push_constant]] SkinPush push;
 
 [[vk::binding(0, 0)]] RWStructuredBuffer<float4> mega_vbo;          // 48B vertex stride: read bind-pose, write skinned output
 [[vk::binding(1, 0)]] StructuredBuffer<uint4> mega_skin;            // 16B SkinVertex: 4 uint16 joints + 4 uint16 weights packed into uint4
 [[vk::binding(2, 0)]] StructuredBuffer<float4x4> palette;
 [[vk::binding(3, 0)]] RWByteAddressBuffer mega_shadow;              // 12B vec3 stride: write position-only output
+[[vk::binding(4, 0)]] StructuredBuffer<SkinWorkgroupInfo> wg_info;
 
 [numthreads(64, 1, 1)]
-void compMain(uint3 tid : SV_DispatchThreadID) {
-	uint v = tid.x;
-	if (v >= push.vertex_count)
+void compMain(uint3 group_id : SV_GroupID, uint3 group_thread_id : SV_GroupThreadID) {
+	SkinWorkgroupInfo info = wg_info[group_id.x];
+	uint v = info.local_vertex_base + group_thread_id.x;
+	if (v >= info.vertex_count)
 		return;
 
-	uint in_v = push.input_vertex_offset + v;
-	uint in_s = push.input_skin_offset + v;
-	uint out_v = push.output_vertex_offset + v;
+	uint in_v = info.input_vertex_offset + v;
+	uint in_s = info.input_skin_offset + v;
+	uint out_v = info.output_vertex_offset + v;
 
 	// Read 48B vertex as three float4:
 	float4 chunk0 = mega_vbo[in_v * 3 + 0];
@@ -53,10 +59,10 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 		float(packed.w & 0xFFFFu) / 65535.0f, float((packed.w >> 16) & 0xFFFFu) / 65535.0f,
 	};
 
-	float4x4 skin = weights[0] * palette[push.palette_offset + joints[0]];
-	skin += weights[1] * palette[push.palette_offset + joints[1]];
-	skin += weights[2] * palette[push.palette_offset + joints[2]];
-	skin += weights[3] * palette[push.palette_offset + joints[3]];
+	float4x4 skin = weights[0] * palette[info.palette_offset + joints[0]];
+	skin += weights[1] * palette[info.palette_offset + joints[1]];
+	skin += weights[2] * palette[info.palette_offset + joints[2]];
+	skin += weights[3] * palette[info.palette_offset + joints[3]];
 
 	float3x3 skin3 = (float3x3)skin;
 	float3x3 cofactor;

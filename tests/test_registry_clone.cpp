@@ -34,7 +34,6 @@ TEST_CASE("cloneEntityRecursive remaps SkinComponent joints and skeleton root",
 	skin.setJointEntities({joint_a, joint_b});
 	skin.setSkeletonRoot(root);
 	skin.setInverseBindMatrices({glm::mat4(1.0f), glm::mat4(1.0f)});
-	skin.setPaletteOffset(42); // stale cache that must be cleared by remap
 
 	Entity root_clone = reg.cloneEntityRecursive(root);
 	REQUIRE(!root_clone.isNull());
@@ -65,7 +64,6 @@ TEST_CASE("cloneEntityRecursive remaps SkinComponent joints and skeleton root",
 	REQUIRE(cloned_joints[1] != joint_b);
 
 	REQUIRE(cloned_skin->getSkeletonRoot() == root_clone);
-	REQUIRE(cloned_skin->getPaletteOffset() == 0);
 }
 
 // ── AnimatorComponent remap (root) ──────────────────────────────────────────

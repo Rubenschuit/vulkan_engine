@@ -681,14 +681,13 @@ void VeRenderer::endWboitComposite(vk::raii::CommandBuffer& command_buffer) {
 	endDebugLabel(command_buffer);
 }
 
-bool VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode) {
+void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode) {
 	assert(m_is_frame_started && "Can't call beginPostProcessRender while frame is not in progress");
 	assert((&command_buffer == &getCurrentCommandBuffer() || &command_buffer == &getShadowGraphicsCommandBuffer() || &command_buffer == &getSwapGraphicsCommandBuffer())
 		&& "Can't begin post-process on command buffer from a different frame");
 
 	beginDebugLabel(command_buffer, "Post Process", {0.8f, 0.2f, 0.8f, 1.0f});
 	if (editor_mode && m_viewport_image) {
-		// Editor mode: render to viewport image
 		auto vp_extent = m_viewport_image->getExtent2D();
 
 		m_viewport_image->transitionImageLayout(
@@ -725,13 +724,8 @@ bool VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer,
 			.minDepth = 0.0f, .maxDepth = 1.0f
 		});
 		command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = vp_extent});
-		return true;
 	} else {
-		// Fullscreen mode: render to swapchain. Acquire the image now.
-		if (!ensureImageAcquired()) {
-			endDebugLabel(command_buffer);
-			return false;
-		}
+		assert(m_image_acquired_this_frame && "Caller must acquire the swapchain image before fullscreen post-process");
 		auto extent = m_ve_swap_chain->getSwapChainExtent();
 
 		m_ve_swap_chain->transitionImageLayout(
@@ -769,7 +763,6 @@ bool VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer,
 			.minDepth = 0.0f, .maxDepth = 1.0f
 		});
 		command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = extent});
-		return true;
 	}
 }
 
@@ -795,12 +788,9 @@ void VeRenderer::endPostProcessRender(vk::raii::CommandBuffer& command_buffer, b
 	endDebugLabel(command_buffer);
 }
 
-bool VeRenderer::beginUIRecording(bool editor_mode) {
+void VeRenderer::beginUIRecording(bool editor_mode) {
 	assert(m_is_frame_started && "Can't call beginUIRecording while frame is not in progress");
-
-	// UI always references m_current_image_index
-	if (!ensureImageAcquired())
-		return false;
+	assert(m_image_acquired_this_frame && "Caller must acquire the swapchain image before UI recording");
 
 	auto& ui_cb = getCurrentUICommandBuffer();
 	beginDebugLabel(ui_cb, "UI", {0.9f, 0.9f, 0.2f, 1.0f});
@@ -828,7 +818,6 @@ bool VeRenderer::beginUIRecording(bool editor_mode) {
 		vk::DependencyInfo dep{.memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
 		ui_cb.pipelineBarrier2(dep);
 	}
-	return true;
 }
 
 void VeRenderer::recreateWboitImages() {
@@ -1008,6 +997,7 @@ void VeRenderer::transitionToPresent(vk::raii::CommandBuffer& command_buffer) {
 // Writes compute end timestamp, ends the command buffer, and submits to the compute queue.
 // Should be called between beginFrame() and endFrame().
 void VeRenderer::submitCompute(vk::raii::CommandBuffer& compute_command_buffer) {
+	ZoneScopedN("Submit Compute");
 	assert(m_is_frame_started && "Can't call submitCompute while frame is not in progress");
 	assert(&compute_command_buffer == &getCurrentComputeCommandBuffer() && "Can't submit compute on command buffer from a different frame");
 
@@ -1018,6 +1008,7 @@ void VeRenderer::submitCompute(vk::raii::CommandBuffer& compute_command_buffer) 
 }
 
 void VeRenderer::submitPreSwapGraphics(bool depth_compute_follows) {
+	ZoneScopedN("Submit Pre-Swap");
 	assert(m_is_frame_started && "Frame is not in progress");
 
 	auto& pre_swap_cb = getCurrentCommandBuffer();
@@ -1029,6 +1020,7 @@ void VeRenderer::submitPreSwapGraphics(bool depth_compute_follows) {
 }
 
 void VeRenderer::submitShadowGraphics(vk::raii::CommandBuffer& shadow_cb) {
+	ZoneScopedN("Submit Shadow Graphics");
 	assert(m_is_frame_started && "Frame is not in progress");
 
 	shadow_cb.end();
@@ -1036,6 +1028,7 @@ void VeRenderer::submitShadowGraphics(vk::raii::CommandBuffer& shadow_cb) {
 }
 
 void VeRenderer::submitDepthCompute(vk::raii::CommandBuffer& depth_compute_cb) {
+	ZoneScopedN("Submit Depth Compute");
 	assert(m_is_frame_started && "Frame is not in progress");
 
 	depth_compute_cb.end();

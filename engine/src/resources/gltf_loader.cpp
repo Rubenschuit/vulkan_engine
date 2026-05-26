@@ -1057,40 +1057,22 @@ static ProcessedMesh processPrimitive(
 		                                      vertices.size()});
 		skin_vertices.resize(vertices.size(), VeMesh::SkinVertex{{0,0,0,0},{65535,0,0,0}});
 
-		size_t max_joints_per_vertex = 0;
-		size_t weight_sum_violations = 0;
 		for (size_t i = 0; i < source_count; i++) {
 			const uint8_t* j_base = &joints_buf.data[joints_bv.byteOffset + joints_acc.byteOffset + i * joints_stride];
 			const uint8_t* w_base = &weights_buf.data[weights_bv.byteOffset + weights_acc.byteOffset + i * weights_stride];
 
 			VeMesh::SkinVertex sv{};
-			float w[4];
 			for (int c = 0; c < 4; c++) {
 				const uint8_t* jp = j_base + static_cast<size_t>(c) * joints_comp_size;
 				sv.joints[c] = (joints_acc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
 				             ? *jp : *reinterpret_cast<const uint16_t*>(jp);
-				w[c] = readGltfComponent(w_base + static_cast<size_t>(c) * weights_comp_size,
-				                         weights_acc.componentType, weights_acc.normalized);
-				float wn = std::clamp(w[c], 0.0f, 1.0f);
+				float w = readGltfComponent(w_base + static_cast<size_t>(c) * weights_comp_size,
+				                            weights_acc.componentType, weights_acc.normalized);
+				float wn = std::clamp(w, 0.0f, 1.0f);
 				sv.weights[c] = static_cast<uint16_t>(wn * 65535.0f + 0.5f);
 			}
 			skin_vertices[i] = sv;
-
-			size_t nonzero = 0;
-			float sum = 0.f;
-			for (int c = 0; c < 4; c++) {
-				if (w[c] > 0.0f)
-					nonzero++;
-				sum += w[c];
-			}
-			if (nonzero > max_joints_per_vertex)
-				max_joints_per_vertex = nonzero;
-			if (std::abs(sum - 1.0f) > 1e-3f)
-				weight_sum_violations++;
 		}
-		VE_LOGD("[Mesh " << mesh_id << "] vertices=" << source_count
-		        << ", max_joints_per_vertex=" << max_joints_per_vertex
-		        << ", weight_sum_violations=" << weight_sum_violations);
 	}
 
 	const size_t vertex_count = vertices.size();

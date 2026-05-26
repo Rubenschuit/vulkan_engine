@@ -456,13 +456,19 @@ void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_mask_pipeline_layout,
 		0, {*descriptor_set}, {});
 
+	if (!mega_buffer.isValid()) {
+		cmd.endRendering();
+		return;
+	}
+	mega_buffer.bindShadow(cmd);
+
 	uint32_t instance_idx = mask_instance_start;
-	VeMesh* bound_mesh = nullptr;
 	for (uint32_t i = 0; i < mask_entity_count; i++) {
 		Entity e = mesh_entities[i];
 		auto* mc = registry.getComponent<MeshComponent>(e);
 		VeMesh* mesh = mc->getMesh();
-		if (!mesh) {
+		const auto* entry = mesh ? mega_buffer.getEntry(mesh) : nullptr;
+		if (!entry || entry->lod_entries.empty()) {
 			instance_idx++;
 			continue;
 		}
@@ -478,29 +484,19 @@ void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_
 			*m_mask_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
 			vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
 
-		// Skinned entities source their post-skin position from the mega VBO's
-		// dynamic region via the slot offset
+		int32_t vertex_offset = static_cast<int32_t>(entry->vertex_offset);
 		bool is_skinned = fi.skinning_pre_pass && registry.hasComponent<SkinComponent>(e);
-
 		if (is_skinned) {
-			const auto* entry = mega_buffer.isValid() ? mega_buffer.getEntry(mesh) : nullptr;
-			if (entry && !entry->lod_entries.empty()) {
-				uint32_t vo = fi.skinning_pre_pass->getSkinnedVertexOffset(e, fi.current_frame, mega_buffer);
-				if (vo != SkinningPrePass::INVALID_OFFSET) {
-					mega_buffer.bindShadow(cmd);
-					const auto& lod = entry->lod_entries[0];
-					cmd.drawIndexed(lod.index_count, 1, lod.first_index, static_cast<int32_t>(vo), 0);
-				}
+			uint32_t vo = fi.skinning_pre_pass->getSkinnedVertexOffset(e, fi.current_frame, mega_buffer);
+			if (vo == SkinningPrePass::INVALID_OFFSET) {
+				instance_idx++;
+				continue;
 			}
-			bound_mesh = nullptr;  // force rebind on next static mesh
-		} else {
-			if (mesh != bound_mesh) {
-				bound_mesh = mesh;
-				mesh->bindShadowVertexBuffer(cmd);
-				mesh->bindLodIndexBuffer(cmd, 0);
-			}
-			mesh->drawIndexedLod(cmd, 0, 1, 0);
+			vertex_offset = static_cast<int32_t>(vo);
 		}
+
+		const auto& lod = entry->lod_entries[0];
+		cmd.drawIndexed(lod.index_count, 1, lod.first_index, vertex_offset, 0);
 		instance_idx++;
 	}
 

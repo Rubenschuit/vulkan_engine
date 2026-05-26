@@ -90,7 +90,7 @@ GpuSceneManager::GpuSceneManager(VeDevice& device) : m_ve_device(device) {
 		m_dirty_ids[f].reserve(1024);
 	}
 	m_object_lod_group_ids.resize(MAX_GPU_OBJECTS);
-	m_cpu_lod_data.resize(MAX_GPU_OBJECTS);
+	m_cpu_object_data.resize(MAX_GPU_OBJECTS);
 	m_meshlet_object_info_cpu.resize(MAX_GPU_OBJECTS);
 	m_is_transparent_by_gpu_id.resize(MAX_GPU_OBJECTS, false);
 }
@@ -119,29 +119,32 @@ void GpuSceneManager::subscribeToRegistry(Registry& registry) {
 				return;
 			if (!event.component.hasMesh())
 				return;
-			if (m_registry->hasComponent<SkinComponent>(event.entity))
-				return;
 			if (!m_mega_buffer->getEntry(event.component.getMesh()))
 				return;
 			registerObject(event.entity, event.component, *m_mega_buffer, *m_mat_mgr, *m_registry);
 		});
 
-	// SkinComponent governs whether an entity participates in the static GPU pipeline.
 	m_skin_added_sub = registry.events().subscribe<ComponentAddedEvent<SkinComponent>>(
 		[this](const ComponentAddedEvent<SkinComponent>& event) {
-			if (hasGpuId(event.entity))
-				unregisterObject(event.entity);
-		});
-	m_skin_removed_sub = registry.events().subscribe<ComponentRemovedEvent<SkinComponent>>(
-		[this](const ComponentRemovedEvent<SkinComponent>& event) {
 			if (!m_mega_buffer || !m_mat_mgr || !m_registry)
 				return;
 			auto* mc = m_registry->getComponent<MeshComponent>(event.entity);
 			if (!mc || !mc->hasMesh())
 				return;
-			if (!m_mega_buffer->getEntry(mc->getMesh()))
+			if (hasGpuId(event.entity)) {
+				markObjectDataDirty(event.entity);
+			} else if (m_mega_buffer->getEntry(mc->getMesh())) {
+				registerObject(event.entity, *mc, *m_mega_buffer, *m_mat_mgr, *m_registry);
+			}
+			if (hasGpuId(event.entity))
+				setDynamic(event.entity, isDynamicEntity(*m_registry, event.entity));
+		});
+	m_skin_removed_sub = registry.events().subscribe<ComponentRemovedEvent<SkinComponent>>(
+		[this](const ComponentRemovedEvent<SkinComponent>& event) {
+			if (!hasGpuId(event.entity) || !m_registry)
 				return;
-			registerObject(event.entity, *mc, *m_mega_buffer, *m_mat_mgr, *m_registry);
+			markObjectDataDirty(event.entity);
+			setDynamic(event.entity, isDynamicEntity(*m_registry, event.entity));
 		});
 	m_rb_changed_sub = registry.events().subscribe<RigidbodyChangedEvent>(
 		[this](const RigidbodyChangedEvent& event) {
@@ -219,7 +222,7 @@ void GpuSceneManager::unregisterObject(Entity entity) {
 
 	uint32_t gpu_id = it->second;
 
-	if (m_cpu_lod_data[gpu_id].object_flags & ObjectFlag::DYNAMIC) {
+	if (m_cpu_object_data[gpu_id].object_flags & ObjectFlag::DYNAMIC) {
 		assert(m_dynamic_object_count > 0 && "DYNAMIC flag set but count is 0");
 		if (m_dynamic_object_count > 0)
 			m_dynamic_object_count--;
@@ -243,7 +246,7 @@ void GpuSceneManager::unregisterObject(Entity entity) {
 	m_entity_to_gpu_id.erase(it);
 	m_active_count--;
 
-	m_cpu_lod_data[gpu_id] = {};
+	m_cpu_object_data[gpu_id] = {};
 	m_meshlet_object_info_cpu[gpu_id] = {};
 	m_object_lod_group_ids[gpu_id].fill(0);
 
@@ -279,6 +282,8 @@ void GpuSceneManager::markObjectDataDirty(Entity entity) {
 bool GpuSceneManager::isDynamicEntity(const Registry& registry, Entity entity) {
 	if (registry.isAnimated(entity))
 		return true;
+	if (registry.hasComponent<SkinComponent>(entity))
+		return true;
 	const auto* rb = registry.getComponent<RigidbodyComponent>(entity);
 	return rb && rb->getMotionType() == PhysicsMotionType::Dynamic;
 }
@@ -289,7 +294,7 @@ void GpuSceneManager::setDynamic(Entity entity, bool is_dynamic) {
 		return;
 	uint32_t gpu_id = it->second;
 
-	auto& obj_flags = m_cpu_lod_data[gpu_id].object_flags;
+	auto& obj_flags = m_cpu_object_data[gpu_id].object_flags;
 	bool was_dynamic = (obj_flags & ObjectFlag::DYNAMIC) != 0;
 	if (was_dynamic == is_dynamic)
 		return;
@@ -308,6 +313,25 @@ void GpuSceneManager::setDynamic(Entity entity, bool is_dynamic) {
 
 	m_object_data_dirty.fill(true);
 	m_dynamic_classification_changed = true;
+}
+
+void GpuSceneManager::refreshSkinnedAabbs(Registry& registry) {
+	bool any = false;
+	for (auto [entity, mc, sc] : registry.view<MeshComponent, SkinComponent>()) {
+		auto it = m_entity_to_gpu_id.find(entity.index());
+		if (it == m_entity_to_gpu_id.end())
+			continue;
+		uint32_t gpu_id = it->second;
+		VeMesh::AABB world_aabb = mc.getWorldAABB();
+		VeMesh::AABB local = transformAABB(world_aabb,
+			glm::inverse(registry.getWorldTransform(entity)));
+		auto& cpu = m_cpu_object_data[gpu_id];
+		cpu.aabb_min = local.min;
+		cpu.aabb_max = local.max;
+		any = true;
+	}
+	if (any)
+		m_object_data_dirty.fill(true);
 }
 
 void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Registry& registry,
@@ -402,13 +426,14 @@ void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Regist
 			               m_draw_group_buffers[current_frame]->getBuffer(),
 			               group_copy);
 
-			// Pre-filled indirect commands (instanceCount=0, rest from draw group)
+			// Pre-filled indirect commands. vertexOffset is left zero: the cull shader
+			// writes the correct value.
 			std::vector<VkDrawIndexedIndirectCommand> cmds(m_total_groups);
 			for (uint32_t g = 0; g < m_total_groups; g++) {
 				cmds[g].indexCount = m_draw_groups[g].index_count;
 				cmds[g].instanceCount = 0;
 				cmds[g].firstIndex = m_draw_groups[g].first_index;
-				cmds[g].vertexOffset = m_draw_groups[g].vertex_offset;
+				cmds[g].vertexOffset = 0;
 				cmds[g].firstInstance = m_draw_groups[g].instance_base;
 			}
 			vk::DeviceSize cmd_size = static_cast<vk::DeviceSize>(m_total_groups) * sizeof(VkDrawIndexedIndirectCommand);
@@ -452,8 +477,6 @@ void GpuSceneManager::registerAllObjects(Registry& registry, const PbrMegaBuffer
 		Entity entity = registry.entityFromIndex(entity_idx);
 		auto& mesh = mesh_pool.data()[i];
 		if (!mesh.hasMesh())
-			continue;
-		if (registry.hasComponent<SkinComponent>(entity))
 			continue;
 		if (!mega_buffer.getEntry(mesh.getMesh()))
 			continue;
@@ -516,7 +539,7 @@ void GpuSceneManager::reset() {
 	}
 	for (auto& arr : m_object_lod_group_ids)
 		arr.fill(0);
-	for (auto& cpu : m_cpu_lod_data)
+	for (auto& cpu : m_cpu_object_data)
 		cpu = {};
 	for (auto& moi : m_meshlet_object_info_cpu)
 		moi = {};
@@ -571,8 +594,12 @@ void GpuSceneManager::rebuildDrawGroups() {
 	std::vector<uint32_t> active_gpu_ids;
 	active_gpu_ids.reserve(m_active_count);
 
+	auto isSkinned = [this](uint32_t gpu_id) {
+		return (m_cpu_object_data[gpu_id].object_flags & ObjectFlag::SKINNED) != 0;
+	};
+
 	for (auto& [entity_idx, gpu_id] : m_entity_to_gpu_id) {
-		const CpuLodData& cpu = m_cpu_lod_data[gpu_id];
+		const CpuObjectData& cpu = m_cpu_object_data[gpu_id];
 		bool is_transparent = (cpu.object_flags & ObjectFlag::IS_TRANSPARENT) != 0;
 		bool is_mask = (cpu.material_flags & MaterialFlag::ALPHA_MODE_MASK) == 1;
 		bool is_double_sided = (cpu.material_flags & MaterialFlag::DOUBLE_SIDED) != 0;
@@ -597,16 +624,24 @@ void GpuSceneManager::rebuildDrawGroups() {
 		}
 	}
 
-	// Sort variants. Objects sharing the same geometry+material at the same LOD group together.
-	std::sort(variants.begin(), variants.end(), [](const LodVariant& a, const LodVariant& b) {
-		return std::tie(a.bucket, a.vertex_offset, a.first_index, a.index_count, a.material_index)
-		     < std::tie(b.bucket, b.vertex_offset, b.first_index, b.index_count, b.material_index);
+	// Sort variants. Objects sharing the same geometry+material at the same LOD group
+	// together; gpu_id is included so skinned variants always form one-entity groups.
+	std::sort(variants.begin(), variants.end(), [&isSkinned](const LodVariant& a, const LodVariant& b) {
+		uint32_t a_skin_key = isSkinned(a.gpu_id) ? a.gpu_id : 0u;
+		uint32_t b_skin_key = isSkinned(b.gpu_id) ? b.gpu_id : 0u;
+		return std::tie(a.bucket, a.vertex_offset, a.first_index, a.index_count, a.material_index, a_skin_key)
+		     < std::tie(b.bucket, b.vertex_offset, b.first_index, b.index_count, b.material_index, b_skin_key);
 	});
 
-	// Build draw groups from consecutive variants with the same key
+	// Build draw groups from consecutive variants with the same key. Skinned variants
+	// form one-entity groups: their per-frame vertexOffset is unique per entity and
+	// resolved by the cull shader.
 	for (size_t i = 0; i < variants.size(); ) {
 		size_t j = i + 1;
-		while (j < variants.size()
+		bool i_skinned = isSkinned(variants[i].gpu_id);
+		while (!i_skinned
+			&& j < variants.size()
+			&& !isSkinned(variants[j].gpu_id)
 			&& variants[j].bucket == variants[i].bucket
 			&& variants[j].vertex_offset == variants[i].vertex_offset
 			&& variants[j].first_index == variants[i].first_index
@@ -660,7 +695,7 @@ void GpuSceneManager::rebuildDrawGroups() {
 	}
 
 	for (uint32_t gpu_id : active_gpu_ids) {
-		const CpuLodData& cpu = m_cpu_lod_data[gpu_id];
+		const CpuObjectData& cpu = m_cpu_object_data[gpu_id];
 		if (cpu.lod_count == 0) {
 			VE_LOGW("GpuSceneManager: object with gpu_id " << gpu_id << " has zero LODs, skipping draw group assignment");
 			continue;
@@ -692,7 +727,25 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 	if (!entry)
 		return;
 
-	VeMesh::AABB aabb = mesh.getMesh()->getLocalAABB();
+	Entity entity = m_gpu_id_to_entity[gpu_id];
+	const bool is_skinned = m_registry && m_registry->hasComponent<SkinComponent>(entity)
+		&& mesh.getMesh()->hasSkinning();
+
+	VeMesh::AABB aabb;
+	if (is_skinned) {
+		const auto& extents = mesh.getMesh()->getJointMeshLocalExtents();
+		if (!extents.empty()) {
+			aabb = extents.front();
+			for (size_t i = 1; i < extents.size(); i++) {
+				aabb.min = glm::min(aabb.min, extents[i].min);
+				aabb.max = glm::max(aabb.max, extents[i].max);
+			}
+		} else {
+			aabb = mesh.getMesh()->getLocalAABB();
+		}
+	} else {
+		aabb = mesh.getMesh()->getLocalAABB();
+	}
 
 	uint32_t mat_index = 0;
 	uint32_t mat_flags = 0;
@@ -711,7 +764,9 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 		obj_flags = (is_transparent ? ObjectFlag::IS_TRANSPARENT : 0u)
 			| (!mesh.has_shadow ? ObjectFlag::NO_SHADOW : 0u);
 	}
-	obj_flags |= (m_cpu_lod_data[gpu_id].object_flags & ObjectFlag::DYNAMIC);
+	obj_flags |= (m_cpu_object_data[gpu_id].object_flags & ObjectFlag::DYNAMIC);
+	if (is_skinned)
+		obj_flags |= ObjectFlag::SKINNED;
 
 	bool was_transparent = m_is_transparent_by_gpu_id[gpu_id];
 	if (was_transparent != is_transparent) {
@@ -729,14 +784,14 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 		m_is_transparent_by_gpu_id[gpu_id] = is_transparent;
 	}
 
-	CpuLodData& cpu = m_cpu_lod_data[gpu_id];
+	CpuObjectData& cpu = m_cpu_object_data[gpu_id];
 	cpu.aabb_min = aabb.min;
 	cpu.aabb_max = aabb.max;
 	cpu.vertex_offset = entry->vertex_offset;
 	cpu.material_flags = mat_flags;
 	cpu.object_flags = obj_flags;
 	cpu.material_index = mat_index;
-	cpu.lod_count = static_cast<uint32_t>(entry->lod_entries.size());
+	cpu.lod_count = is_skinned ? 1u : static_cast<uint32_t>(entry->lod_entries.size());
 	for (uint32_t l = 0; l < MAX_LOD_LEVELS; l++) {
 		uint32_t src = (l < entry->lod_entries.size()) ? l
 		             : static_cast<uint32_t>(entry->lod_entries.size()) - 1;
@@ -758,7 +813,7 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 }
 
 void GpuSceneManager::buildObjectData(uint32_t gpu_id, ObjectDataGPU& out) const {
-	const auto& cpu = m_cpu_lod_data[gpu_id];
+	const auto& cpu = m_cpu_object_data[gpu_id];
 	out = {};
 	out.aabb_min = glm::vec4(cpu.aabb_min, 0.0f);
 	out.aabb_max = glm::vec4(cpu.aabb_max, 0.0f);

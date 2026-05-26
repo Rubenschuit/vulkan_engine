@@ -47,6 +47,7 @@ private:
 	static std::vector<VeMesh*> collectUniqueMeshes(Registry& registry);
 
 	VeDevice& m_ve_device;
+	EventBus& m_event_bus;
 	VeResourceManager& m_resource_manager;
 	std::unique_ptr<PbrMegaBuffer> m_mega_buffer;
 	std::unique_ptr<BindlessTextureRegistry> m_bindless_registry;

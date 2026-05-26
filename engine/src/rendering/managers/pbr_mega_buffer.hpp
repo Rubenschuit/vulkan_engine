@@ -1,6 +1,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "ve_config.hpp"
+#include "events/event_bus.hpp"
 #include "vulkan/ve_buffer.hpp"
 
 #include <memory>
@@ -34,15 +35,21 @@ public:
 		std::vector<MeshletLodEntry> lod_entries;
 	};
 
-	explicit PbrMegaBuffer(VeDevice& device);
+	PbrMegaBuffer(VeDevice& device, EventBus& event_bus);
 	~PbrMegaBuffer();
 
 	PbrMegaBuffer(const PbrMegaBuffer&) = delete;
 	PbrMegaBuffer& operator=(const PbrMegaBuffer&) = delete;
 
-	// Build the mega buffer from all scene meshes. Call once at scene load.
-	// cmd must be a recording command buffer (copies are GPU-side).
-	void build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh*>& meshes);
+	// Builds the mega buffer from `meshes`. When `previous` is non-null, meshes
+	// present in `previous->m_entries` are sourced via GPU->GPU copy from the
+	// previous mega buffers (since per-mesh GPU buffers are released after the
+	// initial build); other meshes are copied from their own per-mesh buffers.
+	void build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh*>& meshes,
+	           const PbrMegaBuffer* previous = nullptr);
+
+	// Swaps all GPU buffers + lookup tables with `other`
+	void swapState(PbrMegaBuffer& other) noexcept;
 
 	const MeshEntry* getEntry(VeMesh* mesh) const;
 	const MeshletMeshEntry* getMeshletEntry(VeMesh* mesh) const;
@@ -68,11 +75,13 @@ public:
 
 private:
 	VeDevice& m_ve_device;
+	EventBus& m_event_bus;
+	EventSubscriptionId m_mesh_unload_sub = 0;
 
 	std::unique_ptr<VeBuffer> m_mega_vbo;
 	std::unique_ptr<VeBuffer> m_mega_shadow_vbo;
 	std::unique_ptr<VeBuffer> m_mega_ibo;
-	
+
 	std::unique_ptr<VeBuffer> m_mega_skin_vbo; // Sparse
 	uint32_t m_static_vertex_count = 0;
 

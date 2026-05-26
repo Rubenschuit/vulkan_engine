@@ -41,6 +41,19 @@ struct ObjectDataGPU {
 };
 static_assert(sizeof(ObjectDataGPU) == 96, "ObjectDataGPU must be 96 bytes (vec4-aligned)");
 
+// CPU mirror of ObjectDataGPU
+struct CpuObjectData {
+	glm::vec3 aabb_min{};
+	glm::vec3 aabb_max{};
+	uint32_t vertex_offset{};
+	uint32_t material_flags{};
+	uint32_t object_flags{};
+	uint32_t material_index{};
+	uint32_t lod_count{};
+	uint32_t first_index[MAX_LOD_LEVELS]{};
+	uint32_t index_count[MAX_LOD_LEVELS]{};
+};
+
 // GPU-resident per-object transform
 struct TransformGPU {
 	glm::mat4 world_transform;
@@ -74,18 +87,6 @@ struct ActiveIdEntry {
 };
 static_assert(sizeof(ActiveIdEntry) == 8, "ActiveIdEntry must be 8 bytes");
 
-// CPU-side per-object LOD data; authoritative source for ObjectDataGPU staging rebuild.
-struct CpuLodData {
-	glm::vec3 aabb_min{};
-	glm::vec3 aabb_max{};
-	uint32_t vertex_offset{};
-	uint32_t material_flags{};
-	uint32_t object_flags{};
-	uint32_t material_index{};
-	uint32_t lod_count{};
-	uint32_t first_index[MAX_LOD_LEVELS]{};
-	uint32_t index_count[MAX_LOD_LEVELS]{};
-};
 
 class VENGINE_API GpuSceneManager {
 public:
@@ -110,8 +111,11 @@ public:
 	void setDynamic(Entity entity, bool is_dynamic);
 
 	// True if the entity should be classified as dynamic for shadow caching.
-	// Checked: animated entities or entities with a Dynamic rigidbody.
+	// Animated entities, skinned entities, or entities with a Dynamic rigidbody.
 	static bool isDynamicEntity(const Registry& registry, Entity entity);
+
+	void refreshSkinnedAabbs(Registry& registry);
+
 	void updateDirtyTransforms(uint32_t current_frame, const Registry& registry,
 	                           vk::raii::CommandBuffer& cmd);
 
@@ -219,7 +223,7 @@ private:
 	std::vector<std::array<uint32_t, MAX_LOD_LEVELS>> m_object_lod_group_ids;
 	// Authoritative CPU-side ObjectDataGPU source. Mutating methods update this;
 	// stageObjectData() reads it to populate the per-frame staging buffer.
-	std::vector<CpuLodData> m_cpu_lod_data;
+	std::vector<CpuObjectData> m_cpu_object_data;
 	// Authoritative CPU-side MeshletObjectInfo source
 	std::vector<MeshletObjectInfo> m_meshlet_object_info_cpu;
 

@@ -19,8 +19,9 @@ namespace ve {
 
 SceneResourceManager::SceneResourceManager(VeDevice& device, EventBus& event_bus, VeResourceManager& resource_manager)
 	: m_ve_device(device),
+	  m_event_bus(event_bus),
 	  m_resource_manager(resource_manager),
-	  m_mega_buffer(std::make_unique<PbrMegaBuffer>(device)),
+	  m_mega_buffer(std::make_unique<PbrMegaBuffer>(device, event_bus)),
 	  m_bindless_registry(std::make_unique<BindlessTextureRegistry>(device, event_bus)),
 	  m_material_ssbo_manager(std::make_unique<MaterialSSBOManager>(device, *m_bindless_registry, event_bus)),
 	  m_gpu_scene_manager(std::make_unique<GpuSceneManager>(device)) {}
@@ -46,6 +47,8 @@ void SceneResourceManager::loadScene(Registry& registry) {
 		auto cmd = m_ve_device.beginSingleTimeCommands();
 		m_mega_buffer->build(*cmd, meshes);
 		m_ve_device.endSingleTimeCommands(*cmd);
+		for (VeMesh* mesh : meshes)
+			mesh->releaseGpuBuffers();
 	}
 
 	m_gpu_scene_manager->subscribeToRegistry(registry);
@@ -66,18 +69,27 @@ void SceneResourceManager::rebuildForModelAdd(Registry& registry) {
 		return;
 
 	m_ve_device.getDevice().waitIdle();
-	m_mega_buffer->clear();
+
+	// new_mega.build copies from m_mega_buffer's GPU buffers for reused meshes.
+	// endSingleTimeCommands waits on the fence, so the copies complete before
+	// swapState moves those source buffers into new_mega
+	PbrMegaBuffer new_mega(m_ve_device, m_event_bus);
+	auto cmd = m_ve_device.beginSingleTimeCommands();
+	new_mega.build(*cmd, meshes, m_mega_buffer.get());
+	m_ve_device.endSingleTimeCommands(*cmd);
+
+	m_mega_buffer->swapState(new_mega);
+
 	m_gpu_scene_manager->reset();
 	m_material_ssbo_manager->reset();
 	m_bindless_registry->reset();
 	m_resource_manager.flushPendingUnloads();
 
-	auto cmd = m_ve_device.beginSingleTimeCommands();
-	m_mega_buffer->build(*cmd, meshes);
-	m_ve_device.endSingleTimeCommands(*cmd);
-
 	m_gpu_scene_manager->subscribeToRegistry(registry);
 	m_gpu_scene_manager->registerAllObjects(registry, *m_mega_buffer, *m_material_ssbo_manager);
+
+	for (VeMesh* mesh : meshes)
+		mesh->releaseGpuBuffers();
 }
 
 std::vector<VeMesh*> SceneResourceManager::collectUniqueMeshes(Registry& registry) {
