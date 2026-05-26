@@ -5,6 +5,8 @@
 #ifndef PARTICLE_COMMON_SLANGH
 #define PARTICLE_COMMON_SLANGH
 
+#include "ve_constants.slangh"
+
 // Particle-local bindless atlas array. Slot 0..MAX-1 = engine/app textures.
 // The sentinel means "skip texture sample and use the procedural
 // round-mask path".

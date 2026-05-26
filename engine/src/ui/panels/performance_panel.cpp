@@ -59,7 +59,9 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		context.stats.gpu_shadow_mask, context.stats.gpu_gtao,
 		context.stats.gpu_scene_render, context.stats.gpu_outline,
 		context.stats.gpu_bloom, context.stats.gpu_post_process,
-		0.0f, 0.0f, 0.0f, 0.0f, 0.0f
+		0.0f, 0.0f,
+		context.stats.gpu_skinning, context.stats.gpu_cluster_lights,
+		context.stats.gpu_particles
 	};
 	const float cpu_src[] = {
 		context.stats.cpu_culling, context.stats.cpu_depth_prepass,

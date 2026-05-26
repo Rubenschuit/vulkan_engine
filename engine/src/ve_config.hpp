@@ -90,13 +90,14 @@ enum class Topology : uint32_t {
 	LINE_LIST = 1,
 };
 
-// Clustered forward lighting
-constexpr uint32_t CLUSTER_TILE_SIZE = 64;            // screen-space tile size in pixels
-constexpr uint32_t CLUSTER_Z_SLICES = 24;             // depth slices (logarithmic distribution)
-constexpr uint32_t MAX_LIGHTS_PER_CLUSTER = 64;       // max lights assignable per cluster
-constexpr uint32_t MAX_CLUSTER_LIGHTS = 1024;         // max total point lights for cluster path
-constexpr float CLUSTER_LIGHT_CUTOFF = 0.005f;        // intensity fraction for effective range (range=0 lights)
-constexpr float CLUSTER_MAX_EFFECTIVE_RANGE = 500.0f; // cap for derived effective range
+// Clustered forward lighting (keep CLUSTER_ASSIGN_WORKGROUP_SIZE in sync with ve_constants.slangh)
+constexpr uint32_t CLUSTER_TILE_SIZE = 64;             // screen-space tile size in pixels
+constexpr uint32_t CLUSTER_Z_SLICES = 24;              // depth slices (logarithmic distribution)
+constexpr uint32_t MAX_LIGHTS_PER_CLUSTER = 64;        // max lights assignable per cluster
+constexpr uint32_t MAX_CLUSTER_LIGHTS = 1024;          // max total point lights for cluster path
+constexpr float CLUSTER_LIGHT_CUTOFF = 0.005f;         // intensity fraction for effective range (range=0 lights)
+constexpr float CLUSTER_MAX_EFFECTIVE_RANGE = 500.0f;  // cap for derived effective range
+constexpr uint32_t CLUSTER_ASSIGN_WORKGROUP_SIZE = 256;
 
 // LOD (Level of Detail) configuration
 constexpr uint32_t MAX_LOD_LEVELS = 4;           // LOD 0 = full, LOD 1..3 = simplified
@@ -143,19 +144,27 @@ constexpr uint32_t MAX_LOD_INSTANCE_SLOTS = MAX_GPU_OBJECTS * MAX_LOD_LEVELS; //
 // Hi-Z occlusion culling
 constexpr uint32_t MAX_HIZ_MIPS = 13;
 
-// Dynamic region of the mega VBO that holds skinning compute outputs.
+// Skinning
 // Reserves 2 (ping-pong) × MAX_SKINNED_VERTICES_PER_FRAME × (48 + 12) bytes in
 // the mega VBO + shadow VBO.
-constexpr uint32_t MAX_SKINNED_VERTICES_PER_FRAME = 256 * 1024;
+constexpr uint32_t MAX_SKINNED_VERTICES_PER_FRAME    = 256 * 1024;
+constexpr uint32_t MAX_SKINNING_PALETTE_MATRICES     = 4096 * 2;
+constexpr uint32_t SKINNING_WORKGROUP_SIZE           = 64; // sync with shader.
+constexpr uint32_t MAX_SKINNING_WG_INFO_ENTRIES      = (MAX_SKINNED_VERTICES_PER_FRAME / SKINNING_WORKGROUP_SIZE) * 2;
+
+// GPU compute particles (keep PARTICLE_WORKGROUP_SIZE in sync with ve_constants.slangh)
+constexpr uint32_t PARTICLE_WORKGROUP_SIZE = 256;
 
 // Meshlet culling (keep in sync with ve_constants.slangh)
 constexpr uint32_t MESHLET_MAX_VERTICES        = 64;
 constexpr uint32_t MESHLET_MAX_TRIANGLES       = 124;
-constexpr uint32_t MAX_MESHLET_DRAWS           = 262144*4;   // total indirect commands across all buckets
-constexpr uint32_t MESHLET_CULL_WORKGROUP_SIZE = 256;
-constexpr uint32_t MESHLET_BUCKET_COUNT        = 6;        // 0=opaque-back, 1=opaque-double, 2=mask-back, 3=mask-double, 4=blend-back, 5=blend-double
-constexpr uint32_t MESHLET_SHADOW_BUCKET_COUNT = 4;        // shadows skip transparent buckets 4-5
-constexpr uint32_t MAX_MESHLET_SHADOW_DRAWS    = 262144*4;   // total indirect commands across all shadow buckets per layer
+constexpr uint32_t MAX_MESHLET_DRAWS               = 262144*4;   // total indirect commands across all buckets
+constexpr uint32_t MESHLET_CULL_WORKGROUP_SIZE     = 256;
+constexpr uint32_t MESHLET_BUCKET_COUNT            = 6;        // 0=opaque-back, 1=opaque-double, 2=mask-back, 3=mask-double, 4=blend-back, 5=blend-double
+constexpr uint32_t MESHLET_SHADOW_BUCKET_COUNT     = 4;        // shadows skip transparent buckets 4-5
+constexpr uint32_t MAX_MESHLET_SHADOW_DRAWS        = 262144*4;   // total indirect commands across all shadow buckets per layer
+constexpr uint32_t MAX_MESHLET_DRAWS_PER_BUCKET        = MAX_MESHLET_DRAWS / MESHLET_BUCKET_COUNT;
+constexpr uint32_t MAX_MESHLET_SHADOW_DRAWS_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
 // gpu_id and local meshlet index are packed into VkDrawIndexedIndirectCommand::firstInstance as two 16-bit fields.
 static_assert(MAX_GPU_OBJECTS <= 65536,
 	"MAX_GPU_OBJECTS exceeds 16-bit range; meshlet firstInstance packing would corrupt gpu_id");

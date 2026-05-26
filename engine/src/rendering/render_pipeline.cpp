@@ -669,16 +669,20 @@ void RenderPipeline::dispatchCompute(VeFrameInfo& fi) {
 			ZoneScopedN("Skinning Dispatch");
 			ScopedDebugLabel skin_label(fi.compute_command_buffer, "Skinning Dispatch", {0.9f, 0.6f, 0.9f, 1.0f});
 			TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Skinning Dispatch");
+			profiler.beginGpuTimer(fi.compute_command_buffer, ProfileTimer::SKINNING);
 			m_skinning_pre_pass->dispatch(fi, m_scene_resources->getMegaBuffer());
+			profiler.endGpuTimer(fi.compute_command_buffer, ProfileTimer::SKINNING);
 		}
 		{
 			ZoneScopedN("Particle Dispatch");
 			ScopedDebugLabel particle_label(fi.compute_command_buffer, "Particle Dispatch", {0.9f, 0.4f, 0.2f, 1.0f});
 			TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Particle Dispatch");
 			profiler.beginCpuTimer(ProfileTimer::PARTICLES);
+			profiler.beginGpuTimer(fi.compute_command_buffer, ProfileTimer::PARTICLES);
 			if (fi.registry)
 				m_particle_emitter_system->tick(*fi.registry, fi.frame_time);
 			m_particle_backend->recordComputeCommands(fi);
+			profiler.endGpuTimer(fi.compute_command_buffer, ProfileTimer::PARTICLES);
 			profiler.endCpuTimer(ProfileTimer::PARTICLES);
 		}
 		if (m_cluster_light_system->isEnabled()) {
@@ -686,7 +690,9 @@ void RenderPipeline::dispatchCompute(VeFrameInfo& fi) {
 			ScopedDebugLabel cluster_label(fi.compute_command_buffer, "Cluster Light Dispatch", {0.4f, 0.7f, 0.5f, 1.0f});
 			TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Cluster Light Dispatch");
 			profiler.beginCpuTimer(ProfileTimer::CLUSTER_LIGHTS);
+			profiler.beginGpuTimer(fi.compute_command_buffer, ProfileTimer::CLUSTER_LIGHTS);
 			m_cluster_light_system->dispatch(fi, extent);
+			profiler.endGpuTimer(fi.compute_command_buffer, ProfileTimer::CLUSTER_LIGHTS);
 			profiler.endCpuTimer(ProfileTimer::CLUSTER_LIGHTS);
 		}
 	}
@@ -1056,6 +1062,9 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	m_stats.gpu_hiz = results.gpu(ProfileTimer::HIZ);
 	m_stats.gpu_shadow_mask = results.gpu(ProfileTimer::SHADOW_MASK);
 	m_stats.gpu_outline = results.gpu(ProfileTimer::OUTLINE);
+	m_stats.gpu_skinning = results.gpu(ProfileTimer::SKINNING);
+	m_stats.gpu_cluster_lights = results.gpu(ProfileTimer::CLUSTER_LIGHTS);
+	m_stats.gpu_particles = results.gpu(ProfileTimer::PARTICLES);
 
 	m_stats.cpu_culling = results.cpu(ProfileTimer::CULLING);
 	m_stats.cpu_shadow_maps = results.cpu(ProfileTimer::SHADOW_MAPS);

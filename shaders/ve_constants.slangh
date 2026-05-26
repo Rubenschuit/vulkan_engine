@@ -9,10 +9,11 @@
 #define NUM_CSM_CASCADES    3
 
 // Clustered forward shading (keep in sync with ve_config.hpp)
-#define CLUSTER_TILE_SIZE        64
-#define CLUSTER_Z_SLICES         24
-#define MAX_LIGHTS_PER_CLUSTER   64
-#define MAX_CLUSTER_LIGHTS       1024
+#define CLUSTER_TILE_SIZE              64
+#define CLUSTER_Z_SLICES               24
+#define MAX_LIGHTS_PER_CLUSTER         64
+#define MAX_CLUSTER_LIGHTS             1024
+#define CLUSTER_ASSIGN_WORKGROUP_SIZE  256
 
 // GPU-driven culling (keep in sync with ve_config.hpp)
 #define MAX_LOD_LEVELS           4
@@ -28,6 +29,12 @@
 #define MESHLET_BUCKET_COUNT        6
 #define MESHLET_SHADOW_BUCKET_COUNT 4
 #define MAX_MESHLET_SHADOW_DRAWS    1048576
+
+// Skinning (keep in sync with ve_config.hpp)
+#define SKINNING_WORKGROUP_SIZE     64
+
+// GPU compute particles (keep in sync with ve_config.hpp)
+#define PARTICLE_WORKGROUP_SIZE     256
 
 // LOD screen-space thresholds (keep in sync with LOD_SCREEN_THRESHOLDS in ve_config.hpp)
 static const float LOD_SCREEN_THRESHOLDS[3] = { 0.70, 0.35, 0.15 };

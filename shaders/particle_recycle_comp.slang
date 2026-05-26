@@ -10,7 +10,7 @@
 #include "particle_common.slangh"
 
 [shader("compute")]
-[numthreads(256, 1, 1)]
+[numthreads(PARTICLE_WORKGROUP_SIZE, 1, 1)]
 void compMain(uint3 group_thread_id : SV_GroupThreadID) {
 	uint tid = group_thread_id.x;
 	uint count = slot_pool_counters[RECYCLE_QUEUE_COUNT_INDEX];

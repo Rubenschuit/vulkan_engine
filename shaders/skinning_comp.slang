@@ -1,7 +1,9 @@
 // Per-vertex linear blend skinning for all skinned entities in a single dispatch.
 //
-// One workgroup processes 64 vertices of one skinning slot. The CPU builds a
-// table `wg_info[]` with one entry per workgroup.
+// One workgroup processes SKINNING_WORKGROUP_SIZE vertices of one skinning slot.
+// The CPU builds a table `wg_info[]` with one entry per workgroup.
+
+#include "ve_constants.slangh"
 //
 // Inputs live in the static / sparse-skin regions of the mega VBO:
 //   mega_vbo[input_vertex_offset + v]  — bind-pose VeMesh::Vertex (48 B)
@@ -17,7 +19,7 @@ struct SkinWorkgroupInfo {
 	uint input_vertex_offset;   // in vertices, into the mega VBO
 	uint input_skin_offset;     // in skin vertices, into the mega skin VBO
 	uint output_vertex_offset;  // in vertices, into the mega VBO dynamic region
-	uint local_vertex_base;     // first vertex index this workgroup handles (0, 64, 128, ...)
+	uint local_vertex_base;     // first vertex index this workgroup handles (0, SKINNING_WORKGROUP_SIZE, 2*SKINNING_WORKGROUP_SIZE, ...)
 	uint _pad0;
 	uint _pad1;
 };
@@ -28,7 +30,7 @@ struct SkinWorkgroupInfo {
 [[vk::binding(3, 0)]] RWByteAddressBuffer mega_shadow;              // 12B vec3 stride: write position-only output
 [[vk::binding(4, 0)]] StructuredBuffer<SkinWorkgroupInfo> wg_info;
 
-[numthreads(64, 1, 1)]
+[numthreads(SKINNING_WORKGROUP_SIZE, 1, 1)]
 void compMain(uint3 group_id : SV_GroupID, uint3 group_thread_id : SV_GroupThreadID) {
 	SkinWorkgroupInfo info = wg_info[group_id.x];
 	uint v = info.local_vertex_base + group_thread_id.x;

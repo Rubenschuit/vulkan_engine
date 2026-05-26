@@ -1,7 +1,7 @@
 // Cluster light assignment compute shader.
 // Assigns point lights to 3D clusters for clustered forward rendering.
 //
-// Dispatch: (ceil(tiles_x * tiles_y / 256), 1, z_slices)
+// Dispatch: (ceil(tiles_x * tiles_y / CLUSTER_ASSIGN_WORKGROUP_SIZE), 1, z_slices)
 // Each thread handles one cluster in the XY plane for its Z-slice.
 
 #include "ve_constants.slangh"
@@ -30,7 +30,7 @@ struct UniformBuffer {
 [[vk::binding(3, 1)]] ConstantBuffer<ClusterParams>      cluster_params;
 [[vk::binding(4, 1)]] RWStructuredBuffer<uint>           atomic_counter;     // global allocation counter
 
-[numthreads(256, 1, 1)]
+[numthreads(CLUSTER_ASSIGN_WORKGROUP_SIZE, 1, 1)]
 void compMain(uint3 dispatch_id : SV_DispatchThreadID, uint3 group_id : SV_GroupID) {
 	uint flat_xy = dispatch_id.x;
 	uint z_slice = group_id.z;

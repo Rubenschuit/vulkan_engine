@@ -264,10 +264,9 @@ void ClusterLightSystem::dispatch(VeFrameInfo& frame_info, vk::Extent2D screen_e
 	};
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pipeline_layout, 0, sets, {});
 
-	// Dispatch: workgroup size = 256, flat over XY clusters per Z-slice
+	// Dispatch: flat over XY clusters per Z-slice
 	uint32_t clusters_per_slice = m_tiles_x * m_tiles_y;
-	constexpr uint32_t WORKGROUP_SIZE = 256;
-	uint32_t groups_xy = (clusters_per_slice + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
+	uint32_t groups_xy = (clusters_per_slice + CLUSTER_ASSIGN_WORKGROUP_SIZE - 1) / CLUSTER_ASSIGN_WORKGROUP_SIZE;
 	cmd.dispatch(groups_xy, 1, CLUSTER_Z_SLICES);
 
 	// Make compute writes available before the semaphore signal.

@@ -425,11 +425,10 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 		m_current_readback_valid = true;
 
 		// Update high-water marks: jump directly to 2x actual + headroom
-		constexpr uint32_t MAX_PER_BUCKET = MAX_MESHLET_DRAWS / BUCKET_COUNT;
 		for (uint32_t b = 0; b < BUCKET_COUNT; b++)
 			m_readback_high_water[b] = std::min(
 				m_readback_counts[b] * 2 + 1024,
-				MAX_PER_BUCKET);
+				MAX_MESHLET_DRAWS_PER_BUCKET);
 	}
 
 	// Clear per-frame counters and init dispatch_indirect to (0, 1, 1)
@@ -441,11 +440,10 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 
 	// Without drawIndirectCount, zero-fill the indirect buffer region using high-water marks
 	if (!m_ve_device.supportsDrawIndirectCount()) {
-		constexpr uint32_t MAX_PER_BUCKET = MAX_MESHLET_DRAWS / BUCKET_COUNT;
 		constexpr vk::DeviceSize CMD_SIZE = sizeof(VkDrawIndexedIndirectCommand);
 		for (uint32_t b = 0; b < BUCKET_COUNT; b++) {
 			uint32_t count = m_readback_high_water[b];
-			auto offset = static_cast<vk::DeviceSize>(b) * MAX_PER_BUCKET * CMD_SIZE;
+			auto offset = static_cast<vk::DeviceSize>(b) * MAX_MESHLET_DRAWS_PER_BUCKET * CMD_SIZE;
 			cmd.fillBuffer(m_meshlet_indirect[frame]->getBuffer(), offset,
 				static_cast<vk::DeviceSize>(count) * CMD_SIZE, 0);
 		}
@@ -623,11 +621,10 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 					std::memcpy(readback_counts[slot].data(), ptr,
 						MESHLET_SHADOW_BUCKET_COUNT * sizeof(uint32_t));
 
-					constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
 					for (uint32_t b = 0; b < MESHLET_SHADOW_BUCKET_COUNT; b++) {
 						uint32_t actual = readback_counts[slot][b];
 						uint32_t hwm = actual + actual / 2 + 512;
-						readback_hwm[slot][b] = std::min(hwm, SHADOW_MAX_PER_BUCKET);
+						readback_hwm[slot][b] = std::min(hwm, MAX_MESHLET_SHADOW_DRAWS_PER_BUCKET);
 					}
 				}
 			}
@@ -666,11 +663,10 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 		cmd.fillBuffer(m_shadow_dispatch_indirect[frame_index][slot]->getBuffer(), 0, 4, 0u);
 		cmd.fillBuffer(m_shadow_dispatch_indirect[frame_index][slot]->getBuffer(), 4, 8, 1u);
 		if (!m_ve_device.supportsDrawIndirectCount()) {
-			constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
 			constexpr vk::DeviceSize CMD_SIZE = sizeof(VkDrawIndexedIndirectCommand);
 			for (uint32_t b = 0; b < MESHLET_SHADOW_BUCKET_COUNT; b++) {
 				uint32_t fill_count = readback_hwm[slot][b];
-				auto offset = static_cast<vk::DeviceSize>(b) * SHADOW_MAX_PER_BUCKET * CMD_SIZE;
+				auto offset = static_cast<vk::DeviceSize>(b) * MAX_MESHLET_SHADOW_DRAWS_PER_BUCKET * CMD_SIZE;
 				cmd.fillBuffer(m_shadow_meshlet_indirect[frame_index][slot]->getBuffer(), offset,
 					static_cast<vk::DeviceSize>(fill_count) * CMD_SIZE, 0);
 			}

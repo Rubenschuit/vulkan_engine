@@ -1826,7 +1826,6 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 	}
 
 	ShadowPushConstantData push{.instance_offset = 0};
-	constexpr uint32_t SHADOW_MAX_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
 
 	auto rebindMeshletState = [&]() {
 		cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
@@ -1843,10 +1842,10 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		auto& shadow_draw_counts = meshlet_cull.getShadowMeshletDrawCounts(frame, slot);
 		const uint32_t* cpu_counts = meshlet_cull.getShadowCpuDrawCounts(slot, is_dynamic);
 		for (uint32_t bucket = 0; bucket < MESHLET_SHADOW_BUCKET_COUNT; bucket++) {
-			auto buf_offset = static_cast<vk::DeviceSize>(bucket) * SHADOW_MAX_PER_BUCKET
+			auto buf_offset = static_cast<vk::DeviceSize>(bucket) * MAX_MESHLET_SHADOW_DRAWS_PER_BUCKET
 			                  * sizeof(VkDrawIndexedIndirectCommand);
 			if (cpu_counts) {
-				uint32_t count = std::min(cpu_counts[bucket], SHADOW_MAX_PER_BUCKET);
+				uint32_t count = std::min(cpu_counts[bucket], MAX_MESHLET_SHADOW_DRAWS_PER_BUCKET);
 				cmd.drawIndexedIndirect(shadow_indirect.getBuffer(), buf_offset,
 					count, sizeof(VkDrawIndexedIndirectCommand));
 			} else {
@@ -1854,7 +1853,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 				cmd.drawIndexedIndirectCount(
 					shadow_indirect.getBuffer(), buf_offset,
 					shadow_draw_counts.getBuffer(), count_offset,
-					SHADOW_MAX_PER_BUCKET, sizeof(VkDrawIndexedIndirectCommand));
+					MAX_MESHLET_SHADOW_DRAWS_PER_BUCKET, sizeof(VkDrawIndexedIndirectCommand));
 			}
 		}
 	};

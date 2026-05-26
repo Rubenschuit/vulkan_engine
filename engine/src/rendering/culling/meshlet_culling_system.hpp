@@ -113,7 +113,7 @@ public:
 	vk::raii::DescriptorSet& getGlobalDescriptorSet(uint32_t frame) { assert(frame < MAX_FRAMES_IN_FLIGHT); return m_global_descriptor_sets[frame]; }
 
 	// CPU-side draw counts for drawIndexedIndirect fallback (only when drawIndirectCount unavailable).
-	// Returns high-water marks when readback is available, or MAX_PER_BUCKET before first readback.
+	// Returns high-water marks when readback is available, or MAX_MESHLET_DRAWS_PER_BUCKET before first readback.
 	const uint32_t* getCpuDrawCounts() const {
 		if (m_ve_device.supportsDrawIndirectCount())
 			return nullptr;

@@ -20,11 +20,6 @@
 
 namespace ve {
 
-constexpr uint32_t MAX_PALETTE_MATRICES = 4096 * 2;
-constexpr uint32_t WORKGROUP_SIZE = 64;
-
-constexpr uint32_t MAX_WG_INFO_ENTRIES = (MAX_SKINNED_VERTICES_PER_FRAME / WORKGROUP_SIZE) * 2;
-
 struct SkinWorkgroupInfo {
 	uint32_t vertex_count;
 	uint32_t palette_offset;
@@ -46,7 +41,7 @@ SkinningPrePass::SkinningPrePass(VeDevice& device, VeDescriptorPool& descriptor_
 		m_palette_ssbos[i] = std::make_unique<VeBuffer>(
 			m_ve_device,
 			sizeof(glm::mat4),
-			MAX_PALETTE_MATRICES,
+			MAX_SKINNING_PALETTE_MATRICES,
 			vk::BufferUsageFlagBits::eStorageBuffer,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 		m_palette_ssbos[i]->map();
@@ -64,7 +59,7 @@ SkinningPrePass::SkinningPrePass(VeDevice& device, VeDescriptorPool& descriptor_
 		m_wg_info_ssbos[i] = std::make_unique<VeBuffer>(
 			m_ve_device,
 			sizeof(SkinWorkgroupInfo),
-			MAX_WG_INFO_ENTRIES,
+			MAX_SKINNING_WG_INFO_ENTRIES,
 			vk::BufferUsageFlagBits::eStorageBuffer,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 		m_wg_info_ssbos[i]->map();
@@ -249,10 +244,10 @@ void SkinningPrePass::updatePalette(Registry& registry, uint32_t frame_index, Ve
 			continue;
 
 		uint32_t joint_count = static_cast<uint32_t>(joints.size());
-		if (palette_cursor + joint_count > MAX_PALETTE_MATRICES) {
+		if (palette_cursor + joint_count > MAX_SKINNING_PALETTE_MATRICES) {
 			if (!overflow_warned_this_frame) {
 				VE_LOGW("SkinningPrePass: palette capacity exceeded (cap="
-				        << MAX_PALETTE_MATRICES << "); some skinned meshes will be skipped this frame");
+				        << MAX_SKINNING_PALETTE_MATRICES << "); some skinned meshes will be skipped this frame");
 				overflow_warned_this_frame = true;
 			}
 			continue;
@@ -411,11 +406,11 @@ void SkinningPrePass::dispatch(VeFrameInfo& fi, PbrMegaBuffer& mega_buffer) {
 		if (slot_it == m_slots.end())
 			continue;
 
-		const uint32_t groups = (d.vertex_count + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-		if (total_workgroups + groups > MAX_WG_INFO_ENTRIES) {
+		const uint32_t groups = (d.vertex_count + SKINNING_WORKGROUP_SIZE - 1) / SKINNING_WORKGROUP_SIZE;
+		if (total_workgroups + groups > MAX_SKINNING_WG_INFO_ENTRIES) {
 			if (!overflow_warned) {
 				VE_LOGW("SkinningPrePass: workgroup table overflow (cap="
-				        << MAX_WG_INFO_ENTRIES << "); skinning truncated this frame");
+				        << MAX_SKINNING_WG_INFO_ENTRIES << "); skinning truncated this frame");
 				overflow_warned = true;
 			}
 			break;
@@ -429,7 +424,7 @@ void SkinningPrePass::dispatch(VeFrameInfo& fi, PbrMegaBuffer& mega_buffer) {
 				.input_vertex_offset = entry->vertex_offset,
 				.input_skin_offset   = entry->skin_vertex_offset,
 				.output_vertex_offset = out_offset,
-				.local_vertex_base   = g * WORKGROUP_SIZE,
+				.local_vertex_base   = g * SKINNING_WORKGROUP_SIZE,
 			};
 		}
 		total_workgroups += groups;

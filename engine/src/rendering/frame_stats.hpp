@@ -26,6 +26,9 @@ struct VENGINE_API FrameStats {
 	float gpu_hiz = 0.0f;
 	float gpu_shadow_mask = 0.0f;
 	float gpu_outline = 0.0f;
+	float gpu_skinning = 0.0f;
+	float gpu_cluster_lights = 0.0f;
+	float gpu_particles = 0.0f;
 
 	// Per-system CPU breakdown (ms)
 	float cpu_culling = 0.0f;

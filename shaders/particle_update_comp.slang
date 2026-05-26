@@ -96,7 +96,7 @@ void spawnChild(Particle parent, uint child_emitter_id) {
 }
 
 [shader("compute")]
-[numthreads(256, 1, 1)]
+[numthreads(PARTICLE_WORKGROUP_SIZE, 1, 1)]
 void compMain(uint3 thread_id : SV_DispatchThreadID) {
 	uint i = thread_id.x;
 	if (i >= params.capacity)

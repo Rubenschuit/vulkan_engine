@@ -66,7 +66,7 @@ Particle buildParticleFromEvent(SpawnEvent e, uint event_id, uint sub_index) {
 }
 
 [shader("compute")]
-[numthreads(256, 1, 1)]
+[numthreads(PARTICLE_WORKGROUP_SIZE, 1, 1)]
 void compMain(uint3 group_id : SV_GroupID, uint3 group_thread_id : SV_GroupThreadID) {
 	uint event_id = group_id.x;
 	if (event_id >= params.spawn_event_count)

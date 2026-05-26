@@ -22,7 +22,7 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 
 	m_birds_orbit_center = root_translation + glm::vec3{0.0f, 0.0f, 20.0f} * sponza_scale;
 	placeModel({
-		.gltf_path = paths.project_root / "assets" / "birds.glb",
+		.gltf_path = paths.birds_model.lexically_normal(),
 		.translation = m_birds_orbit_center,
 		.scale = glm::vec3(sponza_scale),
 		.on_loaded = [this](Entity birds) {

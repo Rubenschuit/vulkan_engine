@@ -644,10 +644,8 @@ void ParticleBackend::recordComputeCommands(VeFrameInfo& frame_info) {
 		);
 	}
 
-	// Main update dispatch. Must match [numthreads(256, 1, 1)] in the shader.
 	frame_info.compute_command_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
-	const uint32_t workgroup_size = 256;
-	uint32_t group_count_x = (m_capacity + workgroup_size - 1) / workgroup_size;
+	uint32_t group_count_x = (m_capacity + PARTICLE_WORKGROUP_SIZE - 1) / PARTICLE_WORKGROUP_SIZE;
 	if (group_count_x > 0) {
 		frame_info.compute_command_buffer.dispatch(group_count_x, 1, 1);
 	}
