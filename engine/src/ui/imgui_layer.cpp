@@ -78,6 +78,7 @@ ImGuiLayer::ImGuiLayer(VeWindow& window, VeDevice& device, VeRenderer& renderer,
     init_info.ImageCount = static_cast<uint32_t>(m_renderer.getImageCount());
     init_info.Allocator = nullptr;
     init_info.CheckVkResultFn = nullptr;
+    init_info.MinAllocationSize = 1024 * 1024;
     init_info.PipelineInfoMain.RenderPass = VK_NULL_HANDLE; // Using dynamic rendering
     init_info.PipelineInfoMain.Subpass = 0;
     init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
@@ -130,7 +131,7 @@ void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd, bool clear_target) {
         .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
         .loadOp = clear_target ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad,
         .storeOp = vk::AttachmentStoreOp::eStore,
-        .clearValue = vk::ClearColorValue(0.1f, 0.1f, 0.1f, 1.0f)
+        .clearValue = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 0.0f)
     };
     const auto extent = m_renderer.getSwapChainExtent();
 
@@ -355,6 +356,7 @@ void ImGuiLayer::recreatePipeline() {
 	init_info.ImageCount = static_cast<uint32_t>(m_renderer.getImageCount());
 	init_info.Allocator = nullptr;
 	init_info.CheckVkResultFn = nullptr;
+	init_info.MinAllocationSize = 1024 * 1024;
 	init_info.PipelineInfoMain.RenderPass = VK_NULL_HANDLE;
 	init_info.PipelineInfoMain.Subpass = 0;
 	init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;

@@ -85,7 +85,6 @@ void IblSystem::createSamplers() {
 }
 
 void IblSystem::createDummyResources() {
-	// 4x4 black cubemap (dummy prefiltered)
 	m_dummy_cubemap = std::make_unique<VeImage>(
 		m_ve_device, 4, 4,
 		vk::SampleCountFlagBits::e1, vk::Format::eR8G8B8A8Unorm,
@@ -95,28 +94,6 @@ void IblSystem::createDummyResources() {
 		vk::ImageAspectFlagBits::eColor,
 		true, 6, 1);
 
-	m_dummy_cubemap->transitionImageLayout(
-		vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
-		{}, vk::AccessFlagBits2::eTransferWrite,
-		vk::PipelineStageFlagBits2::eTopOfPipe, vk::PipelineStageFlagBits2::eTransfer);
-
-	constexpr uint32_t face_bytes = 4 * 4 * 4; // 4x4 RGBA
-	constexpr uint32_t total_bytes = face_bytes * 6;
-	std::vector<uint8_t> black(total_bytes, 0);
-	VeBuffer staging(m_ve_device, total_bytes, 1,
-		vk::BufferUsageFlagBits::eTransferSrc,
-		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-	staging.map();
-	staging.writeToBuffer(black.data(), total_bytes);
-	m_ve_device.copyBufferToImage(staging.getBuffer(), m_dummy_cubemap->getImage(), 4, 4, 6);
-
-	m_dummy_cubemap->transitionImageLayout(
-		vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
-		vk::AccessFlagBits2::eTransferWrite, vk::AccessFlagBits2::eShaderRead,
-		vk::PipelineStageFlagBits2::eTransfer, vk::PipelineStageFlagBits2::eFragmentShader);
-	m_dummy_cubemap->setDebugName("IBL Dummy Cubemap");
-
-	// 4x4 black 2D texture (dummy BRDF LUT)
 	m_dummy_2d = std::make_unique<VeImage>(
 		m_ve_device, 4, 4,
 		vk::SampleCountFlagBits::e1, vk::Format::eR8G8B8A8Unorm,
@@ -126,22 +103,48 @@ void IblSystem::createDummyResources() {
 		vk::ImageAspectFlagBits::eColor,
 		false, 1, 1);
 
-	m_dummy_2d->transitionImageLayout(
+	constexpr uint32_t face_bytes = 4 * 4 * 4;
+	constexpr uint32_t total_bytes = face_bytes * 6;
+	std::vector<uint8_t> black(total_bytes, 0);
+
+	VeBuffer staging_cube(m_ve_device, total_bytes, 1,
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	staging_cube.map();
+	staging_cube.writeToBuffer(black.data(), total_bytes);
+
+	VeBuffer staging_2d(m_ve_device, face_bytes, 1,
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	staging_2d.map();
+	staging_2d.writeToBuffer(black.data(), face_bytes);
+
+	auto cmd = m_ve_device.beginSingleTimeCommands(QueueKind::Graphics);
+
+	m_dummy_cubemap->transitionImageLayout(*cmd,
+		vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
+		{}, vk::AccessFlagBits2::eTransferWrite,
+		vk::PipelineStageFlagBits2::eTopOfPipe, vk::PipelineStageFlagBits2::eTransfer);
+	m_dummy_2d->transitionImageLayout(*cmd,
 		vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
 		{}, vk::AccessFlagBits2::eTransferWrite,
 		vk::PipelineStageFlagBits2::eTopOfPipe, vk::PipelineStageFlagBits2::eTransfer);
 
-	VeBuffer staging2(m_ve_device, face_bytes, 1,
-		vk::BufferUsageFlagBits::eTransferSrc,
-		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-	staging2.map();
-	staging2.writeToBuffer(black.data(), face_bytes);
-	m_ve_device.copyBufferToImage(staging2.getBuffer(), m_dummy_2d->getImage(), 4, 4, 1);
+	VeDevice::copyBufferToImage(*cmd, staging_cube.getBuffer(), m_dummy_cubemap->getImage(), 4, 4, 6);
+	VeDevice::copyBufferToImage(*cmd, staging_2d.getBuffer(), m_dummy_2d->getImage(), 4, 4, 1);
 
-	m_dummy_2d->transitionImageLayout(
+	m_dummy_cubemap->transitionImageLayout(*cmd,
 		vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
 		vk::AccessFlagBits2::eTransferWrite, vk::AccessFlagBits2::eShaderRead,
 		vk::PipelineStageFlagBits2::eTransfer, vk::PipelineStageFlagBits2::eFragmentShader);
+	m_dummy_2d->transitionImageLayout(*cmd,
+		vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
+		vk::AccessFlagBits2::eTransferWrite, vk::AccessFlagBits2::eShaderRead,
+		vk::PipelineStageFlagBits2::eTransfer, vk::PipelineStageFlagBits2::eFragmentShader);
+
+	m_ve_device.endSingleTimeCommands(*cmd, QueueKind::Graphics);
+
+	m_dummy_cubemap->setDebugName("IBL Dummy Cubemap");
 	m_dummy_2d->setDebugName("IBL Dummy BRDF LUT");
 
 	// Build dummy descriptor set

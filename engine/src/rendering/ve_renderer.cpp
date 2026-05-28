@@ -292,15 +292,16 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer,
 	// Compute shaders (GTAO, shadow mask) read from the resolved depth instead of MSAA depth.
 	if (m_ve_swap_chain->hasResolvedDepth()) {
 		if (clear) {
-			// Prepare resolved depth for resolve target (only on first clear pass).
+			// MSAA depth-resolve writes happen at COLOR_ATTACHMENT_OUTPUT / COLOR_ATTACHMENT_WRITE per spec
 			vk::ImageMemoryBarrier2 prep{
 				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader
-					| vk::PipelineStageFlagBits2::eColorAttachmentOutput
-					| vk::PipelineStageFlagBits2::eLateFragmentTests,
+					| vk::PipelineStageFlagBits2::eLateFragmentTests
+					| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
 				.srcAccessMask = vk::AccessFlagBits2::eShaderRead
-					| vk::AccessFlagBits2::eColorAttachmentWrite
-					| vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-				.dstStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests
+					| vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+					| vk::AccessFlagBits2::eColorAttachmentWrite,
+				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+					| vk::PipelineStageFlagBits2::eLateFragmentTests
 					| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
 				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
 					| vk::AccessFlagBits2::eColorAttachmentWrite,
@@ -353,12 +354,17 @@ void VeRenderer::endDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
 	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end depth pre-pass on command buffer from a different frame");
 	command_buffer.endRendering();
 
-	// Barrier: depth writes from pre-pass must be visible before scene pass reads them
+	// Barrier: depth writes from pre-pass must be visible before scene pass reads them.
 	vk::MemoryBarrier2 depth_barrier{
-		.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests,
-		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
-		.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+		.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests
+			| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+			| vk::AccessFlagBits2::eColorAttachmentWrite,
+		.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+			| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
+			| vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+			| vk::AccessFlagBits2::eColorAttachmentWrite
 	};
 	vk::DependencyInfo dep_info{
 		.memoryBarrierCount = 1,
@@ -706,7 +712,7 @@ void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer,
 			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
 			.loadOp = vk::AttachmentLoadOp::eClear,
 			.storeOp = vk::AttachmentStoreOp::eStore,
-			.clearValue = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f)
+			.clearValue = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 0.0f)
 		};
 
 		vk::RenderingInfo rendering_info = {
@@ -745,7 +751,7 @@ void VeRenderer::beginPostProcessRender(vk::raii::CommandBuffer& command_buffer,
 			.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
 			.loadOp = vk::AttachmentLoadOp::eClear,
 			.storeOp = vk::AttachmentStoreOp::eStore,
-			.clearValue = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f)
+			.clearValue = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 0.0f)
 		};
 
 		vk::RenderingInfo rendering_info = {

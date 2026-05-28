@@ -1139,11 +1139,8 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 						}
 
 						beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eLoad, &strip);
-						if (!strip_groups.empty()) {
-							command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-							command_buffer.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
+						if (!strip_groups.empty())
 							renderShadowMap(frame_info, c, strip_groups, mega_buffer);
-						}
 						command_buffer.endRendering();
 					}
 				} else {
@@ -1266,8 +1263,6 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 			if (has_dynamics || has_skinned) {
 				TracyVkZone(m_tracy_gfx_ctx, *command_buffer, "Shadow: dynamic+skinned overlay");
 				beginShadowRegionRender(command_buffer, region, vk::AttachmentLoadOp::eLoad);
-				command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-				command_buffer.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
 				renderShadowMap(frame_info, c, m_dynamic_csm_instance_groups, mega_buffer, /*include_skinned=*/true);
 				command_buffer.endRendering();
 			}
@@ -1545,13 +1540,11 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		}
 	};
 
-	auto rebindGraphicsState = [&]() {
-		cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-		cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
-		mega_buffer.bindShadow(cmd);
-		cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
-			vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
-	};
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
+	mega_buffer.bindShadow(cmd);
+	cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
+		vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
 
 	// Per-cascade: render static, snapshot to cache, then dynamic overlay
 	{
@@ -1580,7 +1573,6 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 					gpu_cull_system.flushShadowCullBarrier(cmd, scene_mgr, frame);
 
 					beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad, &strip);
-					rebindGraphicsState();
 					cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 						0, {*m_gpu_cascade_descriptor_sets[frame][c]}, {});
 					drawIndirect(c);
@@ -1590,7 +1582,6 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 				// Full re-render (static only, already dispatched above)
 				TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: full static render");
 				beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eClear);
-				rebindGraphicsState();
 				cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 					0, {*m_gpu_cascade_descriptor_sets[frame][c]}, {});
 				drawIndirect(c);
@@ -1716,7 +1707,6 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 			gpu_cull_system.flushShadowCullBarrier(cmd, scene_mgr, frame);
 
 			beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad);
-			rebindGraphicsState();
 			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 				0, {*m_gpu_cascade_descriptor_sets[frame][c]}, {});
 			drawIndirect(c);
@@ -1732,7 +1722,6 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		for (uint32_t i = 0; i < num_shadow_lights; i++) {
 			uint32_t slot = NUM_CSM_CASCADES + i;
 			beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eClear);
-			rebindGraphicsState();
 			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 				0, {*m_gpu_shadow_descriptor_sets[frame][i]}, {});
 			drawIndirect(slot);
@@ -1827,15 +1816,11 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 
 	ShadowPushConstantData push{.instance_offset = 0};
 
-	auto rebindMeshletState = [&]() {
-		cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
-		cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
-		mega_buffer.bindShadowMeshletIbo(cmd);
-		cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
-			vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
-	};
-
-	rebindMeshletState();
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
+	mega_buffer.bindShadowMeshletIbo(cmd);
+	cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
+		vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
 
 	auto drawMeshletIndirect = [&](uint32_t slot, bool is_dynamic = false) {
 		auto& shadow_indirect = meshlet_cull.getShadowMeshletIndirectBuffer(frame, slot);
@@ -1885,7 +1870,6 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 					meshlet_cull.dispatchShadowCulls(cmd, &strip_req, 1, scene_mgr, frame, true);
 
 					beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad, &strip);
-					rebindMeshletState();
 					cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 						0, {*m_meshlet_cascade_descriptor_sets[frame][c]}, {});
 					drawMeshletIndirect(c);
@@ -2019,7 +2003,6 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 			meshlet_cull.dispatchShadowCulls(cmd, &dyn_req, 1, scene_mgr, frame);
 
 			beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad);
-			rebindMeshletState();
 			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 				0, {*m_meshlet_cascade_descriptor_sets[frame][c]}, {});
 			drawMeshletIndirect(c, true);
