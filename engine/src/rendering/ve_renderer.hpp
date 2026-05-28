@@ -109,7 +109,7 @@ public:
 
 	void markSceneFrame() { m_scene_frame = true; }
 
-	// Scene-frame split submission. Called mid-frame when early_submit is on.
+	// Scene-frame split submission. Called mid-frame from the async (GTAO/HiZ) path.
 	void submitPreSwapGraphics(bool depth_compute_follows);
 	void submitShadowGraphics(vk::raii::CommandBuffer& shadow_cb);
 	void submitDepthCompute(vk::raii::CommandBuffer& depth_compute_cb);

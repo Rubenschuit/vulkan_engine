@@ -437,19 +437,6 @@ void SkinningPrePass::dispatch(VeFrameInfo& fi, PbrMegaBuffer& mega_buffer) {
 	std::array<vk::DescriptorSet, 1> sets{*m_descriptor_sets[frame]};
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pipeline_layout, 0, sets, {});
 	cmd.dispatch(total_workgroups, 1, 1);
-
-	// Make compute writes visible to subsequent vertex-input reads.
-	vk::MemoryBarrier2 compute_done{
-		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eVertexAttributeInput,
-		.dstAccessMask = vk::AccessFlagBits2::eVertexAttributeRead,
-	};
-	vk::DependencyInfo dep{
-		.memoryBarrierCount = 1,
-		.pMemoryBarriers = &compute_done,
-	};
-	cmd.pipelineBarrier2(dep);
 }
 
 uint32_t SkinningPrePass::getSkinnedVertexOffset(Entity entity, uint32_t frame_index,

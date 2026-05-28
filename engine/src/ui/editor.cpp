@@ -21,7 +21,7 @@ Editor::Editor(VeWindow& window, VeDevice& device, VeRenderer& renderer,
 	m_imgui_layer = std::make_unique<ImGuiLayer>(window, device, renderer, event_bus);
 	m_imgui_layer->setAppSettingsWindowName(config.app_name);
 	m_performance_panel = std::make_unique<PerformancePanel>(renderer);
-	m_graphics_panel = std::make_unique<GraphicsPanel>(renderer, event_bus);
+	m_graphics_panel = std::make_unique<GraphicsPanel>(renderer, window, event_bus);
 	m_environment_panel = std::make_unique<EnvironmentPanel>();
 	m_debug_panel = std::make_unique<DebugPanel>(m_texture_inspector);
 	m_inspector_panel.setTextureInspector(&m_texture_inspector);

@@ -2,6 +2,7 @@
 #include "ui/panels/graphics_panel.hpp"
 #include "ui/editor_state.hpp"
 #include "ui/imgui_layer.hpp"
+#include "platform/ve_window.hpp"
 #include "rendering/particle_backend.hpp"
 #include "rendering/ve_renderer.hpp"
 #include "events/event_bus.hpp"
@@ -24,6 +25,82 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		ImGui::SliderFloat("FOV (Degrees)", &ctx.settings.fov, 30.0f, 120.0f, "%.1f");
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Field of View in degrees.");
+
+		{
+			static const char* mode_labels[] = {"Windowed", "Borderless", "Fullscreen"};
+			VeWindow::WindowMode current_mode = m_window.getWindowMode();
+			int mode_idx = static_cast<int>(current_mode);
+			if (ImGui::Combo("Window Mode", &mode_idx, mode_labels, IM_ARRAYSIZE(mode_labels))) {
+				m_window.setWindowMode(static_cast<VeWindow::WindowMode>(mode_idx));
+				current_mode = m_window.getWindowMode();
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip(
+					"On Windows 10/11 a fullscreen-covering borderless window can engage\n"
+					"DWM Independent Flip -- latency comparable to exclusive fullscreen,\n"
+					"but alt-tab is slow.\n\n"
+					"HDR mode keeps DWM in always-composed flip,\n"
+					"which disables Independent Flip: alt-tab is instant.");
+
+			if (current_mode != VeWindow::WindowMode::Windowed) {
+				auto monitors = m_window.getMonitors();
+				if (monitors.size() > 1) {
+					int sel = m_window.getResolvedMonitorIndex();
+					auto label = [](const VeWindow::MonitorInfo& m) {
+						return std::to_string(m.index) + ": " + m.name + " ("
+							+ std::to_string(m.width) + "x" + std::to_string(m.height)
+							+ " @" + std::to_string(m.refresh_rate) + "Hz)";
+					};
+					std::string preview = label(monitors[static_cast<size_t>(sel)]);
+					if (ImGui::BeginCombo("Monitor", preview.c_str())) {
+						for (const auto& m : monitors) {
+							bool is_selected = (m.index == sel);
+							if (ImGui::Selectable(label(m).c_str(), is_selected))
+								m_window.setMonitor(m.index);
+							if (is_selected)
+								ImGui::SetItemDefaultFocus();
+						}
+						ImGui::EndCombo();
+					}
+				}
+			}
+
+			if (current_mode == VeWindow::WindowMode::Fullscreen) {
+				auto modes = m_window.getVideoModes(m_window.getResolvedMonitorIndex());
+				if (!modes.empty()) {
+					VeWindow::VideoMode current = m_window.getTargetVideoMode();
+					auto label = [](const VeWindow::VideoMode& m) {
+						return std::to_string(m.width) + "x" + std::to_string(m.height)
+							+ " @ " + std::to_string(m.refresh_rate) + "Hz";
+					};
+					std::string preview = (current.width > 0) ? label(current) : "Desktop default";
+					if (ImGui::BeginCombo("Video Mode", preview.c_str())) {
+						bool desktop_selected = (current.width == 0);
+						if (ImGui::Selectable("Desktop default", desktop_selected))
+							m_window.setVideoMode({0, 0, 0});
+						if (desktop_selected)
+							ImGui::SetItemDefaultFocus();
+						for (const auto& m : modes) {
+							bool is_selected = (m == current);
+							if (ImGui::Selectable(label(m).c_str(), is_selected))
+								m_window.setVideoMode(m);
+							if (is_selected)
+								ImGui::SetItemDefaultFocus();
+						}
+						ImGui::EndCombo();
+					}
+				}
+			}
+
+			GLFWwindow* gw = m_window.getGLFWwindow();
+			GLFWmonitor* fs_mon = glfwGetWindowMonitor(gw);
+			bool decorated = glfwGetWindowAttrib(gw, GLFW_DECORATED) != 0;
+			int wx = 0, wy = 0, ww = 0, wh = 0;
+			glfwGetWindowPos(gw, &wx, &wy);
+			glfwGetWindowSize(gw, &ww, &wh);
+			const char* glfw_state = fs_mon ? "GLFW fullscreen" : (decorated ? "GLFW windowed" : "GLFW windowed (undecorated)");
+			ImGui::TextDisabled("%s  pos=(%d,%d)  size=%dx%d", glfw_state, wx, wy, ww, wh);
+		}
 
 		if (ImGui::Checkbox("Enable VSync", &ctx.settings.vsync))
 			m_renderer.setVSync(ctx.settings.vsync);

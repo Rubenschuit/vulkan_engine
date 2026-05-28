@@ -53,6 +53,7 @@ protected:
 	// --- Engine accessors ---
 	EventBus& eventBus() { return m_event_bus; }
 	InputController& getInputController() { return m_input_controller; }
+	VeWindow& getWindow() { return m_ve_window; }
 	Editor& getEditor() { return *m_editor; }
 	PhysicsSystem& getPhysicsSystem() { return *m_physics_system; }
 	const RenderServices& renderServices() const;

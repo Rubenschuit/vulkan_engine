@@ -463,9 +463,11 @@ vk::SurfaceFormatKHR VeSwapChain::chooseSwapSurfaceFormat(const std::vector<vk::
 vk::PresentModeKHR VeSwapChain::chooseSwapPresentMode(const std::vector<vk::PresentModeKHR>& available_present_modes) {
 	for (const auto& available_present_mode : available_present_modes) {
 		if (available_present_mode == m_present_mode) {
+			VE_LOGI("Present mode selected: " << vk::to_string(available_present_mode));
 			return available_present_mode;
 		}
 	}
+	VE_LOGW("Requested present mode " << vk::to_string(m_present_mode) << " unavailable; falling back to FIFO");
 	return vk::PresentModeKHR::eFifo;
 }
 
@@ -519,7 +521,7 @@ void VeSwapChain::prepareSubmitValues(bool depth_compute_follows) {
 }
 
 void VeSwapChain::submitPreSwapGraphics(vk::CommandBuffer cb) {
-	// Waits on compute timeline only; signals pre_swap.
+	// Waits on compute timeline; signals pre_swap.
 	vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eDrawIndirect
 		| vk::PipelineStageFlagBits::eVertexInput
 		| vk::PipelineStageFlagBits::eFragmentShader;

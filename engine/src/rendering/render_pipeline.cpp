@@ -904,35 +904,25 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		}
 	}
 
-	if (!any_async_consumer) {
-		vk::raii::CommandBuffer* depth_barrier_target = &command_buffer;
-		if (m_settings.early_submit) {
-			m_ve_renderer.submitPreSwapGraphics(/*depth_compute_follows=*/false);
-			auto& swap_cb = m_ve_renderer.getSwapGraphicsCommandBuffer();
-			fi.command_buffer = &swap_cb;
-			depth_barrier_target = &swap_cb;
-		}
-
-		if (any_depth_consumer) {
-			vk::ImageMemoryBarrier2 depth_to_attach{
-				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-				.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
-					| vk::PipelineStageFlagBits2::eLateFragmentTests
-					| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
-					| vk::AccessFlagBits2::eDepthStencilAttachmentWrite
-					| vk::AccessFlagBits2::eColorAttachmentWrite,
-				.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-				.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.image = m_ve_renderer.getResolvedDepthImage(),
-				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
-			};
-			vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_attach};
-			depth_barrier_target->pipelineBarrier2(dep);
-		}
+	if (!any_async_consumer && any_depth_consumer) {
+		vk::ImageMemoryBarrier2 depth_to_attach{
+			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
+			.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+				| vk::PipelineStageFlagBits2::eLateFragmentTests
+				| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
+				| vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+				| vk::AccessFlagBits2::eColorAttachmentWrite,
+			.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+			.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_ve_renderer.getResolvedDepthImage(),
+			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
+		};
+		vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_attach};
+		command_buffer.pipelineBarrier2(dep);
 	}
 
 	if (!fi.shadow_mask_active)

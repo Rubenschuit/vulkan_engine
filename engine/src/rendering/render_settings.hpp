@@ -33,12 +33,6 @@ struct VENGINE_API RenderSettings {
 	bool hdr_enabled = false;
 	bool msaa = false;
 	bool vsync = false;
-	// Submit pre_swap_graphics mid-frame
-#ifdef __APPLE__
-	bool early_submit = false;
-#else
-	bool early_submit = true;
-#endif
 
 	// lighting
 	glm::vec3 ambient_light_color = glm::vec3(1.0f);

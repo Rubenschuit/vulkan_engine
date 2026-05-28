@@ -20,6 +20,8 @@ struct VENGINE_API EngineConfig {
 	// Window
 	uint32_t window_width = 1920;
 	uint32_t window_height = 1080;
+
+	bool register_default_window_hotkeys = true;
 };
 
 }

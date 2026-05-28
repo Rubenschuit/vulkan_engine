@@ -362,7 +362,7 @@ void VeDevice::createLogicalDevice() {
 					vk::PhysicalDeviceVulkan12Features,
 					vk::PhysicalDeviceVulkan13Features,
 					vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> feature_chain = {
-		{.features = {.independentBlend = true, .multiDrawIndirect = true, .depthClamp = true, .depthBiasClamp = true, .samplerAnisotropy = true}},
+		{.features = {.independentBlend = true, .multiDrawIndirect = true, .drawIndirectFirstInstance = true, .depthClamp = true, .depthBiasClamp = true, .samplerAnisotropy = true}},
 		{.multiview = true, .shaderDrawParameters = true},
 		{	// Vulkan 1.2 features (descriptor indexing + timeline semaphore)
 			.drawIndirectCount = m_supports_draw_indirect_count,
