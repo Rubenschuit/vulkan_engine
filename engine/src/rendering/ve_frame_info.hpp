@@ -90,7 +90,7 @@ struct UniformBufferObject {
 	alignas(16) glm::mat4 projection_view;
 	alignas(16) glm::vec4 camera_position;
 	alignas(16) glm::vec4 ambient_light_color = DEFAULT_AMBIENT_LIGHT_COLOR;
-	alignas(16) PointLight point_lights[ve::MAX_LIGHTS];
+	alignas(16) PointLight point_lights[ve::MAX_BRUTE_FORCE_POINT_LIGHTS];
 	alignas(16) ShadowLight shadow_lights[ve::MAX_SHADOW_LIGHTS];
 	alignas(4)  uint32_t num_lights = 0;
 	alignas(4)  uint32_t num_shadow_lights = 0;

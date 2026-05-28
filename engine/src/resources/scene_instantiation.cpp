@@ -248,7 +248,7 @@ Entity instantiateModel(const VeModel& model, Registry& registry,
 		auto* tc = registry.getComponent<TransformComponent>(light);
 		tc->setTranslation(toLocalPos(L.position, parent));
 		registry.setParent(light, parent);
-		registry.setActive(light, false);  // default OFF (MAX_LIGHTS constraint)
+		registry.setActive(light, false);  // emissive-derived; default OFF, user opts in per-light
 	}
 	for (const ExtractedLight& L : punctual_lights) {
 		Entity parent = lightParent(L);

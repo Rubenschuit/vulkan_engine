@@ -234,17 +234,18 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 
 	auto& registry = *frame_info.registry;
 	for (auto [entity, pl, tc] : registry.view<PointLightComponent, TransformComponent>()) {
-		assert(num_lights < MAX_LIGHTS && "Number of point lights exceeds MAX_LIGHTS");
-
 		glm::vec3 color = pl.getColor();
 		float intensity = pl.getIntensity();
 
 		glm::vec3 world_pos = glm::vec3(registry.getWorldTransform(entity)[3]);
-		ubo.point_lights[num_lights].position = glm::vec4{world_pos, pl.getRange()};
-		ubo.point_lights[num_lights].color.x = color.x * intensity;
-		ubo.point_lights[num_lights].color.y = color.y * intensity;
-		ubo.point_lights[num_lights].color.z = color.z * intensity;
-		ubo.point_lights[num_lights].color.w = intensity;
+
+		if (num_lights < MAX_BRUTE_FORCE_POINT_LIGHTS) {
+			ubo.point_lights[num_lights].position = glm::vec4{world_pos, pl.getEffectiveRange()};
+			ubo.point_lights[num_lights].color.x = color.x * intensity;
+			ubo.point_lights[num_lights].color.y = color.y * intensity;
+			ubo.point_lights[num_lights].color.z = color.z * intensity;
+			ubo.point_lights[num_lights].color.w = intensity;
+		}
 
 		if (pl.getCastsShadow() && num_shadow_lights < MAX_POINT_SHADOW_LIGHTS) {
 			glm::vec3 light_pos = world_pos;
@@ -267,13 +268,14 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 		num_lights++;
 	}
 
-	ubo.num_lights = num_lights;
+	ubo.num_lights = std::min(num_lights, MAX_BRUTE_FORCE_POINT_LIGHTS);
 
 	// Directional lights (first shadow-casting directional gets CSM)
 	uint32_t num_dir_lights = 0;
 	bool csm_assigned = false;
 	for (auto [entity, dl] : registry.view<DirectionalLightComponent>()) {
-		assert(num_dir_lights < MAX_DIR_LIGHTS && "Number of directional lights exceeds MAX_DIR_LIGHTS");
+		if (num_dir_lights >= MAX_DIR_LIGHTS)
+			break;
 
 		glm::vec3 dir = glm::normalize(dl.getDirection());
 		glm::vec3 dl_color = dl.getColor();
@@ -442,7 +444,8 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 	// Spot lights
 	uint32_t num_spot_lights = 0;
 	for (auto [entity, sl, tc] : registry.view<SpotLightComponent, TransformComponent>()) {
-		assert(num_spot_lights < MAX_SPOT_LIGHTS && "Number of spot lights exceeds MAX_SPOT_LIGHTS");
+		if (num_spot_lights >= MAX_SPOT_LIGHTS)
+			break;
 
 		glm::vec3 color = sl.getColor();
 		float intensity = sl.getIntensity();
@@ -495,7 +498,7 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 			}
 			ubo.shadow_lights[num_shadow_lights].shadow_matrix = spot_atlas_bias * light_proj * light_view;
 			ubo.shadow_lights[num_shadow_lights].light_index_padding = glm::vec4(
-				static_cast<float>(MAX_LIGHTS + num_spot_lights), 2.0f,  // type 2 = spot
+				static_cast<float>(MAX_CLUSTER_LIGHTS + num_spot_lights), 2.0f,  // type 2 = spot
 				static_cast<float>(NUM_CSM_CASCADES + num_shadow_lights),
 				0.0f);
 			// Atlas bounds for XY clamping

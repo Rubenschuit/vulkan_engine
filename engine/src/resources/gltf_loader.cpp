@@ -894,7 +894,7 @@ static std::vector<ExtractedLight> extractEmissiveLights(
 					pushLight(world_pos, " [" + std::to_string(ci) + "]");
 				}
 			}
-			if (emissive_light_count >= ve::MAX_LIGHTS - 1)
+			if (emissive_light_count >= ve::MAX_CLUSTER_LIGHTS - 1)
 				VE_LOGW("Reached maximum light count while extracting emissive lights from model; some lights may be missing");
 		}
 	}

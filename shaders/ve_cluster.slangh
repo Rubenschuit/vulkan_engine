@@ -69,12 +69,17 @@ void getClusterAABB(uint3 cluster_id, ClusterParams params,
 	float2 dir_min = view_min_near.xy / -view_min_near.z;
 	float2 dir_max = view_max_near.xy / -view_max_near.z;
 
-	// Scale XY by depth range to get the tile frustum AABB in view space
-	float3 near_min = float3(min(dir_min, dir_max) * slice_near, -slice_far);
-	float3 near_max = float3(max(dir_min, dir_max) * slice_far, -slice_near);
+	// Slice widens with depth
+	float2 a_near = dir_min * slice_near;
+	float2 a_far  = dir_min * slice_far;
+	float2 b_near = dir_max * slice_near;
+	float2 b_far  = dir_max * slice_far;
 
-	aabb_min = near_min;
-	aabb_max = near_max;
+	float2 xy_min = min(min(a_near, a_far), min(b_near, b_far));
+	float2 xy_max = max(max(a_near, a_far), max(b_near, b_far));
+
+	aabb_min = float3(xy_min, -slice_far);
+	aabb_max = float3(xy_max, -slice_near);
 }
 
 // Cluster heatmap color: dark blue(0), blue(few), red(many), magenta(saturated).

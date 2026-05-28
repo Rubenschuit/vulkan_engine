@@ -3,14 +3,16 @@
 //
 // Dispatch: (ceil(tiles_x * tiles_y / CLUSTER_ASSIGN_WORKGROUP_SIZE), 1, z_slices)
 // Each thread handles one cluster in the XY plane for its Z-slice.
+//
+// Each cluster owns a fixed slice [cluster_index * MAX_LIGHTS_PER_CLUSTER, +cap)
+// in light_index_list.
 
 #include "ve_constants.slangh"
 #include "ve_cluster.slangh"
 
-// Set 0: Global UBO (reuses the same layout as graphics pipeline)
 struct PointLightData {
 	float4 position;  // xyz = world pos, w = range
-	float4 color;     // xyz = color*intensity, w = intensity
+	float4 color;     // unused in compute
 };
 
 struct UniformBuffer {
@@ -18,20 +20,21 @@ struct UniformBuffer {
 	float4x4 proj;
 	float4x4 projection_view;
 	float4 camera_position;
-	// We only need the view matrix, but must match the UBO layout up to the fields we access.
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<UniformBuffer> ubo;
 
-// Set 1: Cluster data
 [[vk::binding(0, 1)]] RWStructuredBuffer<PointLightData> light_data;
 [[vk::binding(1, 1)]] RWStructuredBuffer<uint2>          cluster_counts;     // (offset, count) per cluster
-[[vk::binding(2, 1)]] RWStructuredBuffer<uint>           light_index_list;   // packed light indices
+[[vk::binding(2, 1)]] RWStructuredBuffer<uint>           light_index_list;
 [[vk::binding(3, 1)]] ConstantBuffer<ClusterParams>      cluster_params;
-[[vk::binding(4, 1)]] RWStructuredBuffer<uint>           atomic_counter;     // global allocation counter
+
+groupshared float4 s_view_pos_range[CLUSTER_ASSIGN_WORKGROUP_SIZE];
 
 [numthreads(CLUSTER_ASSIGN_WORKGROUP_SIZE, 1, 1)]
-void compMain(uint3 dispatch_id : SV_DispatchThreadID, uint3 group_id : SV_GroupID) {
+void compMain(uint3 dispatch_id : SV_DispatchThreadID,
+              uint3 group_id    : SV_GroupID,
+              uint  local_id    : SV_GroupThreadID) {
 	uint flat_xy = dispatch_id.x;
 	uint z_slice = group_id.z;
 
@@ -39,55 +42,56 @@ void compMain(uint3 dispatch_id : SV_DispatchThreadID, uint3 group_id : SV_Group
 	uint tiles_y = cluster_params.grid_dims.y;
 	uint clusters_per_slice = tiles_x * tiles_y;
 
-	if (flat_xy >= clusters_per_slice) return;
+	bool active = flat_xy < clusters_per_slice;
 
-	uint tile_x = flat_xy % tiles_x;
-	uint tile_y = flat_xy / tiles_x;
-	uint3 cluster_id = uint3(tile_x, tile_y, z_slice);
+	float3 aabb_min = float3(0.0);
+	float3 aabb_max = float3(0.0);
+	uint cluster_index = 0;
+	if (active) {
+		uint tile_x = flat_xy % tiles_x;
+		uint tile_y = flat_xy / tiles_x;
+		uint3 cluster_id = uint3(tile_x, tile_y, z_slice);
+		cluster_index = flat_xy + z_slice * clusters_per_slice;
+		getClusterAABB(cluster_id, cluster_params, aabb_min, aabb_max);
+	}
 
-	uint cluster_index = flat_xy + z_slice * clusters_per_slice;
-
-	// Compute view-space AABB for this cluster
-	float3 aabb_min, aabb_max;
-	getClusterAABB(cluster_id, cluster_params, aabb_min, aabb_max);
-
-	// Test each light against the cluster AABB
+	uint cluster_base = cluster_index * MAX_LIGHTS_PER_CLUSTER;
 	uint local_count = 0;
-	uint local_indices[MAX_LIGHTS_PER_CLUSTER];
 
 	uint num_lights = cluster_params.num_lights;
-	for (uint i = 0; i < num_lights && local_count < MAX_LIGHTS_PER_CLUSTER; i++) {
-		float4 world_pos = light_data[i].position;
-		float range = world_pos.w;
+	uint num_batches = (num_lights + CLUSTER_ASSIGN_WORKGROUP_SIZE - 1) / CLUSTER_ASSIGN_WORKGROUP_SIZE;
 
-		// Transform light to view space
-		float4 view_pos = mul(cluster_params.view, float4(world_pos.xyz, 1.0));
-		float3 light_view = view_pos.xyz;
-
-		// Culling radius: CPU always provides effective range in w (derived from
-		// intensity when the artist didn't set an explicit range). This matches the
-		// windowed attenuation in the fragment shader so lights fade smoothly at
-		// the cluster boundary instead of popping.
-		if (range > 0.0 && sphereAABBIntersect(light_view, range, aabb_min, aabb_max)) {
-			local_indices[local_count] = i;
-			local_count++;
+	for (uint batch = 0; batch < num_batches; batch++) {
+		uint base = batch * CLUSTER_ASSIGN_WORKGROUP_SIZE;
+		uint load_idx = base + local_id;
+		if (load_idx < num_lights) {
+			float4 wp = light_data[load_idx].position;
+			float3 vp = mul(cluster_params.view, float4(wp.xyz, 1.0)).xyz;
+			s_view_pos_range[local_id] = float4(vp, wp.w);
 		}
+		GroupMemoryBarrierWithGroupSync();
+
+		if (active && local_count < MAX_LIGHTS_PER_CLUSTER) {
+			uint batch_size = min(num_lights - base, CLUSTER_ASSIGN_WORKGROUP_SIZE);
+			for (uint i = 0; i < batch_size; i++) {
+				if (local_count >= MAX_LIGHTS_PER_CLUSTER)
+					break;
+
+				float4 vpr = s_view_pos_range[i];
+				float range = vpr.w;
+				if (range <= 0.0)
+					continue;
+
+				if (sphereAABBIntersect(vpr.xyz, range, aabb_min, aabb_max)) {
+					light_index_list[cluster_base + local_count] = base + i;
+					local_count++;
+				}
+			}
+		}
+
+		GroupMemoryBarrierWithGroupSync();
 	}
 
-	// Atomically allocate space in the global light index list
-	if (local_count > 0) {
-		uint global_offset;
-		InterlockedAdd(atomic_counter[0], local_count, global_offset);
-
-		// Write light indices to the global list
-		uint max_total = cluster_params.grid_dims.w * cluster_params.max_lights_per_cluster;
-		uint write_count = min(local_count, max_total - min(global_offset, max_total));
-		for (uint j = 0; j < write_count; j++) {
-			light_index_list[global_offset + j] = local_indices[j];
-		}
-
-		// Write (offset, count) for this cluster
-		cluster_counts[cluster_index] = uint2(global_offset, write_count);
-	}
-	// If local_count == 0, cluster_counts[cluster_index] remains (0, 0) from fillBuffer clear
+	if (active)
+		cluster_counts[cluster_index] = uint2(cluster_base, local_count);
 }

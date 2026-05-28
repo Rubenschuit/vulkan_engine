@@ -18,35 +18,57 @@ auto makeNullArray() {
 	}(std::make_index_sequence<N>{});
 }
 
-// lights
-constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.04f); // w indicates light intensity
-constexpr uint32_t MAX_LIGHTS = 320; // requirded for UBO alignment
-constexpr uint32_t MAX_POINT_SHADOW_LIGHTS = 2; // Max point lights that can cast shadows
-constexpr uint32_t MAX_SPOT_LIGHTS = 32;
-constexpr uint32_t MAX_SPOT_SHADOW_LIGHTS = 2;
-constexpr uint32_t MAX_SHADOW_LIGHTS = MAX_POINT_SHADOW_LIGHTS + MAX_SPOT_SHADOW_LIGHTS;
-constexpr uint32_t MAX_DIR_LIGHTS = 4; // Maximum number of directional lights
+// ---------------------------------------------------------------------------
+// Lighting (keep in sync with shaders/ve_constants.slangh)
+// ---------------------------------------------------------------------------
+constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.04f);
+
+// Light count caps
+constexpr uint32_t MAX_BRUTE_FORCE_POINT_LIGHTS = 64;    // UBO inline array, only used when clustering is disabled
+constexpr uint32_t MAX_DIR_LIGHTS               = 4;
+constexpr uint32_t MAX_SPOT_LIGHTS              = 32;
+
+// Clustered forward shading
+constexpr uint32_t CLUSTER_TILE_SIZE             = 64;     // screen-space tile size in pixels
+constexpr uint32_t CLUSTER_Z_SLICES              = 24;     // depth slices (logarithmic distribution)
+constexpr uint32_t MAX_LIGHTS_PER_CLUSTER        = 128;    // per-cluster light cap (inner fragment loop ceiling)
+constexpr uint32_t MAX_CLUSTER_LIGHTS            = 8192;   // total point + spot lights for cluster path
+constexpr uint32_t CLUSTER_ASSIGN_WORKGROUP_SIZE = 256;
+
+// KHR_lights_punctual range derivation: for lights with range=0 (= unbounded),
+// the CPU synthesises an effective range at the distance where 1/d² falls to
+// CLUSTER_LIGHT_CUTOFF of peak intensity, capped at CLUSTER_MAX_EFFECTIVE_RANGE.
+// Used for cluster-AABB tests only; the shader still uses the windowed quartic.
+constexpr float CLUSTER_LIGHT_CUTOFF        = 0.02f;
+constexpr float CLUSTER_MAX_EFFECTIVE_RANGE = 500.0f;
+
+// Shadow casters (subset of the above that own shadow maps in the atlas)
+constexpr uint32_t MAX_POINT_SHADOW_LIGHTS = 2;
+constexpr uint32_t MAX_SPOT_SHADOW_LIGHTS  = 2;
+constexpr uint32_t MAX_SHADOW_LIGHTS       = MAX_POINT_SHADOW_LIGHTS + MAX_SPOT_SHADOW_LIGHTS;
 
 // Celestial billboard (sun/moon) configuration
-constexpr float CELESTIAL_DISTANCE = 200.0f;
-constexpr float CELESTIAL_SCALE = 22.0f;
-constexpr float CELESTIAL_INTENSITY_BOOST = 100.0f; // Intensity multiplier so bloom creates halo/corona
+constexpr float CELESTIAL_DISTANCE         = 200.0f;
+constexpr float CELESTIAL_SCALE            = 22.0f;
+constexpr float CELESTIAL_INTENSITY_BOOST  = 100.0f;
 
-// Shadow mapping configuration
-constexpr float SHADOW_BIAS = 0.00042f;
-constexpr float CSM_NORMAL_BIAS = 0.08f; // world-space normal offset for CSM, scaled per cascade
-constexpr float SHADOW_DEPTH_BIAS_CONSTANT = 1.25f;
-constexpr float SHADOW_DEPTH_BIAS_SLOPE = 1.75f;
-constexpr float DIR_SHADOW_MAX_DISTANCE = 300.0f; // Max distance from camera for directional light shadows
+// ---------------------------------------------------------------------------
+// Shadow mapping
+// ---------------------------------------------------------------------------
+constexpr float SHADOW_BIAS                 = 0.00042f;
+constexpr float CSM_NORMAL_BIAS             = 0.08f; // world-space normal offset for CSM, scaled per cascade
+constexpr float SHADOW_DEPTH_BIAS_CONSTANT  = 1.25f;
+constexpr float SHADOW_DEPTH_BIAS_SLOPE     = 1.75f;
+constexpr float DIR_SHADOW_MAX_DISTANCE     = 300.0f;
 
-// Cascaded Shadow Maps (CSM) configuration
-constexpr uint32_t NUM_CSM_CASCADES = 3; // keep in sync with shader
-constexpr uint32_t CSM_CASCADE_RESOLUTIONS[NUM_CSM_CASCADES] = {2048, 1024, 1024}; // per-cascade atlas resolution (Medium preset defaults)
-constexpr float CSM_SPLIT_LAMBDA = 0.80f; // practical split blend (0=linear, 1=logarithmic)
-constexpr int32_t CSM_SCROLL_THRESHOLD = 256; // max texels per frame before fallback to full re-render
-constexpr float CSM_Z_MARGIN = 150.0f; // depth margin behind cascade sphere for shadow casters
-constexpr uint32_t POINT_SHADOW_RESOLUTION = 512; // per-light atlas resolution (Medium preset default)
-constexpr uint32_t SPOT_SHADOW_RESOLUTION = 512;
+// Cascaded Shadow Maps (CSM)
+constexpr uint32_t NUM_CSM_CASCADES                       = 3; // keep in sync with shader
+constexpr uint32_t CSM_CASCADE_RESOLUTIONS[NUM_CSM_CASCADES] = {2048, 1024, 1024};
+constexpr float    CSM_SPLIT_LAMBDA                       = 0.80f;
+constexpr int32_t  CSM_SCROLL_THRESHOLD                   = 256;
+constexpr float    CSM_Z_MARGIN                           = 150.0f;
+constexpr uint32_t POINT_SHADOW_RESOLUTION                = 512;
+constexpr uint32_t SPOT_SHADOW_RESOLUTION                 = 512;
 constexpr uint32_t MAX_SHADOW_LAYERS = NUM_CSM_CASCADES + MAX_POINT_SHADOW_LIGHTS + MAX_SPOT_SHADOW_LIGHTS;
 
 enum class ShadowResolutionPreset : uint32_t {
@@ -89,15 +111,6 @@ enum class Topology : uint32_t {
 	TRIANGLE_LIST = 0,
 	LINE_LIST = 1,
 };
-
-// Clustered forward lighting (keep CLUSTER_ASSIGN_WORKGROUP_SIZE in sync with ve_constants.slangh)
-constexpr uint32_t CLUSTER_TILE_SIZE = 64;             // screen-space tile size in pixels
-constexpr uint32_t CLUSTER_Z_SLICES = 24;              // depth slices (logarithmic distribution)
-constexpr uint32_t MAX_LIGHTS_PER_CLUSTER = 64;        // max lights assignable per cluster
-constexpr uint32_t MAX_CLUSTER_LIGHTS = 1024;          // max total point lights for cluster path
-constexpr float CLUSTER_LIGHT_CUTOFF = 0.005f;         // intensity fraction for effective range (range=0 lights)
-constexpr float CLUSTER_MAX_EFFECTIVE_RANGE = 500.0f;  // cap for derived effective range
-constexpr uint32_t CLUSTER_ASSIGN_WORKGROUP_SIZE = 256;
 
 // LOD (Level of Detail) configuration
 constexpr uint32_t MAX_LOD_LEVELS = 4;           // LOD 0 = full, LOD 1..3 = simplified

@@ -59,7 +59,7 @@ struct UniformBuffer {
 	float4x4 projection_view;
 	float4 camera_position; // .w unused
 	float4 ambient_light_color;
-	PointLight point_lights[MAX_LIGHTS];
+	PointLight point_lights[MAX_BRUTE_FORCE_POINT_LIGHTS];
 	ShadowLight shadow_lights[MAX_SHADOW_LIGHTS];
 	uint32_t num_lights;
 	uint32_t num_shadow_lights;

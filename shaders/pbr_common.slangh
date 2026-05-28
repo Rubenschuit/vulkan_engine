@@ -6,6 +6,10 @@
 
 #include "ve_common.slangh"
 
+// Per-light early-out thresholds
+static const float LIGHT_RADIANCE_CUTOFF = 1e-3;
+static const float LIGHT_SPECULAR_CUTOFF = 5e-3;
+
 // ============================================================================
 // Bindless textures (set 1): sampler at binding 0, texture array at binding 1
 // ============================================================================3
@@ -268,14 +272,16 @@ float4 computePbrLighting(VertexOutput in_vert) {
 			PointLight light = cluster_lights[light_idx];
 
 			float3 light_dir = light.position.xyz - in_vert.frag_pos_world;
-			float3 L = normalize(light_dir);
+			float distance_sq = dot(light_dir, light_dir);
+			float range = light.position.w;
+			if (range > 0.0 && distance_sq >= range * range) continue;
+
+			float3 L = light_dir * rsqrt(max(distance_sq, 1e-8));
 			float NdotL = clamp(dot(world_normal, L), 0.0, 1.0);
 			if (NdotL <= 0.0) continue;
 
-			float distance_sq = dot(light_dir, light_dir);
-			float attenuation = calculateAttenuation(distance_sq, light.position.w);
+			float attenuation = calculateAttenuation(distance_sq, range);
 
-			// if spot light
 			if (light_idx >= cluster_params.num_point_lights) {
 				uint spot_idx = light_idx - cluster_params.num_point_lights;
 				float cos_outer = ubo.spot_lights[spot_idx].direction.w;
@@ -286,18 +292,24 @@ float4 computePbrLighting(VertexOutput in_vert) {
 				attenuation *= spot_atten;
 			}
 
-			float3 H = normalize(view_dir + L);
 			float3 radiance = light.color.xyz * attenuation;
+			float max_radiance = max(max(radiance.r, radiance.g), radiance.b);
+			if (max_radiance * NdotL < LIGHT_RADIANCE_CUTOFF) continue;
 
+			float3 H = normalize(view_dir + L);
 			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0, F90);
-			float D = distributionGGX(world_normal, H, roughness);
-			float G = G1_V * geometrySchlickGGX(NdotL, roughness);
-			float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
+
+			float3 specular = float3(0.0);
+			if (max_radiance > LIGHT_SPECULAR_CUTOFF) {
+				float D = distributionGGX(world_normal, H, roughness);
+				float G = G1_V * geometrySchlickGGX(NdotL, roughness);
+				specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
+			}
 
 			float3 kD = (1.0 - F) * kD_factor;
 			uint shadow_key = light_idx;
 			if (light_idx >= cluster_params.num_point_lights)
-				shadow_key = MAX_LIGHTS + (light_idx - cluster_params.num_point_lights);
+				shadow_key = MAX_CLUSTER_LIGHTS + (light_idx - cluster_params.num_point_lights);
 			float pt_shadow = getPointShadow(shadow_key, shadow_terms, shadow_for_light);
 			Lo += (kD * diffuse_brdf + specular) * radiance * NdotL * pt_shadow;
 		}
@@ -305,19 +317,28 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		// Brute-force point lights
 		for (uint32_t i = 0; i < ubo.num_lights; i++) {
 			float3 light_dir = ubo.point_lights[i].position.xyz - in_vert.frag_pos_world;
-			float3 L = normalize(light_dir);
+			float distance_sq = dot(light_dir, light_dir);
+			float range = ubo.point_lights[i].position.w;
+			if (range > 0.0 && distance_sq >= range * range) continue;
+
+			float3 L = light_dir * rsqrt(max(distance_sq, 1e-8));
 			float NdotL = clamp(dot(world_normal, L), 0.0, 1.0);
 			if (NdotL <= 0.0) continue;
 
-			float3 H = normalize(view_dir + L);
-			float distance_sq = dot(light_dir, light_dir);
-			float attenuation = calculateAttenuation(distance_sq, ubo.point_lights[i].position.w);
+			float attenuation = calculateAttenuation(distance_sq, range);
 			float3 radiance = ubo.point_lights[i].color.xyz * attenuation;
+			float max_radiance = max(max(radiance.r, radiance.g), radiance.b);
+			if (max_radiance * NdotL < LIGHT_RADIANCE_CUTOFF) continue;
 
+			float3 H = normalize(view_dir + L);
 			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0, F90);
-			float D = distributionGGX(world_normal, H, roughness);
-			float G = G1_V * geometrySchlickGGX(NdotL, roughness);
-			float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
+
+			float3 specular = float3(0.0);
+			if (max_radiance > LIGHT_SPECULAR_CUTOFF) {
+				float D = distributionGGX(world_normal, H, roughness);
+				float G = G1_V * geometrySchlickGGX(NdotL, roughness);
+				specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
+			}
 
 			float3 kD = (1.0 - F) * kD_factor;
 			float pt_shadow = getPointShadow(i, shadow_terms, shadow_for_light);
@@ -327,12 +348,15 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		// Brute-force spot lights
 		for (uint32_t i = 0; i < ubo.num_spot_lights; i++) {
 			float3 light_dir = ubo.spot_lights[i].position.xyz - in_vert.frag_pos_world;
-			float3 L = normalize(light_dir);
+			float distance_sq = dot(light_dir, light_dir);
+			float range = ubo.spot_lights[i].position.w;
+			if (range > 0.0 && distance_sq >= range * range) continue;
+
+			float3 L = light_dir * rsqrt(max(distance_sq, 1e-8));
 			float NdotL = clamp(dot(world_normal, L), 0.0, 1.0);
 			if (NdotL <= 0.0) continue;
 
-			float distance_sq = dot(light_dir, light_dir);
-			float attenuation = calculateAttenuation(distance_sq, ubo.spot_lights[i].position.w);
+			float attenuation = calculateAttenuation(distance_sq, range);
 
 			float cos_outer = ubo.spot_lights[i].direction.w;
 			float cos_inner = ubo.spot_lights[i].color.w;
@@ -341,16 +365,22 @@ float4 computePbrLighting(VertexOutput in_vert) {
 			if (spot_atten <= 0.0) continue;
 			attenuation *= spot_atten;
 
-			float3 H = normalize(view_dir + L);
 			float3 radiance = ubo.spot_lights[i].color.xyz * attenuation;
+			float max_radiance = max(max(radiance.r, radiance.g), radiance.b);
+			if (max_radiance * NdotL < LIGHT_RADIANCE_CUTOFF) continue;
 
+			float3 H = normalize(view_dir + L);
 			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0, F90);
-			float D = distributionGGX(world_normal, H, roughness);
-			float G = G1_V * geometrySchlickGGX(NdotL, roughness);
-			float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
+
+			float3 specular = float3(0.0);
+			if (max_radiance > LIGHT_SPECULAR_CUTOFF) {
+				float D = distributionGGX(world_normal, H, roughness);
+				float G = G1_V * geometrySchlickGGX(NdotL, roughness);
+				specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
+			}
 
 			float3 kD = (1.0 - F) * kD_factor;
-			float spot_shadow = getPointShadow(MAX_LIGHTS + i, shadow_terms, shadow_for_light);
+			float spot_shadow = getPointShadow(MAX_CLUSTER_LIGHTS + i, shadow_terms, shadow_for_light);
 			Lo += (kD * diffuse_brdf + specular) * radiance * NdotL * spot_shadow;
 		}
 	}

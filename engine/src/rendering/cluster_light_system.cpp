@@ -51,13 +51,20 @@ void ClusterLightSystem::createBuffers(vk::Extent2D screen_extent) {
 	m_total_clusters = m_tiles_x * m_tiles_y * CLUSTER_Z_SLICES;
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		m_light_staging_ssbos[i] = std::make_unique<VeBuffer>(
+			m_ve_device,
+			sizeof(PointLight),
+			MAX_CLUSTER_LIGHTS,
+			vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		m_light_staging_ssbos[i]->map();
+
 		m_light_ssbos[i] = std::make_unique<VeBuffer>(
 			m_ve_device,
 			sizeof(PointLight),
 			MAX_CLUSTER_LIGHTS,
-			vk::BufferUsageFlagBits::eStorageBuffer,
-			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-		m_light_ssbos[i]->map();
+			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 		m_cluster_count_ssbos[i] = std::make_unique<VeBuffer>(
 			m_ve_device,
@@ -71,13 +78,6 @@ void ClusterLightSystem::createBuffers(vk::Extent2D screen_extent) {
 			sizeof(uint32_t),
 			m_total_clusters * MAX_LIGHTS_PER_CLUSTER,
 			vk::BufferUsageFlagBits::eStorageBuffer,
-			vk::MemoryPropertyFlagBits::eDeviceLocal);
-
-		m_atomic_counter_ssbos[i] = std::make_unique<VeBuffer>(
-			m_ve_device,
-			sizeof(uint32_t),
-			1,
-			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 		m_cluster_param_ubos[i] = std::make_unique<VeBuffer>(
@@ -97,7 +97,6 @@ void ClusterLightSystem::createComputeSetLayout() {
 		.addBinding(1, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // cluster counts
 		.addBinding(2, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // light index list
 		.addBinding(3, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eCompute)  // cluster params
-		.addBinding(4, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // atomic counter
 		.build();
 }
 
@@ -136,14 +135,12 @@ void ClusterLightSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool)
 		auto count_info = m_cluster_count_ssbos[i]->getDescriptorInfo();
 		auto index_info = m_light_index_ssbos[i]->getDescriptorInfo();
 		auto param_info = m_cluster_param_ubos[i]->getDescriptorInfo();
-		auto atomic_info = m_atomic_counter_ssbos[i]->getDescriptorInfo();
 
 		VeDescriptorWriter(*m_compute_set_layout, descriptor_pool)
 			.writeBuffer(0, &light_info)
 			.writeBuffer(1, &count_info)
 			.writeBuffer(2, &index_info)
 			.writeBuffer(3, &param_info)
-			.writeBuffer(4, &atomic_info)
 			.build(m_compute_descriptor_sets[i]);
 
 		VeDescriptorWriter(*m_output_set_layout, descriptor_pool)
@@ -163,7 +160,7 @@ uint32_t ClusterLightSystem::uploadLightData(VeFrameInfo& frame_info) {
 	ClusterParams disabled_params{};
 	m_cluster_param_ubos[frame]->writeToBuffer(&disabled_params);
 
-	auto* buffer = static_cast<PointLight*>(m_light_ssbos[frame]->getMappedMemory());
+	auto* buffer = static_cast<PointLight*>(m_light_staging_ssbos[frame]->getMappedMemory());
 	uint32_t count = 0;
 
 	auto& registry = *frame_info.registry;
@@ -185,9 +182,9 @@ uint32_t ClusterLightSystem::uploadLightData(VeFrameInfo& frame_info) {
 
 	m_last_point_light_count = count;
 
-	// Append spot lights after point lights (same PointLight layout: position+range, color)
+	uint32_t spot_count = 0;
 	for (auto [entity, sl, tc] : registry.view<SpotLightComponent, TransformComponent>()) {
-		if (count >= MAX_CLUSTER_LIGHTS)
+		if (count >= MAX_CLUSTER_LIGHTS || spot_count >= MAX_SPOT_LIGHTS)
 			break;
 		glm::vec3 color = sl.getColor();
 		float intensity = sl.getIntensity();
@@ -198,6 +195,7 @@ uint32_t ClusterLightSystem::uploadLightData(VeFrameInfo& frame_info) {
 		buffer[count].color.z = color.z * intensity;
 		buffer[count].color.w = intensity;
 		count++;
+		spot_count++;
 	}
 
 	m_last_light_count = count;
@@ -225,36 +223,42 @@ void ClusterLightSystem::dispatch(VeFrameInfo& frame_info, vk::Extent2D screen_e
 	params.num_point_lights = m_last_point_light_count;
 	m_cluster_param_ubos[frame]->writeToBuffer(&params);
 
-	// Barrier: previous frame's compute dispatch -> this frame's fillBuffer.
-	vk::MemoryBarrier2 pre_fill_barrier{
-		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eClear,
-		.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
-	};
-	vk::DependencyInfo pre_fill_dep{
-		.memoryBarrierCount = 1,
-		.pMemoryBarriers = &pre_fill_barrier,
-	};
-	cmd.pipelineBarrier2(pre_fill_dep);
+	// Each cluster owns a fixed slice of light_index_list and is fully written every
+	// frame by an active thread
+	if (m_last_light_count > 0) {
+		vk::MemoryBarrier2 pre_copy_barrier{
+			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
+			.dstStageMask = vk::PipelineStageFlagBits2::eCopy,
+			.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+		};
+		vk::DependencyInfo pre_copy_dep{
+			.memoryBarrierCount = 1,
+			.pMemoryBarriers = &pre_copy_barrier,
+		};
+		cmd.pipelineBarrier2(pre_copy_dep);
 
-	// Reset atomic counter and cluster counts to zero
-	cmd.fillBuffer(m_atomic_counter_ssbos[frame]->getBuffer(), 0, sizeof(uint32_t), 0);
-	cmd.fillBuffer(m_cluster_count_ssbos[frame]->getBuffer(), 0,
-		static_cast<vk::DeviceSize>(m_total_clusters) * sizeof(glm::uvec2), 0);
+		vk::BufferCopy light_copy{
+			.srcOffset = 0,
+			.dstOffset = 0,
+			.size = static_cast<vk::DeviceSize>(m_last_light_count) * sizeof(PointLight),
+		};
+		cmd.copyBuffer(m_light_staging_ssbos[frame]->getBuffer(),
+		               m_light_ssbos[frame]->getBuffer(),
+		               light_copy);
 
-	// Barrier: fillBuffer → compute shader
-	vk::MemoryBarrier2 fill_barrier{
-		.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-		.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite,
-	};
-	vk::DependencyInfo fill_dep{
-		.memoryBarrierCount = 1,
-		.pMemoryBarriers = &fill_barrier,
-	};
-	cmd.pipelineBarrier2(fill_dep);
+		vk::MemoryBarrier2 copy_to_compute{
+			.srcStageMask = vk::PipelineStageFlagBits2::eCopy,
+			.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+		};
+		vk::DependencyInfo copy_dep{
+			.memoryBarrierCount = 1,
+			.pMemoryBarriers = &copy_to_compute,
+		};
+		cmd.pipelineBarrier2(copy_dep);
+	}
 
 	// Bind pipeline and descriptor sets
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());

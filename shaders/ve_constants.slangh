@@ -1,18 +1,18 @@
 #ifndef VE_CONSTANTS_SLANGH
 #define VE_CONSTANTS_SLANGH
 
-// Keep in sync with engine/src/ve_config.hpp
-#define MAX_LIGHTS          320
-#define MAX_SHADOW_LIGHTS   4
-#define MAX_DIR_LIGHTS      4
-#define MAX_SPOT_LIGHTS     32
-#define NUM_CSM_CASCADES    3
+// Lighting (keep in sync with engine/src/ve_config.hpp)
+#define MAX_BRUTE_FORCE_POINT_LIGHTS   64
+#define MAX_DIR_LIGHTS                 4
+#define MAX_SPOT_LIGHTS                32
+#define MAX_SHADOW_LIGHTS              4
+#define NUM_CSM_CASCADES               3
 
-// Clustered forward shading (keep in sync with ve_config.hpp)
+// Clustered forward shading
 #define CLUSTER_TILE_SIZE              64
 #define CLUSTER_Z_SLICES               24
-#define MAX_LIGHTS_PER_CLUSTER         64
-#define MAX_CLUSTER_LIGHTS             1024
+#define MAX_LIGHTS_PER_CLUSTER         128
+#define MAX_CLUSTER_LIGHTS             8192
 #define CLUSTER_ASSIGN_WORKGROUP_SIZE  256
 
 // GPU-driven culling (keep in sync with ve_config.hpp)
