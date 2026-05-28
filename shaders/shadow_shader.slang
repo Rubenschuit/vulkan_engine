@@ -13,19 +13,11 @@ struct UniformBuffer {
 [vk::binding(0, 0)]
 ConstantBuffer<UniformBuffer> ubo;
 
-// Per-instance transforms stored in SSBO (must match 128-byte C++ InstanceData)
-struct InstanceData {
+struct ShadowInstanceData {
 	float4x4 transform;
-	float4   normal_col0;
-	float4   normal_col1;
-	float4   normal_col2;
-	uint     material_index;
-	uint     lod_level;
-	float    depth_offset;
-	uint     material_flags;
 };
 [vk::binding(1, 0)]
-StructuredBuffer<InstanceData> instances;
+StructuredBuffer<ShadowInstanceData> instances;
 
 struct PushConstantData {
 	[vk::offset(0)] uint32_t instance_offset;  // SSBO offset

@@ -170,7 +170,8 @@ private:
 	vk::raii::PipelineLayout m_pass2_pipeline_layout{nullptr};
 
 	// Compute pipelines
-	std::unique_ptr<VeComputePipeline> m_pass1_pipeline;
+	std::unique_ptr<VeComputePipeline> m_pass1_pipeline;         // VE_CULL_IS_SHADOW=0
+	std::unique_ptr<VeComputePipeline> m_pass1_shadow_pipeline;  // VE_CULL_IS_SHADOW=1
 	std::unique_ptr<VeComputePipeline> m_pass2_pipeline;
 
 	// Pass 1 descriptor sets (frustum-only and Hi-Z)

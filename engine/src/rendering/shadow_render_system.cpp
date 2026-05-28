@@ -165,7 +165,7 @@ void ShadowRenderSystem::createShadowInstanceBuffers() {
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		m_shadow_instance_buffers.emplace_back(std::make_unique<VeBuffer>(
 			m_ve_device,
-			sizeof(InstanceData),
+			sizeof(ShadowInstanceData),
 			m_shadow_instance_capacity,
 			vk::BufferUsageFlagBits::eStorageBuffer,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
@@ -978,7 +978,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 	if (max_needed > m_shadow_instance_capacity)
 		growShadowInstanceBuffers(std::max(max_needed, m_shadow_instance_capacity * 2));
 
-	auto* shadow_instance_data = static_cast<InstanceData*>(
+	auto* shadow_instance_data = static_cast<ShadowInstanceData*>(
 		m_shadow_instance_buffers[frame_info.current_frame]->getMappedMemory());
 	uint32_t shadow_instance_count = 0;
 
@@ -998,9 +998,6 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 			}
 			uint32_t idx = shadow_instance_count++;
 			shadow_instance_data[idx].transform = registry.getWorldTransform(d.entity);
-			shadow_instance_data[idx].normal_transform[0] = glm::vec4(0.0f);
-			shadow_instance_data[idx].normal_transform[1] = glm::vec4(0.0f);
-			shadow_instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
 
 			VeMesh* mesh_ptr = d.mesh->getMesh();
 			if (!groups.empty()
@@ -1034,7 +1031,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 	populateInstanceGroups(m_dynamic_shadow_drawables, m_shadow_instance_groups, nullptr);
 	}
 
-	// Skinned shadow casters: write one shadow InstanceData slot per entity. Cull
+	// Skinned shadow casters: write one shadow instance slot per entity. Cull
 	// against the outer CSM cascade
 	m_skinned_shadow_drawables.clear();
 	FrustumPlane skin_cull_planes[6];
@@ -1056,9 +1053,6 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 		}
 		uint32_t idx = shadow_instance_count++;
 		shadow_instance_data[idx].transform = registry.getWorldTransform(entity);
-		shadow_instance_data[idx].normal_transform[0] = glm::vec4(0.0f);
-		shadow_instance_data[idx].normal_transform[1] = glm::vec4(0.0f);
-		shadow_instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
 		m_skinned_shadow_drawables.push_back({entity, mc.getMesh(), idx});
 	}
 
@@ -1124,9 +1118,6 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 								break;
 							uint32_t idx = shadow_instance_count++;
 							shadow_instance_data[idx].transform = registry.getWorldTransform(d.entity);
-							shadow_instance_data[idx].normal_transform[0] = glm::vec4(0.0f);
-							shadow_instance_data[idx].normal_transform[1] = glm::vec4(0.0f);
-							shadow_instance_data[idx].normal_transform[2] = glm::vec4(0.0f);
 
 							VeMesh* mesh_ptr = d.mesh->getMesh();
 							if (!strip_groups.empty()

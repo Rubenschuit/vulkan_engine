@@ -129,7 +129,7 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 				vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 			m_shadow_instance_buffers[i][slot] = std::make_unique<VeBuffer>(m_ve_device,
-				sizeof(InstanceData), MAX_GPU_OBJECTS,
+				sizeof(ShadowInstanceData), MAX_GPU_OBJECTS,
 				vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
 				vk::MemoryPropertyFlagBits::eDeviceLocal);
 
@@ -202,7 +202,11 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 	createPipelineLayouts();
 
 	m_pass1_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, shaders_dir / "gpu_cull_meshlet_comp.spv", m_pass1_pipeline_layout);
+		m_ve_device, shaders_dir / "gpu_cull_meshlet_comp.spv", m_pass1_pipeline_layout,
+		std::unordered_map<uint32_t, uint32_t>{{4, 0}});
+	m_pass1_shadow_pipeline = std::make_unique<VeComputePipeline>(
+		m_ve_device, shaders_dir / "gpu_cull_meshlet_comp.spv", m_pass1_pipeline_layout,
+		std::unordered_map<uint32_t, uint32_t>{{4, 1}});
 	m_pass2_pipeline = std::make_unique<VeComputePipeline>(
 		m_ve_device, shaders_dir / "meshlet_cull_comp.spv", m_pass2_pipeline_layout);
 
@@ -685,8 +689,8 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 	vk::DependencyInfo clear_dep{.memoryBarrierCount = 1, .pMemoryBarriers = &clear_barrier};
 	cmd.pipelineBarrier2(clear_dep);
 
-	// Pass 1 dispatches
-	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_pass1_pipeline->getPipeline());
+	// Pass 1 dispatches (shadow variant)
+	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_pass1_shadow_pipeline->getPipeline());
 	for (uint32_t r = 0; r < count; r++) {
 		uint32_t slot = requests[r].slot;
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pass1_pipeline_layout,

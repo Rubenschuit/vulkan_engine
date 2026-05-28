@@ -80,7 +80,13 @@ struct InstanceData {
 	alignas(4)  float    depth_offset;     // clip-space Z offset for MASK
 	alignas(4)  uint32_t material_flags;   // see MaterialFlag in ve_config.hpp
 };
-static_assert(sizeof(InstanceData) == 128, "InstanceData must be 128 bytes for SSBO alignment");
+static_assert(sizeof(InstanceData) == 128, "InstanceData must be 128 bytes");
+
+// Shadow passes only need the world transform
+struct ShadowInstanceData {
+	alignas(16) glm::mat4 transform;
+};
+static_assert(sizeof(ShadowInstanceData) == 64, "ShadowInstanceData must be 64 bytes");
 
 // --- Main UBO bound to every render pass at set 0 ---
 

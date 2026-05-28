@@ -4,6 +4,7 @@ It mirrors VePipeline but for compute stage only. */
 #include "ve_export.hpp"
 #include <vulkan/vulkan_raii.hpp>
 #include <filesystem>
+#include <unordered_map>
 
 namespace ve { class VeDevice; }
 
@@ -12,7 +13,10 @@ namespace ve {
 
 class VENGINE_API VeComputePipeline {
 public:
-	VeComputePipeline(VeDevice& device, const std::filesystem::path& comp_spv_path, const vk::raii::PipelineLayout& pipeline_layout);
+	VeComputePipeline(VeDevice& device,
+	                  const std::filesystem::path& comp_spv_path,
+	                  const vk::raii::PipelineLayout& pipeline_layout,
+	                  const std::unordered_map<uint32_t, uint32_t>& specialization_constants = {});
 	~VeComputePipeline() = default;
 
 	VeComputePipeline(const VeComputePipeline&) = delete;
@@ -22,7 +26,9 @@ public:
 
 private:
 
-	void createComputePipeline(const std::filesystem::path& comp_spv_path, const vk::raii::PipelineLayout& pipeline_layout);
+	void createComputePipeline(const std::filesystem::path& comp_spv_path,
+	                           const vk::raii::PipelineLayout& pipeline_layout,
+	                           const std::unordered_map<uint32_t, uint32_t>& specialization_constants);
 
 	VeDevice& m_ve_device;
 	vk::raii::ShaderModule m_shader_module{nullptr};

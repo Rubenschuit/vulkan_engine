@@ -72,7 +72,11 @@ GpuCullingSystem::GpuCullingSystem(VeDevice& device, const std::filesystem::path
 	createPipelineLayout();
 
 	m_compute_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, shaders_dir / "gpu_cull_comp.spv", m_pipeline_layout);
+		m_ve_device, shaders_dir / "gpu_cull_comp.spv", m_pipeline_layout,
+		std::unordered_map<uint32_t, uint32_t>{{4, 0}});
+	m_shadow_compute_pipeline = std::make_unique<VeComputePipeline>(
+		m_ve_device, shaders_dir / "gpu_cull_comp.spv", m_pipeline_layout,
+		std::unordered_map<uint32_t, uint32_t>{{4, 1}});
 
 	// Dummy 1x1 R32Float image + sampler for placeholder bindings 6-7 when Hi-Z is inactive
 	m_dummy_image = std::make_unique<VeImage>(
@@ -109,7 +113,7 @@ GpuCullingSystem::GpuCullingSystem(VeDevice& device, const std::filesystem::path
 				vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 			m_shadow_instance_buffers[i][slot] = std::make_unique<VeBuffer>(m_ve_device,
-				sizeof(InstanceData), MAX_LOD_INSTANCE_SLOTS,
+				sizeof(ShadowInstanceData), MAX_LOD_INSTANCE_SLOTS,
 				vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
 				vk::MemoryPropertyFlagBits::eDeviceLocal);
 
@@ -681,7 +685,7 @@ void GpuCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 
 	// Loop 2: bind pipeline once, dispatch per slot, no inter-dispatch barriers
 	// so successive cull dispatches can overlap on the GPU.
-	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
+	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_shadow_compute_pipeline->getPipeline());
 	uint32_t group_count = (object_count + GPU_CULL_WORKGROUP_SIZE - 1) / GPU_CULL_WORKGROUP_SIZE;
 	for (uint32_t r = 0; r < count; r++) {
 		uint32_t slot = requests[r].slot;

@@ -44,6 +44,10 @@ struct InstanceData {
 	uint     material_flags;
 };
 
+struct ShadowInstanceData {
+	float4x4 transform;
+};
+
 struct ActiveIdEntry {
 	uint gpu_id;
 	uint _pad;
@@ -269,9 +273,9 @@ bool hizOcclusionTest(CullParams params, Texture2D<float> hiz_tex, SamplerState 
 }
 
 // Select LOD level based on projected screen-space size.
-uint selectLod(CullParams params, float3 center_world, float radius, uint lod_count) {
+uint selectLod(CullParams params, float3 center_world, float radius, uint lod_count, bool is_shadow) {
 	uint lod;
-	if (params.is_shadow_pass != 0) {
+	if (is_shadow) {
 		lod = 0;
 	} else {
 		float3 center_view = mul(params.view, float4(center_world, 1.0)).xyz;

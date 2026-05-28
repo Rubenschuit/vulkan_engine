@@ -149,7 +149,8 @@ private:
 
 	std::unique_ptr<VeDescriptorSetLayout> m_compute_set_layout;
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
-	std::unique_ptr<VeComputePipeline> m_compute_pipeline;
+	std::unique_ptr<VeComputePipeline> m_compute_pipeline;         // VE_CULL_IS_SHADOW=0
+	std::unique_ptr<VeComputePipeline> m_shadow_compute_pipeline;  // VE_CULL_IS_SHADOW=1
 
 	// Frustum-only descriptor sets
 	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_compute_descriptor_sets =
