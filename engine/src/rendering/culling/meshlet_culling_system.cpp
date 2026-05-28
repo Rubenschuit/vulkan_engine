@@ -341,10 +341,9 @@ void MeshletCullingSystem::createHizDescriptorSets(VeDescriptorPool& pool,
                                                    HizSystem& hiz,
                                                    SkinningPrePass& skinning_pre_pass) {
 	m_hiz_size      = glm::vec2(static_cast<float>(hiz.getScreenWidth()),
-	                             static_cast<float>(hiz.getScreenHeight()));
-	m_hiz_uv_scale  = glm::vec2(
-		static_cast<float>(hiz.getScreenWidth())  / static_cast<float>(hiz.getWidth()),
-		static_cast<float>(hiz.getScreenHeight()) / static_cast<float>(hiz.getHeight()));
+	                             static_cast<float>(hiz.getScreenHeight())) * 0.5f;
+	m_hiz_uv_scale  = m_hiz_size / glm::vec2(static_cast<float>(hiz.getWidth()),
+	                                          static_cast<float>(hiz.getHeight()));
 	m_hiz_mip_count = hiz.getMipLevels();
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {

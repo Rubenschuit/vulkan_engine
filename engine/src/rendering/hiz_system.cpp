@@ -2,6 +2,7 @@
 #include "rendering/hiz_system.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_image.hpp"
+#include "vulkan/ve_buffer.hpp"
 #include "vulkan/ve_debug_utils.hpp"
 #include "vulkan/ve_descriptors.hpp"
 #include "vulkan/ve_compute_pipeline.hpp"
@@ -11,15 +12,17 @@
 #include "events/render_events.hpp"
 
 #include <cmath>
+#include <cstring>
 
 namespace ve {
 
-struct HizPushConstants {
-	glm::uvec2 dst_size;
-	glm::uvec2 src_size;
-	glm::vec2 src_texel_size;
-	uint32_t mip_count;
-	uint32_t write_source;
+struct SpdConstants {
+	uint32_t   mips;
+	uint32_t   numWorkGroups;
+	glm::vec2  invInputSize;
+	glm::vec2  workGroupOffset;
+	glm::uvec2 srcSize;
+	glm::uvec2 mip5Extent;
 };
 
 static uint32_t nextPow2(uint32_t v) {
@@ -34,8 +37,26 @@ static uint32_t nextPow2(uint32_t v) {
 	return v + 1;
 }
 
-static constexpr uint32_t MIPS_PASS1 = 6; // 1 copy + 5 reductions
-static constexpr uint32_t MIPS_TAIL = 5;  // 5 reductions per subsequent pass
+// Mirror of SPD's SpdSetup() helper. Returns dispatch thread group counts and
+// the number of mips to write. We always downsample the full image starting at
+// (0, 0), so workGroupOffset is implicitly 0.
+struct SpdDispatch {
+	uint32_t group_count_x;
+	uint32_t group_count_y;
+	uint32_t num_work_groups;
+	uint32_t mip_count;
+};
+
+static SpdDispatch spdSetup(uint32_t src_w, uint32_t src_h, uint32_t max_mips) {
+	SpdDispatch out{};
+	out.group_count_x = (src_w + 63u) / 64u;
+	out.group_count_y = (src_h + 63u) / 64u;
+	out.num_work_groups = out.group_count_x * out.group_count_y;
+	uint32_t resolution = std::max(src_w, src_h);
+	uint32_t derived = static_cast<uint32_t>(std::floor(std::log2(static_cast<float>(resolution))));
+	out.mip_count = std::min(derived, max_mips);
+	return out;
+}
 
 HizSystem::HizSystem(
 	VeDevice& device,
@@ -58,15 +79,15 @@ HizSystem::HizSystem(
 	createHizImages(extent);
 	createMipViews();
 	createSampler();
-	createDummyImage();
 	createComputeSetLayout();
 	createPipelineLayout();
 	createPipeline(shaders_dir);
+	createAtomicCounterBuffers();
 	createDescriptorSets(descriptor_pool);
 
-	VE_LOGI("HizSystem: initialized (screen " << m_screen_width << "x" << m_screen_height
+	VE_LOGI("HizSystem: SPD (screen " << m_screen_width << "x" << m_screen_height
 	         << ", padded " << m_width << "x" << m_height
-	         << ", " << m_mip_levels << " mips, " << m_pass_count << " passes)");
+	         << ", " << m_mip_levels << " mips)");
 }
 
 HizSystem::~HizSystem() {
@@ -77,18 +98,14 @@ HizSystem::~HizSystem() {
 void HizSystem::createHizImages(vk::Extent2D extent) {
 	m_screen_width = extent.width;
 	m_screen_height = extent.height;
-	m_width = nextPow2(extent.width);
-	m_height = nextPow2(extent.height);
-	m_mip_levels = static_cast<uint32_t>(std::floor(std::log2(std::max(m_width, m_height)))) + 1;
-	if (m_mip_levels > MAX_HIZ_MIPS)
-		m_mip_levels = MAX_HIZ_MIPS;
-
-	if (m_mip_levels <= MIPS_PASS1)
-		m_pass_count = 1;
-	else if (m_mip_levels <= MIPS_PASS1 + MIPS_TAIL)
-		m_pass_count = 2;
-	else
-		m_pass_count = 3;
+	// Power of two padding: keeps every mip an exact 2x reduction of
+	// the previous, so no odd-dimension drops accumulate at the boundary.
+	m_padded_source_width = nextPow2(extent.width);
+	m_padded_source_height = nextPow2(extent.height);
+	m_width = m_padded_source_width / 2;
+	m_height = m_padded_source_height / 2;
+	uint32_t max_mips_dim = static_cast<uint32_t>(std::floor(std::log2(std::max(m_width, m_height)))) + 1u;
+	m_mip_levels = std::min({max_mips_dim, static_cast<uint32_t>(MAX_HIZ_MIPS), SPD_MAX_MIPS});
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		m_hiz_images[i] = std::make_unique<VeImage>(
@@ -158,44 +175,24 @@ void HizSystem::createSampler() {
 	m_nearest_sampler = vk::raii::Sampler(m_ve_device.getDevice(), sampler_info);
 }
 
-void HizSystem::createDummyImage() {
-	m_dummy_image = std::make_unique<VeImage>(
-		m_ve_device, 1, 1,
-		vk::SampleCountFlagBits::e1,
-		vk::Format::eR32Sfloat,
-		vk::ImageTiling::eOptimal,
-		vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled,
-		vk::MemoryPropertyFlagBits::eDeviceLocal,
-		vk::ImageAspectFlagBits::eColor,
-		false, 1);
-	m_dummy_image->setDebugName("Hi-Z Dummy");
-	m_dummy_image->transitionImageLayout(
-		vk::ImageLayout::eUndefined,
-		vk::ImageLayout::eGeneral,
-		vk::AccessFlagBits2::eNone,
-		vk::AccessFlagBits2::eShaderStorageWrite,
-		vk::PipelineStageFlagBits2::eTopOfPipe,
-		vk::PipelineStageFlagBits2::eComputeShader);
-}
-
 void HizSystem::createComputeSetLayout() {
-	auto b = VeDescriptorSetLayout::Builder(m_ve_device)
+	m_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute)
-		.addBinding(1, vk::DescriptorType::eSampler, vk::ShaderStageFlagBits::eCompute);
-	for (uint32_t i = 2; i <= 7; i++)
-		b.addBinding(i, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute);
-	m_downsample_set_layout = b.build();
+		.addBinding(1, vk::DescriptorType::eSampler, vk::ShaderStageFlagBits::eCompute)
+		.addBinding(2, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute, SPD_MAX_MIPS)
+		.addBinding(3, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)
+		.build();
 }
 
 void HizSystem::createPipelineLayout() {
 	vk::PushConstantRange push_range{
 		.stageFlags = vk::ShaderStageFlagBits::eCompute,
 		.offset = 0,
-		.size = sizeof(HizPushConstants),
+		.size = sizeof(SpdConstants),
 	};
 
 	std::array<vk::DescriptorSetLayout, 1> set_layouts{
-		*m_downsample_set_layout->getDescriptorSetLayout(),
+		*m_set_layout->getDescriptorSetLayout(),
 	};
 
 	vk::PipelineLayoutCreateInfo layout_info{
@@ -210,167 +207,121 @@ void HizSystem::createPipelineLayout() {
 
 void HizSystem::createPipeline(const std::filesystem::path& shaders_dir) {
 	m_compute_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, shaders_dir / "hiz_build_comp.spv", m_pipeline_layout);
+		m_ve_device, shaders_dir / "hiz_spd_comp.spv", m_pipeline_layout);
+}
+
+void HizSystem::createAtomicCounterBuffers() {
+	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
+		m_atomic_counter_buffers[f] = std::make_unique<VeBuffer>(
+			m_ve_device,
+			sizeof(uint32_t), 1,
+			vk::BufferUsageFlagBits::eStorageBuffer,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		m_atomic_counter_buffers[f]->setDebugName(
+			("Hi-Z SPD Atomic Counter [" + std::to_string(f) + "]").c_str());
+
+		// SPD resets the counter back to 0 at the end of every dispatch, so
+		// zero-init at creation is sufficient.
+		uint32_t zero = 0;
+		m_atomic_counter_buffers[f]->map();
+		m_atomic_counter_buffers[f]->writeToBuffer(&zero, sizeof(uint32_t));
+		m_atomic_counter_buffers[f]->unmap();
+	}
 }
 
 void HizSystem::createDescriptorSets(VeDescriptorPool& pool) {
 	vk::DescriptorImageInfo sampler_info{.sampler = *m_nearest_sampler};
-	vk::DescriptorImageInfo dummy_info{
-		.imageView = *m_dummy_image->getImageView(),
-		.imageLayout = vk::ImageLayout::eGeneral,
-	};
 
 	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
-		m_pass_sets[f].clear();
-		m_pass_sets[f].reserve(m_pass_count);
+		vk::DescriptorImageInfo src_info{
+			.imageView = m_depth_image_view,
+			.imageLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+		};
 
-		for (uint32_t pass = 0; pass < m_pass_count; pass++) {
-			// Source: depth buffer for pass 0, previous pass's last mip for pass 1+
-			vk::DescriptorImageInfo src_info;
-			if (pass == 0) {
-				src_info = {
-					.imageView = m_depth_image_view,
-					.imageLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-				};
-			} else {
-				uint32_t src_mip = (pass == 1) ? 5 : 10;
-				src_info = {
-					.imageView = *m_hiz_mip_views[f][src_mip],
-					.imageLayout = vk::ImageLayout::eGeneral,
-				};
-			}
-
-			// Output mip range for this pass. Bind only the slots the shader actually writes
-			// (gated by mip_count push constant); leave the rest as the dummy image.
-			uint32_t first_out = (pass == 0) ? 0 : (pass == 1) ? 6 : 11;
-			uint32_t remaining = m_mip_levels - first_out;
-			uint32_t pass_mip_count = (pass == 0) ? std::min(MIPS_PASS1, remaining)
-			                                      : std::min(MIPS_TAIL, remaining);
-			vk::DescriptorImageInfo out_infos[6];
-			for (uint32_t i = 0; i < 6; i++) {
-				uint32_t mip = first_out + i;
-				if (i < pass_mip_count && mip < m_mip_levels)
-					out_infos[i] = {
-						.imageView = *m_hiz_mip_views[f][mip],
-						.imageLayout = vk::ImageLayout::eGeneral,
-					};
-				else
-					out_infos[i] = dummy_info;
-			}
-
-			vk::raii::DescriptorSet set{nullptr};
-			VeDescriptorWriter(*m_downsample_set_layout, pool)
-				.writeImage(0, &src_info)
-				.writeImage(1, &sampler_info)
-				.writeImage(2, &out_infos[0])
-				.writeImage(3, &out_infos[1])
-				.writeImage(4, &out_infos[2])
-				.writeImage(5, &out_infos[3])
-				.writeImage(6, &out_infos[4])
-				.writeImage(7, &out_infos[5])
-				.build(set);
-			m_pass_sets[f].push_back(std::move(set));
+		// SPD requires SPD_MAX_MIPS (12) storage image entries even when
+		// fewer mips exist. Pad the unused tail with mip 0's view — the shader
+		// will not write past `mips` in the push constants.
+		std::array<vk::DescriptorImageInfo, SPD_MAX_MIPS> mip_infos{};
+		for (uint32_t i = 0; i < SPD_MAX_MIPS; i++) {
+			uint32_t bind_mip = (i < m_mip_levels) ? i : 0u;
+			mip_infos[i] = {
+				.imageView = *m_hiz_mip_views[f][bind_mip],
+				.imageLayout = vk::ImageLayout::eGeneral,
+			};
 		}
+
+		vk::DescriptorBufferInfo counter_info =
+			m_atomic_counter_buffers[f]->getDescriptorInfo();
+
+		VeDescriptorWriter(*m_set_layout, pool)
+			.writeImage(0, &src_info)
+			.writeImage(1, &sampler_info)
+			.writeImageArray(2, mip_infos.data(), SPD_MAX_MIPS)
+			.writeBuffer(3, &counter_info)
+			.build(m_descriptor_sets[f]);
 	}
 }
 
 void HizSystem::generate(vk::raii::CommandBuffer& cmd, uint32_t frame_index) {
 	vk::Image hiz_image = m_hiz_images[frame_index]->getImage();
 
-	// Transition all Hi-Z mips to eGeneral for storage writes
-	{
-		vk::ImageMemoryBarrier2 barrier{
-			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-			.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite
-				| vk::AccessFlagBits2::eShaderSampledRead,
-			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-			.dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-			.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-			.newLayout = vk::ImageLayout::eGeneral,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = hiz_image,
-			.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, m_mip_levels, 0, 1},
-		};
-		vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier};
-		cmd.pipelineBarrier2(dep);
-	}
+	// Transition all Hi-Z mips to eGeneral for storage writes.
+	vk::ImageMemoryBarrier2 to_general{
+		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite
+			| vk::AccessFlagBits2::eShaderSampledRead,
+		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+		.dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite
+			| vk::AccessFlagBits2::eShaderStorageRead,
+		.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+		.newLayout = vk::ImageLayout::eGeneral,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = hiz_image,
+		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, m_mip_levels, 0, 1},
+	};
+	vk::DependencyInfo dep_in{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &to_general};
+	cmd.pipelineBarrier2(dep_in);
 
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute_pipeline->getPipeline());
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pipeline_layout,
+		0, {*m_descriptor_sets[frame_index]}, {});
 
-	for (uint32_t pass = 0; pass < m_pass_count; pass++) {
-		if (pass > 0) {
-			vk::MemoryBarrier2 sync{
-				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-				.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-				.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-				.dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead
-					| vk::AccessFlagBits2::eShaderStorageRead
-					| vk::AccessFlagBits2::eShaderStorageWrite,
-			};
-			vk::DependencyInfo dep{.memoryBarrierCount = 1, .pMemoryBarriers = &sync};
-			cmd.pipelineBarrier2(dep);
-		}
+	SpdDispatch d = spdSetup(m_padded_source_width, m_padded_source_height, m_mip_levels);
 
-		// Compute pass parameters
-		uint32_t first_out = (pass == 0) ? 0 : (pass == 1) ? 6 : 11;
-		uint32_t remaining = m_mip_levels - first_out;
-		uint32_t pass_mip_count = (pass == 0) ? std::min(MIPS_PASS1, remaining)
-		                                      : std::min(MIPS_TAIL, remaining);
+	SpdConstants pc{
+		.mips = d.mip_count,
+		.numWorkGroups = d.num_work_groups,
+		.invInputSize = glm::vec2(
+			1.0f / static_cast<float>(m_screen_width),
+			1.0f / static_cast<float>(m_screen_height)),
+		.workGroupOffset = glm::vec2(0.0f, 0.0f),
+		.srcSize = glm::uvec2(m_screen_width, m_screen_height),
+		.mip5Extent = glm::uvec2(d.group_count_x, d.group_count_y),
+	};
+	cmd.pushConstants(
+		*m_pipeline_layout,
+		vk::ShaderStageFlagBits::eCompute,
+		0,
+		vk::ArrayProxy<const uint8_t>(sizeof(pc), reinterpret_cast<const uint8_t*>(&pc)));
 
-		uint32_t dst_w, dst_h, src_w, src_h;
-		if (pass == 0) {
-			dst_w = m_width;
-			dst_h = m_height;
-			src_w = m_screen_width;
-			src_h = m_screen_height;
-		} else {
-			uint32_t src_mip = (pass == 1) ? 5 : 10;
-			dst_w = std::max(1u, m_width >> src_mip);
-			dst_h = std::max(1u, m_height >> src_mip);
-			src_w = dst_w;
-			src_h = dst_h;
-		}
+	cmd.dispatch(d.group_count_x, d.group_count_y, 1);
 
-		HizPushConstants pc{
-			.dst_size = glm::uvec2(dst_w, dst_h),
-			.src_size = glm::uvec2(src_w, src_h),
-			.src_texel_size = glm::vec2(1.0f / static_cast<float>(src_w),
-			                            1.0f / static_cast<float>(src_h)),
-			.mip_count = pass_mip_count,
-			.write_source = (pass == 0) ? 1u : 0u,
-		};
-		cmd.pushConstants(
-			*m_pipeline_layout,
-			vk::ShaderStageFlagBits::eCompute,
-			0,
-			vk::ArrayProxy<const uint8_t>(sizeof(pc), reinterpret_cast<const uint8_t*>(&pc)));
-
-		cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pipeline_layout,
-			0, {*m_pass_sets[frame_index][pass]}, {});
-
-		uint32_t groups_x = (dst_w + 31) / 32;
-		uint32_t groups_y = (dst_h + 31) / 32;
-		cmd.dispatch(groups_x, groups_y, 1);
-	}
-
-	// Final barrier: all Hi-Z mips eGeneral -> eShaderReadOnlyOptimal
-	{
-		vk::ImageMemoryBarrier2 barrier{
-			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-			.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-			.dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
-			.oldLayout = vk::ImageLayout::eGeneral,
-			.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = hiz_image,
-			.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, m_mip_levels, 0, 1},
-		};
-		vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier};
-		cmd.pipelineBarrier2(dep);
-	}
+	// Final barrier: all Hi-Z mips eGeneral -> eShaderReadOnlyOptimal.
+	vk::ImageMemoryBarrier2 to_sampled{
+		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+		.dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
+		.oldLayout = vk::ImageLayout::eGeneral,
+		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = hiz_image,
+		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, m_mip_levels, 0, 1},
+	};
+	vk::DependencyInfo dep_out{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &to_sampled};
+	cmd.pipelineBarrier2(dep_out);
 }
 
 void HizSystem::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D extent,

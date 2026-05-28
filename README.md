@@ -87,7 +87,7 @@ Fetched automatically if not found on the system:
 - KTX, GLFW 3.3+, GLM, Meshoptimizer
 
 Included in `external/`:
-- TinyGLTF, Dear ImGui, ImGuizmo, Mikktspace, Portable File Dialogs
+- TinyGLTF, Dear ImGui, ImGuizmo, Mikktspace, Portable File Dialogs, AMD FidelityFX SPD (Hi-Z downsampler)
 
 
 #### Downloads:

@@ -84,6 +84,7 @@ function(add_slang_spirv_target TARGET)
 				COMMAND ${CMAKE_COMMAND} -E make_directory "${_OUT_DIR}"
 				COMMAND "${SLANGC}" "${SLANG_SRC}"
 					-I "${PROJECT_SOURCE_DIR}/shaders"
+					-I "${PROJECT_SOURCE_DIR}/external/FidelityFX-SPD"
 					-target spirv
 					-profile ${_PROFILE}
 					-capability ${_SLANG_CAPABILITY_FLAG}
@@ -104,6 +105,7 @@ function(add_slang_spirv_target TARGET)
 				COMMAND ${CMAKE_COMMAND} -E make_directory "${_OUT_DIR}"
 				COMMAND "${SLANGC}" "${SLANG_SRC}"
 					-I "${PROJECT_SOURCE_DIR}/shaders"
+					-I "${PROJECT_SOURCE_DIR}/external/FidelityFX-SPD"
 					-target spirv
 					-profile ${_PROFILE}
 					-capability ${_SLANG_CAPABILITY_FLAG}

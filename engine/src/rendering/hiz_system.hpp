@@ -1,4 +1,7 @@
 #pragma once
+// Builds a hierarchical-Z depth pyramid from the previous frame's depth
+// buffer in one compute dispatch via AMD FidelityFX SPD. Consumed by the GPU
+// occlusion-culling backends.
 #include "ve_export.hpp"
 #include "ve_config.hpp"
 #include "events/event_bus.hpp"
@@ -10,6 +13,7 @@
 namespace ve {
 class VeDevice;
 class VeImage;
+class VeBuffer;
 class VeDescriptorPool;
 class VeDescriptorSetLayout;
 class VeComputePipeline;
@@ -32,13 +36,10 @@ public:
 	HizSystem(const HizSystem&) = delete;
 	HizSystem& operator=(const HizSystem&) = delete;
 
-	// Generate the Hi-Z mip chain from the current depth buffer.
-	// Depth must be in eDepthStencilReadOnlyOptimal before calling.
-	// After return, depth is still in eDepthStencilReadOnlyOptimal
-	// and Hi-Z is in eShaderReadOnlyOptimal (all mips).
+	// Pre: depth in eDepthStencilReadOnlyOptimal.
+	// Post: all Hi-Z mips in eShaderReadOnlyOptimal.
 	void generate(vk::raii::CommandBuffer& cmd, uint32_t frame_index);
 
-	// Recreate images on swapchain resize.
 	void recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D extent,
 	              const vk::raii::ImageView& depth_image_view,
 	              vk::Image depth_image);
@@ -56,40 +57,45 @@ private:
 	void createHizImages(vk::Extent2D extent);
 	void createMipViews();
 	void createSampler();
-	void createDummyImage();
 	void createComputeSetLayout();
 	void createPipelineLayout();
 	void createPipeline(const std::filesystem::path& shaders_dir);
+	void createAtomicCounterBuffers();
 	void createDescriptorSets(VeDescriptorPool& pool);
 
 	VeDevice& m_ve_device;
 
-	// m_width/m_height are the padded (next-POT) Hi-Z image dims
-	// Padded pixels are initialised to 1.0 in mip 0
+	// SPD's hard cap is 12 mips per dispatch.
+	static constexpr uint32_t SPD_MAX_MIPS = 12;
+
+	// m_width/m_height       = Hi-Z image extent = padded_source / 2 (SPD destination mip 0).
+	// m_padded_source_*      = source extent rounded up to next POT.
+	// m_screen_width/height  = exact depth-buffer (source) extent.
 	uint32_t m_width = 0;
 	uint32_t m_height = 0;
+	uint32_t m_padded_source_width = 0;
+	uint32_t m_padded_source_height = 0;
 	uint32_t m_screen_width = 0;
 	uint32_t m_screen_height = 0;
 	uint32_t m_mip_levels = 0;
-	uint32_t m_pass_count = 0;
 
-	// Per-frame Hi-Z images (R32Sfloat with full mip chain)
 	std::array<std::unique_ptr<VeImage>, MAX_FRAMES_IN_FLIGHT> m_hiz_images;
 
-	// Per-mip image views for storage writes [frame][mip]
 	std::array<std::vector<vk::raii::ImageView>, MAX_FRAMES_IN_FLIGHT> m_hiz_mip_views;
 
 	vk::raii::Sampler m_nearest_sampler{nullptr};
 
-	// 1x1 R32Sfloat dummy for unused output bindings
-	std::unique_ptr<VeImage> m_dummy_image;
+	// One 4-byte storage buffer per frame holding SPD's global atomic counter.
+	// SPD resets the counter back to 0 at the end of every dispatch, so a single
+	// zero-init at creation suffices.
+	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_atomic_counter_buffers;
 
-	std::unique_ptr<VeDescriptorSetLayout> m_downsample_set_layout;
+	std::unique_ptr<VeDescriptorSetLayout> m_set_layout;
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VeComputePipeline> m_compute_pipeline;
 
-	// Per-pass descriptor sets [frame][pass_index]
-	std::array<std::vector<vk::raii::DescriptorSet>, MAX_FRAMES_IN_FLIGHT> m_pass_sets;
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_descriptor_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
 
 	vk::Image m_depth_image{};
 	vk::ImageView m_depth_image_view{};

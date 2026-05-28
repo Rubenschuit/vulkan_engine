@@ -34,7 +34,7 @@ struct CullParams {
 	alignas(4) uint32_t hiz_enabled;   // 0 = frustum only, 1 = frustum + prev-frame Hi-Z
 	alignas(4) uint32_t is_shadow_pass;
 	alignas(4) uint32_t hiz_mip_count;
-	alignas(8) glm::vec2 hiz_size;     // screen (not padded) extent
+	alignas(8) glm::vec2 hiz_size;     // hiz mip 0 extent (= screen / 2)
 	alignas(8) glm::vec2 hiz_uv_scale; // screen_size / hiz_pad_size
 	alignas(4) int32_t  lod_bias;
 	alignas(4) uint32_t max_meshlet_draws{MAX_MESHLET_DRAWS};

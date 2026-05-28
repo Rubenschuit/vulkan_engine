@@ -66,7 +66,7 @@ struct CullParams {
 	uint     hiz_enabled;        // 0 = frustum only, 1 = frustum + prev-frame Hi-Z
 	uint     is_shadow_pass;
 	uint     hiz_mip_count;
-	float2   hiz_size;           // screen extent: AABB pixel math stays in screen units
+	float2   hiz_size;           // hiz mip 0 extent
 	float2   hiz_uv_scale;       // screen_size / hiz_pad_size: applied to uv before sampling
 	int      lod_bias;           // 0 for main pass, cascade_index for shadow passes
 	uint     max_meshlet_draws;  // MAX_MESHLET_DRAWS for main, MAX_MESHLET_SHADOW_DRAWS for shadow
