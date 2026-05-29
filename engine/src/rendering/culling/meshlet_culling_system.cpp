@@ -202,13 +202,13 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 	createPipelineLayouts();
 
 	m_pass1_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, shaders_dir / "gpu_cull_meshlet_comp.spv", m_pass1_pipeline_layout,
+		m_ve_device, shaders_dir / "meshlet_cull_objects_comp.spv", m_pass1_pipeline_layout,
 		std::unordered_map<uint32_t, uint32_t>{{4, 0}});
 	m_pass1_shadow_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, shaders_dir / "gpu_cull_meshlet_comp.spv", m_pass1_pipeline_layout,
+		m_ve_device, shaders_dir / "meshlet_cull_objects_comp.spv", m_pass1_pipeline_layout,
 		std::unordered_map<uint32_t, uint32_t>{{4, 1}});
 	m_pass2_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, shaders_dir / "meshlet_cull_comp.spv", m_pass2_pipeline_layout);
+		m_ve_device, shaders_dir / "meshlet_cull_meshlets_comp.spv", m_pass2_pipeline_layout);
 
 	// Dummy 1x1 R32Float image + sampler for Hi-Z placeholder bindings
 	m_dummy_image = std::make_unique<VeImage>(
@@ -553,10 +553,9 @@ void MeshletCullingSystem::createShadowGlobalDescriptorSets(
 		m_shadow_global_sets[frame].clear();
 		m_shadow_global_sets[frame].reserve(SHADOW_BUFFER_COUNT);
 
-		// Cascade slots: 0..NUM_CSM_CASCADES-1
-		for (uint32_t cascade = 0; cascade < NUM_CSM_CASCADES; cascade++) {
+		auto buildCascadeSet = [&](uint32_t cascade, uint32_t slot) {
 			auto ubo_info  = csm_ubos[frame][cascade]->getDescriptorInfo();
-			auto inst_info = m_shadow_instance_buffers[frame][cascade]->getDescriptorInfo();
+			auto inst_info = m_shadow_instance_buffers[frame][slot]->getDescriptorInfo();
 
 			vk::raii::DescriptorSet ds{nullptr};
 			VeDescriptorWriter(layout, pool)
@@ -564,12 +563,22 @@ void MeshletCullingSystem::createShadowGlobalDescriptorSets(
 				.writeBuffer(1, &inst_info)
 				.build(ds);
 			m_shadow_global_sets[frame].push_back(std::move(ds));
-		}
+		};
 
-		// Shadow light slots: NUM_CSM_CASCADES..SHADOW_BUFFER_COUNT-1
+		// Cascade static slots: 0..NUM_CSM_CASCADES-1
+		for (uint32_t cascade = 0; cascade < NUM_CSM_CASCADES; cascade++)
+			buildCascadeSet(cascade, cascade);
+
+		// Cascade dynamic slots: NUM_CSM_CASCADES..2*NUM_CSM_CASCADES-1
+		// Same cascade UBO, different instance buffer.
+		for (uint32_t cascade = 0; cascade < NUM_CSM_CASCADES; cascade++)
+			buildCascadeSet(cascade, NUM_CSM_CASCADES + cascade);
+
+		// Shadow light slots: 2*NUM_CSM_CASCADES..SHADOW_BUFFER_COUNT-1
 		for (uint32_t light = 0; light < MAX_SHADOW_LIGHTS; light++) {
-			uint32_t slot  = NUM_CSM_CASCADES + light;
-			auto ubo_info  = shadow_ubos[frame][slot]->getDescriptorInfo();
+			uint32_t layer = NUM_CSM_CASCADES + light;
+			uint32_t slot  = 2 * NUM_CSM_CASCADES + light;
+			auto ubo_info  = shadow_ubos[frame][layer]->getDescriptorInfo();
 			auto inst_info = m_shadow_instance_buffers[frame][slot]->getDescriptorInfo();
 
 			vk::raii::DescriptorSet ds{nullptr};
@@ -653,7 +662,8 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 		params.bucket_count      = MESHLET_SHADOW_BUCKET_COUNT;
 		params.camera_pos        = glm::vec4(req.light_pos, 0.0f);
 		params.hiz_enabled       = 0;
-		params.shadow_cone_cull  = (req.slot < NUM_CSM_CASCADES) ? 1 : 0;
+		// Cone-cull enabled for directional cascades (static + dynamic slots), disabled for point/spot lights.
+		params.shadow_cone_cull  = (req.slot < 2 * NUM_CSM_CASCADES) ? 1 : 0;
 		// Record UBO data into the command stream so each dispatch sees its own
 		// parameters even when the same slot is reused for static and dynamic passes.
 		cmd.updateBuffer<CullParams>(m_shadow_cull_param_ubos[frame_index][slot]->getBuffer(),

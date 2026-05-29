@@ -1368,28 +1368,37 @@ void ShadowRenderSystem::ensureCascadeUbos() {
 void ShadowRenderSystem::createShadowSlotDescriptorSets(
 	std::function<VeBuffer&(uint32_t frame, uint32_t slot)> get_instance_buffer,
 	std::vector<std::vector<vk::raii::DescriptorSet>>& out_cascade_sets,
+	std::vector<std::vector<vk::raii::DescriptorSet>>& out_cascade_dynamic_sets,
 	std::vector<std::vector<vk::raii::DescriptorSet>>& out_light_sets) {
 
 	ensureCascadeUbos();
 
+	auto buildCascadeSet = [&](uint32_t frame, uint32_t cascade, uint32_t slot) {
+		vk::DescriptorBufferInfo cascade_ubo_info{
+			.buffer = m_csm_cascade_ubos[frame][cascade]->getBuffer(),
+			.offset = 0,
+			.range = sizeof(ShadowPassUBO)
+		};
+		auto instance_info = get_instance_buffer(frame, slot).getDescriptorInfo();
+
+		vk::raii::DescriptorSet ds{nullptr};
+		VeDescriptorWriter(*m_shadow_global_set_layout, m_descriptor_pool)
+			.writeBuffer(0, &cascade_ubo_info)
+			.writeBuffer(1, &instance_info)
+			.build(ds);
+		return ds;
+	};
+
 	out_cascade_sets.resize(MAX_FRAMES_IN_FLIGHT);
+	out_cascade_dynamic_sets.resize(MAX_FRAMES_IN_FLIGHT);
 	for (size_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
 		out_cascade_sets[frame].clear();
+		out_cascade_dynamic_sets[frame].clear();
 		for (uint32_t cascade = 0; cascade < NUM_CSM_CASCADES; cascade++) {
-			vk::DescriptorBufferInfo cascade_ubo_info{
-				.buffer = m_csm_cascade_ubos[frame][cascade]->getBuffer(),
-				.offset = 0,
-				.range = sizeof(ShadowPassUBO)
-			};
-			auto instance_info = get_instance_buffer(
-				static_cast<uint32_t>(frame), cascade).getDescriptorInfo();
-
-			vk::raii::DescriptorSet ds{nullptr};
-			VeDescriptorWriter(*m_shadow_global_set_layout, m_descriptor_pool)
-				.writeBuffer(0, &cascade_ubo_info)
-				.writeBuffer(1, &instance_info)
-				.build(ds);
-			out_cascade_sets[frame].push_back(std::move(ds));
+			// Static slot = cascade; dynamic slot = NUM_CSM_CASCADES + cascade.
+			out_cascade_sets[frame].push_back(buildCascadeSet(static_cast<uint32_t>(frame), cascade, cascade));
+			out_cascade_dynamic_sets[frame].push_back(buildCascadeSet(
+				static_cast<uint32_t>(frame), cascade, NUM_CSM_CASCADES + cascade));
 		}
 	}
 
@@ -1398,6 +1407,7 @@ void ShadowRenderSystem::createShadowSlotDescriptorSets(
 		out_light_sets[frame].clear();
 		for (uint32_t light = 0; light < MAX_SHADOW_LIGHTS; light++) {
 			uint32_t layer = NUM_CSM_CASCADES + light;
+			uint32_t slot  = 2 * NUM_CSM_CASCADES + light;
 
 			vk::DescriptorBufferInfo buffer_info{
 				.buffer = m_shadow_ubos[frame][layer]->getBuffer(),
@@ -1405,7 +1415,7 @@ void ShadowRenderSystem::createShadowSlotDescriptorSets(
 				.range = sizeof(ShadowPassUBO)
 			};
 			auto instance_info = get_instance_buffer(
-				static_cast<uint32_t>(frame), layer).getDescriptorInfo();
+				static_cast<uint32_t>(frame), slot).getDescriptorInfo();
 
 			vk::raii::DescriptorSet ds{nullptr};
 			VeDescriptorWriter(*m_shadow_global_set_layout, m_descriptor_pool)
@@ -1422,11 +1432,14 @@ void ShadowRenderSystem::createGpuShadowDescriptorSets(GpuCullingSystem& gpu_cul
 		[&](uint32_t f, uint32_t s) -> VeBuffer& {
 			return gpu_cull_system.getShadowInstanceBuffer(f, s);
 		},
-		m_gpu_cascade_descriptor_sets, m_gpu_shadow_descriptor_sets);
+		m_gpu_cascade_descriptor_sets,
+		m_gpu_cascade_dynamic_descriptor_sets,
+		m_gpu_shadow_descriptor_sets);
 }
 
 void ShadowRenderSystem::releaseGpuShadowDescriptorSets() {
 	m_gpu_cascade_descriptor_sets.clear();
+	m_gpu_cascade_dynamic_descriptor_sets.clear();
 	m_gpu_shadow_descriptor_sets.clear();
 }
 
@@ -1453,22 +1466,15 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		}
 	}
 
-	// Classify cascades
-	bool any_incremental = false;
-	bool any_full_dirty = false;
-	for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
-		if (!m_cascade_state[c].dirty) continue;
-		if (m_cascade_state[c].incremental) any_incremental = true;
-		else any_full_dirty = true;
-	}
 	bool has_dynamics = scene_mgr.hasDynamicObjects();
-	bool any_dirty = any_incremental || any_full_dirty || num_shadow_lights > 0
-		|| has_dynamics;
-	if (!any_dirty)
+	bool any_cascade_dirty = false;
+	for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
+		if (m_cascade_state[c].dirty) { any_cascade_dirty = true; break; }
+	}
+	if (!any_cascade_dirty && num_shadow_lights == 0 && !has_dynamics)
 		return;
 
-	// Batch cull dispatches for full-dirty cascades (static only) and point/spot
-	// lights (all)
+	// Compute phase: everything except per-strip culls.
 	std::array<GpuCullingSystem::ShadowCullRequest,
 	           GpuCullingSystem::SHADOW_BUFFER_COUNT> shadow_requests{};
 	uint32_t shadow_req_count = 0;
@@ -1485,13 +1491,25 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 			.shadow_mode = ShadowPassMode::STATIC_ONLY,
 		};
 	}
+	if (has_dynamics) {
+		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
+			glm::mat4 cascade_vp = m_light_projs[frame][c] * m_light_views[frame][c];
+			shadow_requests[shadow_req_count++] = {
+				.view_proj   = cascade_vp,
+				.camera_view = cam_for_hiz,
+				.slot        = NUM_CSM_CASCADES + c,
+				.lod_bias    = static_cast<int32_t>(c) + 1,
+				.shadow_mode = ShadowPassMode::DYNAMIC_ONLY,
+			};
+		}
+	}
 	for (uint32_t i = 0; i < num_shadow_lights; i++) {
 		glm::mat4 light_vp = m_light_projs[frame][csm_count + i]
 		                   * m_light_views[frame][csm_count + i];
 		shadow_requests[shadow_req_count++] = {
 			.view_proj   = light_vp,
 			.camera_view = cam_for_hiz,
-			.slot        = NUM_CSM_CASCADES + i,
+			.slot        = 2 * NUM_CSM_CASCADES + i,
 			.lod_bias    = 2,
 			.shadow_mode = ShadowPassMode::ALL_OBJECTS,
 		};
@@ -1504,6 +1522,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		gpu_cull_system.flushShadowCullBarrier(cmd, scene_mgr, frame);
 	}
 
+	// Graphics phase
 	{
 		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: atlas transition");
 		transitionAtlasForRendering(cmd, csm_count);
@@ -1570,7 +1589,6 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 					cmd.endRendering();
 				}
 			} else {
-				// Full re-render (static only, already dispatched above)
 				TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: full static render");
 				beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eClear);
 				cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
@@ -1683,24 +1701,14 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 			continue;
 		}
 
-		// Dynamic overlay: cull + render dynamic objects on top using full cascade VP
+		// Dynamic overlay: render dynamic objects on top using full cascade VP.
 		if (has_dynamics) {
 			TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: dynamic overlay");
-			glm::mat4 cascade_vp = m_light_projs[frame][c] * m_light_views[frame][c];
-			GpuCullingSystem::ShadowCullRequest dyn_req{
-				.view_proj   = cascade_vp,
-				.camera_view = cam_for_hiz,
-				.slot        = c,
-				.lod_bias    = static_cast<int32_t>(c) + 1,
-				.shadow_mode = ShadowPassMode::DYNAMIC_ONLY,
-			};
-			gpu_cull_system.dispatchShadowCulls(cmd, &dyn_req, 1, scene_mgr, frame);
-			gpu_cull_system.flushShadowCullBarrier(cmd, scene_mgr, frame);
-
+			uint32_t dyn_slot = NUM_CSM_CASCADES + c;
 			beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad);
 			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
-				0, {*m_gpu_cascade_descriptor_sets[frame][c]}, {});
-			drawIndirect(c);
+				0, {*m_gpu_cascade_dynamic_descriptor_sets[frame][c]}, {});
+			drawIndirect(dyn_slot);
 			cmd.endRendering();
 		}
 	}
@@ -1711,8 +1719,9 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 		ZoneScopedN("Light shadows");
 		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: light shadows");
 		for (uint32_t i = 0; i < num_shadow_lights; i++) {
-			uint32_t slot = NUM_CSM_CASCADES + i;
-			beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eClear);
+			uint32_t layer = NUM_CSM_CASCADES + i;
+			uint32_t slot  = 2 * NUM_CSM_CASCADES + i;
+			beginShadowRegionRender(cmd, m_atlas_regions[layer], vk::AttachmentLoadOp::eClear);
 			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 				0, {*m_gpu_shadow_descriptor_sets[frame][i]}, {});
 			drawIndirect(slot);
@@ -1731,11 +1740,14 @@ void ShadowRenderSystem::createMeshletShadowDescriptorSets(MeshletCullingSystem&
 		[&](uint32_t f, uint32_t s) -> VeBuffer& {
 			return meshlet_cull.getShadowInstanceBuffer(f, s);
 		},
-		m_meshlet_cascade_descriptor_sets, m_meshlet_shadow_descriptor_sets);
+		m_meshlet_cascade_descriptor_sets,
+		m_meshlet_cascade_dynamic_descriptor_sets,
+		m_meshlet_shadow_descriptor_sets);
 }
 
 void ShadowRenderSystem::releaseMeshletShadowDescriptorSets() {
 	m_meshlet_cascade_descriptor_sets.clear();
+	m_meshlet_cascade_dynamic_descriptor_sets.clear();
 	m_meshlet_shadow_descriptor_sets.clear();
 }
 
@@ -1766,15 +1778,19 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 	if (!any_dirty)
 		return;
 
-	// Batch cull dispatches for full-dirty cascades (static only) and point/spot lights (all)
-	std::vector<MeshletCullingSystem::ShadowCullRequest> requests;
-	requests.reserve(csm_count + num_shadow_lights);
-	for (uint32_t c = 0; c < csm_count; c++) {
-		if (c < NUM_CSM_CASCADES && (!m_cascade_state[c].dirty || m_cascade_state[c].incremental))
+	// Compute phase
+	std::vector<MeshletCullingSystem::ShadowCullRequest> static_requests;
+	std::vector<MeshletCullingSystem::ShadowCullRequest> dynamic_requests;
+	static_requests.reserve(csm_count + num_shadow_lights);
+	dynamic_requests.reserve(csm_count);
+
+	for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
+		// Incremental cascades culling deferred to the per-strip loop below.
+		if (!m_cascade_state[c].dirty || m_cascade_state[c].incremental)
 			continue;
 		const glm::mat4& lv = m_light_views[frame][c];
 		glm::vec3 light_dir = -glm::vec3(lv[0][2], lv[1][2], lv[2][2]);
-		requests.push_back({
+		static_requests.push_back({
 			.view_proj    = m_light_projs[frame][c] * lv,
 			.light_pos    = -light_dir * 100000.0f,
 			.slot         = c,
@@ -1784,20 +1800,39 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 	}
 	for (uint32_t i = 0; i < num_shadow_lights; i++) {
 		const glm::mat4& lv = m_light_views[frame][csm_count + i];
-		requests.push_back({
+		static_requests.push_back({
 			.view_proj    = m_light_projs[frame][csm_count + i] * lv,
 			.light_pos    = -glm::transpose(glm::mat3(lv)) * glm::vec3(lv[3]),
-			.slot         = NUM_CSM_CASCADES + i,
+			.slot         = 2 * NUM_CSM_CASCADES + i,
 			.lod_bias     = 2,
 			.shadow_mode  = ShadowPassMode::ALL_OBJECTS,
 		});
 	}
+	if (has_dynamics) {
+		for (uint32_t c = 0; c < csm_count && c < NUM_CSM_CASCADES; c++) {
+			const glm::mat4& lv = m_light_views[frame][c];
+			glm::vec3 light_dir = -glm::vec3(lv[0][2], lv[1][2], lv[2][2]);
+			dynamic_requests.push_back({
+				.view_proj    = m_light_projs[frame][c] * lv,
+				.light_pos    = -light_dir * 100000.0f,
+				.slot         = NUM_CSM_CASCADES + c,
+				.lod_bias     = static_cast<int32_t>(c) + 1,
+				.shadow_mode  = ShadowPassMode::DYNAMIC_ONLY,
+			});
+		}
+	}
 
-	if (!requests.empty()) {
+	if (!static_requests.empty() || !dynamic_requests.empty()) {
 		ZoneScopedN("Batched cull");
 		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: batched cull");
-		meshlet_cull.dispatchShadowCulls(cmd, requests.data(),
-			static_cast<uint32_t>(requests.size()), scene_mgr, frame);
+		if (!static_requests.empty()) {
+			meshlet_cull.dispatchShadowCulls(cmd, static_requests.data(),
+				static_cast<uint32_t>(static_requests.size()), scene_mgr, frame);
+		}
+		if (!dynamic_requests.empty()) {
+			meshlet_cull.dispatchShadowCulls(cmd, dynamic_requests.data(),
+				static_cast<uint32_t>(dynamic_requests.size()), scene_mgr, frame);
+		}
 	}
 
 	{
@@ -1842,12 +1877,12 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 
 		if (m_cascade_state[c].dirty) {
 			if (m_cascade_state[c].incremental) {
+				// Per-strip cull + render (static only)
 				ZoneScopedN("Cascade strips");
 				TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: strips");
 				auto strips = computeStripRegions(c);
 				const glm::mat4& lv = m_light_views[frame][c];
 				glm::vec3 light_dir = -glm::vec3(lv[0][2], lv[1][2], lv[2][2]);
-
 				for (auto& strip : strips) {
 					TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: strip cull+render");
 					glm::mat4 strip_vp = computeStripFrustumVP(c, strip, frame);
@@ -1979,24 +2014,13 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 			continue;
 		}
 
-		// Dynamic overlay: cull + render dynamic objects on top using full cascade VP
 		if (has_dynamics) {
 			TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: dynamic overlay");
-			const glm::mat4& lv = m_light_views[frame][c];
-			glm::vec3 light_dir = -glm::vec3(lv[0][2], lv[1][2], lv[2][2]);
-			MeshletCullingSystem::ShadowCullRequest dyn_req{
-				.view_proj    = m_light_projs[frame][c] * lv,
-				.light_pos    = -light_dir * 100000.0f,
-				.slot         = c,
-				.lod_bias     = static_cast<int32_t>(c) + 1,
-				.shadow_mode  = ShadowPassMode::DYNAMIC_ONLY,
-			};
-			meshlet_cull.dispatchShadowCulls(cmd, &dyn_req, 1, scene_mgr, frame);
-
+			uint32_t dyn_slot = NUM_CSM_CASCADES + c;
 			beginShadowRegionRender(cmd, region, vk::AttachmentLoadOp::eLoad);
 			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
-				0, {*m_meshlet_cascade_descriptor_sets[frame][c]}, {});
-			drawMeshletIndirect(c, true);
+				0, {*m_meshlet_cascade_dynamic_descriptor_sets[frame][c]}, {});
+			drawMeshletIndirect(dyn_slot, true);
 			cmd.endRendering();
 		}
 	}
@@ -2006,8 +2030,9 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 		ZoneScopedN("Light shadows");
 		TracyVkZone(m_tracy_gfx_ctx, *cmd, "Shadow: light shadows");
 		for (uint32_t i = 0; i < num_shadow_lights; i++) {
-			uint32_t slot = NUM_CSM_CASCADES + i;
-			beginShadowRegionRender(cmd, m_atlas_regions[slot], vk::AttachmentLoadOp::eClear);
+			uint32_t layer = NUM_CSM_CASCADES + i;
+			uint32_t slot  = 2 * NUM_CSM_CASCADES + i;
+			beginShadowRegionRender(cmd, m_atlas_regions[layer], vk::AttachmentLoadOp::eClear);
 			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 				0, {*m_meshlet_shadow_descriptor_sets[frame][i]}, {});
 			drawMeshletIndirect(slot);

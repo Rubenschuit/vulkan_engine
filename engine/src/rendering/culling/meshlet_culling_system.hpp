@@ -59,7 +59,10 @@ public:
 	void dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& frame_info, GpuSceneManager& scene_mgr);
 
 	// Shadow things
-	static constexpr uint32_t SHADOW_BUFFER_COUNT = NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS;
+	// Slot layout: [0..NUM_CSM_CASCADES) static cascades,
+	// [NUM_CSM_CASCADES..2*NUM_CSM_CASCADES) dynamic cascades,
+	// [2*NUM_CSM_CASCADES..) shadow lights.
+	static constexpr uint32_t SHADOW_BUFFER_COUNT = 2 * NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS;
 
 	// Build shadow descriptor sets (dummy Hi-Z; call before HizSystem exists).
 	void createShadowDescriptorSets(VeDescriptorPool& pool,

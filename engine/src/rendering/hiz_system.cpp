@@ -239,8 +239,7 @@ void HizSystem::createDescriptorSets(VeDescriptorPool& pool) {
 		};
 
 		// SPD requires SPD_MAX_MIPS (12) storage image entries even when
-		// fewer mips exist. Pad the unused tail with mip 0's view — the shader
-		// will not write past `mips` in the push constants.
+		// fewer mips exist
 		std::array<vk::DescriptorImageInfo, SPD_MAX_MIPS> mip_infos{};
 		for (uint32_t i = 0; i < SPD_MAX_MIPS; i++) {
 			uint32_t bind_mip = (i < m_mip_levels) ? i : 0u;

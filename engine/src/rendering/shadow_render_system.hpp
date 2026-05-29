@@ -158,6 +158,7 @@ private:
 	void createShadowSlotDescriptorSets(
 		std::function<VeBuffer&(uint32_t frame, uint32_t slot)> get_instance_buffer,
 		std::vector<std::vector<vk::raii::DescriptorSet>>& out_cascade_sets,
+		std::vector<std::vector<vk::raii::DescriptorSet>>& out_cascade_dynamic_sets,
 		std::vector<std::vector<vk::raii::DescriptorSet>>& out_light_sets);
 
 	// --- Rendering helpers ---
@@ -259,10 +260,12 @@ private:
 	std::array<std::unique_ptr<VeImage>, NUM_CSM_CASCADES> m_cascade_cache;
 
 	std::vector<std::vector<vk::raii::DescriptorSet>> m_gpu_cascade_descriptor_sets;
+	std::vector<std::vector<vk::raii::DescriptorSet>> m_gpu_cascade_dynamic_descriptor_sets;
 	std::vector<std::vector<std::unique_ptr<VeBuffer>>> m_csm_cascade_ubos;
 	std::vector<std::vector<vk::raii::DescriptorSet>> m_gpu_shadow_descriptor_sets;
 
 	std::vector<std::vector<vk::raii::DescriptorSet>> m_meshlet_cascade_descriptor_sets;
+	std::vector<std::vector<vk::raii::DescriptorSet>> m_meshlet_cascade_dynamic_descriptor_sets;
 	std::vector<std::vector<vk::raii::DescriptorSet>> m_meshlet_shadow_descriptor_sets;
 
 	struct RetiredBuffer {

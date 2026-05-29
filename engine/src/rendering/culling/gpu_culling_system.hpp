@@ -106,7 +106,10 @@ public:
 	VeBuffer& getShadowCompactedIndirectBuffer(uint32_t frame, uint32_t slot) { return *m_shadow_compacted_indirect_buffers[frame][slot]; }
 	VeBuffer& getShadowCompactCountBuffer(uint32_t frame, uint32_t slot) { return *m_shadow_compact_count_buffers[frame][slot]; }
 
-	static constexpr uint32_t SHADOW_BUFFER_COUNT = NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS;
+	// Slot layout: [0..NUM_CSM_CASCADES) static cascades,
+	// [NUM_CSM_CASCADES..2*NUM_CSM_CASCADES) dynamic cascades,
+	// [2*NUM_CSM_CASCADES..) shadow lights.
+	static constexpr uint32_t SHADOW_BUFFER_COUNT = 2 * NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS;
 
 	// Read back draw counts from a previous frame's staging buffer
 	uint32_t readbackDrawCounts(uint32_t frame) const;
