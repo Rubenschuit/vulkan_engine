@@ -122,11 +122,12 @@ void ShadowRenderSystem::createPipeline(vk::Format depth_format) {
 	pipeline_config.binding_descriptions = VeMesh::Vertex::getShadowBindingDescriptions();
 
 	pipeline_config.multisample_info.rasterizationSamples = vk::SampleCountFlagBits::e1;
-	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eFront;
+	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eFront; // dynamic; see frame_info.shadow_cull_mode
 	pipeline_config.rasterization_info.depthClampEnable = VK_TRUE;
 	pipeline_config.rasterization_info.depthBiasEnable = VK_TRUE;
 
 	pipeline_config.dynamic_state_enables.push_back(vk::DynamicState::eDepthBias);
+	pipeline_config.dynamic_state_enables.push_back(vk::DynamicState::eCullMode);
 	pipeline_config.dynamic_state_info.dynamicStateCount = static_cast<uint32_t>(pipeline_config.dynamic_state_enables.size());
 	pipeline_config.dynamic_state_info.pDynamicStates = pipeline_config.dynamic_state_enables.data();
 
@@ -1065,6 +1066,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 
 	command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 	command_buffer.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
+	command_buffer.setCullMode(frame_info.shadow_cull_mode);
 
 	if (mega_buffer.isValid())
 		mega_buffer.bindShadow(command_buffer);
@@ -1552,6 +1554,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulled(VeFrameInfo& frame_info,
 
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 	cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
+	cmd.setCullMode(frame_info.shadow_cull_mode);
 	mega_buffer.bindShadow(cmd);
 	cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
 		vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
@@ -1844,6 +1847,7 @@ void ShadowRenderSystem::renderShadowMapsGpuCulledMeshlets(VeFrameInfo& frame_in
 
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 	cmd.setDepthBias(frame_info.depth_bias_constant, frame_info.depth_bias_clamp, frame_info.depth_bias_slope);
+	cmd.setCullMode(frame_info.shadow_cull_mode);
 	mega_buffer.bindShadowMeshletIbo(cmd);
 	cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0,
 		vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));

@@ -36,6 +36,14 @@ enum class ShadowMode : uint32_t {
 	PCSS = 3,
 };
 
+inline vk::CullModeFlags toVkCullMode(ShadowCullMode mode) {
+	switch (mode) {
+		case ShadowCullMode::Back: return vk::CullModeFlagBits::eBack;
+		case ShadowCullMode::None: return vk::CullModeFlagBits::eNone;
+		default:                   return vk::CullModeFlagBits::eFront;
+	}
+}
+
 enum ToneMapMode : int {
 	TONEMAP_NONE         = 0,
 	TONEMAP_REINHARD     = 1,
@@ -116,6 +124,7 @@ struct UniformBufferObject {
 	alignas(4)  float    pcss_light_size = 0.04f;  // world-space light radius for PCSS penumbra
 	alignas(4)  uint32_t csm_blend_dithered = 0;   // 0 = off, 1 = linear, 2 = dithered
 	alignas(4)  float    csm_normal_bias = ve::CSM_NORMAL_BIAS;
+	alignas(16) glm::vec4 csm_world_texel_size{}; // per-cascade world units per shadow texel
 
 	// Screen-space shadow mask reprojection
 	alignas(16) glm::mat4 inverse_projection_view{1.0f};
@@ -213,7 +222,8 @@ struct VeFrameInfo {
 	ShadowMode shadow_mode = ShadowMode::REGULAR;
 	float      depth_bias_constant = ve::SHADOW_DEPTH_BIAS_CONSTANT;
 	float      depth_bias_slope = ve::SHADOW_DEPTH_BIAS_SLOPE;
-	float      depth_bias_clamp = 0.0f;
+	float      depth_bias_clamp = ve::SHADOW_DEPTH_BIAS_CLAMP;
+	vk::CullModeFlags shadow_cull_mode = vk::CullModeFlagBits::eFront;
 	CsmCascadeData csm_data;
 	const FrameAtlasRegion* shadow_atlas_regions = nullptr;  // MAX_SHADOW_LAYERS entries
 	uint32_t shadow_atlas_width = 0;

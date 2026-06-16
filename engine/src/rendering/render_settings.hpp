@@ -27,7 +27,8 @@ struct VENGINE_API RenderSettings {
 	float csm_normal_bias = ve::CSM_NORMAL_BIAS;
 	float depth_bias_constant = ve::SHADOW_DEPTH_BIAS_CONSTANT;
 	float depth_bias_slope = ve::SHADOW_DEPTH_BIAS_SLOPE;
-	float depth_bias_clamp = 0.0f;
+	float depth_bias_clamp = ve::SHADOW_DEPTH_BIAS_CLAMP;
+	ShadowCullMode shadow_cull_mode = ShadowCullMode::Front;
 	Topology topology = Topology::TRIANGLE_LIST;
 	RenderMode render_mode = RenderMode::BRDF_MICROFACET;
 	bool hdr_enabled = false;

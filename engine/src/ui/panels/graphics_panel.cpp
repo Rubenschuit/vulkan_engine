@@ -34,13 +34,6 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 				m_window.setWindowMode(static_cast<VeWindow::WindowMode>(mode_idx));
 				current_mode = m_window.getWindowMode();
 			}
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip(
-					"On Windows 10/11 a fullscreen-covering borderless window can engage\n"
-					"DWM Independent Flip -- latency comparable to exclusive fullscreen,\n"
-					"but alt-tab is slow.\n\n"
-					"HDR mode keeps DWM in always-composed flip,\n"
-					"which disables Independent Flip: alt-tab is instant.");
 
 			if (current_mode != VeWindow::WindowMode::Windowed) {
 				auto monitors = m_window.getMonitors();
@@ -287,9 +280,9 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			ImGui::SliderFloat("Shadow Bias", &ctx.settings.shadow_bias, 0.0f, 0.01f, "%.5f");
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Depth comparison bias.\nHigher = less acne but more Peter panning.");
-			ImGui::SliderFloat("Normal Bias", &ctx.settings.csm_normal_bias, 0.0f, 1.0f, "%.3f");
+			ImGui::SliderFloat("Normal Bias", &ctx.settings.csm_normal_bias, 0.0f, 8.0f, "%.2f");
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("World-space normal offset for CSM shadows.\nPushes shadow lookup along surface normal.\nHigher = less acne on angled surfaces.");
+				ImGui::SetTooltip("CSM normal offset in shadow texels (auto-scaled per cascade and by\nangle to the light). Pushes the shadow lookup along the surface normal.\nHigher = less acne on angled surfaces, slightly more Peter panning.");
 			ImGui::SliderFloat("Depth Bias Constant", &ctx.settings.depth_bias_constant, 0.0f, 5.0f, "%.2f");
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Rasterizer constant depth bias applied when rendering shadow maps.\nHigher = less acne but more Peter panning.");
@@ -299,6 +292,15 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			ImGui::SliderFloat("Depth Bias Clamp", &ctx.settings.depth_bias_clamp, 0.0f, 0.1f, "%.4f");
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Maximum absolute depth bias. Caps the total bias to prevent\nPeter panning on surfaces close to the light.");
+			int cull_idx = static_cast<int>(ctx.settings.shadow_cull_mode);
+			ImGui::Text("Shadow Cull:");
+			ImGui::SameLine();
+			ImGui::RadioButton("Front##scull", &cull_idx, 0);
+			ImGui::SameLine();
+			ImGui::RadioButton("Back##scull", &cull_idx, 1);
+			ImGui::SameLine();
+			ImGui::RadioButton("None##scull", &cull_idx, 2);
+			ctx.settings.shadow_cull_mode = static_cast<ShadowCullMode>(cull_idx);
 			ImGui::Text("CSM Blend: ");
 			ImGui::SameLine();
 			ImGui::RadioButton("Off", &ctx.settings.csm_blend_mode, 0);

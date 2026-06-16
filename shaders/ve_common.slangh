@@ -81,10 +81,11 @@ struct UniformBuffer {
 	float    pcss_light_size;
 	uint32_t csm_blend_dithered;
 	float    csm_normal_bias;
+	float4   csm_world_texel_size;
 
 	// Screen-space shadow mask
 	float4x4 inverse_projection_view;
-	float4x4 prev_projection_view;  // previous frame's proj*view for temporal reprojection
+	float4x4 prev_projection_view;
 	float2   screen_size;
 	float    _pad_screen_0;
 	float    _pad_screen_1;
@@ -146,7 +147,7 @@ StructuredBuffer<MaterialGPU> materials;
 // ============================================================================
 
 [vk::binding(0, 2)]
-SamplerComparisonState shadow_cmp_sampler;  // Hardware comparison sampler (2x2 bilinear PCF)
+SamplerComparisonState shadow_cmp_sampler;
 [vk::binding(1, 2)]
 Texture2D shadow_atlas;
 [vk::binding(2, 2)]
@@ -403,7 +404,7 @@ float sampleCascadeShadow(uint cascade, float3 frag_pos_world, float3 normal_off
 }
 
 // CSM shadow lookup: select cascade based on view-space depth, blend near boundaries
-float calculateCSMShadow(float3 frag_pos_world, float frag_view_z, float3 world_normal,
+float calculateCSMShadow(float3 frag_pos_world, float frag_view_z, float3 geo_normal,
                           out uint out_cascade, out float out_blend) {
 	out_cascade = 0;
 	out_blend = 0.0;
@@ -442,9 +443,16 @@ float calculateCSMShadow(float3 frag_pos_world, float frag_view_z, float3 world_
 
 	out_cascade = cascade;
 
-	// Normal-offset bias: push sample position along surface normal to reduce shadow acne.
-	// Coarser cascades get proportionally more offset since their texels cover more world space.
-	float3 normal_offset = world_normal * ubo.csm_normal_bias * (1.0 + float(cascade));
+	// Normal-offset bias: push the sample along the surface normal by csm_normal_bias shadow
+	// texels (in world space)
+	float slope_scale = 1.0;
+	if (ubo.csm_dir_light_index != 0xFFFFFFFF) {
+		float3 light_dir = normalize(-ubo.dir_lights[ubo.csm_dir_light_index].direction.xyz);
+		float ndotl = saturate(dot(geo_normal, light_dir));
+		slope_scale = sqrt(max(0.0, 1.0 - ndotl * ndotl));
+	}
+	float3 normal_offset = geo_normal * ubo.csm_normal_bias
+		* ubo.csm_world_texel_size[cascade] * slope_scale;
 
 	float shadow = sampleCascadeShadow(cascade, frag_pos_world, normal_offset);
 
@@ -455,7 +463,8 @@ float calculateCSMShadow(float3 frag_pos_world, float frag_view_z, float3 world_
 		float blend_zone = (split - cascade_start) * BLEND_FRACTION;
 
 		if (frag_view_z > split - blend_zone) {
-			float3 next_offset = world_normal * ubo.csm_normal_bias * (2.0 + float(cascade));
+			float3 next_offset = geo_normal * ubo.csm_normal_bias
+				* ubo.csm_world_texel_size[cascade + 1] * slope_scale;
 			float next_shadow = sampleCascadeShadow(cascade + 1, frag_pos_world, next_offset);
 			float t = (frag_view_z - (split - blend_zone)) / blend_zone;
 			shadow = lerp(shadow, next_shadow, t);
@@ -507,7 +516,6 @@ float getPointShadow(uint32_t light_index, float shadow_terms[MAX_SHADOW_LIGHTS]
 	return 1.0;
 }
 
-// Cascade debug visualization: tint by cascade index, lerp at blend boundaries
 float3 csmDebugColor(float3 albedo, uint cascade, float blend_t, float shadow) {
 	static const float3 CASCADE_COLORS[4] = {
 		float3(1.0, 0.2, 0.2),  // red
@@ -521,7 +529,6 @@ float3 csmDebugColor(float3 albedo, uint cascade, float blend_t, float shadow) {
 	return albedo * tint * shadow;
 }
 
-// LOD level debug visualization: color-code by LOD level (green=0, yellow=1, orange=2, red=3)
 float3 lodDebugColor(float3 albedo, uint lod_level) {
 	static const float3 LOD_COLORS[4] = {
 		float3(0.2, 1.0, 0.2),  // green  = LOD 0 (full detail)
@@ -532,7 +539,6 @@ float3 lodDebugColor(float3 albedo, uint lod_level) {
 	return albedo * LOD_COLORS[min(lod_level, 3u)];
 }
 
-// Meshlet debug visualization: hash-based coloring per draw command
 float3 meshletDebugColor(float3 albedo, uint meshlet_id) {
 	uint h = meshlet_id;
 	h = ((h >> 16) ^ h) * 0x45d9f3bu;

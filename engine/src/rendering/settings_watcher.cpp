@@ -37,6 +37,7 @@ void SettingsWatcher::seed() {
 	m_depth_bias_constant = m_settings.depth_bias_constant;
 	m_depth_bias_slope = m_settings.depth_bias_slope;
 	m_depth_bias_clamp = m_settings.depth_bias_clamp;
+	m_shadow_cull_mode = m_settings.shadow_cull_mode;
 	m_last_topology = m_settings.topology;
 }
 
@@ -45,7 +46,8 @@ void SettingsWatcher::tick() {
 
 	bool depth_bias_changed = m_settings.depth_bias_constant != m_depth_bias_constant
 		|| m_settings.depth_bias_slope != m_depth_bias_slope
-		|| m_settings.depth_bias_clamp != m_depth_bias_clamp;
+		|| m_settings.depth_bias_clamp != m_depth_bias_clamp
+		|| m_settings.shadow_cull_mode != m_shadow_cull_mode;
 	bool topology_changed = m_settings.topology != m_last_topology;
 	bool samples_changed = m_settings.pcf_samples != m_pcf_samples
 		|| m_settings.pcss_filter_samples != m_pcss_filter_samples;
@@ -60,6 +62,7 @@ void SettingsWatcher::tick() {
 		m_depth_bias_constant = m_settings.depth_bias_constant;
 		m_depth_bias_slope = m_settings.depth_bias_slope;
 		m_depth_bias_clamp = m_settings.depth_bias_clamp;
+		m_shadow_cull_mode = m_settings.shadow_cull_mode;
 		m_event_bus.emitImmediate(DepthBiasChangedEvent{});
 	}
 

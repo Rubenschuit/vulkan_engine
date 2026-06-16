@@ -423,6 +423,8 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 
 				ubo.csm_shadow_matrices[cascade] = atlas_bias * light_proj * light_view;
 				ubo.csm_split_distances[static_cast<int>(cascade)] = far_split;
+				// World units per shadow texel for this cascade
+				ubo.csm_world_texel_size[static_cast<int>(cascade)] = (2.0f * radius) / cascade_res;
 
 				// Store raw view/proj for shadow render pass
 				frame_info.csm_data.light_view[cascade] = light_view;

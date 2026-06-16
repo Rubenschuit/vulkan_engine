@@ -234,9 +234,9 @@ float4 computePbrLighting(VertexOutput in_vert) {
 			float2 mask_uv = in_vert.pos.xy / ubo.screen_size;
 			csm_shadow = shadow_mask.SampleLevel(shadow_mask_sampler, mask_uv, 0);
 			if (ubo.render_mode == RenderMode::CSM_CASCADE)
-				calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, world_normal, csm_cascade_idx, csm_blend_t);
+				calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, N, csm_cascade_idx, csm_blend_t);
 		} else {
-			csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, world_normal, csm_cascade_idx, csm_blend_t);
+			csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, N, csm_cascade_idx, csm_blend_t);
 		}
 	}
 
@@ -434,9 +434,8 @@ float4 computePbrLighting(VertexOutput in_vert) {
 
 		float diffuse_ao = occlusion_sample.r * ssao;
 		float spec_ao = specularAO(NdotV, diffuse_ao, roughness);
-		float shadow_occ = lerp(csm_shadow, 1.0, 0.3 + 0.7 * roughness);
 		ambient = diffuse_ibl * diffuse_ao * ubo.ibl_diffuse_intensity
-				+ specular_ibl * spec_ao * shadow_occ * ubo.ibl_specular_intensity;
+				+ specular_ibl * spec_ao * ubo.ibl_specular_intensity;
 		ambient *= 1.0 - transmission;
 	} else {
 		ambient = ubo.ambient_light_color.xyz * albedo.rgb * occlusion_sample.r * ssao;

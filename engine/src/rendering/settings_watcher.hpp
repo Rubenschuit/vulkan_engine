@@ -44,7 +44,8 @@ private:
 	int m_pcss_filter_samples = 16;
 	float m_depth_bias_constant = ve::SHADOW_DEPTH_BIAS_CONSTANT;
 	float m_depth_bias_slope = ve::SHADOW_DEPTH_BIAS_SLOPE;
-	float m_depth_bias_clamp = 0.0f;
+	float m_depth_bias_clamp = ve::SHADOW_DEPTH_BIAS_CLAMP;
+	ShadowCullMode m_shadow_cull_mode = ShadowCullMode::Front;
 	Topology m_last_topology = Topology::TRIANGLE_LIST;
 };
 

@@ -55,10 +55,11 @@ constexpr float CELESTIAL_INTENSITY_BOOST  = 100.0f;
 // ---------------------------------------------------------------------------
 // Shadow mapping
 // ---------------------------------------------------------------------------
-constexpr float SHADOW_BIAS                 = 0.00042f;
-constexpr float CSM_NORMAL_BIAS             = 0.08f; // world-space normal offset for CSM, scaled per cascade
-constexpr float SHADOW_DEPTH_BIAS_CONSTANT  = 1.25f;
-constexpr float SHADOW_DEPTH_BIAS_SLOPE     = 1.75f;
+constexpr float SHADOW_BIAS                 = 0.0001f;
+constexpr float CSM_NORMAL_BIAS             = 2.0f;  // CSM normal offset in shadow texels, auto-scaled per cascade by world-texel size
+constexpr float SHADOW_DEPTH_BIAS_CONSTANT  = 0.5f;
+constexpr float SHADOW_DEPTH_BIAS_SLOPE     = 1.0f;
+constexpr float SHADOW_DEPTH_BIAS_CLAMP     = 0.005f;
 constexpr float DIR_SHADOW_MAX_DISTANCE     = 300.0f;
 
 // Cascaded Shadow Maps (CSM)
@@ -104,6 +105,12 @@ enum class ShadowPassMode : uint32_t {
 	ALL_OBJECTS  = 1,
 	STATIC_ONLY  = 2,
 	DYNAMIC_ONLY = 3,
+};
+
+enum class ShadowCullMode : uint32_t {
+	Front = 0,
+	Back  = 1,
+	None  = 2,
 };
 
 // Primitive topology selection for the main PBR pass (wireframe debug).
@@ -161,7 +168,7 @@ constexpr uint32_t MAX_HIZ_MIPS = 13;
 // Reserves 2 (ping-pong) × MAX_SKINNED_VERTICES_PER_FRAME × (48 + 12) bytes in
 // the mega VBO + shadow VBO.
 constexpr uint32_t MAX_SKINNED_VERTICES_PER_FRAME    = 256 * 1024;
-constexpr uint32_t MAX_SKINNING_PALETTE_MATRICES     = 4096 * 2;
+constexpr uint32_t MAX_SKINNING_PALETTE_MATRICES     = 4096 * 2 * 2;
 constexpr uint32_t SKINNING_WORKGROUP_SIZE           = 64; // sync with shader.
 constexpr uint32_t MAX_SKINNING_WG_INFO_ENTRIES      = (MAX_SKINNED_VERTICES_PER_FRAME / SKINNING_WORKGROUP_SIZE) * 2;
 
