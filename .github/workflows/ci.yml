@@ -34,7 +34,7 @@ jobs:
 
           - name: "Windows MSVC"
             os: windows-latest
-            generator: "Visual Studio 17 2022"
+            generator: "Visual Studio 18 2026"
             cmake_args: "-A x64"
             build_type: Release
 
@@ -54,7 +54,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
@@ -87,7 +87,7 @@ jobs:
       # ── Vulkan SDK ─────────────────────────────────────────────────
 
       - name: Install Vulkan SDK
-        uses: jakoch/install-vulkan-sdk-action@v1.5.3
+        uses: jakoch/install-vulkan-sdk-action@v1.5.5
         with:
           vulkan_version: ${{ env.VULKAN_SDK_VERSION }}
           install_runtime: true
@@ -133,7 +133,7 @@ jobs:
       # ── FetchContent cache ─────────────────────────────────────────
 
       - name: Cache FetchContent
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/_deps
           key: deps-${{ matrix.name }}-${{ hashFiles('CMakeLists.txt', 'cmake/Dependencies.cmake', 'cmake/Tests.cmake') }}
