@@ -69,17 +69,20 @@ VeMesh::VeMesh(VeDevice& device, ProcessedMesh& data, UploadContext& ctx)
 void VeMesh::initFromProcessedMesh(ProcessedMesh& data, UploadContext& ctx) {
 	m_local_aabb = data.local_aabb;
 	const bool has_skin = !data.skin_vertices.empty();
+	const bool has_morph = data.morph_target_count > 0 && !data.morph_pos_deltas.empty();
 	// If shadow_positions wasn't precomputed, build it now.
 	if (data.shadow_positions.empty() && !data.vertices.empty()) {
 		data.shadow_positions.reserve(data.vertices.size());
 		for (const auto& v : data.vertices)
 			data.shadow_positions.push_back(v.pos);
 	}
-	recordVertexBuffers(data.vertices, has_skin, ctx);
+	recordVertexBuffers(data.vertices, has_skin || has_morph, ctx);
 	recordShadowVertexBuffer(data.shadow_positions, ctx);
 	recordIndexBuffers(data.indices, ctx);
 	if (has_skin)
 		recordSkinVertexBuffer(data.skin_vertices, ctx);
+	if (has_morph)
+		recordMorphBuffers(data, ctx);
 	for (const auto& lod : data.lod_indices)
 		recordLodIndexBuffer(lod, ctx);
 
@@ -108,6 +111,8 @@ void VeMesh::releaseGpuBuffers() {
 	m_vertex_buffer.reset();
 	m_shadow_vertex_buffer.reset();
 	m_skin_vertex_buffer.reset();
+	m_morph_position_buffer.reset();
+	m_morph_normal_buffer.reset();
 	m_index_buffer.reset();
 	for (auto& lod : m_lod_levels)
 		lod.index_buffer.reset();
@@ -184,6 +189,8 @@ void VeMesh::doUnload() {
 	m_vertex_buffer.reset();
 	m_shadow_vertex_buffer.reset();
 	m_skin_vertex_buffer.reset();
+	m_morph_position_buffer.reset();
+	m_morph_normal_buffer.reset();
 	m_index_buffer.reset();
 	m_lod_levels.clear();
 	m_cpu_positions.clear();
@@ -260,6 +267,41 @@ void VeMesh::recordSkinVertexBuffer(const std::vector<SkinVertex>& skin_vertices
 	ctx.bytes_in_flight += static_cast<size_t>(total_size);
 	ctx.transfer_has_work = true;
 	m_has_skinning = true;
+}
+
+void VeMesh::recordMorphBuffers(const ProcessedMesh& data, UploadContext& ctx) {
+	const uint32_t element_count = m_vertex_count * data.morph_target_count;
+	assert(data.morph_pos_deltas.size() == element_count && "morph delta count must be vertex_count * target_count");
+
+	// Pack vec3 deltas into vec4 
+	std::vector<glm::vec4> pos4(element_count);
+	std::vector<glm::vec4> nrm4(element_count);
+	for (uint32_t i = 0; i < element_count; i++) {
+		pos4[i] = glm::vec4(data.morph_pos_deltas[i], 0.0f);
+		nrm4[i] = glm::vec4(data.morph_normal_deltas[i], 0.0f);
+	}
+
+	const vk::DeviceSize total_size = sizeof(glm::vec4) * element_count;
+	const vk::BufferUsageFlags usage = vk::BufferUsageFlagBits::eStorageBuffer
+		| vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc;
+
+	auto pos_src = ctx.arena.write(pos4.data(), total_size);
+	m_morph_position_buffer = std::make_unique<VeBuffer>(
+		m_ve_device, sizeof(glm::vec4), element_count, usage,
+		vk::MemoryPropertyFlagBits::eDeviceLocal, 1);
+	VeDevice::copyBuffer(ctx.transfer_cmd, pos_src.buffer, m_morph_position_buffer->getBuffer(), total_size, pos_src.offset);
+
+	auto nrm_src = ctx.arena.write(nrm4.data(), total_size);
+	m_morph_normal_buffer = std::make_unique<VeBuffer>(
+		m_ve_device, sizeof(glm::vec4), element_count, usage,
+		vk::MemoryPropertyFlagBits::eDeviceLocal, 1);
+	VeDevice::copyBuffer(ctx.transfer_cmd, nrm_src.buffer, m_morph_normal_buffer->getBuffer(), total_size, nrm_src.offset);
+
+	ctx.bytes_in_flight += static_cast<size_t>(total_size) * 2;
+	ctx.transfer_has_work = true;
+	m_morph_target_count = data.morph_target_count;
+	m_morph_local_aabb = data.morph_local_aabb;
+	m_has_morph = true;
 }
 
 void VeMesh::recordIndexBuffers(const std::vector<uint32_t>& indices, UploadContext& ctx) {

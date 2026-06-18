@@ -1,6 +1,6 @@
 #include "pch.hpp"
 #include "rendering/skinned_points_render_system.hpp"
-#include "rendering/skinning_pre_pass.hpp"
+#include "rendering/deform_pre_pass.hpp"
 #include "rendering/managers/pbr_mega_buffer.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_buffer.hpp"
@@ -80,7 +80,7 @@ void SkinnedPointsRenderSystem::recreatePipeline(vk::Format color_format, vk::Sa
 	createPipeline(color_format, sample_count);
 }
 
-void SkinnedPointsRenderSystem::render(VeFrameInfo& fi, const SkinningPrePass& prepass, const PbrMegaBuffer& mega_buffer) {
+void SkinnedPointsRenderSystem::render(VeFrameInfo& fi, const DeformPrePass& prepass, const PbrMegaBuffer& mega_buffer) {
 	if (!fi.registry || !mega_buffer.isValid())
 		return;
 	auto& cmd = fi.cmd();
@@ -98,8 +98,8 @@ void SkinnedPointsRenderSystem::render(VeFrameInfo& fi, const SkinningPrePass& p
 		VeMesh* mesh = mc.getMesh();
 		if (!mesh || !mesh->hasSkinning())
 			continue;
-		uint32_t vo = prepass.getSkinnedVertexOffset(entity, fi.current_frame, mega_buffer);
-		if (vo == SkinningPrePass::INVALID_OFFSET)
+		uint32_t vo = prepass.getDeformedVertexOffset(entity, fi.current_frame, mega_buffer);
+		if (vo == DeformPrePass::INVALID_OFFSET)
 			continue;
 
 		// Color from low-bit hash of entity id (yellow-ish bias for visibility on dark background).

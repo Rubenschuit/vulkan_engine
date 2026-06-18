@@ -16,6 +16,7 @@ class VeMesh;
 class VENGINE_API PbrMegaBuffer {
 public:
 	static constexpr uint32_t NO_SKIN_OFFSET = UINT32_MAX;
+	static constexpr uint32_t NO_MORPH_OFFSET = UINT32_MAX;
 
 	struct LodEntry {
 		uint32_t first_index;
@@ -23,7 +24,9 @@ public:
 	};
 	struct MeshEntry {
 		uint32_t vertex_offset;
-		uint32_t skin_vertex_offset = NO_SKIN_OFFSET; // UINT32_MAX iff mesh is non-skinned
+		uint32_t skin_vertex_offset = NO_SKIN_OFFSET;
+		uint32_t morph_offset = NO_MORPH_OFFSET;
+		uint32_t morph_target_count = 0;
 		std::vector<LodEntry> lod_entries;
 	};
 
@@ -57,14 +60,20 @@ public:
 	bool isValid() const { return m_mega_vbo != nullptr; }
 	bool hasMeshletData() const { return m_meshlet_ssbo != nullptr; }
 	bool hasSkinData() const { return m_mega_skin_vbo != nullptr; }
+	bool hasMorphData() const { return m_mega_morph_position != nullptr; }
+
+	// Monotonic tag bumped on every (re)build/swap
+	uint64_t generation() const { return m_generation; }
 
 	VeBuffer* getMeshletSsbo() const { return m_meshlet_ssbo.get(); }
 	VeBuffer* getMegaVbo() const { return m_mega_vbo.get(); }
 	VeBuffer* getMegaShadowVbo() const { return m_mega_shadow_vbo.get(); }
 	VeBuffer* getMegaSkinVbo() const { return m_mega_skin_vbo.get(); }
+	VeBuffer* getMegaMorphPosition() const { return m_mega_morph_position.get(); }
+	VeBuffer* getMegaMorphNormal() const { return m_mega_morph_normal.get(); }
 
 	uint32_t getDynamicRegionBase() const { return m_static_vertex_count; }
-	uint32_t getDynamicRegionCapacity() const { return MAX_SKINNED_VERTICES_PER_FRAME; }
+	uint32_t getDynamicRegionCapacity() const { return MAX_DEFORMED_VERTICES_PER_FRAME; }
 
 	void clear();
 	void bind(vk::raii::CommandBuffer& cmd) const;
@@ -84,6 +93,10 @@ private:
 
 	std::unique_ptr<VeBuffer> m_mega_skin_vbo; // Sparse
 	uint32_t m_static_vertex_count = 0;
+	uint64_t m_generation = 0;
+
+	std::unique_ptr<VeBuffer> m_mega_morph_position;
+	std::unique_ptr<VeBuffer> m_mega_morph_normal;
 
 	std::unique_ptr<VeBuffer> m_meshlet_ibo;
 	std::unique_ptr<VeBuffer> m_meshlet_ssbo;

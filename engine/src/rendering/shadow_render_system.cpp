@@ -4,7 +4,7 @@
 #include "rendering/culling/meshlet_culling_system.hpp"
 #include "rendering/managers/gpu_scene_manager.hpp"
 #include "rendering/managers/pbr_mega_buffer.hpp"
-#include "rendering/skinning_pre_pass.hpp"
+#include "rendering/deform_pre_pass.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_pipeline.hpp"
 #include "vulkan/ve_buffer.hpp"
@@ -939,9 +939,9 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 		for (auto [entity, mesh, tc] : view) {
 			if (!mesh.getMesh() || !mesh.has_shadow)
 				continue;
-			// Skinned meshes go through the per-instance skinned shadow path, which
-			// reads SkinningPrePass output buffers instead of the mega buffer.
-			if (registry.hasComponent<SkinComponent>(entity))
+			// Deformed (skin/morph) meshes go through the per-instance deformed shadow
+			// path, which reads the deform pre-pass output instead of the mega buffer.
+			if (isDeformed(registry, entity))
 				continue;
 			uint32_t shadow_lod = std::min(std::max(1u, mesh.cached_lod + 1),
 			                               mesh.getMesh()->getLodCount() - 1);
@@ -1034,7 +1034,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 
 	// Skinned shadow casters: write one shadow instance slot per entity. Cull
 	// against the outer CSM cascade
-	m_skinned_shadow_drawables.clear();
+	m_deformed_shadow_drawables.clear();
 	FrustumPlane skin_cull_planes[6];
 	bool have_skin_cull_planes = false;
 	if (csm_count > 0) {
@@ -1044,7 +1044,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 		have_skin_cull_planes = true;
 	}
 	for (auto [entity, mc, sc] : registry.view<MeshComponent, SkinComponent>()) {
-		if (!mc.has_shadow || !mc.hasMesh() || !mc.hasMaterial())
+		if (!mc.has_shadow || !mc.hasMesh() || !mc.hasMaterial() || !mc.getMesh()->hasSkinning())
 			continue;
 		if (have_skin_cull_planes && !isAABBInFrustum(mc.getWorldAABB(), skin_cull_planes))
 			continue;
@@ -1054,7 +1054,23 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 		}
 		uint32_t idx = shadow_instance_count++;
 		shadow_instance_data[idx].transform = registry.getWorldTransform(entity);
-		m_skinned_shadow_drawables.push_back({entity, mc.getMesh(), idx});
+		m_deformed_shadow_drawables.push_back({entity, mc.getMesh(), idx});
+	}
+	// Morph-only meshes share the per-instance deformed shadow path.
+	for (auto [entity, mc, morph] : registry.view<MeshComponent, MorphComponent>()) {
+		if (registry.hasComponent<SkinComponent>(entity))
+			continue;
+		if (!mc.has_shadow || !mc.hasMesh() || !mc.hasMaterial() || !mc.getMesh()->hasMorphTargets())
+			continue;
+		if (have_skin_cull_planes && !isAABBInFrustum(mc.getWorldAABB(), skin_cull_planes))
+			continue;
+		if (shadow_instance_count >= m_shadow_instance_capacity) {
+			VE_LOGW("Shadow instance buffer full (deformed)");
+			break;
+		}
+		uint32_t idx = shadow_instance_count++;
+		shadow_instance_data[idx].transform = registry.getWorldTransform(entity);
+		m_deformed_shadow_drawables.push_back({entity, mc.getMesh(), idx});
 	}
 
 	auto& command_buffer = frame_info.cmd();
@@ -1072,7 +1088,7 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 		mega_buffer.bindShadow(command_buffer);
 
 	bool has_dynamics = !m_dynamic_csm_instance_groups.empty();
-	bool has_skinned = !m_skinned_shadow_drawables.empty();
+	bool has_skinned = !m_deformed_shadow_drawables.empty();
 
 	if (csm_count > 0 && (!m_static_csm_instance_groups.empty() || has_dynamics || has_skinned)) {
 		ZoneScopedN("CSM cascade loop");
@@ -1323,17 +1339,17 @@ void ShadowRenderSystem::renderShadowMap(VeFrameInfo& frame_info, uint32_t light
 		}
 	}
 
-	if (include_skinned && !m_skinned_shadow_drawables.empty() && frame_info.skinning_pre_pass) {
+	if (include_skinned && !m_deformed_shadow_drawables.empty() && frame_info.deform_pre_pass) {
 		mega_buffer.bindShadow(cmd);
-		for (const auto& sd : m_skinned_shadow_drawables) {
+		for (const auto& sd : m_deformed_shadow_drawables) {
 			if (!sd.mesh)
 				continue;
 			const auto* entry = mega_buffer.getEntry(sd.mesh);
 			if (!entry || entry->lod_entries.empty())
 				continue;
-			uint32_t vo = frame_info.skinning_pre_pass->getSkinnedVertexOffset(
+			uint32_t vo = frame_info.deform_pre_pass->getDeformedVertexOffset(
 				sd.entity, frame_info.current_frame, mega_buffer);
-			if (vo == SkinningPrePass::INVALID_OFFSET)
+			if (vo == DeformPrePass::INVALID_OFFSET)
 				continue;
 
 			ShadowPushConstantData push{};

@@ -4,7 +4,7 @@
 #include "rendering/managers/gpu_scene_manager.hpp"
 #include "rendering/managers/pbr_mega_buffer.hpp"
 #include "rendering/hiz_system.hpp"
-#include "rendering/skinning_pre_pass.hpp"
+#include "rendering/deform_pre_pass.hpp"
 #include "rendering/ve_frame_info.hpp"
 #include "vulkan/ve_image.hpp"
 #include "utils/ve_frustum.hpp"
@@ -20,23 +20,23 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
                                            EventBus& event_bus, VeDescriptorPool& pool,
                                            SceneResourceManager& scene_resources,
                                            PbrMegaBuffer& mega_buffer, HizSystem& hiz,
-                                           SkinningPrePass& skinning_pre_pass)
+                                           DeformPrePass& deform_pre_pass)
 	: m_ve_device(device), m_event_bus(&event_bus) {
 
-	auto rebuild = [this, &pool, &scene_resources, &mega_buffer, &hiz, &skinning_pre_pass]() {
+	auto rebuild = [this, &pool, &scene_resources, &mega_buffer, &hiz, &deform_pre_pass]() {
 		auto& gpu_scene = scene_resources.getGpuSceneManager();
-		createDescriptorSets(pool, gpu_scene, mega_buffer, skinning_pre_pass);
-		createHizDescriptorSets(pool, gpu_scene, mega_buffer, hiz, skinning_pre_pass);
-		createShadowDescriptorSets(pool, gpu_scene, mega_buffer, skinning_pre_pass);
+		createDescriptorSets(pool, gpu_scene, mega_buffer, deform_pre_pass);
+		createHizDescriptorSets(pool, gpu_scene, mega_buffer, hiz, deform_pre_pass);
+		createShadowDescriptorSets(pool, gpu_scene, mega_buffer, deform_pre_pass);
 	};
 	m_scene_loaded_sub = event_bus.subscribe<SceneLoadedEvent>(
 		[rebuild](const SceneLoadedEvent&) { rebuild(); });
 	m_asset_load_sub = event_bus.subscribe<AssetLoadCompleteEvent>(
 		[rebuild](const AssetLoadCompleteEvent&) { rebuild(); });
 	m_resolution_sub = event_bus.subscribe<ResolutionChangedEvent>(
-		[this, &pool, &scene_resources, &mega_buffer, &hiz, &skinning_pre_pass](const ResolutionChangedEvent&) {
+		[this, &pool, &scene_resources, &mega_buffer, &hiz, &deform_pre_pass](const ResolutionChangedEvent&) {
 			auto& gpu_scene = scene_resources.getGpuSceneManager();
-			createHizDescriptorSets(pool, gpu_scene, mega_buffer, hiz, skinning_pre_pass);
+			createHizDescriptorSets(pool, gpu_scene, mega_buffer, hiz, deform_pre_pass);
 		});
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
@@ -264,7 +264,7 @@ void MeshletCullingSystem::createPipelineLayouts() {
 
 void MeshletCullingSystem::writeCullDescriptorSets(
 		VeDescriptorPool& pool, GpuSceneManager& scene_mgr, const PbrMegaBuffer& mega_buffer,
-		SkinningPrePass& skinning_pre_pass, uint32_t frame,
+		DeformPrePass& deform_pre_pass, uint32_t frame,
 		vk::DescriptorImageInfo& hiz_img, vk::DescriptorImageInfo& hiz_smp_info,
 		VeBuffer& cull_params, VeBuffer& visible_objects, VeBuffer& counts,
 		VeBuffer& instance_buf, VeBuffer& meshlet_object_map, VeBuffer& dispatch_indirect,
@@ -300,7 +300,7 @@ void MeshletCullingSystem::writeCullDescriptorSets(
 		auto msbo_info = mega_buffer.getMeshletSsbo()->getDescriptorInfo();
 		auto ind_info  = meshlet_indirect.getDescriptorInfo();
 		auto dc_info   = meshlet_draw_counts.getDescriptorInfo();
-		auto skin_off_info = skinning_pre_pass.getSkinnedOffsetBuffer(frame).getDescriptorInfo();
+		auto skin_off_info = deform_pre_pass.getDeformedOffsetBuffer(frame).getDescriptorInfo();
 
 		VeDescriptorWriter(*m_pass2_layout, pool)
 			.writeBuffer(0,  &vis_info)
@@ -322,12 +322,12 @@ void MeshletCullingSystem::writeCullDescriptorSets(
 void MeshletCullingSystem::createDescriptorSets(VeDescriptorPool& pool,
                                                 GpuSceneManager& scene_mgr,
                                                 const PbrMegaBuffer& mega_buffer,
-                                                SkinningPrePass& skinning_pre_pass) {
+                                                DeformPrePass& deform_pre_pass) {
 	vk::DescriptorImageInfo dummy_img{.imageView = *m_dummy_image->getImageView(), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
 	vk::DescriptorImageInfo dummy_smp_info{.sampler = *m_dummy_sampler};
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-		writeCullDescriptorSets(pool, scene_mgr, mega_buffer, skinning_pre_pass, i,
+		writeCullDescriptorSets(pool, scene_mgr, mega_buffer, deform_pre_pass, i,
 			dummy_img, dummy_smp_info,
 			*m_cull_param_ubos[i], *m_visible_objects[i], *m_counts[i],
 			*m_instance_buffers[i], *m_meshlet_object_map[i], *m_dispatch_indirect[i],
@@ -339,7 +339,7 @@ void MeshletCullingSystem::createHizDescriptorSets(VeDescriptorPool& pool,
                                                    GpuSceneManager& scene_mgr,
                                                    const PbrMegaBuffer& mega_buffer,
                                                    HizSystem& hiz,
-                                                   SkinningPrePass& skinning_pre_pass) {
+                                                   DeformPrePass& deform_pre_pass) {
 	m_hiz_size      = glm::vec2(static_cast<float>(hiz.getScreenWidth()),
 	                             static_cast<float>(hiz.getScreenHeight())) * 0.5f;
 	m_hiz_uv_scale  = m_hiz_size / glm::vec2(static_cast<float>(hiz.getWidth()),
@@ -351,7 +351,7 @@ void MeshletCullingSystem::createHizDescriptorSets(VeDescriptorPool& pool,
 		vk::DescriptorImageInfo hiz_img{.imageView = *hiz.getHizImageView(prev_frame), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
 		vk::DescriptorImageInfo hiz_smp_info{.sampler = *hiz.getSampler()};
 
-		writeCullDescriptorSets(pool, scene_mgr, mega_buffer, skinning_pre_pass, i,
+		writeCullDescriptorSets(pool, scene_mgr, mega_buffer, deform_pre_pass, i,
 			hiz_img, hiz_smp_info,
 			*m_cull_param_ubos[i], *m_visible_objects[i], *m_counts[i],
 			*m_instance_buffers[i], *m_meshlet_object_map[i], *m_dispatch_indirect[i],
@@ -515,7 +515,7 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 void MeshletCullingSystem::createShadowDescriptorSets(VeDescriptorPool& pool,
                                                        GpuSceneManager& scene_mgr,
                                                        const PbrMegaBuffer& mega_buffer,
-                                                       SkinningPrePass& skinning_pre_pass) {
+                                                       DeformPrePass& deform_pre_pass) {
 	vk::DescriptorImageInfo dummy_img{.imageView = *m_dummy_image->getImageView(), .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
 	vk::DescriptorImageInfo dummy_smp_info{.sampler = *m_dummy_sampler};
 
@@ -529,7 +529,7 @@ void MeshletCullingSystem::createShadowDescriptorSets(VeDescriptorPool& pool,
 		for (uint32_t slot = 0; slot < SHADOW_BUFFER_COUNT; slot++) {
 			vk::raii::DescriptorSet ds1{nullptr};
 			vk::raii::DescriptorSet ds2{nullptr};
-			writeCullDescriptorSets(pool, scene_mgr, mega_buffer, skinning_pre_pass, i,
+			writeCullDescriptorSets(pool, scene_mgr, mega_buffer, deform_pre_pass, i,
 				dummy_img, dummy_smp_info,
 				*m_shadow_cull_param_ubos[i][slot], *m_shadow_visible_objects[i][slot],
 				*m_shadow_counts[i][slot], *m_shadow_instance_buffers[i][slot],

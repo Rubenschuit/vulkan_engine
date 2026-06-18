@@ -64,7 +64,8 @@ using ComponentPools = std::tuple<
 	ComponentPool<AnimatorComponent>,
 	ComponentPool<SkinComponent>,
 	ComponentPool<CameraComponent>,
-	ComponentPool<ParticleEmitterComponent>
+	ComponentPool<ParticleEmitterComponent>,
+	ComponentPool<MorphComponent>
 >;
 
 class VENGINE_API Registry {
@@ -107,6 +108,10 @@ public:
 	template <typename T>
 	bool hasComponent(Entity e) const;
 
+	// First T on `e` or any descendant (depth-first), or nullptr.
+	template <typename T>
+	T* getComponentInChildren(Entity e);
+
 	// Generic pool accessor
 	template <typename T>
 	ComponentPool<T>& pool() { return std::get<ComponentPool<T>>(m_pools); }
@@ -146,6 +151,9 @@ public:
 
 	ComponentPool<ParticleEmitterComponent>& particleEmitters() { return pool<ParticleEmitterComponent>(); }
 	const ComponentPool<ParticleEmitterComponent>& particleEmitters() const { return pool<ParticleEmitterComponent>(); }
+
+	ComponentPool<MorphComponent>& morphs() { return pool<MorphComponent>(); }
+	const ComponentPool<MorphComponent>& morphs() const { return pool<MorphComponent>(); }
 
 	// Fast active check (skips generation validation)
 	bool isActiveAtIndex(uint32_t index) const {
@@ -297,6 +305,17 @@ bool Registry::hasComponent(Entity e) const {
 	return pool<T>().has(e.index());
 }
 
+template <typename T>
+T* Registry::getComponentInChildren(Entity e) {
+	if (T* c = getComponent<T>(e))
+		return c;
+	for (Entity child = firstChild(e); !child.isNull(); child = nextSibling(child)) {
+		if (T* c = getComponentInChildren<T>(child))
+			return c;
+	}
+	return nullptr;
+}
+
 } // namespace ve
 
 // View included after Registry is fully defined (View references Registry)
@@ -306,5 +325,15 @@ namespace ve {
 template <typename... Components>
 auto Registry::view() {
 	return View<Components...>(*this, pool<Components>()...);
+}
+
+// True if the entity's mesh is actually deformed at runtime
+inline bool isDeformed(const Registry& registry, Entity entity) {
+	const auto* mc = registry.getComponent<MeshComponent>(entity);
+	const VeMesh* mesh = mc ? mc->getMesh() : nullptr;
+	if (!mesh)
+		return false;
+	return (mesh->hasSkinning() && registry.hasComponent<SkinComponent>(entity))
+	    || (mesh->hasMorphTargets() && registry.hasComponent<MorphComponent>(entity));
 }
 } // namespace ve

@@ -12,7 +12,7 @@
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
 #include "events/render_events.hpp"
-#include "rendering/skinning_pre_pass.hpp"
+#include "rendering/deform_pre_pass.hpp"
 #include "rendering/managers/pbr_mega_buffer.hpp"
 
 #include <algorithm>
@@ -423,7 +423,7 @@ void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_
 	};
 	{
 		vk::DependencyInfo dep{
-			.imageMemoryBarrierCount = 1, 
+			.imageMemoryBarrierCount = 1,
 			.pImageMemoryBarriers = &mask_to_attachment
 		};
 		cmd.pipelineBarrier2(dep);
@@ -485,10 +485,10 @@ void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_
 			vk::ArrayProxy<const uint8_t>(sizeof(push), reinterpret_cast<const uint8_t*>(&push)));
 
 		int32_t vertex_offset = static_cast<int32_t>(entry->vertex_offset);
-		bool is_skinned = fi.skinning_pre_pass && registry.hasComponent<SkinComponent>(e);
-		if (is_skinned) {
-			uint32_t vo = fi.skinning_pre_pass->getSkinnedVertexOffset(e, fi.current_frame, mega_buffer);
-			if (vo == SkinningPrePass::INVALID_OFFSET) {
+		bool is_deformed = fi.deform_pre_pass && isDeformed(registry, e);
+		if (is_deformed) {
+			uint32_t vo = fi.deform_pre_pass->getDeformedVertexOffset(e, fi.current_frame, mega_buffer);
+			if (vo == DeformPrePass::INVALID_OFFSET) {
 				instance_idx++;
 				continue;
 			}

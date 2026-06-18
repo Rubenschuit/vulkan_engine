@@ -13,6 +13,7 @@
 #include "rendering/particle_emitter_params.hpp"
 
 #include <glm/glm.hpp>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -148,6 +149,10 @@ public:
 
 	VeMesh* getMesh() const { return mesh_handle.get(); }
 	VeMaterial* getMaterial() const { return material_handle.get(); }
+
+	// Mutates this material's PBR factors and notifies the
+	// renderer to re-upload
+	void editMaterialFactors(const std::function<void(MaterialFactors&)>& fn);
 	ResourceHandle<VeMesh> getMeshHandle() const { return mesh_handle; }
 	ResourceHandle<VeMaterial> getMaterialHandle() const { return material_handle; }
 	bool hasMesh() const { return mesh_handle.isValid(); }
@@ -434,6 +439,21 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// MorphComponent
+// ---------------------------------------------------------------------------
+// Per-instance morph-target weights
+class VENGINE_API MorphComponent : public Component {
+public:
+	const std::vector<float>& getWeights() const { return m_weights; }
+	std::vector<float>& weights() { return m_weights; }
+	void setWeights(std::vector<float> weights) { m_weights = std::move(weights); }
+	size_t targetCount() const { return m_weights.size(); }
+
+private:
+	std::vector<float> m_weights;  // one weight per mesh morph target
+};
+
+// ---------------------------------------------------------------------------
 // ParticleEmitterComponent
 // ---------------------------------------------------------------------------
 class VENGINE_API ParticleEmitterComponent : public Component {
@@ -501,5 +521,6 @@ extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<AnimatorComp
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SkinComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<CameraComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<ParticleEmitterComponent>();
+extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MorphComponent>();
 
 } // namespace ve

@@ -1,6 +1,6 @@
 #include "pch.hpp"
 #include "rendering/pbr_render_system.hpp"
-#include "rendering/skinning_pre_pass.hpp"
+#include "rendering/deform_pre_pass.hpp"
 #include "rendering/managers/pbr_mega_buffer.hpp"
 #include "rendering/managers/material_ssbo_manager.hpp"
 #include "vulkan/ve_device.hpp"
@@ -145,10 +145,10 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		MaterialAlphaProps alpha_props = mat->getAlphaProps();
 		float transmission = mat->getMaterialFactors().transmission_factor;
 		bool use_transparent_pass = (alpha_props.alpha_mode == AlphaMode::BLEND) || (transmission > 0.0f);
-		bool is_skinned = registry.hasComponent<SkinComponent>(entry.entity);
-		if (is_skinned && use_transparent_pass) {
+		bool is_deformed = isDeformed(registry, entry.entity);
+		if (is_deformed && use_transparent_pass) {
 			if (!m_warned_skinned_blend) {
-				VE_LOGW("Skinned mesh with BLEND/transmissive material skipped (no transparent skinned path)");
+				VE_LOGW("Deformed mesh (skin/morph) with BLEND/transmissive material skipped (no transparent deform path)");
 				m_warned_skinned_blend = true;
 			}
 			continue;
@@ -156,8 +156,8 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		const auto& aabb = mesh->getWorldAABB();
 		glm::vec3 obj_pos = (aabb.min + aabb.max) * 0.5f;
 		float dist = glm::dot(obj_pos - camera_pos, camera_fwd);
-		// For now, skinned meshes only have LOD 0's vertices in the dynamic region
-		uint32_t lod_level = is_skinned ? 0u : entry.lod_level;
+		// Deformed meshes only have LOD 0 vertices in the dynamic region.
+		uint32_t lod_level = is_deformed ? 0u : entry.lod_level;
 		Drawable d{
 			.entity = entry.entity,
 			.mesh = mesh,
@@ -168,7 +168,7 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 			.double_sided = alpha_props.double_sided,
 			.ssbo_index = 0,
 			.lod_level = lod_level,
-			.is_skinned = is_skinned,
+			.is_deformed = is_deformed,
 		};
 		if (use_transparent_pass)
 			m_transparent_drawables.push_back(d);
@@ -185,7 +185,7 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 			bool b_mask = (b.alpha_mode == AlphaMode::MASK);
 			if (a_mask != b_mask) return !a_mask;
 			if (a.double_sided != b.double_sided) return !a.double_sided;
-			if (a.is_skinned != b.is_skinned) return !a.is_skinned;
+			if (a.is_deformed != b.is_deformed) return !a.is_deformed;
 			if (a.material_ptr != b.material_ptr) return a.material_ptr < b.material_ptr;
 			if (a.mesh_ptr != b.mesh_ptr) return a.mesh_ptr < b.mesh_ptr;
 			return a.lod_level < b.lod_level;
@@ -241,12 +241,12 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		uint32_t instance_count = 1;
 		int32_t vertex_offset = static_cast<int32_t>(entry->vertex_offset);
 
-		if (d.is_skinned) {
-			uint32_t vo = frame_info.skinning_pre_pass
-				? frame_info.skinning_pre_pass->getSkinnedVertexOffset(
+		if (d.is_deformed) {
+			uint32_t vo = frame_info.deform_pre_pass
+				? frame_info.deform_pre_pass->getDeformedVertexOffset(
 					d.entity, frame_info.current_frame, m_mega_buffer)
-				: SkinningPrePass::INVALID_OFFSET;
-			if (vo == SkinningPrePass::INVALID_OFFSET) {
+				: DeformPrePass::INVALID_OFFSET;
+			if (vo == DeformPrePass::INVALID_OFFSET) {
 				i++;
 				continue;
 			}
@@ -257,7 +257,7 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 			size_t j = i + 1;
 			while (j < m_opaque_drawables.size()) {
 				auto& d2 = m_opaque_drawables[j];
-				if (d2.is_skinned
+				if (d2.is_deformed
 					|| d2.mesh_ptr != d.mesh_ptr || d2.lod_level != d.lod_level
 					|| d2.alpha_mode != d.alpha_mode || d2.double_sided != is_double
 					|| d2.material_ptr != d.material_ptr)

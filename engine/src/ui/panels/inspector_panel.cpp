@@ -438,6 +438,24 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 			renderSkin(*registry, *registry->getComponent<SkinComponent>(entity), state);
 	}
 
+	// Morph
+	if (registry->hasComponent<MorphComponent>(entity)) {
+		auto* morph = registry->getComponent<MorphComponent>(entity);
+		char header[64];
+		snprintf(header, sizeof(header), "Morph (%zu targets)", morph->targetCount());
+		bool open = ImGui::CollapsingHeader(header, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		if (open) {
+			ImGui::PushID("morph");
+			auto& weights = morph->weights();
+			for (size_t i = 0; i < weights.size(); i++) {
+				char label[32];
+				snprintf(label, sizeof(label), "Weight %zu", i);
+				ImGui::DragFloat(label, &weights[i], 0.01f);
+			}
+			ImGui::PopID();
+		}
+	}
+
 	// Camera
 	if (registry->hasComponent<CameraComponent>(entity)) {
 		bool open = ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);

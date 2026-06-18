@@ -1,7 +1,7 @@
 #include "pch.hpp"
 #include "rendering/depth_prepass_system.hpp"
 #include "rendering/managers/pbr_mega_buffer.hpp"
-#include "rendering/skinning_pre_pass.hpp"
+#include "rendering/deform_pre_pass.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_pipeline.hpp"
 #include "vulkan/ve_buffer.hpp"

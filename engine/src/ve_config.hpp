@@ -151,7 +151,7 @@ namespace ObjectFlag {
 	constexpr uint32_t IS_TRANSPARENT = 0x1;
 	constexpr uint32_t NO_SHADOW      = 0x2;
 	constexpr uint32_t DYNAMIC        = 0x4;
-	constexpr uint32_t SKINNED        = 0x8;
+	constexpr uint32_t DEFORMED        = 0x8;
 }
 
 // GPU-driven culling
@@ -164,13 +164,13 @@ constexpr uint32_t MAX_LOD_INSTANCE_SLOTS = MAX_GPU_OBJECTS * MAX_LOD_LEVELS; //
 // Hi-Z occlusion culling
 constexpr uint32_t MAX_HIZ_MIPS = 13;
 
-// Skinning
-// Reserves 2 (ping-pong) × MAX_SKINNED_VERTICES_PER_FRAME × (48 + 12) bytes in
-// the mega VBO + shadow VBO.
-constexpr uint32_t MAX_SKINNED_VERTICES_PER_FRAME    = 256 * 1024;
+// Skinning/morph targets
+constexpr uint32_t MAX_DEFORMED_VERTICES_PER_FRAME    = 256 * 1024;
 constexpr uint32_t MAX_SKINNING_PALETTE_MATRICES     = 4096 * 2 * 2;
 constexpr uint32_t SKINNING_WORKGROUP_SIZE           = 64; // sync with shader.
-constexpr uint32_t MAX_SKINNING_WG_INFO_ENTRIES      = (MAX_SKINNED_VERTICES_PER_FRAME / SKINNING_WORKGROUP_SIZE) * 2;
+constexpr uint32_t MAX_SKINNING_WG_INFO_ENTRIES      = (MAX_DEFORMED_VERTICES_PER_FRAME / SKINNING_WORKGROUP_SIZE) * 2;
+
+constexpr uint32_t MAX_MORPH_WEIGHTS                 = 64 * 1024;
 
 // GPU compute particles (keep PARTICLE_WORKGROUP_SIZE in sync with ve_constants.slangh)
 constexpr uint32_t PARTICLE_WORKGROUP_SIZE = 256;

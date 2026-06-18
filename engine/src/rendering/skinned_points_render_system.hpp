@@ -1,4 +1,4 @@
-/* debug visualization for SkinningPrePass output.
+/* debug visualization for DeformPrePass output.
  *
  * Iterates skinned drawables and draws each entity's joints
  * as a colored point cloud.
@@ -13,7 +13,7 @@
 namespace ve {
 	class VeDevice;
 	class VePipeline;
-	class SkinningPrePass;
+	class DeformPrePass;
 	class EventBus;
 	class PbrMegaBuffer;
 }
@@ -34,7 +34,7 @@ public:
 	SkinnedPointsRenderSystem(const SkinnedPointsRenderSystem&) = delete;
 	SkinnedPointsRenderSystem& operator=(const SkinnedPointsRenderSystem&) = delete;
 
-	void render(VeFrameInfo& fi, const SkinningPrePass& prepass, const PbrMegaBuffer& mega_buffer);
+	void render(VeFrameInfo& fi, const DeformPrePass& prepass, const PbrMegaBuffer& mega_buffer);
 	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count);
 
 	void setPointSize(float px) { m_point_size = px; }

@@ -99,7 +99,13 @@ public:
 	bool hasSkinning() const { return m_has_skinning; }
 	VeBuffer& getSkinVertexBuffer() const { return *m_skin_vertex_buffer; }
 
+	bool hasMorphTargets() const { return m_has_morph; }
+	uint32_t getMorphTargetCount() const { return m_morph_target_count; }
+	VeBuffer& getMorphPositionBuffer() const { return *m_morph_position_buffer; }
+	VeBuffer& getMorphNormalBuffer() const { return *m_morph_normal_buffer; }
+
 	AABB getLocalAABB() const { return m_local_aabb; }
+	AABB getMorphLocalAABB() const { return m_morph_local_aabb; }
 	const std::vector<AABB>& getJointMeshLocalExtents() const { return m_joint_mesh_local_extents; }
 
 	const std::vector<glm::vec3>& getCpuPositions() const { return m_cpu_positions; }
@@ -133,6 +139,7 @@ private:
 	void recordVertexBuffers(const std::vector<Vertex>& vertices, bool needs_storage_usage, UploadContext& ctx);
 	void recordShadowVertexBuffer(const std::vector<glm::vec3>& positions, UploadContext& ctx);
 	void recordSkinVertexBuffer(const std::vector<SkinVertex>& skin_vertices, UploadContext& ctx);
+	void recordMorphBuffers(const ProcessedMesh& data, UploadContext& ctx);
 	void recordIndexBuffers(const std::vector<uint32_t>& indices, UploadContext& ctx);
 	void recordLodIndexBuffer(const std::vector<uint32_t>& indices, UploadContext& ctx);
 
@@ -140,6 +147,8 @@ private:
 	std::unique_ptr<VeBuffer> m_vertex_buffer;
 	std::unique_ptr<VeBuffer> m_shadow_vertex_buffer;
 	std::unique_ptr<VeBuffer> m_skin_vertex_buffer;
+	std::unique_ptr<VeBuffer> m_morph_position_buffer;
+	std::unique_ptr<VeBuffer> m_morph_normal_buffer;
 	std::unique_ptr<VeBuffer> m_index_buffer;
 	std::vector<LodLevel> m_lod_levels;  // LODs 1+ (LOD 0 is m_index_buffer)
 	uint32_t m_vertex_count{0};
@@ -150,10 +159,17 @@ private:
 	std::unique_ptr<CpuMeshletData> m_meshlet_data;
 	std::vector<AABB> m_joint_mesh_local_extents;
 	bool m_has_skinning{false};
+	uint32_t m_morph_target_count{0};
+	AABB m_morph_local_aabb{};
+	bool m_has_morph{false};
 };
 
 // Transform AABB by model matrix (transform 8 corners, take min/max of result).
 VENGINE_API VeMesh::AABB transformAABB(const VeMesh::AABB& local, const glm::mat4& model);
+
+inline VeMesh::AABB unionAABB(const VeMesh::AABB& a, const VeMesh::AABB& b) {
+	return {glm::min(a.min, b.min), glm::max(a.max, b.max)};
+}
 
 } // namespace ve
 

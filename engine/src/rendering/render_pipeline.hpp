@@ -52,7 +52,7 @@ class OutlineSystem;
 class GpuCullingSystem;
 class MeshletCullingSystem;
 class HizSystem;
-class SkinningPrePass;
+class DeformPrePass;
 class SkinnedPointsRenderSystem;
 class CpuCullingBackend;
 class GpuCullingBackend;
@@ -148,7 +148,7 @@ private:
 	std::unique_ptr<GpuCullingSystem> m_gpu_culling_system;
 	std::unique_ptr<MeshletCullingSystem> m_meshlet_culling_system;
 	std::unique_ptr<HizSystem> m_hiz_system;
-	std::unique_ptr<SkinningPrePass> m_skinning_pre_pass;
+	std::unique_ptr<DeformPrePass> m_deform_pre_pass;
 	std::unique_ptr<SkinnedPointsRenderSystem> m_skinned_points_render_system;
 
 	std::unique_ptr<CpuCullingBackend> m_cpu_backend;

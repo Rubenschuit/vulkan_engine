@@ -21,7 +21,7 @@ namespace ve {
 	class VeDescriptorSetLayout;
 	class VeDescriptorPool;
 	class EventBus;
-	class SkinningPrePass;
+	class DeformPrePass;
 }
 
 namespace ve {
@@ -108,7 +108,7 @@ public:
 		bool double_sided = false;
 		uint32_t ssbo_index = 0;
 		uint32_t lod_level = 0;
-		bool is_skinned = false;
+		bool is_deformed = false;
 	};
 
 private:

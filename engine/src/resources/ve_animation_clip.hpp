@@ -11,7 +11,8 @@ namespace ve {
 enum class AnimationPath : uint8_t {
 	Translation,
 	Rotation,
-	Scale
+	Scale,
+	Weights
 };
 
 enum class AnimationInterpolation : uint8_t {
@@ -23,7 +24,8 @@ enum class AnimationInterpolation : uint8_t {
 struct AnimationSampler {
 	std::vector<float> timestamps;
 	std::vector<float> values;
-	uint8_t component_count = 3; // vec3 for translation/scale, vec4 for rotation
+	uint8_t component_count = 3; 
+	uint16_t weights_target_count = 0;
 };
 
 struct AnimationChannel {

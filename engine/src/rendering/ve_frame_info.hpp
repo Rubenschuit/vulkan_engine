@@ -239,7 +239,7 @@ struct VeFrameInfo {
 	bool meshlet_culling_active = false;
 
 	// Pre-skinning output (vertices written to a scratch VBO before draws)
-	const class SkinningPrePass* skinning_pre_pass = nullptr;
+	const class DeformPrePass* deform_pre_pass = nullptr;
 
 	vk::raii::CommandBuffer& cmd() const {
 		assert(command_buffer && "command_buffer is null");

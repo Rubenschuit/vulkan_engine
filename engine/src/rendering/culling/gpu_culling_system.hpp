@@ -17,7 +17,7 @@ class VeDevice;
 class VeImage;
 class GpuSceneManager;
 class HizSystem;
-class SkinningPrePass;
+class DeformPrePass;
 struct VeFrameInfo;
 struct CameraView;
 
@@ -52,13 +52,13 @@ public:
 	GpuCullingSystem& operator=(const GpuCullingSystem&) = delete;
 
 	void createDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr,
-	                          SkinningPrePass& skinning_pre_pass);
+	                          DeformPrePass& deform_pre_pass);
 	void createShadowDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr,
-	                                SkinningPrePass& skinning_pre_pass);
+	                                DeformPrePass& deform_pre_pass);
 	void createShadowHizDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr,
-	                                   HizSystem& hiz, SkinningPrePass& skinning_pre_pass);
+	                                   HizSystem& hiz, DeformPrePass& deform_pre_pass);
 	void createHizDescriptorSets(VeDescriptorPool& pool, GpuSceneManager& scene_mgr,
-	                             HizSystem& hiz, SkinningPrePass& skinning_pre_pass);
+	                             HizSystem& hiz, DeformPrePass& deform_pre_pass);
 
 	void createGlobalDescriptorSets(VeDescriptorPool& pool,
 	                                VeDescriptorSetLayout& global_layout,
@@ -128,7 +128,7 @@ public:
 	void createCompactionDescriptorSets(VeDescriptorPool& pool);
 
 	void subscribeToEvents(EventBus& event_bus, HizSystem& hiz, GpuSceneManager& scene_mgr,
-	                       SkinningPrePass& skinning_pre_pass);
+	                       DeformPrePass& deform_pre_pass);
 
 private:
 	void createPipelineLayout();

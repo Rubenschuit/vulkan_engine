@@ -34,7 +34,7 @@
 #include "rendering/shadow_mask_system.hpp"
 #include "rendering/shadow_render_system.hpp"
 #include "rendering/skinned_points_render_system.hpp"
-#include "rendering/skinning_pre_pass.hpp"
+#include "rendering/deform_pre_pass.hpp"
 #include "rendering/skybox_render_system.hpp"
 #include "rendering/ve_frame_info.hpp"
 #include "rendering/ve_renderer.hpp"
@@ -296,8 +296,8 @@ void RenderPipeline::initRenderSystems() {
 		m_event_bus
 	);
 
-	m_skinning_pre_pass = std::make_unique<SkinningPrePass>(
-		m_ve_device, *m_resources.pool(), shader("skinning_comp.spv"), m_event_bus);
+	m_deform_pre_pass = std::make_unique<DeformPrePass>(
+		m_ve_device, *m_resources.pool(), shader("deform_comp.spv"), m_event_bus);
 
 	m_skinned_points_render_system = std::make_unique<SkinnedPointsRenderSystem>(
 		m_ve_device, m_resources.globalSetLayout().getDescriptorSetLayout(),
@@ -380,9 +380,9 @@ void RenderPipeline::renderFrame(VeScene& scene,
 		ZoneScopedN("Skinning Palette");
 		auto& profiler = m_ve_renderer.getProfiler();
 		profiler.beginCpuTimer(ProfileTimer::SKINNING);
-		m_skinning_pre_pass->updatePalette(scene.getRegistry(), fi.current_frame,
+		m_deform_pre_pass->updatePalette(scene.getRegistry(), fi.current_frame,
 			&m_ve_renderer.getThreadPool());
-		m_skinning_pre_pass->updateSkinnedOffsets(
+		m_deform_pre_pass->updateDeformedOffsets(
 			m_scene_resources->getGpuSceneManager(),
 			m_scene_resources->getMegaBuffer(),
 			fi.current_frame);
@@ -409,7 +409,7 @@ void RenderPipeline::ensureGpuCullingInfrastructure() {
 	ensureHizInfrastructure();
 
 	auto& gpu_scene = m_scene_resources->getGpuSceneManager();
-	auto& skinning = *m_skinning_pre_pass;
+	auto& skinning = *m_deform_pre_pass;
 	m_gpu_culling_system = std::make_unique<GpuCullingSystem>(m_ve_device, m_config.shaders_dir);
 	m_gpu_culling_system->createDescriptorSets(*m_resources.pool(), gpu_scene, skinning);
 	m_gpu_culling_system->createShadowDescriptorSets(*m_resources.pool(), gpu_scene, skinning);
@@ -436,7 +436,7 @@ void RenderPipeline::ensureMeshletCullingInfrastructure() {
 	ensureHizInfrastructure();
 
 	auto& gpu_scene = m_scene_resources->getGpuSceneManager();
-	auto& skinning = *m_skinning_pre_pass;
+	auto& skinning = *m_deform_pre_pass;
 	m_meshlet_culling_system = std::make_unique<MeshletCullingSystem>(
 		m_ve_device, m_config.shaders_dir, m_event_bus, *m_resources.pool(),
 		*m_scene_resources, m_scene_resources->getMegaBuffer(), *m_hiz_system, skinning);
@@ -603,7 +603,7 @@ VeFrameInfo RenderPipeline::buildFrameInfo(VeScene& scene,
 		},
 		.gpu_culling_active = gpu_culling_active,
 		.meshlet_culling_active = meshlet_active,
-		.skinning_pre_pass = m_skinning_pre_pass.get(),
+		.deform_pre_pass = m_deform_pre_pass.get(),
 	};
 
 	fi.ibl_descriptor_set = &m_ibl_system->getOutputDescriptorSet(current_frame);
@@ -671,7 +671,7 @@ void RenderPipeline::dispatchCompute(VeFrameInfo& fi) {
 			ScopedDebugLabel skin_label(fi.compute_command_buffer, "Skinning Dispatch", {0.9f, 0.6f, 0.9f, 1.0f});
 			TracyVkZone(m_ve_renderer.getTracyComputeCtx(), *fi.compute_command_buffer, "Skinning Dispatch");
 			profiler.beginGpuTimer(fi.compute_command_buffer, ProfileTimer::SKINNING);
-			m_skinning_pre_pass->dispatch(fi, m_scene_resources->getMegaBuffer());
+			m_deform_pre_pass->dispatch(fi, m_scene_resources->getMegaBuffer());
 			profiler.endGpuTimer(fi.compute_command_buffer, ProfileTimer::SKINNING);
 		}
 		{
@@ -970,7 +970,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 			if (m_settings.show_aabb_debug)
 				m_aabb_debug_render_system->render(fi);
 			if (m_settings.show_skinned_points)
-				m_skinned_points_render_system->render(fi, *m_skinning_pre_pass,
+				m_skinned_points_render_system->render(fi, *m_deform_pre_pass,
 					m_scene_resources->getMegaBuffer());
 		}
 		{

@@ -31,11 +31,15 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 	m_mega_shadow_vbo.reset();
 	m_mega_ibo.reset();
 	m_mega_skin_vbo.reset();
+	m_mega_morph_position.reset();
+	m_mega_morph_normal.reset();
 	m_meshlet_ibo.reset();
 	m_meshlet_ssbo.reset();
 	m_meshlet_ssbo_staging.reset();
 	m_meshlet_ibo_staging.reset();
 	m_static_vertex_count = 0;
+	static uint64_t s_generation_counter = 0;
+	m_generation = ++s_generation_counter;
 
 	if (meshes.empty())
 		return;
@@ -43,12 +47,15 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 	uint32_t total_vertices = 0;
 	uint32_t total_indices = 0;
 	uint32_t total_skin_vertices = 0;
+	uint64_t total_morph_vec4 = 0;
 	for (VeMesh* mesh : meshes) {
 		total_vertices += mesh->getVertexCount();
 		for (uint32_t lod = 0; lod < mesh->getLodCount(); lod++)
 			total_indices += mesh->getLodIndexCount(lod);
 		if (mesh->hasSkinning())
 			total_skin_vertices += mesh->getVertexCount();
+		if (mesh->hasMorphTargets())
+			total_morph_vec4 += static_cast<uint64_t>(mesh->getVertexCount()) * mesh->getMorphTargetCount();
 	}
 
 	if (total_vertices == 0 || total_indices == 0)
@@ -56,7 +63,7 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 
 	m_static_vertex_count = total_vertices;
 
-	const uint32_t dynamic_capacity = MAX_SKINNED_VERTICES_PER_FRAME * MAX_FRAMES_IN_FLIGHT;
+	const uint32_t dynamic_capacity = MAX_DEFORMED_VERTICES_PER_FRAME * MAX_FRAMES_IN_FLIGHT;
 	const uint32_t total_vbo_vertices = total_vertices + dynamic_capacity;
 
 	m_mega_vbo = std::make_unique<VeBuffer>(m_ve_device,
@@ -85,9 +92,24 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
 	}
 
+	// Static morph-delta regions
+	if (total_morph_vec4 > UINT32_MAX)
+		VE_LOGE("PBR mega-buffer: morph delta count " << total_morph_vec4
+		        << " exceeds uint32; morph disabled this build");
+	else if (total_morph_vec4 > 0) {
+		const vk::BufferUsageFlags morph_usage = vk::BufferUsageFlagBits::eStorageBuffer
+			| vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc;
+		const uint32_t morph_count = static_cast<uint32_t>(total_morph_vec4);
+		m_mega_morph_position = std::make_unique<VeBuffer>(m_ve_device,
+			sizeof(glm::vec4), morph_count, morph_usage, vk::MemoryPropertyFlagBits::eDeviceLocal);
+		m_mega_morph_normal = std::make_unique<VeBuffer>(m_ve_device,
+			sizeof(glm::vec4), morph_count, morph_usage, vk::MemoryPropertyFlagBits::eDeviceLocal);
+	}
+
 	uint32_t vertex_offset = 0;
 	uint32_t index_offset = 0;
 	uint32_t skin_vertex_offset = 0;
+	uint32_t morph_offset = 0;
 
 	for (VeMesh* mesh : meshes) {
 		uint32_t vc = mesh->getVertexCount();
@@ -122,6 +144,7 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 		entry.vertex_offset = vertex_offset;
 		entry.lod_entries.reserve(mesh->getLodCount());
 
+		// Copy skinning data if present
 		if (mesh->hasSkinning() && m_mega_skin_vbo) {
 			bool prev_has_skin = prev_entry && prev_entry->skin_vertex_offset != NO_SKIN_OFFSET;
 			vk::BufferCopy skin_copy{
@@ -137,6 +160,32 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 			cmd.copyBuffer(skin_src, m_mega_skin_vbo->getBuffer(), skin_copy);
 			entry.skin_vertex_offset = skin_vertex_offset;
 			skin_vertex_offset += vc;
+		}
+
+		// Copy morph target data if present
+		if (mesh->hasMorphTargets() && m_mega_morph_position) {
+			uint64_t mc64 = static_cast<uint64_t>(vc) * mesh->getMorphTargetCount();
+			assert(mc64 <= UINT32_MAX && "per-mesh morph element count overflow");
+			uint32_t mc = static_cast<uint32_t>(mc64);
+			bool prev_has_morph = prev_entry && prev_entry->morph_offset != NO_MORPH_OFFSET;
+			vk::BufferCopy morph_copy{
+				.srcOffset = prev_has_morph
+					? static_cast<vk::DeviceSize>(prev_entry->morph_offset) * sizeof(glm::vec4)
+					: vk::DeviceSize{0},
+				.dstOffset = static_cast<vk::DeviceSize>(morph_offset) * sizeof(glm::vec4),
+				.size = static_cast<vk::DeviceSize>(mc) * sizeof(glm::vec4),
+			};
+			vk::Buffer morph_pos_src = prev_has_morph
+				? previous->m_mega_morph_position->getBuffer()
+				: mesh->getMorphPositionBuffer().getBuffer();
+			vk::Buffer morph_nrm_src = prev_has_morph
+				? previous->m_mega_morph_normal->getBuffer()
+				: mesh->getMorphNormalBuffer().getBuffer();
+			cmd.copyBuffer(morph_pos_src, m_mega_morph_position->getBuffer(), morph_copy);
+			cmd.copyBuffer(morph_nrm_src, m_mega_morph_normal->getBuffer(), morph_copy);
+			entry.morph_offset = morph_offset;
+			entry.morph_target_count = mesh->getMorphTargetCount();
+			morph_offset += mc;
 		}
 
 		for (uint32_t lod = 0; lod < mesh->getLodCount(); lod++) {
@@ -255,7 +304,10 @@ void PbrMegaBuffer::swapState(PbrMegaBuffer& other) noexcept {
 	swap(m_mega_shadow_vbo, other.m_mega_shadow_vbo);
 	swap(m_mega_ibo, other.m_mega_ibo);
 	swap(m_mega_skin_vbo, other.m_mega_skin_vbo);
+	swap(m_mega_morph_position, other.m_mega_morph_position);
+	swap(m_mega_morph_normal, other.m_mega_morph_normal);
 	swap(m_static_vertex_count, other.m_static_vertex_count);
+	swap(m_generation, other.m_generation);
 	swap(m_meshlet_ibo, other.m_meshlet_ibo);
 	swap(m_meshlet_ssbo, other.m_meshlet_ssbo);
 	swap(m_meshlet_ssbo_staging, other.m_meshlet_ssbo_staging);
@@ -271,6 +323,8 @@ void PbrMegaBuffer::clear() {
 	m_mega_shadow_vbo.reset();
 	m_mega_ibo.reset();
 	m_mega_skin_vbo.reset();
+	m_mega_morph_position.reset();
+	m_mega_morph_normal.reset();
 	m_meshlet_ibo.reset();
 	m_meshlet_ssbo.reset();
 	m_meshlet_ssbo_staging.reset();

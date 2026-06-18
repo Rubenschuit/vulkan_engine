@@ -251,6 +251,8 @@ private:
 	SubscriptionId m_anim_removed_sub = 0;
 	SubscriptionId m_skin_added_sub = 0;
 	SubscriptionId m_skin_removed_sub = 0;
+	SubscriptionId m_morph_added_sub = 0;
+	SubscriptionId m_morph_removed_sub = 0;
 };
 
 }

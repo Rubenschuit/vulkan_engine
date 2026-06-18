@@ -232,7 +232,7 @@ private:
 
 	std::vector<ShadowDrawable> m_static_shadow_drawables;
 	std::vector<ShadowDrawable> m_dynamic_shadow_drawables;
-	std::vector<SkinnedShadowDrawable> m_skinned_shadow_drawables;
+	std::vector<SkinnedShadowDrawable> m_deformed_shadow_drawables;
 	bool m_static_drawables_dirty = true;
 	bool m_dynamic_drawables_dirty = true;
 	std::vector<ShadowInstanceGroup> m_shadow_instance_groups;       // point/spot (all objects)

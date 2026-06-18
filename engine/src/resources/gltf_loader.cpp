@@ -304,39 +304,73 @@ static NodeTRS getNodeTRS(const tinygltf::Node& node) {
 	return {{0, 0, 0}, {1, 1, 1}, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)};
 }
 
-// Read all float values from a glTF accessor into a flat vector
+// Read all float values from a glTF accessor into a flat vector, applying any sparse overlay.
 static std::vector<float> readAccessorFloats(const tinygltf::Model& gltf, int accessor_idx, int expected_components) {
 	const auto& acc = gltf.accessors[static_cast<size_t>(accessor_idx)];
-	const auto& bv = gltf.bufferViews[static_cast<size_t>(acc.bufferView)];
-	const auto& buf = gltf.buffers[static_cast<size_t>(bv.buffer)];
+	const size_t comp_size = gltfComponentSize(acc.componentType);
+	const size_t ec = static_cast<size_t>(expected_components);
 
-	size_t comp_size = gltfComponentSize(acc.componentType);
-	int stride_val = acc.ByteStride(bv);
-	size_t stride = stride_val > 0 ? static_cast<size_t>(stride_val) : comp_size * static_cast<size_t>(expected_components);
-	bool normalized = acc.normalized;
+	std::vector<float> result(acc.count * ec, 0.0f);
 
-	std::vector<float> result;
-	result.reserve(acc.count * static_cast<size_t>(expected_components));
-	for (size_t i = 0; i < acc.count; i++) {
-		const uint8_t* base = &buf.data[bv.byteOffset + acc.byteOffset + i * stride];
-		for (int c = 0; c < expected_components; c++)
-			result.push_back(readGltfComponent(base + static_cast<size_t>(c) * comp_size, acc.componentType, normalized));
+	if (acc.bufferView >= 0) {
+		const auto& bv = gltf.bufferViews[static_cast<size_t>(acc.bufferView)];
+		const auto& buf = gltf.buffers[static_cast<size_t>(bv.buffer)];
+		int stride_val = acc.ByteStride(bv);
+		size_t stride = stride_val > 0 ? static_cast<size_t>(stride_val) : comp_size * ec;
+		for (size_t i = 0; i < acc.count; i++) {
+			const uint8_t* base = &buf.data[bv.byteOffset + acc.byteOffset + i * stride];
+			for (size_t c = 0; c < ec; c++)
+				result[i * ec + c] = readGltfComponent(base + c * comp_size, acc.componentType, acc.normalized);
+		}
 	}
+
+	if (acc.sparse.isSparse) {
+		const auto& sidx = acc.sparse.indices;
+		const auto& sval = acc.sparse.values;
+		const auto& idx_bv = gltf.bufferViews[static_cast<size_t>(sidx.bufferView)];
+		const auto& idx_buf = gltf.buffers[static_cast<size_t>(idx_bv.buffer)];
+		const auto& val_bv = gltf.bufferViews[static_cast<size_t>(sval.bufferView)];
+		const auto& val_buf = gltf.buffers[static_cast<size_t>(val_bv.buffer)];
+		const size_t idx_comp_size = gltfComponentSize(sidx.componentType);
+		const size_t sparse_count = static_cast<size_t>(acc.sparse.count);
+		// Reject a sparse block that points past its buffer views (malformed/corrupt glTF).
+		if (idx_bv.byteOffset + sidx.byteOffset + sparse_count * idx_comp_size > idx_buf.data.size()
+		 || val_bv.byteOffset + sval.byteOffset + sparse_count * ec * comp_size > val_buf.data.size()) {
+			VE_LOGW("glTF sparse accessor extends past its buffer view; skipping sparse overlay");
+			return result;
+		}
+		const uint8_t* idx_base = &idx_buf.data[idx_bv.byteOffset + sidx.byteOffset];
+		const uint8_t* val_base = &val_buf.data[val_bv.byteOffset + sval.byteOffset];
+		for (size_t k = 0; k < sparse_count; k++) {
+			const uint8_t* ip = idx_base + k * idx_comp_size;
+			uint32_t target_index = 0;
+			switch (sidx.componentType) {
+				case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: target_index = *ip; break;
+				case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: target_index = *reinterpret_cast<const uint16_t*>(ip); break;
+				case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT: target_index = *reinterpret_cast<const uint32_t*>(ip); break;
+				default: target_index = *reinterpret_cast<const uint16_t*>(ip); break;
+			}
+			if (target_index >= acc.count)
+				continue;
+			for (size_t c = 0; c < ec; c++) {
+				const uint8_t* vp = val_base + (k * ec + c) * comp_size;
+				result[static_cast<size_t>(target_index) * ec + c] = readGltfComponent(vp, acc.componentType, acc.normalized);
+			}
+		}
+	}
+
 	return result;
 }
 
-// Convert a quaternion from glTF Y-up to engine Z-up
 static glm::quat convertQuatYupToZup(const glm::quat& q_gltf) {
 	const glm::mat4 M_engine = YUP_TO_ZUP * glm::mat4_cast(q_gltf) * ZUP_TO_YUP;
 	return glm::quat_cast(M_engine);
 }
 
-// Convert animation translation from glTF Y-up to engine Z-up: (x,y,z) -> (x,-z,y)
 static glm::vec3 convertTranslationYupToZup(float x, float y, float z) {
 	return {x, -z, y};
 }
 
-// Convert animation scale from glTF Y-up to engine Z-up: swap y and z
 static glm::vec3 convertScaleYupToZup(float x, float y, float z) {
 	return {x, z, y};
 }
@@ -399,8 +433,10 @@ static std::vector<VeAnimationClip> parseAnimations(
 				channel.path = AnimationPath::Rotation;
 			else if (gc.target_path == "scale")
 				channel.path = AnimationPath::Scale;
+			else if (gc.target_path == "weights")
+				channel.path = AnimationPath::Weights;
 			else
-				continue; // skip weights/unknown for now
+				continue;
 
 			// Map interpolation
 			const auto& gs = anim.samplers[static_cast<size_t>(gc.sampler)];
@@ -500,6 +536,11 @@ static std::vector<VeAnimationClip> parseAnimations(
 						sampler.values[base + 1] = v.y;
 						sampler.values[base + 2] = v.z;
 					}
+				}
+			} else if (channel.path == AnimationPath::Weights) {
+				if (n_keyframes > 0) {
+					size_t per_kf = sampler.values.size() / n_keyframes; // target_count, or 3*target_count for cubicspline
+					sampler.weights_target_count = static_cast<uint16_t>(is_cubicspline ? per_kf / 3 : per_kf);
 				}
 			}
 		}
@@ -1075,6 +1116,32 @@ static ProcessedMesh processPrimitive(
 		}
 	}
 
+	// Morph targets
+	const size_t morph_target_count = primitive.targets.size();
+	std::vector<glm::vec3> morph_pos_deltas;
+	std::vector<glm::vec3> morph_normal_deltas;
+	if (morph_target_count > 0) {
+		morph_pos_deltas.assign(morph_target_count * vertices.size(), glm::vec3(0.0f));
+		morph_normal_deltas.assign(morph_target_count * vertices.size(), glm::vec3(0.0f));
+		for (size_t t = 0; t < morph_target_count; t++) {
+			const auto& target = primitive.targets[t];
+			auto pit = target.find("POSITION");
+			if (pit != target.end()) {
+				std::vector<float> pd = readAccessorFloats(m, pit->second, 3);
+				size_t n = std::min(vertices.size(), pd.size() / 3);
+				for (size_t i = 0; i < n; i++)
+					morph_pos_deltas[t * vertices.size() + i] = {pd[i * 3 + 0], -pd[i * 3 + 2], pd[i * 3 + 1]};
+			}
+			auto nit = target.find("NORMAL");
+			if (nit != target.end()) {
+				std::vector<float> nd = readAccessorFloats(m, nit->second, 3);
+				size_t n = std::min(vertices.size(), nd.size() / 3);
+				for (size_t i = 0; i < n; i++)
+					morph_normal_deltas[t * vertices.size() + i] = {nd[i * 3 + 0], -nd[i * 3 + 2], nd[i * 3 + 1]};
+			}
+		}
+	}
+
 	const size_t vertex_count = vertices.size();
 	if (index_accessor && index_buf) {
 		const unsigned char* index_data = &index_buf->data[index_bv->byteOffset + index_accessor->byteOffset];
@@ -1163,6 +1230,21 @@ static ProcessedMesh processPrimitive(
 		out_skin_vertices.resize(unique_count);
 		meshopt_remapVertexBuffer(out_skin_vertices.data(), skin_vertices.data(),
 		                          skin_vertices.size(), sizeof(VeMesh::SkinVertex), remap.data());
+	}
+
+	std::vector<glm::vec3> out_morph_pos_deltas;
+	std::vector<glm::vec3> out_morph_normal_deltas;
+	if (morph_target_count > 0) {
+		out_morph_pos_deltas.resize(morph_target_count * unique_count);
+		out_morph_normal_deltas.resize(morph_target_count * unique_count);
+		for (size_t t = 0; t < morph_target_count; t++) {
+			meshopt_remapVertexBuffer(out_morph_pos_deltas.data() + t * unique_count,
+			                          morph_pos_deltas.data() + t * vertices.size(),
+			                          vertices.size(), sizeof(glm::vec3), remap.data());
+			meshopt_remapVertexBuffer(out_morph_normal_deltas.data() + t * unique_count,
+			                          morph_normal_deltas.data() + t * vertices.size(),
+			                          vertices.size(), sizeof(glm::vec3), remap.data());
+		}
 	}
 
 	if (out_center_extent && !out_vertices.empty()) {
@@ -1270,6 +1352,24 @@ static ProcessedMesh processPrimitive(
 		result.local_aabb = {mn, mx};
 	}
 
+	// Conservative AABB for morph targets
+	if (morph_target_count > 0 && !out_vertices.empty()) {
+		glm::vec3 mn(std::numeric_limits<float>::max());
+		glm::vec3 mx(std::numeric_limits<float>::lowest());
+		for (size_t v = 0; v < out_vertices.size(); v++) {
+			glm::vec3 lo = out_vertices[v].pos;
+			glm::vec3 hi = out_vertices[v].pos;
+			for (size_t t = 0; t < morph_target_count; t++) {
+				const glm::vec3& d = out_morph_pos_deltas[t * unique_count + v];
+				lo += glm::min(d, glm::vec3(0.0f));
+				hi += glm::max(d, glm::vec3(0.0f));
+			}
+			mn = glm::min(mn, lo);
+			mx = glm::max(mx, hi);
+		}
+		result.morph_local_aabb = {mn, mx};
+	}
+
 	// Build meshlet data
 	result.meshlet_data = VeMesh::buildMeshletData(out_vertices, out_indices, lod_indices);
 
@@ -1281,6 +1381,9 @@ static ProcessedMesh processPrimitive(
 	result.vertices = std::move(out_vertices);
 	result.skin_vertices = std::move(out_skin_vertices);
 	result.joint_mesh_local_extents = std::move(joint_mesh_local_extents);
+	result.morph_target_count = static_cast<uint32_t>(morph_target_count);
+	result.morph_pos_deltas = std::move(out_morph_pos_deltas);
+	result.morph_normal_deltas = std::move(out_morph_normal_deltas);
 	result.indices = std::move(out_indices);
 	result.lod_indices = std::move(lod_indices);
 	return result;
@@ -1329,6 +1432,18 @@ static void discoverNodeCpu(
 	const auto& node = ctx.gltf.nodes[static_cast<size_t>(gltf_node_idx)];
 	NodeTRS trs = getNodeTRS(node);
 
+	std::vector<float> morph_weights;
+	const std::vector<double>* src_weights = nullptr;
+	if (!node.weights.empty())
+		src_weights = &node.weights;
+	else if (node.mesh >= 0 && !ctx.gltf.meshes[static_cast<size_t>(node.mesh)].weights.empty())
+		src_weights = &ctx.gltf.meshes[static_cast<size_t>(node.mesh)].weights;
+	if (src_weights) {
+		morph_weights.reserve(src_weights->size());
+		for (double w : *src_weights)
+			morph_weights.push_back(static_cast<float>(w));
+	}
+
 	uint32_t node_idx = static_cast<uint32_t>(nodes.size());
 	gltf_to_loaded_idx[gltf_node_idx] = node_idx;
 	nodes.push_back({
@@ -1336,7 +1451,8 @@ static void discoverNodeCpu(
 		.translation = trs.translation,
 		.rotation = trs.rotation,
 		.scale = trs.scale,
-		.skin_idx = node.skin
+		.skin_idx = node.skin,
+		.morph_weights = std::move(morph_weights)
 	});
 
 	if (parent_node_idx >= 0)
@@ -2042,6 +2158,8 @@ LoadedAssetData load(
 		result.meshes.push_back(std::move(raw_meshes[i]));
 	}
 
+	// Mapping loaded node index -> its primitive node indices
+	std::unordered_map<uint32_t, std::vector<uint32_t>> weight_mirror_nodes;
 	for (const auto& pa : pending_attachments) {
 		auto it = geometry_mesh_cache.find(pa.key);
 		int mesh_data_idx = (it != geometry_mesh_cache.end()) ? it->second : -1;
@@ -2051,20 +2169,53 @@ LoadedAssetData load(
 			result.nodes[pa.node_idx].mesh_idx = mesh_data_idx;
 			result.nodes[pa.node_idx].material_idx = static_cast<int>(pa.mat_idx);
 		} else {
+			// glTF requires all primitives of a mesh to share one weights vector + target count.
+			uint32_t parent_tc = (result.nodes[pa.node_idx].mesh_idx >= 0)
+				? result.meshes[static_cast<size_t>(result.nodes[pa.node_idx].mesh_idx)].morph_target_count : 0;
+			uint32_t this_tc = result.meshes[static_cast<size_t>(mesh_data_idx)].morph_target_count;
+			if (this_tc != parent_tc && (this_tc > 0 || parent_tc > 0))
+				VE_LOGW("glTF mesh '" << pa.parent_node_name << "' has inconsistent morph target counts across primitives ("
+				        << parent_tc << " vs " << this_tc << ")");
+
 			uint32_t prim_node_idx = static_cast<uint32_t>(result.nodes.size());
 			result.nodes.push_back({
 				.name = pa.parent_node_name + "_prim" + std::to_string(pa.prim_idx),
 				.mesh_idx = mesh_data_idx,
 				.material_idx = static_cast<int>(pa.mat_idx),
 				.skin_idx = pa.skin_idx,
+				.morph_weights = result.nodes[pa.node_idx].morph_weights,
 			});
 			result.parent_links.emplace_back(prim_node_idx, pa.node_idx);
+			if (this_tc > 0)
+				weight_mirror_nodes[pa.node_idx].push_back(prim_node_idx);
 		}
 	}
 
 	// Parse animations
 	progress.setStatus("Parsing animations");
 	result.animation_clips = parseAnimations(gltf, result.gltf_to_loaded_idx, progress);
+
+	// A glTF weights animation targets a mesh node, but we split multi-primitive meshes
+	// into seperate nodes per primitive that share the node's weights.
+	if (!weight_mirror_nodes.empty()) {
+		for (auto& clip : result.animation_clips) {
+			size_t channel_count = clip.channels.size();
+			for (size_t ci = 0; ci < channel_count; ci++) {
+				AnimationChannel ch = clip.channels[ci];
+				if (ch.path != AnimationPath::Weights || ch.target_slot >= clip.target_node_indices.size())
+					continue;
+				auto mirror_it = weight_mirror_nodes.find(clip.target_node_indices[ch.target_slot]);
+				if (mirror_it == weight_mirror_nodes.end())
+					continue;
+				for (uint32_t mirror_node : mirror_it->second) {
+					AnimationChannel nch = ch;
+					nch.target_slot = static_cast<uint32_t>(clip.target_node_indices.size());
+					clip.target_node_indices.push_back(mirror_node);
+					clip.channels.push_back(nch);
+				}
+			}
+		}
+	}
 
 	result.skins = parseSkins(gltf);
 

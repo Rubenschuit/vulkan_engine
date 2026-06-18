@@ -18,6 +18,7 @@ struct ModelNode {
 	int mesh_idx = -1;
 	int material_idx = -1;
 	int skin_idx = -1;
+	std::vector<float> morph_weights;
 };
 
 struct ModelSkin {

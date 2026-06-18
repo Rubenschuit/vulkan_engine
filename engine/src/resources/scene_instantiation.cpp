@@ -113,7 +113,10 @@ Entity instantiateModel(const VeModel& model, Registry& registry,
 		    && static_cast<size_t>(node.material_idx) < material_handles.size()) {
 			const auto& mesh_h = mesh_handles[static_cast<size_t>(node.mesh_idx)];
 			const auto& mat_h = material_handles[static_cast<size_t>(node.material_idx)];
-			bool skip_dedup = node.skin_idx >= 0;
+			VeMesh* mesh_ptr = mesh_h.get();
+			bool mesh_has_morph = mesh_ptr && mesh_ptr->hasMorphTargets();
+			// Morph meshes carry per-instance weights
+			bool skip_dedup = node.skin_idx >= 0 || mesh_has_morph;
 			bool add_mesh = skip_dedup;
 			if (!skip_dedup) {
 				glm::vec3 pos(worldTransform(i)[3]);
@@ -133,6 +136,13 @@ Entity instantiateModel(const VeModel& model, Registry& registry,
 				auto* mat = mat_h.get();
 				mc.has_texture = (mat && mat->getAlbedoTexture().isValid()) ? 1.0f : 0.0f;
 				mesh_attached++;
+
+				if (mesh_has_morph) {
+					uint32_t tc = mesh_ptr->getMorphTargetCount();
+					std::vector<float> weights = node.morph_weights;
+					weights.resize(tc, 0.0f); // default/missing weights are zero
+					registry.addComponent<MorphComponent>(entity).setWeights(std::move(weights));
+				}
 			}
 		} else if (node.mesh_idx >= 0 || node.material_idx >= 0) {
 			mesh_skipped_invalid++;

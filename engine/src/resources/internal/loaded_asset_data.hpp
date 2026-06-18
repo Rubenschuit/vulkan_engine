@@ -60,6 +60,11 @@ struct ProcessedMesh {
 	std::vector<glm::vec3> shadow_positions;
 	std::vector<VeMesh::SkinVertex> skin_vertices;  // empty if mesh has no JOINTS_0/WEIGHTS_0
 	std::vector<VeMesh::AABB> joint_mesh_local_extents;  // per joint index, in mesh-local space
+
+	uint32_t morph_target_count = 0;
+	std::vector<glm::vec3> morph_pos_deltas;
+	std::vector<glm::vec3> morph_normal_deltas;
+	VeMesh::AABB morph_local_aabb{};  // conservative deformed bound
 	std::vector<uint32_t> indices;
 	std::vector<std::vector<uint32_t>> lod_indices;
 	VeMesh::AABB local_aabb{};

@@ -146,6 +146,28 @@ void GpuSceneManager::subscribeToRegistry(Registry& registry) {
 			markObjectDataDirty(event.entity);
 			setDynamic(event.entity, isDynamicEntity(*m_registry, event.entity));
 		});
+	m_morph_added_sub = registry.events().subscribe<ComponentAddedEvent<MorphComponent>>(
+		[this](const ComponentAddedEvent<MorphComponent>& event) {
+			if (!m_mega_buffer || !m_mat_mgr || !m_registry)
+				return;
+			auto* mc = m_registry->getComponent<MeshComponent>(event.entity);
+			if (!mc || !mc->hasMesh())
+				return;
+			if (hasGpuId(event.entity)) {
+				markObjectDataDirty(event.entity);
+			} else if (m_mega_buffer->getEntry(mc->getMesh())) {
+				registerObject(event.entity, *mc, *m_mega_buffer, *m_mat_mgr, *m_registry);
+			}
+			if (hasGpuId(event.entity))
+				setDynamic(event.entity, isDynamicEntity(*m_registry, event.entity));
+		});
+	m_morph_removed_sub = registry.events().subscribe<ComponentRemovedEvent<MorphComponent>>(
+		[this](const ComponentRemovedEvent<MorphComponent>& event) {
+			if (!hasGpuId(event.entity) || !m_registry)
+				return;
+			markObjectDataDirty(event.entity);
+			setDynamic(event.entity, isDynamicEntity(*m_registry, event.entity));
+		});
 	m_rb_changed_sub = registry.events().subscribe<RigidbodyChangedEvent>(
 		[this](const RigidbodyChangedEvent& event) {
 			if (hasGpuId(event.entity) && m_registry)
@@ -284,6 +306,8 @@ bool GpuSceneManager::isDynamicEntity(const Registry& registry, Entity entity) {
 		return true;
 	if (registry.hasComponent<SkinComponent>(entity))
 		return true;
+	if (registry.hasComponent<MorphComponent>(entity))
+		return true;
 	const auto* rb = registry.getComponent<RigidbodyComponent>(entity);
 	return rb && rb->getMotionType() == PhysicsMotionType::Dynamic;
 }
@@ -315,12 +339,15 @@ void GpuSceneManager::setDynamic(Entity entity, bool is_dynamic) {
 	m_dynamic_classification_changed = true;
 }
 
+// Only skinned bounds change per frame. Morph-only meshes keep the
+// static conservative bound set at registration (does not account for weights
+// exceeding 1.0 for now).
 void GpuSceneManager::refreshSkinnedAabbs(Registry& registry) {
 	bool any = false;
-	for (auto [entity, mc, sc] : registry.view<MeshComponent, SkinComponent>()) {
+	auto write_aabb = [&](Entity entity, MeshComponent& mc) {
 		auto it = m_entity_to_gpu_id.find(entity.index());
 		if (it == m_entity_to_gpu_id.end())
-			continue;
+			return;
 		uint32_t gpu_id = it->second;
 		VeMesh::AABB world_aabb = mc.getWorldAABB();
 		VeMesh::AABB local = transformAABB(world_aabb,
@@ -329,7 +356,9 @@ void GpuSceneManager::refreshSkinnedAabbs(Registry& registry) {
 		cpu.aabb_min = local.min;
 		cpu.aabb_max = local.max;
 		any = true;
-	}
+	};
+	for (auto [entity, mc, sc] : registry.view<MeshComponent, SkinComponent>())
+		write_aabb(entity, mc);
 	if (any)
 		m_object_data_dirty.fill(true);
 }
@@ -495,6 +524,8 @@ void GpuSceneManager::unsubscribeFromRegistry() {
 	events.unsubscribe<ComponentAddedEvent<MeshComponent>>(m_mesh_added_sub);
 	events.unsubscribe<ComponentAddedEvent<SkinComponent>>(m_skin_added_sub);
 	events.unsubscribe<ComponentRemovedEvent<SkinComponent>>(m_skin_removed_sub);
+	events.unsubscribe<ComponentAddedEvent<MorphComponent>>(m_morph_added_sub);
+	events.unsubscribe<ComponentRemovedEvent<MorphComponent>>(m_morph_removed_sub);
 	events.unsubscribe<RigidbodyChangedEvent>(m_rb_changed_sub);
 	events.unsubscribe<ComponentRemovedEvent<RigidbodyComponent>>(m_rb_removed_sub);
 	events.unsubscribe<AnimationStateChangedEvent>(m_anim_state_changed_sub);
@@ -505,6 +536,8 @@ void GpuSceneManager::unsubscribeFromRegistry() {
 	m_mesh_added_sub = 0;
 	m_skin_added_sub = 0;
 	m_skin_removed_sub = 0;
+	m_morph_added_sub = 0;
+	m_morph_removed_sub = 0;
 	m_rb_changed_sub = 0;
 	m_rb_removed_sub = 0;
 	m_anim_state_changed_sub = 0;
@@ -595,7 +628,7 @@ void GpuSceneManager::rebuildDrawGroups() {
 	active_gpu_ids.reserve(m_active_count);
 
 	auto isSkinned = [this](uint32_t gpu_id) {
-		return (m_cpu_object_data[gpu_id].object_flags & ObjectFlag::SKINNED) != 0;
+		return (m_cpu_object_data[gpu_id].object_flags & ObjectFlag::DEFORMED) != 0;
 	};
 
 	for (auto& [entity_idx, gpu_id] : m_entity_to_gpu_id) {
@@ -706,7 +739,7 @@ void GpuSceneManager::rebuildDrawGroups() {
 			groups[l] = last_valid;
 	}
 
-	// Sort by LOD-0 draw group 
+	// Sort by LOD-0 draw group
 	std::sort(active_gpu_ids.begin(), active_gpu_ids.end(),
 		[this](uint32_t a, uint32_t b) {
 			return m_object_lod_group_ids[a][0] < m_object_lod_group_ids[b][0];
@@ -730,19 +763,25 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 	Entity entity = m_gpu_id_to_entity[gpu_id];
 	const bool is_skinned = m_registry && m_registry->hasComponent<SkinComponent>(entity)
 		&& mesh.getMesh()->hasSkinning();
+	const bool is_morph = m_registry && m_registry->hasComponent<MorphComponent>(entity)
+		&& mesh.getMesh()->hasMorphTargets();
+	const bool is_deformed = is_skinned || is_morph;
 
 	VeMesh::AABB aabb;
 	if (is_skinned) {
 		const auto& extents = mesh.getMesh()->getJointMeshLocalExtents();
 		if (!extents.empty()) {
 			aabb = extents.front();
-			for (size_t i = 1; i < extents.size(); i++) {
-				aabb.min = glm::min(aabb.min, extents[i].min);
-				aabb.max = glm::max(aabb.max, extents[i].max);
-			}
+			for (size_t i = 1; i < extents.size(); i++)
+				aabb = unionAABB(aabb, extents[i]);
 		} else {
 			aabb = mesh.getMesh()->getLocalAABB();
 		}
+		// Skinned + morph: union the morph bound so morph displacement is covered too.
+		if (is_morph)
+			aabb = unionAABB(aabb, mesh.getMesh()->getMorphLocalAABB());
+	} else if (is_morph) {
+		aabb = mesh.getMesh()->getMorphLocalAABB();
 	} else {
 		aabb = mesh.getMesh()->getLocalAABB();
 	}
@@ -765,8 +804,8 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 			| (!mesh.has_shadow ? ObjectFlag::NO_SHADOW : 0u);
 	}
 	obj_flags |= (m_cpu_object_data[gpu_id].object_flags & ObjectFlag::DYNAMIC);
-	if (is_skinned)
-		obj_flags |= ObjectFlag::SKINNED;
+	if (is_deformed)
+		obj_flags |= ObjectFlag::DEFORMED;
 
 	bool was_transparent = m_is_transparent_by_gpu_id[gpu_id];
 	if (was_transparent != is_transparent) {
@@ -791,7 +830,7 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 	cpu.material_flags = mat_flags;
 	cpu.object_flags = obj_flags;
 	cpu.material_index = mat_index;
-	cpu.lod_count = is_skinned ? 1u : static_cast<uint32_t>(entry->lod_entries.size());
+	cpu.lod_count = is_deformed ? 1u : static_cast<uint32_t>(entry->lod_entries.size());
 	for (uint32_t l = 0; l < MAX_LOD_LEVELS; l++) {
 		uint32_t src = (l < entry->lod_entries.size()) ? l
 		             : static_cast<uint32_t>(entry->lod_entries.size()) - 1;

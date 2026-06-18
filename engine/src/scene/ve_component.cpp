@@ -28,6 +28,7 @@ template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<AnimatorComponent>(
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SkinComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<CameraComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<ParticleEmitterComponent>();
+template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MorphComponent>();
 
 
 // ---------------------------------------------------------------------------
@@ -163,11 +164,28 @@ void MeshComponent::invalidateWorldAABB() {
 	m_world_aabb_dirty = true;
 }
 
+void MeshComponent::editMaterialFactors(const std::function<void(MaterialFactors&)>& fn) {
+	VeMaterial* mat = getMaterial();
+	if (!mat)
+		return;
+	MaterialFactors factors = mat->getMaterialFactors();
+	fn(factors);
+	mat->setMaterialFactors(factors);
+	if (m_registry)
+		m_registry->events().emit(MeshDataChangedEvent{m_entity});
+}
+
 void MeshComponent::updateWorldAABB() const {
 	assert(m_registry && "MeshComponent must have Registry context for world AABB");
+	const glm::mat4& model = m_registry->getWorldTransform(m_entity);
+	const VeMesh* mesh = getMesh();
+	const bool has_morph = mesh && mesh->hasMorphTargets()
+		&& m_registry->hasComponent<MorphComponent>(m_entity);
+
 	const auto* skin = m_registry->getComponent<SkinComponent>(m_entity);
 	const auto& joint_local = skin ? skin->getJointLocalExtents() : std::vector<VeMesh::AABB>{};
 	const auto& joints = skin ? skin->getJointEntities() : std::vector<Entity>{};
+	bool have_skinned_bound = false;
 	if (skin && !joint_local.empty() && joint_local.size() == joints.size()) {
 		bool first = true;
 		for (size_t j = 0; j < joints.size(); j++) {
@@ -175,23 +193,27 @@ void MeshComponent::updateWorldAABB() const {
 			if (je.isNull() || !m_registry->isAlive(je))
 				continue;
 			VeMesh::AABB world_j = transformAABB(joint_local[j], m_registry->getWorldTransform(je));
-			if (first) {
-				m_cached_world_aabb = world_j;
-				first = false;
-			} else {
-				m_cached_world_aabb.min = glm::min(m_cached_world_aabb.min, world_j.min);
-				m_cached_world_aabb.max = glm::max(m_cached_world_aabb.max, world_j.max);
-			}
+			m_cached_world_aabb = first ? world_j : unionAABB(m_cached_world_aabb, world_j);
+			first = false;
 		}
-		if (first) {
-			// No joints contributed; fall through to static path
-		} else {
-			m_world_aabb_dirty = false;
-			return;
-		}
+		have_skinned_bound = !first;
 	}
-	const glm::mat4& model = m_registry->getWorldTransform(m_entity);
-	m_cached_world_aabb = transformAABB(getMesh()->getLocalAABB(), model);
+
+	if (!have_skinned_bound) {
+		// No skinning: a morph-only mesh uses the conservative bound; a missing mesh
+		// degenerates to a point at the entity origin.
+		VeMesh::AABB local{glm::vec3(0.0f), glm::vec3(0.0f)};
+		if (has_morph)
+			local = mesh->getMorphLocalAABB();
+		else if (mesh)
+			local = mesh->getLocalAABB();
+		m_cached_world_aabb = transformAABB(local, model);
+	} else if (has_morph) {
+		// The skinned bound tracks the animated base mesh; union so morph
+		// displacement is conservatively included too.
+		m_cached_world_aabb = unionAABB(m_cached_world_aabb,
+		                                transformAABB(mesh->getMorphLocalAABB(), model));
+	}
 	m_world_aabb_dirty = false;
 }
 
@@ -448,7 +470,7 @@ static glm::quat sampleQuat(const AnimationSampler& sampler, float t, AnimationI
 		return glm::normalize(glm::slerp(q0, q1, alpha));
 	}
 
-	// CubicSpline
+	// Cubic spline
 	float dt = t1 - t0;
 	size_t stride = 3 * 4;
 	const float* k0_val = &sampler.values[i * stride + 4];
@@ -474,6 +496,70 @@ static glm::quat sampleQuat(const AnimationSampler& sampler, float t, AnimationI
 	result.y = h00 * p0.y + h10 * dt * m0.y + h01 * p1.y + h11 * dt * m1.y;
 	result.z = h00 * p0.z + h10 * dt * m0.z + h01 * p1.z + h11 * dt * m1.z;
 	return glm::normalize(result);
+}
+
+// `n` is how many weights this mesh wants, 
+// `m` is how many the animation stores per keyframe. 
+// They match for normal meshes, but a multi-primitive mesh split across nodes 
+// can share one channel whose width differs from a given primitive's target count.
+// Weights are unclamped.
+static void sampleScalarArray(const AnimationSampler& sampler, float t,
+                              AnimationInterpolation interp, uint32_t n, std::vector<float>& out) {
+	out.assign(n, 0.0f);
+	const uint32_t m = sampler.weights_target_count;
+	if (n == 0 || m == 0 || sampler.timestamps.empty() || sampler.values.empty())
+		return;
+
+	const size_t stride = (interp == AnimationInterpolation::CubicSpline) ? 3u * m : m;
+	const size_t val_ofs = (interp == AnimationInterpolation::CubicSpline) ? m : 0u;
+	const uint32_t cn = std::min(n, m);
+
+	if (sampler.timestamps.size() == 1 || t <= sampler.timestamps.front()) {
+		const float* v = &sampler.values[val_ofs];
+		for (uint32_t c = 0; c < cn; c++) out[c] = v[c];
+		return;
+	}
+	if (t >= sampler.timestamps.back()) {
+		size_t last = sampler.timestamps.size() - 1;
+		const float* v = &sampler.values[last * stride + val_ofs];
+		for (uint32_t c = 0; c < cn; c++) out[c] = v[c];
+		return;
+	}
+
+	uint32_t i = findKeyframe(sampler.timestamps, t);
+	float t0 = sampler.timestamps[i];
+	float t1 = sampler.timestamps[i + 1];
+	float alpha = (t - t0) / (t1 - t0);
+
+	if (interp == AnimationInterpolation::Step) {
+		const float* v = &sampler.values[i * stride + val_ofs];
+		for (uint32_t c = 0; c < cn; c++) out[c] = v[c];
+		return;
+	}
+
+	if (interp == AnimationInterpolation::Linear) {
+		const float* v0 = &sampler.values[i * stride + val_ofs];
+		const float* v1 = &sampler.values[(i + 1) * stride + val_ofs];
+		for (uint32_t c = 0; c < cn; c++) out[c] = glm::mix(v0[c], v1[c], alpha);
+		return;
+	}
+
+	// Cubic spline
+	float dt = t1 - t0;
+	const float* k0_val = &sampler.values[i * stride + m];
+	const float* k0_out = &sampler.values[i * stride + 2u * m];
+	const float* k1_in  = &sampler.values[(i + 1) * stride];
+	const float* k1_val = &sampler.values[(i + 1) * stride + m];
+
+	float a2 = alpha * alpha;
+	float a3 = a2 * alpha;
+	float h00 = 2.0f * a3 - 3.0f * a2 + 1.0f;
+	float h10 = a3 - 2.0f * a2 + alpha;
+	float h01 = -2.0f * a3 + 3.0f * a2;
+	float h11 = a3 - a2;
+
+	for (uint32_t c = 0; c < cn; c++)
+		out[c] = h00 * k0_val[c] + h10 * dt * k0_out[c] + h01 * k1_val[c] + h11 * dt * k1_in[c];
 }
 
 // ---------------------------------------------------------------------------
@@ -696,6 +782,13 @@ void AnimatorComponent::update(float delta_time) {
 				case AnimationPath::Scale:
 					tc->setScale(sampleVec3(sampler, t, channel.interpolation));
 					break;
+				case AnimationPath::Weights: {
+					auto* morph = m_registry->getComponent<MorphComponent>(target);
+					if (morph && morph->targetCount() > 0)
+						sampleScalarArray(sampler, t, channel.interpolation,
+						                  static_cast<uint32_t>(morph->targetCount()), morph->weights());
+					break;
+				}
 			}
 		}
 	}
