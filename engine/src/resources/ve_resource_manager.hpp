@@ -121,7 +121,8 @@ public:
 	                                          MaterialTextures textures,
 	                                          MaterialAlphaProps alpha_props,
 	                                          MaterialFactors factors,
-	                                          bool flip_tex_coord_v = false);
+	                                          bool flip_tex_coord_v = false,
+	                                          MaterialUvTransforms uv_transforms = {});
 
 	// Register a VeMesh built from pre-decoded CPU data; records all buffer
 	// copies into ctx.transfer_cmd. Caller owns submit + sync.

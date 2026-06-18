@@ -30,7 +30,8 @@ public:
 	           MaterialTextures textures,
 	           MaterialAlphaProps alpha_props,
 	           MaterialFactors factors,
-	           bool flip_tex_coord_v = false);
+	           bool flip_tex_coord_v = false,
+	           MaterialUvTransforms uv_transforms = {});
 	~VeMaterial() override;
 
 	VeMaterial(const VeMaterial&) = delete;
@@ -42,6 +43,7 @@ public:
 	void setMaterialFactors(const MaterialFactors& factors);
 	// When true, vertex shader flips tex coord v. Required for some gltf exporters.
 	bool getFlipTexCoordV() const { return m_flip_tex_coord_v; }
+	const MaterialUvTransforms& getUvTransforms() const { return m_uv_transforms; }
 
 	const ResourceHandle<VeTexture>& getAlbedoTexture() const { return m_textures.albedo; }
 	const ResourceHandle<VeTexture>& getNormalTexture() const { return m_textures.normal; }
@@ -61,6 +63,7 @@ private:
 	MaterialAlphaProps m_alpha_props;
 	MaterialFactors m_factors;
 	bool m_flip_tex_coord_v{false};
+	MaterialUvTransforms m_uv_transforms;
 };
 
 } // namespace ve

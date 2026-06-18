@@ -17,6 +17,22 @@ struct MaterialAlphaProps {
 	bool use_spec_gloss_texture = false;  // MR texture is specularGlossinessTexture (RGB=specular, A=glossiness)
 };
 
+// KHR_texture_transform: per-texture-slot UV offset/scale/rotation. Identity by
+// default so materials without the extension are a no-op in the shader.
+struct UvTransform {
+	glm::vec2 offset{0.0f, 0.0f};
+	glm::vec2 scale{1.0f, 1.0f};
+	float rotation{0.0f};  // radians
+};
+
+struct MaterialUvTransforms {
+	UvTransform albedo;
+	UvTransform metallic_roughness;
+	UvTransform normal;
+	UvTransform occlusion;
+	UvTransform emissive;
+};
+
 // PBR data from glTF
 struct MaterialFactors {
 	glm::vec4 base_color_factor{1.0f, 1.0f, 1.0f, 1.0f};

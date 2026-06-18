@@ -140,6 +140,7 @@ void MaterialSSBOManager::releaseSlot(VeMaterial* mat) {
 void MaterialSSBOManager::writeMaterialGPU(uint32_t index, VeMaterial* mat) {
 	auto factors = mat->getMaterialFactors();
 	auto alpha_props = mat->getAlphaProps();
+	const auto& uv = mat->getUvTransforms();
 
 	auto getIdx = [&](const ResourceHandle<VeTexture>& tex, TextureType fallback) -> uint32_t {
 		if (tex.isValid())
@@ -172,6 +173,13 @@ void MaterialSSBOManager::writeMaterialGPU(uint32_t index, VeMaterial* mat) {
 		.specular_strength = factors.specular_strength,
 		._pad0 = 0,
 		._pad1 = 0,
+		.uv_albedo = glm::vec4(uv.albedo.offset, uv.albedo.scale),
+		.uv_metal_rough = glm::vec4(uv.metallic_roughness.offset, uv.metallic_roughness.scale),
+		.uv_normal = glm::vec4(uv.normal.offset, uv.normal.scale),
+		.uv_occlusion = glm::vec4(uv.occlusion.offset, uv.occlusion.scale),
+		.uv_emissive = glm::vec4(uv.emissive.offset, uv.emissive.scale),
+		.uv_rot_a = glm::vec4(uv.albedo.rotation, uv.metallic_roughness.rotation, uv.normal.rotation, uv.occlusion.rotation),
+		.uv_rot_b = glm::vec4(uv.emissive.rotation, 0.0f, 0.0f, 0.0f),
 	};
 
 	m_staging_buffer->writeToBuffer(&gpu, sizeof(MaterialGPU),

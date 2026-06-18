@@ -31,10 +31,17 @@ struct GpuCaps {
 	bool supports_astc = false;
 };
 
+enum class AlphaCoverage : uint8_t {
+	Unknown,
+	Opaque,
+	Cutout,
+};
+
 struct DecodedTexture {
 	std::string resource_id;
 	std::filesystem::path file_path;
 	TextureType type = TextureType::ALBEDO;
+	AlphaCoverage alpha_coverage = AlphaCoverage::Unknown;
 
 	// Pre-decoded payload populated on the loader worker thread.
 	// Empty pixels vector means the decode failed; the upload stage skips the slot
@@ -89,6 +96,7 @@ struct ProcessedMaterial {
 	int specular_color_tex_idx = -1;
 	MaterialAlphaProps alpha_props;
 	MaterialFactors factors;
+	MaterialUvTransforms uv_transforms;
 	bool flip_tex_coord_v = false;
 };
 

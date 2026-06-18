@@ -33,8 +33,16 @@ struct MaterialGPU {
 	float    specular_strength;
 	uint32_t _pad0;
 	uint32_t _pad1;
+	// KHR_texture_transform, per slot: (offset.xy, scale.xy). Identity when unused.
+	glm::vec4 uv_albedo;
+	glm::vec4 uv_metal_rough;
+	glm::vec4 uv_normal;
+	glm::vec4 uv_occlusion;
+	glm::vec4 uv_emissive;
+	glm::vec4 uv_rot_a;  // rotation radians: x=albedo y=metalRough z=normal w=occlusion
+	glm::vec4 uv_rot_b;  // x=emissive, yzw reserved
 };
-static_assert(sizeof(MaterialGPU) == 112, "MaterialGPU must be 112 bytes for SSBO alignment");
+static_assert(sizeof(MaterialGPU) == 224, "MaterialGPU must be 224 bytes for SSBO alignment");
 
 class VENGINE_API MaterialSSBOManager {
 public:

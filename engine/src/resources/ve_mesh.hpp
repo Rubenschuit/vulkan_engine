@@ -35,6 +35,7 @@ public:
 		glm::vec3 normal;
 		glm::vec2 tex_coord{0.0f, 0.0f};
 		glm::vec4 tangent{0.0f, 0.0f, 0.0f, 0.0f};
+		glm::vec4 color{1.0f, 1.0f, 1.0f, 1.0f};
 
 		static std::vector<vk::VertexInputBindingDescription> getBindingDescriptions();
 		static std::vector<vk::VertexInputBindingDescription> getShadowBindingDescriptions();
@@ -44,9 +45,10 @@ public:
 
 		bool operator==(const Vertex& other) const {
 			return pos == other.pos && normal == other.normal &&
-			       tangent == other.tangent && tex_coord == other.tex_coord;
+			       tangent == other.tangent && tex_coord == other.tex_coord && color == other.color;
 		}
 	};
+	static_assert(sizeof(Vertex) == 64, "Vertex must be 64 bytes");
 
 	struct LodLevel {
 		std::unique_ptr<VeBuffer> index_buffer;
@@ -181,6 +183,7 @@ struct std::hash<ve::VeMesh::Vertex> {
 		seed ^= std::hash<glm::vec3>()(v.normal) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 		seed ^= std::hash<glm::vec2>()(v.tex_coord) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 		seed ^= std::hash<glm::vec4>()(v.tangent) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+		seed ^= std::hash<glm::vec4>()(v.color) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 		return seed;
 	}
 };

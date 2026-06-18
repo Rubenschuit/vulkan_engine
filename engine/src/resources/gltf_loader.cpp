@@ -189,34 +189,6 @@ static const glm::mat4 ZUP_TO_YUP(1.0f, 0.0f, 0.0f, 0.0f,
 // Compensate so emissive intensities match other exporters. See glTF-Blender-IO #2473.
 static constexpr float BLENDER_EMISSIVE_FACTOR = 638.0f;
 
-// Material name heuristic rules. Contains overrides for
-// materials that lack proper glTF extension data (e.g. glass, liquid).
-struct MaterialNameRule {
-	const char* keyword;
-	float color_scale;           // multiply RGB (1.0 = no change)
-	float roughness_scale;       // multiply roughness (1.0 = no change)
-	float alpha_scale;           // multiply alpha (1.0 = no change)
-	float min_alpha;             // clamp alpha >= this (-1 = skip)
-	float default_transmission;  // set if transmission <= 0 (-1 = skip)
-	float max_transmission;      // clamp transmission <= this (-1 = skip)
-	bool implies_transparency;
-};
-static const MaterialNameRule s_material_name_rules[] = {
-	//          color rough alpha min_a  tr    max_tr  transparent
-	{"beer",    1.4f, 0.8f, 1.2f, 0.15f, -1.f, -1.f,   false},
-	{"wine",    1.4f, 0.8f, 1.2f, 0.15f, -1.f, -1.f,   false},
-	{"liquid",  1.4f, 0.8f, 1.2f, 0.15f, -1.f, -1.f,   false},
-	{"glass",   1.0f, 1.0f, 1.0f, 0.4f,  0.7f, 0.75f,  true},
-	{"window",  1.0f, 1.0f, 1.0f, 0.4f,  0.7f, 0.75f,  true},
-	{"frosted", 1.0f, 1.0f, 1.0f, 0.4f,  0.7f, 0.75f,  true},
-	{"bottle",  1.0f, 1.0f, 1.0f, 0.70f, -1.f, 0.85f,  true},
-	{"leaf",    1.0f, 1.0f, 1.0f, -1.f,  -1.f, -1.f,   true},
-	{"foliage", 1.0f, 1.0f, 1.0f, -1.f,  -1.f, -1.f,   true},
-	{"vine",    1.0f, 1.0f, 1.0f, -1.f,  -1.f, -1.f,   true},
-	{"curtain", 1.0f, 1.0f, 1.0f, -1.f,  -1.f, -1.f,   true},
-	{"decal",   1.0f, 1.0f, 1.0f, -1.f,  -1.f, -1.f,   true},
-};
-
 // Byte size of a single glTF component (BYTE=1, SHORT=2, FLOAT=4, etc.)
 static size_t gltfComponentSize(int componentType) {
 	switch (componentType) {
@@ -257,6 +229,7 @@ static float readGltfComponent(const uint8_t* data, int componentType, bool norm
 struct ParsedMaterial {
 	MaterialAlphaProps alpha_props;
 	MaterialFactors factors;
+	MaterialUvTransforms uv_transforms;
 	std::filesystem::path albedo_path, normal_path, metallic_roughness_path,
 	                      occlusion_path, emissive_path,
 	                      specular_path, specular_color_path;
@@ -984,6 +957,13 @@ static ProcessedMesh processPrimitive(
 	const tinygltf::BufferView* tex_bv = has_tex_coords ? &m.bufferViews[static_cast<size_t>(tex_acc->bufferView)] : nullptr;
 	const tinygltf::Buffer* tex_buf = has_tex_coords ? &m.buffers[static_cast<size_t>(tex_bv->buffer)] : nullptr;
 
+	// COLOR_0 is optional and may be VEC3 or VEC4, float or normalized u8/u16: normalize to linear vec4
+	bool has_colors = primitive.attributes.find("COLOR_0") != primitive.attributes.end();
+	const tinygltf::Accessor* color_acc = has_colors ? &m.accessors[static_cast<size_t>(primitive.attributes.at("COLOR_0"))] : nullptr;
+	const tinygltf::BufferView* color_bv = has_colors ? &m.bufferViews[static_cast<size_t>(color_acc->bufferView)] : nullptr;
+	const tinygltf::Buffer* color_buf = has_colors ? &m.buffers[static_cast<size_t>(color_bv->buffer)] : nullptr;
+	const int color_components = has_colors ? (color_acc->type == TINYGLTF_TYPE_VEC4 ? 4 : 3) : 0;
+
 	int pos_stride_val = pos_accessor.ByteStride(pos_bv);
 	const size_t pos_stride = pos_stride_val > 0 ? static_cast<size_t>(pos_stride_val) : gltfComponentSize(pos_accessor.componentType) * 3;
 	int normal_stride_val = has_normals ? normal_acc->ByteStride(*normal_bv) : 0;
@@ -1010,10 +990,14 @@ static ProcessedMesh processPrimitive(
 		}
 	}
 
+	int color_stride_val = has_colors ? color_acc->ByteStride(*color_bv) : 0;
+	const size_t color_stride = color_stride_val > 0 ? static_cast<size_t>(color_stride_val) : (has_colors ? gltfComponentSize(color_acc->componentType) * static_cast<size_t>(color_components) : size_t{0});
+
 	const size_t pos_comp_size = gltfComponentSize(pos_accessor.componentType);
 	const size_t normal_comp_size = has_normals ? gltfComponentSize(normal_acc->componentType) : 4;
 	const size_t tangent_comp_size = has_tangents ? gltfComponentSize(tangent_acc->componentType) : 4;
 	const size_t tex_comp_size = has_tex_coords ? gltfComponentSize(tex_acc->componentType) : 4;
+	const size_t color_comp_size = has_colors ? gltfComponentSize(color_acc->componentType) : 4;
 
 	// Stage 1: build vertex array and indices (same as createPrimitiveMesh)
 	vertices.reserve(static_cast<size_t>(pos_accessor.count));
@@ -1071,6 +1055,15 @@ static ProcessedMesh processPrimitive(
 			vertex.tangent = glm::vec4(T, w);
 		} else {
 			vertex.tangent = {0, 0, 0, 0};
+		}
+
+		if (has_colors && color_stride > 0) {
+			const uint8_t* c_base = &color_buf->data[color_bv->byteOffset + color_acc->byteOffset + i * color_stride];
+			float cr = readGltfComponent(c_base + 0 * color_comp_size, color_acc->componentType, color_acc->normalized);
+			float cg = readGltfComponent(c_base + 1 * color_comp_size, color_acc->componentType, color_acc->normalized);
+			float cb = readGltfComponent(c_base + 2 * color_comp_size, color_acc->componentType, color_acc->normalized);
+			float ca = (color_components == 4) ? readGltfComponent(c_base + 3 * color_comp_size, color_acc->componentType, color_acc->normalized) : 1.0f;
+			vertex.color = {cr, cg, cb, ca};
 		}
 		vertices.push_back(vertex);
 	}
@@ -1511,24 +1504,27 @@ static bool LoadImageDataCpuOnly(tinygltf::Image* image, const int /*image_idx*/
 	return true;
 }
 
-// KHR_materials_... extensions handled by parseSingleMaterial
-static const std::unordered_set<std::string> s_supported_khr_materials_extensions = {
+// Every glTF extension this loader actually consumes. Anything in extensionsUsed
+// outside this set is silently dropped at parse time, so warn the author about it.
+static const std::unordered_set<std::string> s_supported_extensions = {
 	"KHR_materials_pbrSpecularGlossiness",
 	"KHR_materials_emissive_strength",
 	"KHR_materials_transmission",
 	"KHR_materials_ior",
 	"KHR_materials_specular",
+	"KHR_texture_basisu",
+	"KHR_lights_punctual",
+	"KHR_texture_transform",
+	"EXT_meshopt_compression",
 };
 
-static void warnUnsupportedMaterialExtensions(const tinygltf::Model& gltf, const std::filesystem::path& model_path) {
+static void warnUnsupportedExtensions(const tinygltf::Model& gltf, const std::filesystem::path& model_path) {
 	for (const auto& ext : gltf.extensionsUsed) {
-		if (ext.rfind("KHR_materials_", 0) != 0)
-			continue;
-		if (s_supported_khr_materials_extensions.count(ext))
+		if (s_supported_extensions.count(ext))
 			continue;
 		bool required = std::find(gltf.extensionsRequired.begin(), gltf.extensionsRequired.end(), ext) != gltf.extensionsRequired.end();
-		VE_LOGW("glTF '" << model_path.filename().string() << "' uses unsupported material extension '"
-			<< ext << "'" << (required ? " (required)" : "") << "; material data from this extension will be ignored");
+		VE_LOGW("glTF '" << model_path.filename().string() << "' uses unsupported extension '"
+			<< ext << "'" << (required ? " (required)" : "") << "; its data will be ignored and the model may render incorrectly");
 	}
 }
 
@@ -1562,7 +1558,7 @@ static bool loadGltfFile(const std::filesystem::path& model_path, tinygltf::Mode
 	}
 	if (!warn.empty())
 		VE_LOGW("glTF warning: " << warn);
-	warnUnsupportedMaterialExtensions(gltf, model_path);
+	warnUnsupportedExtensions(gltf, model_path);
 	return true;
 }
 
@@ -1760,6 +1756,32 @@ static void applyTexturePathFallbacks(
 	}
 }
 
+// Read KHR_texture_transform (offset/scale/rotation) from any glTF texture-info
+// type (TextureInfo / NormalTextureInfo / OcclusionTextureInfo all expose
+// .extensions). Returns identity when the extension is absent.
+template <typename TexInfo>
+static UvTransform readUvTransform(const TexInfo& ti, const char* slot, const std::string& model_name) {
+	UvTransform xform;
+	auto it = ti.extensions.find("KHR_texture_transform");
+	if (it == ti.extensions.end())
+		return xform;
+	const tinygltf::Value& ext = it->second;
+	if (ext.Has("offset") && ext.Get("offset").IsArray() && ext.Get("offset").ArrayLen() >= 2) {
+		xform.offset.x = static_cast<float>(ext.Get("offset").Get(0).Get<double>());
+		xform.offset.y = static_cast<float>(ext.Get("offset").Get(1).Get<double>());
+	}
+	if (ext.Has("scale") && ext.Get("scale").IsArray() && ext.Get("scale").ArrayLen() >= 2) {
+		xform.scale.x = static_cast<float>(ext.Get("scale").Get(0).Get<double>());
+		xform.scale.y = static_cast<float>(ext.Get("scale").Get(1).Get<double>());
+	}
+	if (ext.Has("rotation") && ext.Get("rotation").IsNumber())
+		xform.rotation = static_cast<float>(ext.Get("rotation").Get<double>());
+	if (ext.Has("texCoord") && ext.Get("texCoord").IsInt() && ext.Get("texCoord").Get<int>() != 0)
+		VE_LOGW("glTF '" << model_name << "' " << slot << " KHR_texture_transform uses texCoord set "
+			<< ext.Get("texCoord").Get<int>() << "; only TEXCOORD_0 is supported, transform applied to TEXCOORD_0");
+	return xform;
+}
+
 // Parse a single glTF material into engine-friendly PBR data.
 static ParsedMaterial parseSingleMaterial(
     const tinygltf::Material& mat, const tinygltf::Model& gltf,
@@ -1875,60 +1897,6 @@ static ParsedMaterial parseSingleMaterial(
 		}
 	}
 
-	// Material name heuristics
-	std::string mat_name_lower = mat.name.empty() ? "" : mat.name;
-	std::transform(mat_name_lower.begin(), mat_name_lower.end(), mat_name_lower.begin(),
-	               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-	std::string albedo_name_lower;
-	if (mat.pbrMetallicRoughness.baseColorTexture.index >= 0) {
-		int img_idx = getTextureImageIndex(gltf, static_cast<size_t>(mat.pbrMetallicRoughness.baseColorTexture.index));
-		if (img_idx >= 0) {
-			const auto& uri = gltf.images[static_cast<size_t>(img_idx)].uri;
-			if (!uri.empty()) {
-				albedo_name_lower = uri;
-				std::transform(albedo_name_lower.begin(), albedo_name_lower.end(), albedo_name_lower.begin(),
-				               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			}
-		}
-	}
-	bool name_implies_transparency = false;
-	for (const auto& rule : s_material_name_rules) {
-		if (mat_name_lower.find(rule.keyword) == std::string::npos &&
-		    (albedo_name_lower.empty() || albedo_name_lower.find(rule.keyword) == std::string::npos))
-			continue;
-		if (rule.color_scale != 1.0f) {
-			factors.base_color_factor.x = std::clamp(factors.base_color_factor.x * rule.color_scale, 0.0f, 4.0f);
-			factors.base_color_factor.y = std::clamp(factors.base_color_factor.y * rule.color_scale, 0.0f, 4.0f);
-			factors.base_color_factor.z = std::clamp(factors.base_color_factor.z * rule.color_scale, 0.0f, 4.0f);
-		}
-		if (rule.roughness_scale != 1.0f)
-			factors.roughness_factor = std::clamp(factors.roughness_factor * rule.roughness_scale, 0.0f, 1.0f);
-		if (rule.alpha_scale != 1.0f)
-			factors.base_color_factor.w = std::clamp(factors.base_color_factor.w * rule.alpha_scale, 0.0f, 1.0f);
-		if (rule.default_transmission >= 0.0f && factors.transmission_factor <= 0.0f)
-			factors.transmission_factor = rule.default_transmission;
-		if (rule.max_transmission >= 0.0f && factors.transmission_factor > rule.max_transmission)
-			factors.transmission_factor = rule.max_transmission;
-		if (rule.min_alpha >= 0.0f && factors.base_color_factor.w < rule.min_alpha)
-			factors.base_color_factor.w = rule.min_alpha;
-		if (rule.implies_transparency)
-			name_implies_transparency = true;
-	}
-	// Treat BLEND as opaque unless there is real transparency/transmission
-	if (result.alpha_props.alpha_mode == AlphaMode::BLEND &&
-		factors.transmission_factor <= 0.0f &&
-		factors.base_color_factor.w >= 0.99f &&
-		!name_implies_transparency)
-		result.alpha_props.alpha_mode = AlphaMode::ALPHA_OPAQUE;
-
-	// Promote OPAQUE to MASK when the material or texture name implies transparency
-	// (e.g. leaf textures in scenes that incorrectly omit alphaMode)
-	if (result.alpha_props.alpha_mode == AlphaMode::ALPHA_OPAQUE && name_implies_transparency) {
-		result.alpha_props.alpha_mode = AlphaMode::MASK;
-		if (result.alpha_props.alpha_cutoff <= 0.0f)
-			result.alpha_props.alpha_cutoff = 0.5f;
-	}
-
 	// Resolve texture paths
 	if (mat.pbrMetallicRoughness.baseColorTexture.index >= 0) {
 		result.albedo_path = resolveTexturePath(gltf,
@@ -1957,6 +1925,13 @@ static ParsedMaterial parseSingleMaterial(
 		result.occlusion_path = resolveTexturePath(gltf, static_cast<size_t>(mat.occlusionTexture.index), model_dir, model_path_str, embedded);
 	if (mat.emissiveTexture.index >= 0)
 		result.emissive_path = resolveTexturePath(gltf, static_cast<size_t>(mat.emissiveTexture.index), model_dir, model_path_str, embedded);
+
+	// KHR_texture_transform per slot (identity when absent)
+	result.uv_transforms.albedo = readUvTransform(mat.pbrMetallicRoughness.baseColorTexture, "baseColor", model_path_str);
+	result.uv_transforms.metallic_roughness = readUvTransform(mat.pbrMetallicRoughness.metallicRoughnessTexture, "metallicRoughness", model_path_str);
+	result.uv_transforms.normal = readUvTransform(mat.normalTexture, "normal", model_path_str);
+	result.uv_transforms.occlusion = readUvTransform(mat.occlusionTexture, "occlusion", model_path_str);
+	result.uv_transforms.emissive = readUvTransform(mat.emissiveTexture, "emissive", model_path_str);
 
 	// KHR_materials_specular textures
 	if (it_spec != mat.extensions.end()) {
@@ -2001,6 +1976,37 @@ static std::vector<MaterialFactors> extractFactors(const std::vector<ParsedMater
 	for (const auto& m : materials)
 		factors.push_back(m.factors);
 	return factors;
+}
+
+// Some gltf exports flag opaque and cutout surfaces as BLEND
+static void reinterpretBlendMaterials(std::vector<ProcessedMaterial>& materials,
+                                      const std::vector<DecodedTexture>& textures) {
+	for (auto& m : materials) {
+		if (m.alpha_props.alpha_mode != AlphaMode::BLEND)
+			continue;
+		// Genuine translucency (semi-transparent base or transmission) stays BLEND.
+		if (m.factors.transmission_factor > 0.0f || m.factors.base_color_factor.w < 0.99f)
+			continue;
+
+		// No albedo texture => alpha lives only in the (opaque) base color factor.
+		AlphaCoverage coverage = AlphaCoverage::Opaque;
+		if (m.albedo_tex_idx >= 0 && static_cast<size_t>(m.albedo_tex_idx) < textures.size())
+			coverage = textures[static_cast<size_t>(m.albedo_tex_idx)].alpha_coverage;
+
+		switch (coverage) {
+			case AlphaCoverage::Opaque:
+				m.alpha_props.alpha_mode = AlphaMode::ALPHA_OPAQUE;
+				break;
+			case AlphaCoverage::Cutout:
+				m.alpha_props.alpha_mode = AlphaMode::MASK;
+				if (m.alpha_props.alpha_cutoff <= 0.0f)
+					m.alpha_props.alpha_cutoff = 0.5f;
+				break;
+			// Unknown (decode failure / unsupported format): keep BLEND.
+			default:
+				break;
+		}
+	}
 }
 
 } // namespace ve
@@ -2061,6 +2067,7 @@ LoadedAssetData load(
 		pmat.resource_id = model_path.generic_string() + "::material_" + std::to_string(i);
 		pmat.alpha_props = pm.alpha_props;
 		pmat.factors = pm.factors;
+		pmat.uv_transforms = pm.uv_transforms;
 		pmat.flip_tex_coord_v = flip_tex_coord_v;
 		pmat.albedo_tex_idx = addTexRef(pm.albedo_path, TextureType::ALBEDO);
 		pmat.normal_tex_idx = addTexRef(pm.normal_path, TextureType::NORMAL);
@@ -2147,6 +2154,8 @@ LoadedAssetData load(
 		});
 	if (progress.cancelled.load())
 		return result;
+
+	reinterpretBlendMaterials(result.materials, result.textures);
 
 	// Compact non-empty meshes + apply node attachments
 	std::unordered_map<std::string, int> geometry_mesh_cache;

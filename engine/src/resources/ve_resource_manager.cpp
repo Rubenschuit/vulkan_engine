@@ -143,7 +143,8 @@ ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& 
                                                              MaterialTextures textures,
                                                              MaterialAlphaProps alpha_props,
                                                              MaterialFactors factors,
-                                                             bool flip_tex_coord_v) {
+                                                             bool flip_tex_coord_v,
+                                                             MaterialUvTransforms uv_transforms) {
 	auto type_idx = typeid(VeMaterial).hash_code();
 	auto& type_resources = m_resources[type_idx];
 	auto it = type_resources.find(resource_id);
@@ -170,7 +171,7 @@ ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& 
 		textures.specular_color = load<VeTexture>("default_specular_color");
 
 	auto resource = std::make_shared<VeMaterial>(resource_id, std::move(textures),
-	                                             alpha_props, factors, flip_tex_coord_v);
+	                                             alpha_props, factors, flip_tex_coord_v, uv_transforms);
 	type_resources[resource_id] = std::move(resource);
 	m_ref_counts[type_idx][resource_id] = 1;
 	return ResourceHandle<VeMaterial>(resource_id, this);

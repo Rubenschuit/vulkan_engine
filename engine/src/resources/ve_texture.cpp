@@ -43,10 +43,30 @@ namespace {
 		}
 	}
 
+	// Probe an uncompressed RGBA8 albedo for whether its alpha channel carries a
+	// cutout/transparency.
+	ve::AlphaCoverage classifyAlbedoAlpha(const std::vector<uint8_t>& rgba8) {
+		constexpr uint8_t OPAQUE_MIN = 250;
+		constexpr float SUB_OPAQUE_FRACTION = 0.005f;
+
+		const size_t texel_count = rgba8.size() / 4;
+		if (texel_count == 0)
+			return ve::AlphaCoverage::Unknown;
+
+		size_t below_opaque = 0;
+		for (size_t i = 0; i < texel_count; i++) {
+			if (rgba8[i * 4 + 3] < OPAQUE_MIN)
+				below_opaque++;
+		}
+		if (static_cast<float>(below_opaque) / static_cast<float>(texel_count) > SUB_OPAQUE_FRACTION)
+			return ve::AlphaCoverage::Cutout;
+		return ve::AlphaCoverage::Opaque;
+	}
+
 	// Transcodes (if needed) and copies the ktxTexture's pixel data + format/mip
 	// layout into a DecodedTexture
 	bool populateDecodedFromKtx(ktxTexture* k_texture, vk::Format format_hint,
-	                            const ve::GpuCaps& caps, ve::DecodedTexture& out) {
+	                            const ve::GpuCaps& caps, bool is_albedo, ve::DecodedTexture& out) {
 		out.width = k_texture->baseWidth;
 		out.height = k_texture->baseHeight;
 		if (out.width == 0 || out.height == 0)
@@ -54,6 +74,12 @@ namespace {
 		out.is_cubemap = k_texture->isCubemap;
 		out.array_layers = out.is_cubemap ? 6u : 1u;
 		out.mip_levels = k_texture->numLevels;
+
+		// Probe alpha from the component count before transcoding compresses it away
+		if (is_albedo && k_texture->classId == ktxTexture2_c) {
+			ktx_uint32_t components = ktxTexture2_GetNumComponents(reinterpret_cast<ktxTexture2*>(k_texture));
+			out.alpha_coverage = (components >= 4) ? ve::AlphaCoverage::Cutout : ve::AlphaCoverage::Opaque;
+		}
 
 		if (k_texture->classId == ktxTexture2_c) {
 			ktxTexture2* ktx2 = reinterpret_cast<ktxTexture2*>(k_texture);
@@ -202,7 +228,7 @@ DecodedTexture VeTexture::decode(const std::filesystem::path& path, TextureType 
 				VE_LOGE("KTX embedded load failed: " << out.resource_id);
 				return out;
 			}
-			if (!populateDecodedFromKtx(k, format_hint, gpu_caps, out)) {
+			if (!populateDecodedFromKtx(k, format_hint, gpu_caps, type == TextureType::ALBEDO, out)) {
 				ktxTexture_Destroy(k);
 				return out;
 			}
@@ -227,6 +253,8 @@ DecodedTexture VeTexture::decode(const std::filesystem::path& path, TextureType 
 			size_t byte_count = static_cast<size_t>(out.width) * static_cast<size_t>(out.height) * 4u;
 			out.pixels.assign(pixels, pixels + byte_count);
 			stbi_image_free(pixels);
+			if (type == TextureType::ALBEDO)
+				out.alpha_coverage = classifyAlbedoAlpha(out.pixels);
 		}
 		return out;
 	}
@@ -244,7 +272,7 @@ DecodedTexture VeTexture::decode(const std::filesystem::path& path, TextureType 
 			VE_LOGE("KTX load failed: " << path.string() << " (error " << static_cast<int>(res) << ")");
 			return out;
 		}
-		if (!populateDecodedFromKtx(k, format_hint, gpu_caps, out)) {
+		if (!populateDecodedFromKtx(k, format_hint, gpu_caps, type == TextureType::ALBEDO, out)) {
 			ktxTexture_Destroy(k);
 			return out;
 		}
@@ -267,6 +295,8 @@ DecodedTexture VeTexture::decode(const std::filesystem::path& path, TextureType 
 	size_t byte_count = static_cast<size_t>(out.width) * static_cast<size_t>(out.height) * 4u;
 	out.pixels.assign(pixels, pixels + byte_count);
 	stbi_image_free(pixels);
+	if (type == TextureType::ALBEDO)
+		out.alpha_coverage = classifyAlbedoAlpha(out.pixels);
 	return out;
 }
 

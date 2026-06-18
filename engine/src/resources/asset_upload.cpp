@@ -59,7 +59,7 @@ static ResourceHandle<VeMaterial> createOneMaterial(VeResourceManager& rm,
 		.specular_color     = resolveSlot(uploaded_textures, pm.specular_color_tex_idx),
 	};
 	return rm.createMaterial(pm.resource_id, std::move(textures),
-	                         pm.alpha_props, pm.factors, pm.flip_tex_coord_v);
+	                         pm.alpha_props, pm.factors, pm.flip_tex_coord_v, pm.uv_transforms);
 }
 
 // Highest non-negative texture slot index referenced by this material, or -1 if none.

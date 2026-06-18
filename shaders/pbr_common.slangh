@@ -28,6 +28,7 @@ struct VertexInput {
 	float3 in_normal : NORMAL;
 	float2 in_tex_coord : TEXCOORD0;
 	float4 in_tangent : TANGENT; // xyz = tangent, w = bitangent sign
+	float4 in_color : COLOR0;    // glTF COLOR_0, defaults to white when absent
 };
 
 struct VertexOutput {
@@ -37,6 +38,7 @@ struct VertexOutput {
 	float3 frag_tangent_world;
 	float3 frag_bitangent_world;
 	float2 frag_tex_coord;
+	float4 frag_color;
 	float4 shadow_coord[MAX_SHADOW_LIGHTS];
 	nointerpolation uint material_index;
 	nointerpolation uint lod_level;
@@ -85,6 +87,7 @@ VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID)
 	if ((inst.material_flags & MAT_FLAG_FLIP_TEX_V) != 0u)
 		tex_coord.y = 1.0f - tex_coord.y;
 	output.frag_tex_coord = tex_coord;
+	output.frag_color = input.in_color;
 
 	if (SHADOW_MODE_SPEC != ShadowMode::DISABLED) {
 		for (uint32_t i = 0; i < ubo.num_shadow_lights; i++)
@@ -134,6 +137,14 @@ float geometrySmith(float NdotV, float NdotL, float roughness) {
 	return ggx1 * ggx2;
 }
 
+// KHR_texture_transform: uv' = (Translate * Rotate * Scale) * uv.
+// identity (offset 0, scale 1, rot 0) is a no-op.
+float2 applyUvTransform(float2 uv, float4 off_scale, float rot) {
+	float2 t = uv * off_scale.zw;
+	float s = sin(rot), c = cos(rot);
+	return float2(c * t.x - s * t.y, s * t.x + c * t.y) + off_scale.xy;
+}
+
 // ============================================================================
 // PBR Lighting Computation
 // Returns the fully-lit fragment color (rgb = HDR color, a = alpha).
@@ -144,10 +155,17 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	MaterialGPU mat = materials[in_vert.material_index];
 
 	float2 tex_coord = in_vert.frag_tex_coord;
+	float2 uv_albedo    = applyUvTransform(tex_coord, mat.uv_albedo,      mat.uv_rot_a.x);
+	float2 uv_mr        = applyUvTransform(tex_coord, mat.uv_metal_rough, mat.uv_rot_a.y);
+	float2 uv_normal    = applyUvTransform(tex_coord, mat.uv_normal,      mat.uv_rot_a.z);
+	float2 uv_occlusion = applyUvTransform(tex_coord, mat.uv_occlusion,   mat.uv_rot_a.w);
+	float2 uv_emissive  = applyUvTransform(tex_coord, mat.uv_emissive,    mat.uv_rot_b.x);
 	float4 albedo = bindless_textures[NonUniformResourceIndex(mat.albedo_index)]
-		.Sample(bindless_sampler, tex_coord);
+		.Sample(bindless_sampler, uv_albedo);
 
+	// glTF base color = baseColorTexture * baseColorFactor * COLOR_0
 	albedo *= mat.base_color_factor;
+	albedo *= in_vert.frag_color;
 
 	// glTF alphaMode: OPAQUE(0)=force alpha 1, MASK(1)=discard below cutoff, BLEND(2)=use texture alpha
 	uint32_t alpha_mode = mat.material_flags & MAT_FLAG_ALPHA_MODE_MASK;
@@ -175,15 +193,15 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		return float4(meshletDebugColor(albedo.rgb, in_vert.meshlet_id), albedo.a);
 
 	float4 mr = bindless_textures[NonUniformResourceIndex(mat.metallic_roughness_index)]
-		.Sample(bindless_sampler, tex_coord);
+		.Sample(bindless_sampler, uv_mr);
 	float4 normal_map = bindless_textures[NonUniformResourceIndex(mat.normal_index)]
-		.Sample(bindless_sampler, tex_coord);
+		.Sample(bindless_sampler, uv_normal);
 	float4 occlusion_sample = bindless_textures[NonUniformResourceIndex(mat.occlusion_index)]
-		.Sample(bindless_sampler, tex_coord);
+		.Sample(bindless_sampler, uv_occlusion);
 	float3 emissive_sample = float3(0.0);
 	if (mat.pbr_params.z > 0.0)
 		emissive_sample = bindless_textures[NonUniformResourceIndex(mat.emissive_index)]
-			.Sample(bindless_sampler, tex_coord).rgb * mat.emissive_factor.xyz * mat.pbr_params.z;
+			.Sample(bindless_sampler, uv_emissive).rgb * mat.emissive_factor.xyz * mat.pbr_params.z;
 
 	float metallic;
 	float roughness;

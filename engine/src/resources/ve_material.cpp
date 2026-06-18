@@ -9,12 +9,14 @@ VeMaterial::VeMaterial(const std::string& resource_id,
                        MaterialTextures textures,
                        MaterialAlphaProps alpha_props,
                        MaterialFactors factors,
-                       bool flip_tex_coord_v)
+                       bool flip_tex_coord_v,
+                       MaterialUvTransforms uv_transforms)
 	: Resource(resource_id),
 	  m_textures(std::move(textures)),
 	  m_alpha_props(alpha_props),
 	  m_factors(factors),
-	  m_flip_tex_coord_v(flip_tex_coord_v) {
+	  m_flip_tex_coord_v(flip_tex_coord_v),
+	  m_uv_transforms(uv_transforms) {
 	setLoaded(true);
 }
 

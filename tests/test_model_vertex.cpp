@@ -19,8 +19,9 @@ TEST_CASE("VeMesh::Vertex attribute descriptions", "[mesh][vertex]") {
     // 1: Normal (vec3)
     // 2: TexCoord (vec2)
     // 3: Tangent (vec4)
+    // 4: Color (vec4)
 
-    REQUIRE(attributes.size() == 4);
+    REQUIRE(attributes.size() == 5);
 
     // Position
     REQUIRE(attributes[0].binding == 0);
@@ -45,6 +46,12 @@ TEST_CASE("VeMesh::Vertex attribute descriptions", "[mesh][vertex]") {
     REQUIRE(attributes[3].location == 3);
     REQUIRE(attributes[3].format == vk::Format::eR32G32B32A32Sfloat);
     REQUIRE(attributes[3].offset == offsetof(ve::VeMesh::Vertex, tangent));
+
+    // Color
+    REQUIRE(attributes[4].binding == 0);
+    REQUIRE(attributes[4].location == 4);
+    REQUIRE(attributes[4].format == vk::Format::eR32G32B32A32Sfloat);
+    REQUIRE(attributes[4].offset == offsetof(ve::VeMesh::Vertex, color));
 }
 
 TEST_CASE("VeMesh::Vertex attribute descriptions (Shadow)", "[mesh][vertex]") {

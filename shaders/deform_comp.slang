@@ -8,7 +8,7 @@
 #include "ve_constants.slangh"
 
 // Inputs live in the static regions of the mega buffers:
-//   mega_vbo[input_vertex_offset + v]              - bind-pose VeMesh::Vertex (48 B)
+//   mega_vbo[input_vertex_offset + v]              - bind-pose VeMesh::Vertex (64 B)
 //   mega_skin[input_skin_offset + v]               - SkinVertex (16 B)
 //   palette[palette_offset + joint]                - joint matrices (mesh-entity-local)
 //   morph_pos[morph_base + t*vertex_count + v]     - POSITION delta (vec4, .xyz)
@@ -37,7 +37,7 @@ struct DeformWorkgroupInfo {
 	uint _pad1;
 };
 
-[[vk::binding(0, 0)]] RWStructuredBuffer<float4> mega_vbo;          // 48B vertex stride: read bind-pose, write deformed output
+[[vk::binding(0, 0)]] RWStructuredBuffer<float4> mega_vbo;          // 64B vertex stride: read bind-pose, write deformed output
 [[vk::binding(1, 0)]] StructuredBuffer<uint4> mega_skin;            // 16B SkinVertex: 4 uint16 joints + 4 uint16 weights packed into uint4
 [[vk::binding(2, 0)]] StructuredBuffer<float4x4> palette;
 [[vk::binding(3, 0)]] RWByteAddressBuffer mega_shadow;              // 12B vec3 stride: write position-only output
@@ -56,10 +56,11 @@ void compMain(uint3 group_id : SV_GroupID, uint3 group_thread_id : SV_GroupThrea
 	uint in_v = info.input_vertex_offset + v;
 	uint out_v = info.output_vertex_offset + v;
 
-	// Read 48B vertex as three float4:
-	float4 chunk0 = mega_vbo[in_v * 3 + 0];
-	float4 chunk1 = mega_vbo[in_v * 3 + 1];
-	float4 chunk2 = mega_vbo[in_v * 3 + 2];
+	// Read 64B vertex as four float4 (chunk3 = COLOR_0, not deformed):
+	float4 chunk0 = mega_vbo[in_v * 4 + 0];
+	float4 chunk1 = mega_vbo[in_v * 4 + 1];
+	float4 chunk2 = mega_vbo[in_v * 4 + 2];
+	float4 color  = mega_vbo[in_v * 4 + 3];
 
 	float3 pos     = chunk0.xyz;
 	float3 normal  = float3(chunk0.w, chunk1.x, chunk1.y);
@@ -112,9 +113,10 @@ void compMain(uint3 group_id : SV_GroupID, uint3 group_thread_id : SV_GroupThrea
 		out_tan    = mul(skin3, tangent.xyz);
 	}
 
-	mega_vbo[out_v * 3 + 0] = float4(out_pos, out_normal.x);
-	mega_vbo[out_v * 3 + 1] = float4(out_normal.y, out_normal.z, uv.x, uv.y);
-	mega_vbo[out_v * 3 + 2] = float4(out_tan, tangent.w);
+	mega_vbo[out_v * 4 + 0] = float4(out_pos, out_normal.x);
+	mega_vbo[out_v * 4 + 1] = float4(out_normal.y, out_normal.z, uv.x, uv.y);
+	mega_vbo[out_v * 4 + 2] = float4(out_tan, tangent.w);
+	mega_vbo[out_v * 4 + 3] = color;
 
 	mega_shadow.Store3(out_v * 12, asuint(out_pos));
 }

@@ -138,6 +138,14 @@ struct MaterialGPU {
 	float  specular_strength;
 	uint   _pad0;
 	uint   _pad1;
+	// KHR_texture_transform, per slot: (offset.xy, scale.xy). Identity when unused.
+	float4 uv_albedo;
+	float4 uv_metal_rough;
+	float4 uv_normal;
+	float4 uv_occlusion;
+	float4 uv_emissive;
+	float4 uv_rot_a;  // rotation radians: x=albedo y=metalRough z=normal w=occlusion
+	float4 uv_rot_b;  // x=emissive, yzw reserved
 };
 [vk::binding(2, 0)]
 StructuredBuffer<MaterialGPU> materials;
