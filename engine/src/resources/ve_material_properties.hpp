@@ -15,6 +15,7 @@ struct MaterialAlphaProps {
 	float alpha_cutoff = 0.5f;
 	bool double_sided = false;
 	bool use_spec_gloss_texture = false;  // MR texture is specularGlossinessTexture (RGB=specular, A=glossiness)
+	bool unlit = false;                   // KHR_materials_unlit: render base color, no lighting
 };
 
 // KHR_texture_transform: per-texture-slot UV offset/scale/rotation. Identity by

@@ -15,6 +15,7 @@
 #include "rendering/culling/meshlet_data.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <numeric>
 #include <cctype>
@@ -27,9 +28,23 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/euler_angles.hpp>
-#include <glm/gtx/matrix_decompose.hpp>
 
 namespace ve {
+
+// Any extension outside this set trigger a warning.
+static const std::unordered_set<std::string> s_supported_extensions = {
+	"KHR_materials_pbrSpecularGlossiness",
+	"KHR_materials_emissive_strength",
+	"KHR_materials_transmission",
+	"KHR_materials_ior",
+	"KHR_materials_specular",
+	"KHR_materials_unlit",
+	"KHR_texture_basisu",
+	"KHR_texture_transform",
+	"KHR_lights_punctual",
+	"KHR_mesh_quantization",
+	"EXT_meshopt_compression",
+};
 
 // Return image index for a glTF texture: texture.source or KHR_texture_basisu.source. Returns -1 if invalid.
 static int getTextureImageIndex(const tinygltf::Model& gltf, size_t tex_idx) {
@@ -257,7 +272,7 @@ static glm::mat4 getNodeMatrixGltf(const tinygltf::Node& node) {
 	return glm::translate(glm::mat4(1.0f), t) * glm::mat4_cast(r) * glm::scale(glm::mat4(1.0f), s);
 }
 
-// Convert node transform from glTF Y-up to engine Z-up: M_engine = C * M * C_inv, then decompose.
+// Convert node transform from glTF Y-up to engine Z-up: M_engine = C * M * C_inv, then split into TRS.
 struct NodeTRS {
 	glm::vec3 translation;
 	glm::vec3 scale;
@@ -266,15 +281,28 @@ struct NodeTRS {
 static NodeTRS getNodeTRS(const tinygltf::Node& node) {
 	const glm::mat4 M_gltf = getNodeMatrixGltf(node);
 	const glm::mat4 M_engine = YUP_TO_ZUP * M_gltf * ZUP_TO_YUP;
-	glm::vec3 scale;
-	glm::quat rotation;
-	glm::vec3 translation;
-	glm::vec3 skew;
-	glm::vec4 perspective;
-	if (glm::decompose(M_engine, scale, rotation, translation, skew, perspective)) {
-		return {translation, scale, rotation};
-	}
-	return {{0, 0, 0}, {1, 1, 1}, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)};
+
+	// glTF requires a node matrix to be TRS-decomposable (no shear)
+	glm::vec3 translation(M_engine[3]);
+	glm::vec3 col0(M_engine[0]), col1(M_engine[1]), col2(M_engine[2]);
+	glm::vec3 scale(glm::length(col0), glm::length(col1), glm::length(col2));
+	if (glm::determinant(glm::mat3(M_engine)) < 0.0f) // flip
+		scale.x = -scale.x;
+
+	auto axisOk = [](float s) { return std::isfinite(s) && glm::abs(s) > 0.0f; };
+	const bool ok_x = axisOk(scale.x), ok_y = axisOk(scale.y), ok_z = axisOk(scale.z);
+	if (!ok_x || !ok_y || !ok_z)
+		VE_LOGW("glTF node '" << node.name << "' has a degenerate transform");
+
+	glm::mat3 rot(
+		ok_x ? col0 / scale.x : glm::vec3(1.0f, 0.0f, 0.0f),
+		ok_y ? col1 / scale.y : glm::vec3(0.0f, 1.0f, 0.0f),
+		ok_z ? col2 / scale.z : glm::vec3(0.0f, 0.0f, 1.0f));
+	// quat_cast assumes an orthonormal basis
+	const glm::quat q = glm::quat_cast(rot);
+	const float q_len = glm::length(q);
+	const glm::quat rotation = (std::isfinite(q_len) && q_len > 0.0f) ? q / q_len : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+	return {translation, scale, rotation};
 }
 
 // Read all float values from a glTF accessor into a flat vector, applying any sparse overlay.
@@ -368,112 +396,121 @@ static std::vector<VeAnimationClip> parseAnimations(
 		[&](size_t anim_idx) {
 			const auto& anim = gltf.animations[anim_idx];
 			VeAnimationClip clip;
-		clip.name = anim.name;
-		clip.duration = 0.0f;
+			clip.name = anim.name;
+			clip.duration = 0.0f;
 
-		// Parse samplers
-		clip.samplers.reserve(anim.samplers.size());
-		for (const auto& gs : anim.samplers) {
-			AnimationSampler sampler;
-			sampler.timestamps = readAccessorFloats(gltf, gs.input, 1);
-			int output_components = gltfTypeComponentCount(gltf.accessors[static_cast<size_t>(gs.output)].type);
-			sampler.values = readAccessorFloats(gltf, gs.output, output_components);
-			sampler.component_count = static_cast<uint8_t>(output_components);
+			// Parse samplers
+			clip.samplers.reserve(anim.samplers.size());
+			for (const auto& gs : anim.samplers) {
+				AnimationSampler sampler;
+				sampler.timestamps = readAccessorFloats(gltf, gs.input, 1);
+				int output_components = gltfTypeComponentCount(gltf.accessors[static_cast<size_t>(gs.output)].type);
+				sampler.values = readAccessorFloats(gltf, gs.output, output_components);
+				sampler.component_count = static_cast<uint8_t>(output_components);
 
-			if (!sampler.timestamps.empty())
-				clip.duration = std::max(clip.duration, sampler.timestamps.back());
+				if (!sampler.timestamps.empty())
+					clip.duration = std::max(clip.duration, sampler.timestamps.back());
 
-			clip.samplers.push_back(std::move(sampler));
-		}
-
-		// Build unique target node mapping and parse channels
-		std::unordered_map<int, uint32_t> gltf_node_to_clip_target;
-
-		for (const auto& gc : anim.channels) {
-			int gltf_node = gc.target_node;
-			if (gltf_node < 0)
-				continue;
-			auto loaded_it = gltf_to_loaded_idx.find(gltf_node);
-			if (loaded_it == gltf_to_loaded_idx.end())
-				continue;
-
-			AnimationChannel channel;
-
-			// Map path string
-			if (gc.target_path == "translation")
-				channel.path = AnimationPath::Translation;
-			else if (gc.target_path == "rotation")
-				channel.path = AnimationPath::Rotation;
-			else if (gc.target_path == "scale")
-				channel.path = AnimationPath::Scale;
-			else if (gc.target_path == "weights")
-				channel.path = AnimationPath::Weights;
-			else
-				continue;
-
-			// Map interpolation
-			const auto& gs = anim.samplers[static_cast<size_t>(gc.sampler)];
-			if (gs.interpolation == "STEP")
-				channel.interpolation = AnimationInterpolation::Step;
-			else if (gs.interpolation == "CUBICSPLINE")
-				channel.interpolation = AnimationInterpolation::CubicSpline;
-			else
-				channel.interpolation = AnimationInterpolation::Linear;
-
-			channel.sampler_index = static_cast<uint32_t>(gc.sampler);
-
-			// Map glTF node to clip target index
-			auto tit = gltf_node_to_clip_target.find(gltf_node);
-			if (tit == gltf_node_to_clip_target.end()) {
-				uint32_t target_idx = static_cast<uint32_t>(clip.target_node_indices.size());
-				clip.target_node_indices.push_back(loaded_it->second);
-				gltf_node_to_clip_target[gltf_node] = target_idx;
-				channel.target_slot = target_idx;
-			} else {
-				channel.target_slot = tit->second;
+				clip.samplers.push_back(std::move(sampler));
 			}
 
-			clip.channels.push_back(channel);
-		}
+			// Build unique target node mapping and parse channels
+			std::unordered_map<int, uint32_t> gltf_node_to_clip_target;
 
-		// Apply coordinate conversion to sampler values based on channel paths
-		// Track which samplers have been converted to avoid double-converting shared samplers
-		std::vector<bool> sampler_converted(clip.samplers.size(), false);
-		for (const auto& channel : clip.channels) {
-			if (sampler_converted[channel.sampler_index])
-				continue;
-			sampler_converted[channel.sampler_index] = true;
+			for (const auto& gc : anim.channels) {
+				int gltf_node = gc.target_node;
+				if (gltf_node < 0)
+					continue;
+				auto loaded_it = gltf_to_loaded_idx.find(gltf_node);
+				if (loaded_it == gltf_to_loaded_idx.end())
+					continue;
 
-			auto& sampler = clip.samplers[channel.sampler_index];
-			bool is_cubicspline = channel.interpolation == AnimationInterpolation::CubicSpline;
-			size_t n_keyframes = sampler.timestamps.size();
+				AnimationChannel channel;
 
-			if (channel.path == AnimationPath::Translation) {
-				size_t values_per_kf = is_cubicspline ? 9 : 3; // cubicspline: 3 vec3 (in, val, out)
-				for (size_t k = 0; k < n_keyframes; k++) {
-					if (is_cubicspline) {
-						for (int part = 0; part < 3; part++) {
-							size_t base = k * values_per_kf + static_cast<size_t>(part) * 3;
+				// Map path string
+				if (gc.target_path == "translation")
+					channel.path = AnimationPath::Translation;
+				else if (gc.target_path == "rotation")
+					channel.path = AnimationPath::Rotation;
+				else if (gc.target_path == "scale")
+					channel.path = AnimationPath::Scale;
+				else if (gc.target_path == "weights")
+					channel.path = AnimationPath::Weights;
+				else
+					continue;
+
+				// Map interpolation
+				const auto& gs = anim.samplers[static_cast<size_t>(gc.sampler)];
+				if (gs.interpolation == "STEP")
+					channel.interpolation = AnimationInterpolation::Step;
+				else if (gs.interpolation == "CUBICSPLINE")
+					channel.interpolation = AnimationInterpolation::CubicSpline;
+				else
+					channel.interpolation = AnimationInterpolation::Linear;
+
+				channel.sampler_index = static_cast<uint32_t>(gc.sampler);
+
+				// Map glTF node to clip target index
+				auto tit = gltf_node_to_clip_target.find(gltf_node);
+				if (tit == gltf_node_to_clip_target.end()) {
+					uint32_t target_idx = static_cast<uint32_t>(clip.target_node_indices.size());
+					clip.target_node_indices.push_back(loaded_it->second);
+					gltf_node_to_clip_target[gltf_node] = target_idx;
+					channel.target_slot = target_idx;
+				} else {
+					channel.target_slot = tit->second;
+				}
+
+				clip.channels.push_back(channel);
+			}
+
+			// Apply coordinate conversion to sampler values based on channel paths
+			// Track which samplers have been converted to avoid double-converting shared samplers
+			std::vector<bool> sampler_converted(clip.samplers.size(), false);
+			for (const auto& channel : clip.channels) {
+				if (sampler_converted[channel.sampler_index])
+					continue;
+				sampler_converted[channel.sampler_index] = true;
+
+				auto& sampler = clip.samplers[channel.sampler_index];
+				bool is_cubicspline = channel.interpolation == AnimationInterpolation::CubicSpline;
+				size_t n_keyframes = sampler.timestamps.size();
+
+				if (channel.path == AnimationPath::Translation) {
+					size_t values_per_kf = is_cubicspline ? 9 : 3; // cubicspline: 3 vec3 (in, val, out)
+					for (size_t k = 0; k < n_keyframes; k++) {
+						if (is_cubicspline) {
+							for (int part = 0; part < 3; part++) {
+								size_t base = k * values_per_kf + static_cast<size_t>(part) * 3;
+								glm::vec3 v = convertTranslationYupToZup(sampler.values[base], sampler.values[base + 1], sampler.values[base + 2]);
+								sampler.values[base] = v.x;
+								sampler.values[base + 1] = v.y;
+								sampler.values[base + 2] = v.z;
+							}
+						} else {
+							size_t base = k * 3;
 							glm::vec3 v = convertTranslationYupToZup(sampler.values[base], sampler.values[base + 1], sampler.values[base + 2]);
 							sampler.values[base] = v.x;
 							sampler.values[base + 1] = v.y;
 							sampler.values[base + 2] = v.z;
 						}
-					} else {
-						size_t base = k * 3;
-						glm::vec3 v = convertTranslationYupToZup(sampler.values[base], sampler.values[base + 1], sampler.values[base + 2]);
-						sampler.values[base] = v.x;
-						sampler.values[base + 1] = v.y;
-						sampler.values[base + 2] = v.z;
 					}
-				}
-			} else if (channel.path == AnimationPath::Rotation) {
-				size_t values_per_kf = is_cubicspline ? 12 : 4; // cubicspline: 3 vec4
-				for (size_t k = 0; k < n_keyframes; k++) {
-					if (is_cubicspline) {
-						for (int part = 0; part < 3; part++) {
-							size_t base = k * values_per_kf + static_cast<size_t>(part) * 4;
-							// glTF stores quaternion as [x, y, z, w]
+				} else if (channel.path == AnimationPath::Rotation) {
+					size_t values_per_kf = is_cubicspline ? 12 : 4; // cubicspline: 3 vec4
+					for (size_t k = 0; k < n_keyframes; k++) {
+						if (is_cubicspline) {
+							for (int part = 0; part < 3; part++) {
+								size_t base = k * values_per_kf + static_cast<size_t>(part) * 4;
+								// glTF stores quaternion as [x, y, z, w]
+								glm::quat q_gltf(sampler.values[base + 3], sampler.values[base], sampler.values[base + 1], sampler.values[base + 2]);
+								glm::quat q_engine = convertQuatYupToZup(q_gltf);
+								sampler.values[base] = q_engine.x;
+								sampler.values[base + 1] = q_engine.y;
+								sampler.values[base + 2] = q_engine.z;
+								sampler.values[base + 3] = q_engine.w;
+							}
+						} else {
+							size_t base = k * 4;
 							glm::quat q_gltf(sampler.values[base + 3], sampler.values[base], sampler.values[base + 1], sampler.values[base + 2]);
 							glm::quat q_engine = convertQuatYupToZup(q_gltf);
 							sampler.values[base] = q_engine.x;
@@ -481,50 +518,41 @@ static std::vector<VeAnimationClip> parseAnimations(
 							sampler.values[base + 2] = q_engine.z;
 							sampler.values[base + 3] = q_engine.w;
 						}
-					} else {
-						size_t base = k * 4;
-						glm::quat q_gltf(sampler.values[base + 3], sampler.values[base], sampler.values[base + 1], sampler.values[base + 2]);
-						glm::quat q_engine = convertQuatYupToZup(q_gltf);
-						sampler.values[base] = q_engine.x;
-						sampler.values[base + 1] = q_engine.y;
-						sampler.values[base + 2] = q_engine.z;
-						sampler.values[base + 3] = q_engine.w;
 					}
-				}
-			} else if (channel.path == AnimationPath::Scale) {
-				size_t values_per_kf = is_cubicspline ? 9 : 3;
-				for (size_t k = 0; k < n_keyframes; k++) {
-					if (is_cubicspline) {
-						for (int part = 0; part < 3; part++) {
-							size_t base = k * values_per_kf + static_cast<size_t>(part) * 3;
+				} else if (channel.path == AnimationPath::Scale) {
+					size_t values_per_kf = is_cubicspline ? 9 : 3;
+					for (size_t k = 0; k < n_keyframes; k++) {
+						if (is_cubicspline) {
+							for (int part = 0; part < 3; part++) {
+								size_t base = k * values_per_kf + static_cast<size_t>(part) * 3;
+								glm::vec3 v = convertScaleYupToZup(sampler.values[base], sampler.values[base + 1], sampler.values[base + 2]);
+								sampler.values[base] = v.x;
+								sampler.values[base + 1] = v.y;
+								sampler.values[base + 2] = v.z;
+							}
+						} else {
+							size_t base = k * 3;
 							glm::vec3 v = convertScaleYupToZup(sampler.values[base], sampler.values[base + 1], sampler.values[base + 2]);
 							sampler.values[base] = v.x;
 							sampler.values[base + 1] = v.y;
 							sampler.values[base + 2] = v.z;
 						}
-					} else {
-						size_t base = k * 3;
-						glm::vec3 v = convertScaleYupToZup(sampler.values[base], sampler.values[base + 1], sampler.values[base + 2]);
-						sampler.values[base] = v.x;
-						sampler.values[base + 1] = v.y;
-						sampler.values[base + 2] = v.z;
+					}
+				} else if (channel.path == AnimationPath::Weights) {
+					if (n_keyframes > 0) {
+						size_t per_kf = sampler.values.size() / n_keyframes; // target_count, or 3*target_count for cubicspline
+						sampler.weights_target_count = static_cast<uint16_t>(is_cubicspline ? per_kf / 3 : per_kf);
 					}
 				}
-			} else if (channel.path == AnimationPath::Weights) {
-				if (n_keyframes > 0) {
-					size_t per_kf = sampler.values.size() / n_keyframes; // target_count, or 3*target_count for cubicspline
-					sampler.weights_target_count = static_cast<uint16_t>(is_cubicspline ? per_kf / 3 : per_kf);
-				}
 			}
-		}
 
-		if (!clip.channels.empty()) {
-			VE_LOGI("Parsed animation '" << clip.name << "': " << clip.channels.size()
-			        << " channels, " << clip.samplers.size() << " samplers, duration "
-			        << clip.duration << "s");
-			raw_clips[anim_idx] = std::move(clip);
-		}
-	});
+			if (!clip.channels.empty()) {
+				VE_LOGI("Parsed animation '" << clip.name << "': " << clip.channels.size()
+				        << " channels, " << clip.samplers.size() << " samplers, duration "
+				        << clip.duration << "s");
+				raw_clips[anim_idx] = std::move(clip);
+			}
+		});
 
 	std::vector<VeAnimationClip> clips;
 	clips.reserve(raw_clips.size());
@@ -881,8 +909,7 @@ static std::vector<ExtractedLight> extractEmissiveLights(
 				if (!pos_acc) {
 					const glm::vec3& center = ce_it->second.first;
 					glm::vec3 world_pos = glm::vec3(W * glm::vec4(center, 1.f));
-					if (!pushLight(world_pos))
-						continue;
+					pushLight(world_pos);
 					continue;
 				}
 				const auto& bv = gltf.bufferViews[static_cast<size_t>(pos_acc->bufferView)];
@@ -1504,20 +1531,6 @@ static bool LoadImageDataCpuOnly(tinygltf::Image* image, const int /*image_idx*/
 	return true;
 }
 
-// Every glTF extension this loader actually consumes. Anything in extensionsUsed
-// outside this set is silently dropped at parse time, so warn the author about it.
-static const std::unordered_set<std::string> s_supported_extensions = {
-	"KHR_materials_pbrSpecularGlossiness",
-	"KHR_materials_emissive_strength",
-	"KHR_materials_transmission",
-	"KHR_materials_ior",
-	"KHR_materials_specular",
-	"KHR_texture_basisu",
-	"KHR_lights_punctual",
-	"KHR_texture_transform",
-	"EXT_meshopt_compression",
-};
-
 static void warnUnsupportedExtensions(const tinygltf::Model& gltf, const std::filesystem::path& model_path) {
 	for (const auto& ext : gltf.extensionsUsed) {
 		if (s_supported_extensions.count(ext))
@@ -1812,6 +1825,7 @@ static ParsedMaterial parseSingleMaterial(
 		result.alpha_props.alpha_mode = AlphaMode::ALPHA_OPAQUE;
 	result.alpha_props.alpha_cutoff = static_cast<float>(mat.alphaCutoff);
 	result.alpha_props.double_sided = mat.doubleSided;
+	result.alpha_props.unlit = mat.extensions.find("KHR_materials_unlit") != mat.extensions.end();
 
 	// PBR factors
 	auto& factors = result.factors;

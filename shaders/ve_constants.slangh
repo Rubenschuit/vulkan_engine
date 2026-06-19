@@ -46,12 +46,13 @@ enum ShadowMode {
 	PCSS = 3,
 };
 
-// Material flags (bits 0-5, in material_flags field)
+// Material flags (bits 0-6, in material_flags field)
 #define MAT_FLAG_ALPHA_MODE_MASK   0x3u
 #define MAT_FLAG_DOUBLE_SIDED      0x4u
 #define MAT_FLAG_FLIP_TEX_V        0x8u
 #define MAT_FLAG_SPEC_GLOSS        0x10u
 #define MAT_FLAG_HAS_TEXTURE       0x20u
+#define MAT_FLAG_UNLIT             0x40u
 
 // Object flags (in object_flags field)
 #define OBJ_FLAG_IS_TRANSPARENT    0x1u

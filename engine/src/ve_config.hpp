@@ -139,12 +139,14 @@ constexpr uint32_t MIN_PARALLEL_CULL_ENTITIES = 64; // below this, single-thread
 constexpr uint32_t MAX_BINDLESS_TEXTURES = 16384;
 constexpr uint32_t MAX_GPU_MATERIALS = 8192;
 
+// Material flags (keep in sync with ve_constants.slangh)
 namespace MaterialFlag {
 	constexpr uint32_t ALPHA_MODE_MASK = 0x3;  // 0=OPAQUE, 1=MASK, 2=BLEND
 	constexpr uint32_t DOUBLE_SIDED    = 0x4;
 	constexpr uint32_t FLIP_TEX_V      = 0x8;
 	constexpr uint32_t SPEC_GLOSS      = 0x10;
 	constexpr uint32_t HAS_TEXTURE     = 0x20;
+	constexpr uint32_t UNLIT           = 0x40;  // KHR_materials_unlit: output base color, skip lighting
 }
 
 namespace ObjectFlag {

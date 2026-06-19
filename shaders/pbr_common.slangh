@@ -192,6 +192,9 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	else if (ubo.render_mode == RenderMode::MESHLET_ID)
 		return float4(meshletDebugColor(albedo.rgb, in_vert.meshlet_id), albedo.a);
 
+	if ((mat.material_flags & MAT_FLAG_UNLIT) != 0u)
+		return albedo;
+
 	float4 mr = bindless_textures[NonUniformResourceIndex(mat.metallic_roughness_index)]
 		.Sample(bindless_sampler, uv_mr);
 	float4 normal_map = bindless_textures[NonUniformResourceIndex(mat.normal_index)]
