@@ -34,6 +34,7 @@ Entity Registry::createEntity(const std::string& name) {
 	auto& meta = m_meta[index];
 	meta.name = name;
 	meta.active = true;
+	meta.active_in_hierarchy = true;
 	meta.alive = true;
 	// generation was already incremented on destroy (or is 0 for fresh slots)
 
@@ -100,6 +101,7 @@ void Registry::destroyEntity(Entity e) {
 	// Increment generation to invalidate outstanding Entity handles
 	m_meta[idx].generation = static_cast<uint16_t>((m_meta[idx].generation + 1) & Entity::GEN_MASK);
 	m_meta[idx].active = false;
+	m_meta[idx].active_in_hierarchy = false;
 	m_meta[idx].alive = false;
 	m_meta[idx].name.clear();
 
@@ -196,14 +198,24 @@ bool Registry::isActive(Entity e) const {
 
 void Registry::setActive(Entity e, bool active) {
 	assert(isAlive(e));
-	m_meta[e.index()].active = active;
+	uint32_t idx = e.index();
+	if (m_meta[idx].active == active)
+		return;
+	m_meta[idx].active = active;
+	updateActiveInHierarchy(e);
+}
+
+bool Registry::isActiveInHierarchy(Entity e) const {
+	if (!isAlive(e))
+		return false;
+	return m_meta[e.index()].active_in_hierarchy;
 }
 
 uint32_t Registry::activePointLightCount() const {
 	uint32_t count = 0;
 	auto& p = pool<PointLightComponent>();
 	for (uint32_t i = 0; i < p.size(); ++i)
-		if (m_meta[p.entityAt(i)].active)
+		if (m_meta[p.entityAt(i)].active_in_hierarchy)
 			++count;
 	return count;
 }
@@ -212,7 +224,7 @@ uint32_t Registry::activeDirectionalLightCount() const {
 	uint32_t count = 0;
 	auto& p = pool<DirectionalLightComponent>();
 	for (uint32_t i = 0; i < p.size(); ++i)
-		if (m_meta[p.entityAt(i)].active)
+		if (m_meta[p.entityAt(i)].active_in_hierarchy)
 			++count;
 	return count;
 }
@@ -221,7 +233,7 @@ uint32_t Registry::activeSpotLightCount() const {
 	uint32_t count = 0;
 	auto& p = pool<SpotLightComponent>();
 	for (uint32_t i = 0; i < p.size(); ++i)
-		if (m_meta[p.entityAt(i)].active)
+		if (m_meta[p.entityAt(i)].active_in_hierarchy)
 			++count;
 	return count;
 }
@@ -287,6 +299,7 @@ void Registry::setParent(Entity child, Entity parent) {
 	}
 
 	invalidateWorldTransform(child);
+	updateActiveInHierarchy(child);
 }
 
 void Registry::reparent(Entity child, Entity new_parent) {
@@ -402,6 +415,24 @@ void Registry::invalidateWorldTransform(Entity e) {
 	Entity child = m_hierarchy[idx].first_child;
 	while (!child.isNull()) {
 		invalidateWorldTransform(child);
+		child = m_hierarchy[child.index()].next_sibling;
+	}
+}
+
+void Registry::updateActiveInHierarchy(Entity e) {
+	if (e.isNull() || e.index() >= m_meta.size())
+		return;
+	uint32_t idx = e.index();
+	Entity parent = m_hierarchy[idx].parent;
+	bool parent_active = parent.isNull() || m_meta[parent.index()].active_in_hierarchy;
+	bool effective = m_meta[idx].active && parent_active;
+	if (m_meta[idx].active_in_hierarchy == effective)
+		return;
+	m_meta[idx].active_in_hierarchy = effective;
+
+	Entity child = m_hierarchy[idx].first_child;
+	while (!child.isNull()) {
+		updateActiveInHierarchy(child);
 		child = m_hierarchy[child.index()].next_sibling;
 	}
 }

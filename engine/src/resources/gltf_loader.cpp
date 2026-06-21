@@ -200,10 +200,6 @@ static const glm::mat4 ZUP_TO_YUP(1.0f, 0.0f, 0.0f, 0.0f,
                                       0.0f, 1.0f, 0.0f, 0.0f,
                                       0.0f, 0.0f, 0.0f, 1.0f);
 
-// Blender's glTF exporter bakes an internal radiance multiplier of ~638 into emissive values.
-// Compensate so emissive intensities match other exporters. See glTF-Blender-IO #2473.
-static constexpr float BLENDER_EMISSIVE_FACTOR = 638.0f;
-
 // Byte size of a single glTF component (BYTE=1, SHORT=2, FLOAT=4, etc.)
 static size_t gltfComponentSize(int componentType) {
 	switch (componentType) {
@@ -843,6 +839,7 @@ static std::vector<ExtractedLight> extractEmissiveLights(
 	const float emissive_light_threshold = 0.1f;
 	constexpr float EMISSIVE_CLUSTER_GAP = 0.005f;
 	constexpr float EMISSIVE_CLUSTER_EXTENT = 0.02f;
+	constexpr float EMISSIVE_INTENSITY_SCALE = 0.08f;
 
 	auto findPositionAccessor = [&](const NodePrim& np) -> const tinygltf::Accessor* {
 		int mesh_idx = gltf.nodes[static_cast<size_t>(np.node_idx)].mesh;
@@ -860,11 +857,15 @@ static std::vector<ExtractedLight> extractEmissiveLights(
 	};
 
 	for (size_t mat_i = 0; mat_i < material_factors.size(); mat_i++) {
-		float chroma = glm::length(material_factors[mat_i].emissive_factor);
-		float strength = material_factors[mat_i].emissive_strength;
-		if (chroma * strength < emissive_light_threshold)
+		const MaterialFactors& mf = material_factors[mat_i];
+		float chroma = glm::length(mf.emissive_factor);
+		float strength = mf.emissive_strength;
+		bool has_hint = mf.emissive_light_lum >= 0.0f;
+		float radiance = has_hint ? mf.emissive_light_lum : chroma * strength;
+		if (radiance < (has_hint ? 0.01f : emissive_light_threshold))
 			continue;
-		glm::vec3 color_n = (chroma > 1e-6f) ? (material_factors[mat_i].emissive_factor / chroma) : material_factors[mat_i].emissive_factor;
+		glm::vec3 color_n = has_hint ? mf.emissive_light_color
+		                             : ((chroma > 1e-6f) ? (mf.emissive_factor / chroma) : mf.emissive_factor);
 		for (const NodePrim& np : node_primitives) {
 			if (np.mat_idx != mat_i)
 				continue;
@@ -875,14 +876,13 @@ static std::vector<ExtractedLight> extractEmissiveLights(
 			const glm::mat4& W = node_world_engine[static_cast<size_t>(np.node_idx)];
 
 			float area_proxy = std::max(diag * diag, 0.01f);
-			float intensity_raw = strength * chroma * area_proxy * 0.08f;
-			float intensity = std::clamp(intensity_raw, 0.25f, 50.0f);
+			float intensity = std::clamp(radiance * area_proxy * EMISSIVE_INTENSITY_SCALE, 0.05f, 50.0f);
 			std::string mat_name = (mat_i < gltf.materials.size() && !gltf.materials[mat_i].name.empty())
 			                       ? gltf.materials[mat_i].name : "Emissive " + std::to_string(emissive_light_count);
 			const std::string& node_name = gltf.nodes[static_cast<size_t>(np.node_idx)].name;
 			std::string individual_name = !node_name.empty() ? node_name : "light " + std::to_string(emissive_light_count);
 
-			auto pushLight = [&](const glm::vec3& world_pos, const std::string& suffix = "") -> bool {
+			auto pushLight = [&](const glm::vec3& world_pos, float light_intensity, const std::string& suffix = "") -> bool {
 				if (!dedup.insert(quantize(world_pos)).second)
 					return false;
 				emissive_lights.push_back({
@@ -890,7 +890,7 @@ static std::vector<ExtractedLight> extractEmissiveLights(
 					.position = world_pos,
 					.direction = glm::vec3(0.0f, 0.0f, -1.0f),
 					.color = color_n,
-					.intensity = intensity,
+					.intensity = light_intensity,
 					.range = std::max(diag * 1.25f, 0.25f),
 					.name = mat_name + ": " + individual_name + suffix,
 					.node_idx = np.node_idx
@@ -902,14 +902,14 @@ static std::vector<ExtractedLight> extractEmissiveLights(
 			if (diag < EMISSIVE_CLUSTER_EXTENT) {
 				const glm::vec3& center = ce_it->second.first;
 				glm::vec3 world_pos = glm::vec3(W * glm::vec4(center, 1.f));
-				if (!pushLight(world_pos))
+				if (!pushLight(world_pos, intensity))
 					continue;
 			} else {
 				const tinygltf::Accessor* pos_acc = findPositionAccessor(np);
 				if (!pos_acc) {
 					const glm::vec3& center = ce_it->second.first;
 					glm::vec3 world_pos = glm::vec3(W * glm::vec4(center, 1.f));
-					pushLight(world_pos);
+					pushLight(world_pos, intensity);
 					continue;
 				}
 				const auto& bv = gltf.bufferViews[static_cast<size_t>(pos_acc->bufferView)];
@@ -930,9 +930,10 @@ static std::vector<ExtractedLight> extractEmissiveLights(
 
 				std::vector<glm::vec3> centroids = clusterVertices(positions, EMISSIVE_CLUSTER_GAP, EMISSIVE_CLUSTER_EXTENT);
 
+				float cluster_intensity = std::clamp(intensity / static_cast<float>(std::max<size_t>(centroids.size(), 1)), 0.05f, 50.0f);
 				for (size_t ci = 0; ci < centroids.size(); ci++) {
 					glm::vec3 world_pos = glm::vec3(W * glm::vec4(centroids[ci], 1.f));
-					pushLight(world_pos, " [" + std::to_string(ci) + "]");
+					pushLight(world_pos, cluster_intensity, " [" + std::to_string(ci) + "]");
 				}
 			}
 			if (emissive_light_count >= ve::MAX_CLUSTER_LIGHTS - 1)
@@ -1664,19 +1665,6 @@ static void decompressMeshopt(tinygltf::Model& gltf) {
 	}
 }
 
-// Detect Blender glTF exporter and return appropriate emissive scale factor.
-static float detectEmissiveScale(const tinygltf::Model& gltf) {
-	std::string generator_lower = gltf.asset.generator;
-	std::transform(generator_lower.begin(), generator_lower.end(), generator_lower.begin(),
-	               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-	if (generator_lower.find("blender") != std::string::npos) {
-		float scale = 1.0f / BLENDER_EMISSIVE_FACTOR;
-		VE_LOGI("Blender generator detected, applying emissive scale " << scale);
-		return scale;
-	}
-	return 1.0f;
-}
-
 // Register embedded images from a .glb file in the per-load embedded cache.
 // Does nothing for .gltf files, which are expected to reference external image files via URI.
 static void registerEmbeddedImages(tinygltf::Model& gltf, const std::string& model_path_str,
@@ -1799,7 +1787,6 @@ static UvTransform readUvTransform(const TexInfo& ti, const char* slot, const st
 static ParsedMaterial parseSingleMaterial(
     const tinygltf::Material& mat, const tinygltf::Model& gltf,
     const std::filesystem::path& model_dir, const std::string& model_path_str,
-    float emissive_scale,
     const EmbeddedImageCache& embedded) {
 	ParsedMaterial result;
 
@@ -1843,18 +1830,28 @@ static ParsedMaterial parseSingleMaterial(
 	}
 	factors.metallic_factor = static_cast<float>(mat.pbrMetallicRoughness.metallicFactor);
 	factors.roughness_factor = static_cast<float>(mat.pbrMetallicRoughness.roughnessFactor);
-	if (mat.emissiveFactor.size() >= 3) {
+	auto it_es = mat.extensions.find("KHR_materials_emissive_strength");
+	bool has_emissive_strength_ext = it_es != mat.extensions.end()
+		&& it_es->second.Has("emissiveStrength") && it_es->second.Get("emissiveStrength").IsNumber();
+	if (has_emissive_strength_ext)
+		factors.emissive_strength = static_cast<float>(it_es->second.Get("emissiveStrength").Get<double>());
+	if (mat.emissiveFactor.size() >= 3)
 		factors.emissive_factor = glm::vec3(
 			static_cast<float>(mat.emissiveFactor[0]),
 			static_cast<float>(mat.emissiveFactor[1]),
 			static_cast<float>(mat.emissiveFactor[2]));
-		factors.emissive_factor *= emissive_scale;
-	}
-	auto it_es = mat.extensions.find("KHR_materials_emissive_strength");
-	if (it_es != mat.extensions.end() && it_es->second.Has("emissiveStrength") && it_es->second.Get("emissiveStrength").IsNumber())
-		factors.emissive_strength = static_cast<float>(it_es->second.Get("emissiveStrength").Get<double>());
-	else if (glm::length(factors.emissive_factor) > 0.1f)
+	if (!has_emissive_strength_ext && glm::length(factors.emissive_factor) > 0.1f)
 		factors.emissive_strength = 1.0f;
+	if (mat.extras.Has("emissive_light")) {
+		const tinygltf::Value& el = mat.extras.Get("emissive_light");
+		if (el.Has("color") && el.Get("color").IsArray() && el.Get("color").ArrayLen() >= 3)
+			factors.emissive_light_color = glm::vec3(
+				static_cast<float>(el.Get("color").Get(0).GetNumberAsDouble()),
+				static_cast<float>(el.Get("color").Get(1).GetNumberAsDouble()),
+				static_cast<float>(el.Get("color").Get(2).GetNumberAsDouble()));
+		if (el.Has("lum") && el.Get("lum").IsNumber())
+			factors.emissive_light_lum = static_cast<float>(el.Get("lum").GetNumberAsDouble());
+	}
 	auto it_tr = mat.extensions.find("KHR_materials_transmission");
 	if (it_tr != mat.extensions.end() && it_tr->second.Has("transmissionFactor") && it_tr->second.Get("transmissionFactor").IsNumber())
 		factors.transmission_factor = static_cast<float>(it_tr->second.Get("transmissionFactor").Get<double>());
@@ -1970,13 +1967,13 @@ static ParsedMaterial parseSingleMaterial(
 // Unbound texture slots stay empty in ParsedMaterial; the upload stage substitutes engine defaults.
 static std::vector<ParsedMaterial> parseAllMaterials(
     const tinygltf::Model& gltf, const std::filesystem::path& model_dir,
-    const std::string& model_path_str, float emissive_scale,
+    const std::string& model_path_str,
     const EmbeddedImageCache& embedded) {
 	std::vector<ParsedMaterial> results;
 	if (!gltf.materials.empty()) {
 		results.reserve(gltf.materials.size());
 		for (const auto& mat : gltf.materials)
-			results.push_back(parseSingleMaterial(mat, gltf, model_dir, model_path_str, emissive_scale, embedded));
+			results.push_back(parseSingleMaterial(mat, gltf, model_dir, model_path_str, embedded));
 	} else {
 		results.push_back(ParsedMaterial{});
 	}
@@ -2016,7 +2013,8 @@ static void reinterpretBlendMaterials(std::vector<ProcessedMaterial>& materials,
 				if (m.alpha_props.alpha_cutoff <= 0.0f)
 					m.alpha_props.alpha_cutoff = 0.5f;
 				break;
-			// Unknown (decode failure / unsupported format): keep BLEND.
+			// Translucent (gradient alpha) or Unknown (decode failure / unsupported
+			// format, e.g. compressed KTX2): genuine blending, keep BLEND.
 			default:
 				break;
 		}
@@ -2051,8 +2049,7 @@ LoadedAssetData load(
 	std::string model_path_str = model_path.lexically_normal().generic_string();
 	registerEmbeddedImages(gltf, model_path_str, result.embedded_images);
 
-	float emissive_scale = detectEmissiveScale(gltf);
-	auto parsed_materials = parseAllMaterials(gltf, model_path.parent_path(), model_path_str, emissive_scale, result.embedded_images);
+	auto parsed_materials = parseAllMaterials(gltf, model_path.parent_path(), model_path_str, result.embedded_images);
 
 	// 4. Decode all unique textures referenced by materials
 	// Collect unique texture paths, decode each once

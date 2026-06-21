@@ -245,6 +245,9 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	float3 view_dir = normalize(ubo.camera_position.xyz - in_vert.frag_pos_world);
 	float frag_view_z = -(mul(ubo.view, float4(in_vert.frag_pos_world, 1.0))).z;
 
+	if ((mat.material_flags & MAT_FLAG_DOUBLE_SIDED) != 0u && dot(world_normal, view_dir) < 0.0)
+		world_normal = -world_normal;
+
 	// CSM shadow for directional light
 	float csm_shadow = 1.0;
 	uint csm_cascade_idx = 0;

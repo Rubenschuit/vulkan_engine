@@ -215,6 +215,8 @@ private:
 	std::array<uint32_t, MESHLET_BUCKET_COUNT> m_readback_high_water{};
 	std::array<bool, MAX_FRAMES_IN_FLIGHT> m_has_readback{};
 	bool m_current_readback_valid = false;
+	bool m_main_overflow_warned = false;
+	bool m_shadow_overflow_warned = false;
 
 	// Shadow culling: per-shadow-layer buffers [frame][slot]
 	using ShadowBufSet = std::array<std::unique_ptr<VeBuffer>, SHADOW_BUFFER_COUNT>;

@@ -189,7 +189,7 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 		child = registry.nextSibling(child);
 	}
 
-	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
+	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowOverlap;
 	if (!has_visible_children)
 		flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 	if (state.selected_entity == entity)
@@ -199,8 +199,8 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 	if (m_force_open_entities.count(entity.id()) || (m_search_active && has_visible_children))
 		ImGui::SetNextItemOpen(true);
 
-	// Dim inactive entities
-	bool active = registry.isActive(entity);
+	// Dim entities that are inactive, or inactive because an ancestor is
+	bool active = registry.isActiveInHierarchy(entity);
 	if (!active)
 		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
 
@@ -258,6 +258,9 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 			ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.9f, 1.0f), "[E]");
 	}
 
+	// Right-aligned active toggle
+	renderActiveToggle(registry, entity);
+
 	// Handle selection
 	if (tree_clicked) {
 		state.selected_entity = entity;
@@ -284,6 +287,20 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 	}
 }
 
+void HierarchyPanel::renderActiveToggle(Registry& registry, Entity entity) {
+	ImGui::PushID(static_cast<int>(entity.id()));
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 2));
+	float toggle_w = ImGui::GetFrameHeight();
+	ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - toggle_w);
+	bool active = registry.isActive(entity);
+	if (ImGui::Checkbox("##active", &active))
+		registry.setActive(entity, active);
+	ImGui::PopStyleVar();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip(active ? "Active" : "Inactive");
+	ImGui::PopID();
+}
+
 void HierarchyPanel::renderSelectableLight(Registry& registry, Entity entity, EditorState& state) {
 	const std::string& name = registry.getName(entity);
 	char label[256];
@@ -292,16 +309,17 @@ void HierarchyPanel::renderSelectableLight(Registry& registry, Entity entity, Ed
 	else
 		snprintf(label, sizeof(label), "%s", name.c_str());
 
-	bool active = registry.isActive(entity);
+	bool active = registry.isActiveInHierarchy(entity);
 	if (!active)
 		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
 
 	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen
-	                         | ImGuiTreeNodeFlags_SpanAvailWidth;
+	                         | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowOverlap;
 	if (state.selected_entity == entity)
 		flags |= ImGuiTreeNodeFlags_Selected;
 
 	ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<uintptr_t>(entity.id())), flags, "%s", label);
+	bool clicked = ImGui::IsItemClicked();
 
 	if (ImGui::BeginPopupContextItem()) {
 		if (ImGui::MenuItem("Duplicate"))
@@ -311,13 +329,16 @@ void HierarchyPanel::renderSelectableLight(Registry& registry, Entity entity, Ed
 		ImGui::EndPopup();
 	}
 
-	if (ImGui::IsItemClicked()) {
+	if (!active)
+		ImGui::PopStyleColor();
+
+	// Right-aligned active toggle
+	renderActiveToggle(registry, entity);
+
+	if (clicked) {
 		state.selected_entity = entity;
 		state.selection_changed = true;
 	}
-
-	if (!active)
-		ImGui::PopStyleColor();
 }
 
 void HierarchyPanel::renderEnableCheckbox(const char* label, const std::vector<Entity>& lights, Registry& registry) {
@@ -342,13 +363,14 @@ void HierarchyPanel::renderGroupControls(const std::string& key, const std::vect
 
 	auto& state = m_group_states[key];
 
-	// Lazy-initialize from first light
 	if (!state.initialized) {
-		auto* pl = registry.getComponent<PointLightComponent>(lights[0]);
-		if (pl) {
+		if (auto* pl = registry.getComponent<PointLightComponent>(lights[0])) {
 			state.color = pl->getColor();
 			state.range = pl->getRange();
 		}
+		for (auto e : lights)
+			if (auto* pl = registry.getComponent<PointLightComponent>(e))
+				state.base_intensity[e.id()] = pl->getIntensity();
 		state.initialized = true;
 	}
 
@@ -356,16 +378,15 @@ void HierarchyPanel::renderGroupControls(const std::string& key, const std::vect
 	ImGui::Text("Intensity");
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(70.0f);
-	float old_mult = state.intensity_multiplier;
 	if (ImGui::DragFloat("##intensity", &state.intensity_multiplier, 0.01f, 0.01f, 10.0f, "%.2fx")) {
-		if (old_mult > 0.001f) {
-			float ratio = state.intensity_multiplier / old_mult;
-			for (auto e : lights) {
-				auto* pl = registry.getComponent<PointLightComponent>(e);
-				if (!pl) continue;
-				float cur = pl->getIntensity();
-				pl->setIntensity(cur > 0.001f ? cur * ratio : state.intensity_multiplier);
-			}
+		for (auto e : lights) {
+			auto* pl = registry.getComponent<PointLightComponent>(e);
+			if (!pl) continue;
+			auto it = state.base_intensity.find(e.id());
+			float base = (it != state.base_intensity.end()) ? it->second : pl->getIntensity();
+			if (it == state.base_intensity.end())
+				state.base_intensity[e.id()] = base;
+			pl->setIntensity(base * state.intensity_multiplier);
 		}
 	}
 

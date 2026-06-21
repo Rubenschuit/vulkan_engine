@@ -27,6 +27,7 @@ enum class LightSource : uint8_t {
 struct EntityMeta {
 	std::string name;
 	bool active = true;
+	bool active_in_hierarchy = true;
 	bool alive = false;
 	bool animated = false;
 	uint16_t generation = 0;
@@ -87,6 +88,7 @@ public:
 	void setName(Entity e, std::string name);
 	bool isActive(Entity e) const;
 	void setActive(Entity e, bool active);
+	bool isActiveInHierarchy(Entity e) const;
 	LightSource getLightSource(Entity e) const;
 	void setLightSource(Entity e, LightSource source);
 	bool isAnimated(Entity e) const;
@@ -157,7 +159,7 @@ public:
 
 	// Fast active check (skips generation validation)
 	bool isActiveAtIndex(uint32_t index) const {
-		return index < m_meta.size() && m_meta[index].active;
+		return index < m_meta.size() && m_meta[index].active_in_hierarchy;
 	}
 
 	// Multi-component view factory
@@ -221,6 +223,7 @@ public:
 private:
 	void ensureSlotSize(uint32_t index);
 	void invalidateMeshWorldAABBs(Entity e);
+	void updateActiveInHierarchy(Entity e);
 	void processPendingComponentRemovals();
 
 	Entity cloneEntityCore(Entity source, bool reparent_to_source_parent);

@@ -30,6 +30,7 @@ private:
 	void renderLightsSection(Registry& registry, EditorState& state);
 	void renderLightGroup(Registry& registry, const std::string& source_key, const std::vector<Entity>& group_lights, EditorState& state);
 	void renderSelectableLight(Registry& registry, Entity entity, EditorState& state);
+	void renderActiveToggle(Registry& registry, Entity entity);
 	void renderGroupControls(const std::string& key, const std::vector<Entity>& lights, Registry& registry);
 	void renderEnableCheckbox(const char* label, const std::vector<Entity>& lights, Registry& registry);
 
@@ -41,6 +42,7 @@ private:
 		glm::vec3 color{1.0f};
 		float range = 0.0f;
 		bool initialized = false;
+		std::unordered_map<uint32_t, float> base_intensity;
 	};
 
 	SceneManager* m_scene_manager = nullptr;

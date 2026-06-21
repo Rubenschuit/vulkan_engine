@@ -35,6 +35,7 @@ enum class AlphaCoverage : uint8_t {
 	Unknown,
 	Opaque,
 	Cutout,
+	Translucent,
 };
 
 struct DecodedTexture {

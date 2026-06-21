@@ -191,6 +191,8 @@ private:
 	uint32_t m_next_id = 0;
 	uint32_t m_active_count = 0;
 	uint32_t m_dynamic_object_count = 0;
+	bool m_object_limit_warned = false; 
+	static constexpr uint32_t INVALID_GPU_ID = 0xFFFFFFFFu;
 	std::vector<uint32_t> m_free_list;
 	std::unordered_map<uint32_t, uint32_t> m_entity_to_gpu_id; // entity_index to gpu_id
 	std::unordered_map<uint32_t, Entity> m_gpu_id_to_entity;   // gpu_id to entity

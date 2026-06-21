@@ -43,24 +43,37 @@ namespace {
 		}
 	}
 
-	// Probe an uncompressed RGBA8 albedo for whether its alpha channel carries a
-	// cutout/transparency.
+	bool isSrgbColorTexture(ve::TextureType type) {
+		return type == ve::TextureType::ALBEDO
+			|| type == ve::TextureType::EMISSIVE
+			|| type == ve::TextureType::SPECULAR_COLOR;
+	}
+
 	ve::AlphaCoverage classifyAlbedoAlpha(const std::vector<uint8_t>& rgba8) {
 		constexpr uint8_t OPAQUE_MIN = 250;
+		constexpr uint8_t MID_LOW = 64;
+		constexpr uint8_t MID_HIGH = 192;
 		constexpr float SUB_OPAQUE_FRACTION = 0.005f;
+		constexpr float GRADIENT_MID_FRACTION = 0.10f;
 
 		const size_t texel_count = rgba8.size() / 4;
 		if (texel_count == 0)
 			return ve::AlphaCoverage::Unknown;
 
 		size_t below_opaque = 0;
+		size_t mid_band = 0;
 		for (size_t i = 0; i < texel_count; i++) {
-			if (rgba8[i * 4 + 3] < OPAQUE_MIN)
+			uint8_t a = rgba8[i * 4 + 3];
+			if (a < OPAQUE_MIN)
 				below_opaque++;
+			if (a >= MID_LOW && a <= MID_HIGH)
+				mid_band++;
 		}
-		if (static_cast<float>(below_opaque) / static_cast<float>(texel_count) > SUB_OPAQUE_FRACTION)
-			return ve::AlphaCoverage::Cutout;
-		return ve::AlphaCoverage::Opaque;
+		if (static_cast<float>(below_opaque) / static_cast<float>(texel_count) <= SUB_OPAQUE_FRACTION)
+			return ve::AlphaCoverage::Opaque;
+		if (static_cast<float>(mid_band) / static_cast<float>(texel_count) > GRADIENT_MID_FRACTION)
+			return ve::AlphaCoverage::Translucent;
+		return ve::AlphaCoverage::Cutout;
 	}
 
 	// Transcodes (if needed) and copies the ktxTexture's pixel data + format/mip
@@ -203,7 +216,7 @@ ResourceHandle<VeTexture> VeTexture::loadFromPath(VeResourceManager& resource_ma
 
 std::string VeTexture::makeResourceKey(const std::filesystem::path& path, TextureType type) {
 	// Format hint has only two buckets currently
-	const char* suffix = (type == TextureType::ALBEDO || type == TextureType::SPECULAR_COLOR) ? "|srgb" : "|linear";
+	const char* suffix = isSrgbColorTexture(type) ? "|srgb" : "|linear";
 	return path.lexically_normal().generic_string() + suffix;
 }
 
@@ -215,7 +228,7 @@ DecodedTexture VeTexture::decode(const std::filesystem::path& path, TextureType 
 	out.file_path = path;
 	out.type = type;
 
-	vk::Format format_hint = (type == TextureType::ALBEDO || type == TextureType::SPECULAR_COLOR)
+	vk::Format format_hint = isSrgbColorTexture(type)
 	                         ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
 
 	if (embedded) {

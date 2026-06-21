@@ -160,7 +160,7 @@ namespace ObjectFlag {
 constexpr uint32_t MAX_GPU_OBJECTS = 16384*4; // sync with shader
 constexpr uint32_t GPU_CULL_WORKGROUP_SIZE = 256;
 constexpr uint32_t GPU_CULL_BUCKET_COUNT = 6; // 0=opaque back, 1=opaque double, 2=mask back, 3=mask double, 4=blend back, 5=blend double
-constexpr uint32_t MAX_DRAW_GROUPS = 8192;         // up to MAX_LOD_LEVELS draw groups per unique mesh+material combo
+constexpr uint32_t MAX_DRAW_GROUPS = 8192*2;         // up to MAX_LOD_LEVELS draw groups per unique mesh+material combo
 constexpr uint32_t MAX_LOD_INSTANCE_SLOTS = MAX_GPU_OBJECTS * MAX_LOD_LEVELS; // worst-case instance buffer size
 
 // Hi-Z occlusion culling

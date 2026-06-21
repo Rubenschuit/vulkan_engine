@@ -216,6 +216,8 @@ uint32_t GpuSceneManager::registerObject(Entity entity, const MeshComponent& mes
 		return it->second;
 
 	uint32_t gpu_id = allocateGpuId();
+	if (gpu_id == INVALID_GPU_ID)
+		return INVALID_GPU_ID;
 	m_entity_to_gpu_id[entity.index()] = gpu_id;
 	m_gpu_id_to_entity[gpu_id] = entity;
 	m_active_count++;
@@ -584,14 +586,20 @@ uint32_t GpuSceneManager::allocateGpuId() {
 		m_free_list.pop_back();
 		return id;
 	}
-	if (m_next_id >= MAX_GPU_OBJECTS)
-		VE_LOGE("GPU object limit reached");
-	assert(m_next_id < MAX_GPU_OBJECTS && "GPU object limit reached");
+	if (m_next_id >= MAX_GPU_OBJECTS) {
+		if (!m_object_limit_warned) {
+			VE_LOGE("GpuSceneManager: GPU object limit (" << MAX_GPU_OBJECTS
+				<< ") reached; further objects will not render.");
+			m_object_limit_warned = true;
+		}
+		return INVALID_GPU_ID;
+	}
 	return m_next_id++;
 }
 
 void GpuSceneManager::freeGpuId(uint32_t id) {
 	m_free_list.push_back(id);
+	m_object_limit_warned = false;
 }
 
 void GpuSceneManager::rebuildDrawGroups() {

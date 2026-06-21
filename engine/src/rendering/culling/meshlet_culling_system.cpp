@@ -432,6 +432,21 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 			m_readback_high_water[b] = std::min(
 				m_readback_counts[b] * 2 + 1024,
 				MAX_MESHLET_DRAWS_PER_BUCKET);
+
+		uint32_t worst_bucket = 0, worst = 0;
+		for (uint32_t b = 0; b < BUCKET_COUNT; b++)
+			if (m_readback_counts[b] > worst) { worst = m_readback_counts[b]; worst_bucket = b; }
+		if (worst > MAX_MESHLET_DRAWS_PER_BUCKET) {
+			if (!m_main_overflow_warned) {
+				VE_LOGW("Meshlet culling overflow: bucket " << worst_bucket << " needs " << worst
+					<< " draws but cap is " << MAX_MESHLET_DRAWS_PER_BUCKET << " (dropping "
+					<< (worst - MAX_MESHLET_DRAWS_PER_BUCKET) << " meshlet draws -> missing geometry). ");
+				m_main_overflow_warned = true;
+			}
+		} else if (m_main_overflow_warned) {
+			VE_LOGI("Meshlet culling overflow resolved (max bucket " << worst << "/" << MAX_MESHLET_DRAWS_PER_BUCKET << ").");
+			m_main_overflow_warned = false;
+		}
 	}
 
 	// Clear per-frame counters and init dispatch_indirect to (0, 1, 1)
@@ -624,6 +639,7 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 
 	// Async readback: read shadow draw counts written 2 frames ago from mapped staging.
 	if (!skip_readback) {
+		uint32_t worst = 0, worst_slot = 0, worst_bucket = 0;
 		for (uint32_t r = 0; r < count; r++) {
 			uint32_t slot = requests[r].slot;
 			if (readback_staging[frame_index][slot]) {
@@ -637,9 +653,22 @@ void MeshletCullingSystem::dispatchShadowCulls(vk::raii::CommandBuffer& cmd,
 						uint32_t actual = readback_counts[slot][b];
 						uint32_t hwm = actual + actual / 2 + 512;
 						readback_hwm[slot][b] = std::min(hwm, MAX_MESHLET_SHADOW_DRAWS_PER_BUCKET);
+						if (actual > worst) { worst = actual; worst_slot = slot; worst_bucket = b; }
 					}
 				}
 			}
+		}
+		if (worst > MAX_MESHLET_SHADOW_DRAWS_PER_BUCKET) {
+			if (!m_shadow_overflow_warned) {
+				VE_LOGW("Meshlet shadow culling overflow: slot " << worst_slot << " bucket " << worst_bucket
+					<< " needs " << worst << " draws but cap is " << MAX_MESHLET_SHADOW_DRAWS_PER_BUCKET
+					<< " (dropping " << (worst - MAX_MESHLET_SHADOW_DRAWS_PER_BUCKET) << " -> missing shadows). "
+					<< "Reduce instance density/LOD or raise MAX_MESHLET_SHADOW_DRAWS.");
+				m_shadow_overflow_warned = true;
+			}
+		} else if (m_shadow_overflow_warned) {
+			VE_LOGI("Meshlet shadow culling overflow resolved.");
+			m_shadow_overflow_warned = false;
 		}
 	}
 

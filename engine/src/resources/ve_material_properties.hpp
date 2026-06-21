@@ -45,6 +45,8 @@ struct MaterialFactors {
 	float ior = 1.5f;  // KHR_materials_ior: index of refraction (default 1.5 gives F0 ≈ 0.04)
 	glm::vec3 specular_factor{1.0f, 1.0f, 1.0f};  // KHR_materials_specular.specularColorFactor (also raw F0 for KHR_materials_pbrSpecularGlossiness)
 	float specular_strength = 1.0f;  // KHR_materials_specular.specularFactor
+	glm::vec3 emissive_light_color{1.0f, 1.0f, 1.0f};
+	float emissive_light_lum = -1.0f;
 };
 
 // Must match shader's MaterialConstants struct (4 × float4 = 64 bytes).

@@ -71,7 +71,9 @@ public:
 	RenderPipeline(const RenderPipeline&) = delete;
 	RenderPipeline& operator=(const RenderPipeline&) = delete;
 
-	static constexpr uint32_t INITIAL_INSTANCE_CAPACITY = 16384 * 2;
+	static constexpr uint32_t INITIAL_INSTANCE_CAPACITY = 16384 * 4;
+	static_assert(INITIAL_INSTANCE_CAPACITY <= MAX_GPU_OBJECTS,
+		"INITIAL_INSTANCE_CAPACITY exceeds the 16-bit gpu_id range");
 
 	// Apply per-frame UI settings and emit setting-change events.
 	void prepareFrame();
