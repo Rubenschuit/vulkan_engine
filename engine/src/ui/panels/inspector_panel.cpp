@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "ui/panels/inspector_panel.hpp"
 #include "ui/imgui_layer.hpp"
+#include "ui/editor_icons.hpp"
 #include "ui/texture_inspector.hpp"
 #include "scene/ve_registry.hpp"
 #include "resources/ve_mesh.hpp"
@@ -225,13 +226,22 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		return;
 	}
 
-	if (state.selected_entity.isNull() || !registry || !registry->isAlive(state.selected_entity)) {
+	if (state.selectedEntity().isNull() || !registry || !registry->isAlive(state.selectedEntity())) {
 		ImGui::TextDisabled("No entity selected");
 		ImGui::End();
 		return;
 	}
 
-	Entity entity = state.selected_entity;
+	Entity entity = state.selectedEntity();
+
+	if (state.selected_entities.size() > 1) {
+		const std::string& primary_name = registry->getName(entity);
+		if (primary_name.empty())
+			ImGui::TextDisabled("%zu selected, editing Entity %u", state.selected_entities.size(), entity.index());
+		else
+			ImGui::TextDisabled("%zu selected, editing \"%s\"", state.selected_entities.size(), primary_name.c_str());
+		ImGui::Separator();
+	}
 
 	renderEntityHeader(*registry, entity, state);
 	ImGui::Separator();
@@ -239,7 +249,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 	// Transform (no remove button)
 	auto* transform = registry->getComponent<TransformComponent>(entity);
 	if (transform) {
-		bool open = ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen);
+		bool open = ImGui::CollapsingHeader(ICON_TRANSFORM "  Transform", ImGuiTreeNodeFlags_DefaultOpen);
 		if (ImGui::BeginPopupContextItem("transform_ctx")) {
 			if (ImGui::MenuItem("Copy")) {
 				CopiedTransform ct;
@@ -263,7 +273,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 
 	// Mesh
 	if (registry->hasComponent<MeshComponent>(entity)) {
-		bool open = ImGui::CollapsingHeader("Mesh", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		bool open = ImGui::CollapsingHeader(ICON_MESH "  Mesh", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
 		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
 		ImGui::PushID("remove_mesh");
 		if (ImGui::SmallButton("X"))
@@ -275,7 +285,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 
 	// Point Light
 	if (registry->hasComponent<PointLightComponent>(entity)) {
-		bool open = ImGui::CollapsingHeader("Point Light", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		bool open = ImGui::CollapsingHeader(ICON_POINT_LIGHT "  Point Light", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
 		if (ImGui::BeginPopupContextItem("pl_ctx")) {
 			if (ImGui::MenuItem("Copy")) {
 				auto* pl = registry->getComponent<PointLightComponent>(entity);
@@ -310,7 +320,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 
 	// Spot Light
 	if (registry->hasComponent<SpotLightComponent>(entity)) {
-		bool open = ImGui::CollapsingHeader("Spot Light", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		bool open = ImGui::CollapsingHeader(ICON_SPOT_LIGHT "  Spot Light", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
 		if (ImGui::BeginPopupContextItem("sl_ctx")) {
 			if (ImGui::MenuItem("Copy")) {
 				auto* sl = registry->getComponent<SpotLightComponent>(entity);
@@ -349,7 +359,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 
 	// Directional Light
 	if (registry->hasComponent<DirectionalLightComponent>(entity)) {
-		bool open = ImGui::CollapsingHeader("Directional Light", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		bool open = ImGui::CollapsingHeader(ICON_DIR_LIGHT "  Directional Light", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
 		if (ImGui::BeginPopupContextItem("dl_ctx")) {
 			if (ImGui::MenuItem("Copy")) {
 				auto* dl = registry->getComponent<DirectionalLightComponent>(entity);
@@ -384,7 +394,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 
 	// Rigidbody
 	if (registry->hasComponent<RigidbodyComponent>(entity)) {
-		bool open = ImGui::CollapsingHeader("Rigidbody", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		bool open = ImGui::CollapsingHeader(ICON_RIGIDBODY "  Rigidbody", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
 		if (ImGui::BeginPopupContextItem("rb_ctx")) {
 			if (ImGui::MenuItem("Copy")) {
 				auto* rb = registry->getComponent<RigidbodyComponent>(entity);
@@ -423,7 +433,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 
 	// Animator
 	if (registry->hasComponent<AnimatorComponent>(entity)) {
-		bool open = ImGui::CollapsingHeader("Animator", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		bool open = ImGui::CollapsingHeader(ICON_ANIMATOR "  Animator", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
 		if (open && registry->hasComponent<AnimatorComponent>(entity))
 			renderAnimator(*registry->getComponent<AnimatorComponent>(entity));
 	}
@@ -432,7 +442,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 	if (registry->hasComponent<SkinComponent>(entity)) {
 		auto* sc = registry->getComponent<SkinComponent>(entity);
 		char header[64];
-		snprintf(header, sizeof(header), "Skin (%zu joints)", sc->jointCount());
+		snprintf(header, sizeof(header), ICON_SKIN "  Skin (%zu joints)", sc->jointCount());
 		bool open = ImGui::CollapsingHeader(header, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
 		if (open && registry->hasComponent<SkinComponent>(entity))
 			renderSkin(*registry, *registry->getComponent<SkinComponent>(entity), state);
@@ -458,7 +468,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 
 	// Camera
 	if (registry->hasComponent<CameraComponent>(entity)) {
-		bool open = ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		bool open = ImGui::CollapsingHeader(ICON_CAMERA "  Camera", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
 		if (ImGui::BeginPopupContextItem("cam_ctx")) {
 			if (ImGui::MenuItem("Copy")) {
 				auto* cc = registry->getComponent<CameraComponent>(entity);
@@ -497,7 +507,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 
 	// Particle Emitter
 	if (registry->hasComponent<ParticleEmitterComponent>(entity)) {
-		bool open = ImGui::CollapsingHeader("Particle Emitter", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		bool open = ImGui::CollapsingHeader(ICON_PARTICLE "  Particle Emitter", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
 		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
 		ImGui::PushID("remove_emitter");
 		if (ImGui::SmallButton("X"))
@@ -517,34 +527,38 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		ImGui::OpenPopup("AddComponentPopup");
 
 	if (ImGui::BeginPopup("AddComponentPopup")) {
-		if (!registry->hasComponent<PointLightComponent>(entity))
-			if (ImGui::MenuItem("Point Light"))
+		bool no_pl = !registry->hasComponent<PointLightComponent>(entity);
+		bool no_sl = !registry->hasComponent<SpotLightComponent>(entity);
+		bool no_dl = !registry->hasComponent<DirectionalLightComponent>(entity);
+		bool no_cam = !registry->hasComponent<CameraComponent>(entity);
+		bool no_emitter = !registry->hasComponent<ParticleEmitterComponent>(entity);
+		bool no_rb = !registry->hasComponent<RigidbodyComponent>(entity);
+
+		if (no_pl || no_sl || no_dl) {
+			ImGui::SeparatorText("Lights");
+			if (no_pl && ImGui::MenuItem(ICON_POINT_LIGHT "  Point Light"))
 				registry->addComponent<PointLightComponent>(entity);
-
-		if (!registry->hasComponent<SpotLightComponent>(entity))
-			if (ImGui::MenuItem("Spot Light"))
+			if (no_sl && ImGui::MenuItem(ICON_SPOT_LIGHT "  Spot Light"))
 				registry->addComponent<SpotLightComponent>(entity);
-
-		if (!registry->hasComponent<DirectionalLightComponent>(entity))
-			if (ImGui::MenuItem("Directional Light"))
+			if (no_dl && ImGui::MenuItem(ICON_DIR_LIGHT "  Directional Light"))
 				registry->addComponent<DirectionalLightComponent>(entity);
+		}
 
-		if (!registry->hasComponent<RigidbodyComponent>(entity))
-			if (ImGui::MenuItem("Rigidbody"))
-				registry->addComponent<RigidbodyComponent>(entity);
-
-		if (!registry->hasComponent<CameraComponent>(entity))
-			if (ImGui::MenuItem("Camera"))
-				registry->addComponent<CameraComponent>(entity);
-
-		if (!registry->hasComponent<ParticleEmitterComponent>(entity))
-			if (ImGui::MenuItem("Particle Emitter"))
-				registry->addComponent<ParticleEmitterComponent>(entity);
-
+		ImGui::SeparatorText("Rendering");
+		if (no_cam && ImGui::MenuItem(ICON_CAMERA "  Camera"))
+			registry->addComponent<CameraComponent>(entity);
+		if (no_emitter && ImGui::MenuItem(ICON_PARTICLE "  Particle Emitter"))
+			registry->addComponent<ParticleEmitterComponent>(entity);
 		if (!registry->hasComponent<MeshComponent>(entity)) {
 			ImGui::BeginDisabled(true);
-			ImGui::MenuItem("Mesh (load model first)");
+			ImGui::MenuItem(ICON_MESH "  Mesh (load model first)");
 			ImGui::EndDisabled();
+		}
+
+		if (no_rb) {
+			ImGui::SeparatorText("Physics");
+			if (ImGui::MenuItem(ICON_RIGIDBODY "  Rigidbody"))
+				registry->addComponent<RigidbodyComponent>(entity);
 		}
 
 		ImGui::EndPopup();
@@ -596,10 +610,8 @@ void InspectorPanel::renderEntityHeader(Registry& registry, Entity entity, Edito
 	if (!has_parent)
 		ImGui::BeginDisabled();
 	float btn_width = ImGui::GetFrameHeight();
-	if (ImGui::Button("^##select_parent", ImVec2(btn_width, 0))) {
-		state.selected_entity = current_parent;
-		state.selection_changed = true;
-	}
+	if (ImGui::Button("^##select_parent", ImVec2(btn_width, 0)))
+		state.selectSingle(current_parent);
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 		ImGui::SetTooltip("Select parent");
 	if (!has_parent)
@@ -681,7 +693,7 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 		return;
 	}
 
-	if (!ImGui::TreeNode("Material"))
+	if (!ImGui::TreeNode(ICON_MATERIAL "  Material"))
 		return;
 
 	ImGui::TextDisabled("%s", mat->getId().c_str());
@@ -774,7 +786,7 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 	}
 
 	// Texture thumbnails
-	if (ImGui::TreeNode("Textures")) {
+	if (ImGui::TreeNode(ICON_TEXTURE "  Textures")) {
 		if (ImGui::BeginTable("##TexTable", 3, ImGuiTableFlags_SizingFixedFit)) {
 			ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 70.0f);
 			ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthFixed, 52.0f);
@@ -1108,10 +1120,8 @@ void InspectorPanel::renderSkin(Registry& registry, SkinComponent& skin, EditorS
 				snprintf(label, sizeof(label), "[%zu] (missing)", j);
 			}
 			ImGui::PushID(static_cast<int>(j));
-			if (ImGui::Selectable(label) && !je.isNull() && registry.isAlive(je)) {
-				state.selected_entity = je;
-				state.selection_changed = true;
-			}
+			if (ImGui::Selectable(label) && !je.isNull() && registry.isAlive(je))
+				state.selectSingle(je);
 			ImGui::PopID();
 		}
 		ImGui::TreePop();
@@ -1173,7 +1183,7 @@ void InspectorPanel::renderParticleEmitter(ParticleEmitterComponent& emitter) {
 	if (ImGui::Checkbox("Active##ParticleEmitter", &active))
 		emitter.setActive(active);
 
-	if (ImGui::TreeNodeEx("Emission", ImGuiTreeNodeFlags_DefaultOpen)) {
+	if (ImGui::TreeNodeEx(ICON_EMISSION "  Emission", ImGuiTreeNodeFlags_DefaultOpen)) {
 		labeledWidget(label_w, "Rate (p/s)", [&]() {
 			ImGui::DragFloat("##Rate", &emitter.rate, 1.0f, 0.0f, 10000.0f, "%.1f",
 				ImGuiSliderFlags_AlwaysClamp);

@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "ui/panels/hierarchy_panel.hpp"
 #include "ui/imgui_layer.hpp"
+#include "ui/editor_icons.hpp"
 #include "application/ve_application.hpp"
 #include "events/engine_events.hpp"
 #include "resources/asset_loading_system.hpp"
@@ -12,39 +13,42 @@
 #include <portable-file-dialogs.h>
 #include <glm/gtc/type_ptr.hpp>
 #include <algorithm>
+#include <cstdint>
 #include <map>
 
 namespace ve {
 
-bool HierarchyPanel::subtreeMatchesSearch(Registry& registry, Entity entity) {
+bool HierarchyPanel::matchesNameSearch(Registry& registry, Entity entity) {
 	if (!m_search_active)
 		return true;
-
-	// Case-insensitive substring match
 	const std::string& name = registry.getName(entity);
-	auto ciFind = [](const std::string& haystack, const char* needle) {
-		return std::search(haystack.begin(), haystack.end(), needle, needle + std::strlen(needle),
-			[](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); })
-			!= haystack.end();
-	};
-	if (ciFind(name, m_search_buf))
-		return true;
+	return std::search(name.begin(), name.end(), m_search_buf, m_search_buf + std::strlen(m_search_buf),
+		[](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); })
+		!= name.end();
+}
 
-	// Check children recursively
+bool HierarchyPanel::matchesTypeFilter(Registry& registry, Entity entity) {
+	switch (m_filter) {
+		case TreeFilter::Meshes:  return registry.hasComponent<MeshComponent>(entity);
+		case TreeFilter::Lights:  return registry.hasComponent<PointLightComponent>(entity)
+		                              || registry.hasComponent<SpotLightComponent>(entity)
+		                              || registry.hasComponent<DirectionalLightComponent>(entity);
+		case TreeFilter::Cameras: return registry.hasComponent<CameraComponent>(entity);
+		default:                  return true;
+	}
+}
+
+// A node is shown if it matches both filters, or has any descendant that does
+bool HierarchyPanel::subtreeVisible(Registry& registry, Entity entity) {
+	if (matchesTypeFilter(registry, entity) && matchesNameSearch(registry, entity))
+		return true;
 	Entity child = registry.firstChild(entity);
 	while (!child.isNull()) {
-		if (subtreeMatchesSearch(registry, child))
+		if (subtreeVisible(registry, child))
 			return true;
 		child = registry.nextSibling(child);
 	}
 	return false;
-}
-
-bool HierarchyPanel::isLightOnly(Registry& registry, Entity entity) {
-	bool is_light = registry.hasComponent<PointLightComponent>(entity)
-	             || registry.hasComponent<DirectionalLightComponent>(entity)
-	             || registry.hasComponent<SpotLightComponent>(entity);
-	return is_light && !registry.hasComponent<MeshComponent>(entity);
 }
 
 void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /*context*/) {
@@ -66,7 +70,18 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 	if (registry != m_last_registry) {
 		m_group_states.clear();
 		m_last_registry = registry;
+		state.clearSelection();
+		m_renaming_entity = Entity::null();
 	}
+
+	// Deferred deletion can kill entities between frames
+	if (!state.selected_entities.empty()) {
+		auto& sel = state.selected_entities;
+		sel.erase(std::remove_if(sel.begin(), sel.end(),
+			[&](Entity e) { return !registry->isAlive(e); }), sel.end());
+	}
+	if (!m_renaming_entity.isNull() && !registry->isAlive(m_renaming_entity))
+		m_renaming_entity = Entity::null();
 
 	m_joint_entity_ids.clear();
 	const auto& skin_pool = registry->skins();
@@ -78,9 +93,9 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 	}
 
 	// Auto-expand ancestors when selection changes
-	if (state.selection_changed && !state.selected_entity.isNull()) {
+	if (state.selection_changed && !state.selectedEntity().isNull()) {
 		m_force_open_entities.clear();
-		Entity ancestor = registry->getParent(state.selected_entity);
+		Entity ancestor = registry->getParent(state.selectedEntity());
 		while (!ancestor.isNull()) {
 			m_force_open_entities.insert(ancestor.id());
 			ancestor = registry->getParent(ancestor);
@@ -88,22 +103,53 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 		m_scroll_to_selected = true;
 	}
 
-	// Lights section
-	renderLightsSection(*registry, state);
+	// Search field with clear button
+	float clear_w = m_search_active ? ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x : 0.0f;
+	ImGui::SetNextItemWidth(-FLT_MIN - clear_w);
+	ImGui::InputTextWithHint("##search", "Search...", m_search_buf, sizeof(m_search_buf));
+	m_search_active = m_search_buf[0] != '\0';
+	if (m_search_active) {
+		ImGui::SameLine();
+		if (ImGui::Button("X##clear_search", ImVec2(ImGui::GetFrameHeight(), 0))) {
+			m_search_buf[0] = '\0';
+			m_search_active = false;
+		}
+	}
 
-	// Entity tree
-	bool entities_open = ImGui::CollapsingHeader("Entities", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
-	ImGui::SameLine(ImGui::GetWindowWidth() - 35.0f);
-	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 2));
-	ImGui::Checkbox("##show_lights", &m_show_lights_in_tree);
-	ImGui::PopStyleVar();
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Show lights in tree");
-	if (entities_open) {
-		ImGui::SetNextItemWidth(-FLT_MIN);
-		ImGui::InputTextWithHint("##search", "Search...", m_search_buf, sizeof(m_search_buf));
-		m_search_active = m_search_buf[0] != '\0';
+	// Type filters
+	renderFilters(*registry);
 
+	// F2 renames the primary selection
+	if (ImGui::IsWindowFocused() && !ImGui::GetIO().WantTextInput
+	    && !state.selectedEntity().isNull() && ImGui::IsKeyPressed(ImGuiKey_F2)) {
+		m_renaming_entity = state.selectedEntity();
+		snprintf(m_rename_buf, sizeof(m_rename_buf), "%s", registry->getName(state.selectedEntity()).c_str());
+		m_rename_focus = true;
+	}
+
+	// Ctrl+G groups the selection
+	if (ImGui::IsWindowFocused() && !ImGui::GetIO().WantTextInput && !state.selected_entities.empty()
+	    && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_G))
+		m_pending_group = state.selected_entities;
+
+	ImGui::Separator();
+
+	ImGuiMultiSelectFlags ms_flags = ImGuiMultiSelectFlags_ClearOnEscape
+		| ImGuiMultiSelectFlags_ClearOnClickVoid | ImGuiMultiSelectFlags_BoxSelect2d;
+	ImGuiMultiSelectIO* ms = ImGui::BeginMultiSelect(ms_flags, static_cast<int>(state.selected_entities.size()), -1);
+	applySelectionRequests(ms, *registry, state);
+
+	m_visible_order.clear();
+	m_visible_row_index = 0;
+
+	if (m_filter == TreeFilter::Lights) {
+		// Grouped light management view
+		renderLightGroups(*registry, state);
+	} else if (m_filter != TreeFilter::All || m_search_active) {
+		// Flat list of matches (Meshes/Cameras, or a search within All)
+		renderFlatList(*registry, state);
+	} else {
+		// Scene hierarchy (collapse state preserved; never force-opened by filters)
 		uint32_t max_idx = registry->maxEntityIndex();
 		for (uint32_t i = 0; i < max_idx; ++i) {
 			if (!registry->isAliveAtIndex(i))
@@ -111,61 +157,180 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 			Entity e = registry->entityFromIndex(i);
 			if (registry->hasParent(e))
 				continue;
-			if (!m_show_lights_in_tree && isLightOnly(*registry, e))
-				continue;
-			if (!subtreeMatchesSearch(*registry, e))
-				continue;
 			renderEntityNode(*registry, e, state);
 		}
 	}
 
-	// Click empty space to deselect
-	if (ImGui::IsMouseClicked(0) && ImGui::IsWindowHovered() && !ImGui::IsAnyItemHovered()) {
-		state.selected_entity = Entity::null();
-		state.selection_changed = true;
-	}
+	ms = ImGui::EndMultiSelect();
+	applySelectionRequests(ms, *registry, state);
 
-	// Delete key on selected entity
-	if (!state.selected_entity.isNull() && ImGui::IsWindowFocused()
+	// Delete key on the whole selection
+	if (!state.selected_entities.empty() && ImGui::IsWindowFocused()
 	    && (ImGui::IsKeyPressed(ImGuiKey_Delete) || ImGui::IsKeyPressed(ImGuiKey_Backspace)))
-		m_pending_delete = state.selected_entity;
+		m_pending_deletes = state.selected_entities;
 
 	m_force_open_entities.clear();
 
-	// Schedule deferred deletion via event system (actual destroy happens at safe frame boundary)
-	if (!m_pending_delete.isNull() && registry) {
-		if (state.selected_entity == m_pending_delete) {
-			state.selected_entity = Entity::null();
-			state.selection_changed = true;
+	// Schedule deferred deletion
+	if (!m_pending_deletes.empty() && registry) {
+		for (Entity e : m_pending_deletes) {
+			state.removeFromSelection(e);
+			registry->events().emit(DeleteEntityRequest{e, /*recursive=*/true});
 		}
-		registry->events().emit(DeleteEntityRequest{m_pending_delete, /*recursive=*/true});
-		m_pending_delete = Entity::null();
+		state.selection_changed = true;
+		m_pending_deletes.clear();
 	}
 
-	// Duplicate entity (recursive)
-	if (!m_pending_duplicate.isNull() && registry) {
-		VE_LOGI("Duplicate entity requested: index=" << m_pending_duplicate.index());
-		Entity cloned = registry->cloneEntityRecursive(m_pending_duplicate);
-		state.selected_entity = cloned;
+	// Duplicate the selection recursively
+	if (!m_pending_duplicates.empty() && registry) {
+		state.selected_entities.clear();
+		for (Entity e : topMostRoots(*registry, m_pending_duplicates))
+			state.selected_entities.push_back(registry->cloneEntityRecursive(e));
 		state.selection_changed = true;
-		m_pending_duplicate = Entity::null();
+		m_pending_duplicates.clear();
+	}
+
+	// Group / ungroup
+	if (!m_pending_group.empty() && registry) {
+		groupEntities(*registry, state, m_pending_group);
+		m_pending_group.clear();
+	}
+	if (!m_pending_ungroup.empty() && registry) {
+		for (Entity g : m_pending_ungroup)
+			ungroupEntity(*registry, state, g);
+		m_pending_ungroup.clear();
 	}
 
 	ImGui::End();
 }
 
-void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorState& state) {
+namespace {
+
+enum class EntityKind { Group, Mesh, PointLight, SpotLight, DirLight, Camera, Particle, Joint, Skin };
+
+EntityKind primaryKind(Registry& r, Entity e, bool is_joint) {
+	if (r.hasComponent<CameraComponent>(e)) return EntityKind::Camera;
+	if (r.hasComponent<DirectionalLightComponent>(e)) return EntityKind::DirLight;
+	if (r.hasComponent<SpotLightComponent>(e)) return EntityKind::SpotLight;
+	if (r.hasComponent<PointLightComponent>(e)) return EntityKind::PointLight;
+	if (r.hasComponent<MeshComponent>(e)) return EntityKind::Mesh;
+	if (r.hasComponent<ParticleEmitterComponent>(e)) return EntityKind::Particle;
+	if (is_joint) return EntityKind::Joint;
+	if (r.hasComponent<SkinComponent>(e)) return EntityKind::Skin;
+	return EntityKind::Group;
+}
+
+const char* kindIcon(EntityKind k) {
+	switch (k) {
+		case EntityKind::Camera:     return ICON_CAMERA;
+		case EntityKind::DirLight:   return ICON_DIR_LIGHT;
+		case EntityKind::SpotLight:  return ICON_SPOT_LIGHT;
+		case EntityKind::PointLight: return ICON_POINT_LIGHT;
+		case EntityKind::Mesh:       return ICON_MESH;
+		case EntityKind::Particle:   return ICON_PARTICLE;
+		case EntityKind::Joint:      return ICON_BONE;
+		case EntityKind::Skin:       return ICON_SKIN;
+		default:                     return ICON_GROUP;
+	}
+}
+
+} // namespace
+
+void HierarchyPanel::applySelectionRequests(ImGuiMultiSelectIO* ms, Registry& registry, EditorState& state) {
+	if (!ms)
+		return;
+	for (const ImGuiSelectionRequest& req : ms->Requests) {
+		if (req.Type == ImGuiSelectionRequestType_SetAll) {
+			state.selected_entities.clear();
+			if (req.Selected)
+				for (Entity e : m_visible_order)
+					if (registry.isAlive(e))
+						state.selected_entities.push_back(e);
+			state.selection_changed = true;
+		} else if (req.Type == ImGuiSelectionRequestType_SetRange) {
+			uint32_t first_id = static_cast<uint32_t>(req.RangeFirstItem);
+			uint32_t last_id = static_cast<uint32_t>(req.RangeLastItem);
+			int i0 = -1, i1 = -1;
+			for (int i = 0; i < static_cast<int>(m_visible_order.size()); ++i) {
+				if (m_visible_order[static_cast<size_t>(i)].id() == first_id)
+					i0 = i;
+				if (m_visible_order[static_cast<size_t>(i)].id() == last_id)
+					i1 = i;
+			}
+			if (i0 < 0 || i1 < 0)
+				continue;
+			if (i0 > i1)
+				std::swap(i0, i1);
+			for (int i = i0; i <= i1; ++i) {
+				Entity e = m_visible_order[static_cast<size_t>(i)];
+				if (req.Selected) {
+					if (registry.isAlive(e) && !state.isSelected(e))
+						state.selected_entities.push_back(e);
+				} else {
+					state.removeFromSelection(e);
+				}
+			}
+			state.selection_changed = true;
+		}
+	}
+}
+
+// Wrap the selected roots (those with no selected ancestor) in a new empty entity
+// placed at their world centroid, preserving each child's world transform.
+void HierarchyPanel::groupEntities(Registry& registry, EditorState& state, const std::vector<Entity>& targets) {
+	std::vector<Entity> roots = topMostRoots(registry, targets);
+	if (roots.empty())
+		return;
+
+	// Group inherits a shared parent only if every root has the same one
+	Entity common_parent = registry.getParent(roots[0]);
+	for (size_t i = 1; i < roots.size(); ++i)
+		if (registry.getParent(roots[i]) != common_parent) {
+			common_parent = Entity::null();
+			break;
+		}
+
+	glm::vec3 centroid(0.0f);
+	for (Entity e : roots)
+		centroid += glm::vec3(registry.getWorldTransform(e)[3]);
+	centroid /= static_cast<float>(roots.size());
+
+	Entity group = registry.createGameObject("Group");
+	if (auto* tc = registry.getComponent<TransformComponent>(group))
+		tc->setTranslation(centroid);
+
+	for (Entity e : roots)
+		registry.reparent(e, group);
+	if (!common_parent.isNull() && registry.isAlive(common_parent))
+		registry.reparent(group, common_parent);
+
+	state.selectSingle(group);
+}
+
+// Dissolve a group: reparent its children to the group's parent (world preserved), then delete it.
+void HierarchyPanel::ungroupEntity(Registry& registry, EditorState& state, Entity group) {
+	if (!registry.isAlive(group))
+		return;
+	Entity parent = registry.getParent(group);
+
+	std::vector<Entity> children;
+	for (Entity c = registry.firstChild(group); !c.isNull(); c = registry.nextSibling(c))
+		children.push_back(c);
+	for (Entity c : children)
+		registry.reparent(c, parent);
+
+	state.removeFromSelection(group);
+	registry.events().emit(DeleteEntityRequest{group, /*recursive=*/true});
+
+	state.selected_entities = children;
+	state.selection_changed = true;
+}
+
+void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorState& state, bool flat) {
+	m_visible_order.push_back(entity);
 	uint32_t idx = entity.index();
-
-	// Build display name
 	const std::string& name = registry.getName(entity);
-	char label[256];
-	if (name.empty())
-		snprintf(label, sizeof(label), "Entity %u", idx);
-	else
-		snprintf(label, sizeof(label), "%s", name.c_str());
 
-	// Component badges
 	bool has_mesh = registry.hasComponent<MeshComponent>(entity);
 	bool has_pl = registry.hasComponent<PointLightComponent>(entity);
 	bool has_sl = registry.hasComponent<SpotLightComponent>(entity);
@@ -175,169 +340,328 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 	bool has_cam = registry.hasComponent<CameraComponent>(entity);
 	bool has_emitter = registry.hasComponent<ParticleEmitterComponent>(entity);
 	bool is_joint = m_joint_entity_ids.count(entity.id()) != 0;
+	EntityKind pk = primaryKind(registry, entity, is_joint);
 
-	// Check if has visible children
 	bool has_visible_children = false;
-	Entity child = registry.firstChild(entity);
-	while (!child.isNull()) {
-		bool visible = (m_show_lights_in_tree || !isLightOnly(registry, child))
-		            && subtreeMatchesSearch(registry, child);
-		if (visible) {
-			has_visible_children = true;
-			break;
+	if (!flat) {
+		Entity child = registry.firstChild(entity);
+		while (!child.isNull()) {
+			if (subtreeVisible(registry, child)) {
+				has_visible_children = true;
+				break;
+			}
+			child = registry.nextSibling(child);
 		}
-		child = registry.nextSibling(child);
 	}
+
+	bool renaming = (m_renaming_entity == entity);
+	char label[300];
+	if (renaming)
+		snprintf(label, sizeof(label), "%s", kindIcon(pk));
+	else if (name.empty())
+		snprintf(label, sizeof(label), "%s  Entity %u", kindIcon(pk), idx);
+	else
+		snprintf(label, sizeof(label), "%s  %s", kindIcon(pk), name.c_str());
 
 	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowOverlap;
 	if (!has_visible_children)
 		flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-	if (state.selected_entity == entity)
+	if (state.isSelected(entity))
 		flags |= ImGuiTreeNodeFlags_Selected;
 
-	// Open ancestors of the selected entity, or auto-expand during search
-	if (m_force_open_entities.count(entity.id()) || (m_search_active && has_visible_children))
+	if (m_force_open_entities.count(entity.id()))
 		ImGui::SetNextItemOpen(true);
 
-	// Dim entities that are inactive, or inactive because an ancestor is
-	bool active = registry.isActiveInHierarchy(entity);
-	if (!active)
+	// Zebra background behind alternate rows (drawn before the node, so text sits on top)
+	ImVec2 row_min = ImGui::GetCursorScreenPos();
+	if ((m_visible_row_index++ & 1) != 0) {
+		float fl = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMin().x;
+		float fr = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+		float h = ImGui::GetTextLineHeight() + ImGui::GetStyle().ItemSpacing.y;
+		ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(fl, row_min.y), ImVec2(fr, row_min.y + h),
+			ImGui::GetColorU32(ImGuiCol_TableRowBgAlt));
+	}
+
+	bool eff_active = registry.isActiveInHierarchy(entity);
+	if (!eff_active)
 		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
 
+	ImGui::SetNextItemSelectionUserData(static_cast<ImGuiSelectionUserData>(entity.id()));
 	bool node_open = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<uintptr_t>(entity.id())), flags, "%s", label);
+	bool node_hovered = ImGui::IsItemHovered();
+	bool row_hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenOverlappedByItem | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
 
-	// Capture TreeNode click state and context menu before badge widgets shift the "last item"
-	bool tree_clicked = ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen();
+	if (!renaming && node_hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+		m_renaming_entity = entity;
+		snprintf(m_rename_buf, sizeof(m_rename_buf), "%s", name.c_str());
+		m_rename_focus = true;
+		renaming = true;
+	}
+
 	if (ImGui::BeginPopupContextItem()) {
-		if (ImGui::MenuItem("Duplicate"))
-			m_pending_duplicate = entity;
-		if (ImGui::MenuItem("Delete"))
-			m_pending_delete = entity;
+		bool in_sel = state.isSelected(entity);
+		bool many = in_sel && state.selected_entities.size() > 1;
+		if (ImGui::MenuItem(many ? "Group selected" : "Group", "Ctrl+G"))
+			m_pending_group = in_sel ? state.selected_entities : std::vector<Entity>{entity};
+		if (pk == EntityKind::Group && !registry.firstChild(entity).isNull())
+			if (ImGui::MenuItem("Ungroup"))
+				m_pending_ungroup = {entity};
+		ImGui::Separator();
+		if (ImGui::MenuItem(many ? "Duplicate selected" : "Duplicate"))
+			m_pending_duplicates = in_sel ? state.selected_entities : std::vector<Entity>{entity};
+		if (ImGui::MenuItem(many ? "Delete selected" : "Delete"))
+			m_pending_deletes = in_sel ? state.selected_entities : std::vector<Entity>{entity};
+		ImGui::Separator();
+		if (ImGui::MenuItem("Set Active"))
+			for (Entity e : (in_sel ? state.selected_entities : std::vector<Entity>{entity}))
+				registry.setActive(e, true);
+		if (ImGui::MenuItem("Set Inactive"))
+			for (Entity e : (in_sel ? state.selected_entities : std::vector<Entity>{entity}))
+				registry.setActive(e, false);
 		ImGui::EndPopup();
 	}
 
-	if (!active)
+	if (!eff_active)
 		ImGui::PopStyleColor();
 
-	// Component badges on the same line
-	if (has_mesh || has_pl || has_sl || has_dl || has_anim || has_skin || is_joint || has_cam || has_emitter) {
+	if (renaming) {
 		ImGui::SameLine();
-		if (has_mesh) {
-			ImGui::TextColored(ImVec4(0.5f, 0.8f, 0.5f, 1.0f), "[M]");
-			if (has_pl || has_sl || has_dl || has_anim || has_skin || is_joint || has_cam || has_emitter) ImGui::SameLine();
+		ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+		if (m_rename_focus) {
+			ImGui::SetKeyboardFocusHere();
+			m_rename_focus = false;
 		}
-		if (has_anim) {
-			ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "[A]");
-			if (has_pl || has_sl || has_dl || has_skin || is_joint || has_cam || has_emitter) ImGui::SameLine();
+		if (ImGui::InputText("##rename", m_rename_buf, sizeof(m_rename_buf),
+				ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+			registry.setName(entity, m_rename_buf);
+			m_renaming_entity = Entity::null();
 		}
-		if (has_skin) {
-			ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.9f, 1.0f), "[S]");
-			if (has_pl || has_sl || has_dl || is_joint || has_cam || has_emitter) ImGui::SameLine();
+		if (ImGui::IsItemDeactivated())
+			m_renaming_entity = Entity::null();
+	} else {
+		struct Badge { bool show; const char* icon; const char* name; };
+		Badge badges[] = {
+			{has_mesh && pk != EntityKind::Mesh,        ICON_MESH,        "Mesh"},
+			{has_anim,                                  ICON_ANIMATOR,    "Animator"},
+			{has_skin && pk != EntityKind::Skin,        ICON_SKIN,        "Skin"},
+			{is_joint && pk != EntityKind::Joint,       ICON_BONE,        "Joint"},
+			{has_pl && pk != EntityKind::PointLight,    ICON_POINT_LIGHT, "Point light"},
+			{has_sl && pk != EntityKind::SpotLight,     ICON_SPOT_LIGHT,  "Spot light"},
+			{has_dl && pk != EntityKind::DirLight,      ICON_DIR_LIGHT,   "Directional light"},
+			{has_cam && pk != EntityKind::Camera,       ICON_CAMERA,      "Camera"},
+			{has_emitter && pk != EntityKind::Particle, ICON_PARTICLE,    "Emitter"},
+		};
+		if (!eff_active)
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(3.0f, ImGui::GetStyle().ItemSpacing.y));
+		for (auto& b : badges) {
+			if (!b.show)
+				continue;
+			ImGui::SameLine();
+			ImGui::TextUnformatted(b.icon);
+			ImGui::SetItemTooltip("%s", b.name);
 		}
-		if (is_joint) {
-			ImGui::TextColored(ImVec4(0.7f, 0.5f, 0.9f, 1.0f), "[J]");
-			if (has_pl || has_sl || has_dl || has_cam || has_emitter) ImGui::SameLine();
-		}
-		if (has_pl) {
-			ImGui::TextColored(ImVec4(1.0f, 0.9f, 0.4f, 1.0f), "[PL]");
-			if (has_sl || has_dl || has_cam || has_emitter) ImGui::SameLine();
-		}
-		if (has_sl) {
-			ImGui::TextColored(ImVec4(0.8f, 0.9f, 1.0f, 1.0f), "[SL]");
-			if (has_dl || has_cam || has_emitter) ImGui::SameLine();
-		}
-		if (has_dl) {
-			ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.3f, 1.0f), "[DL]");
-			if (has_cam || has_emitter) ImGui::SameLine();
-		}
-		if (has_cam) {
-			ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.4f, 1.0f), "[C]");
-			if (has_emitter) ImGui::SameLine();
-		}
-		if (has_emitter)
-			ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.9f, 1.0f), "[E]");
+		ImGui::PopStyleVar();
+		if (!eff_active)
+			ImGui::PopStyleColor();
+
+		renderVisibilityToggle(registry, entity, row_hovered);
 	}
 
-	// Right-aligned active toggle
-	renderActiveToggle(registry, entity);
-
-	// Handle selection
-	if (tree_clicked) {
-		state.selected_entity = entity;
-		state.selection_changed = true;
-	}
-
-	// Scroll to the selected entity
-	if (state.selected_entity == entity && m_scroll_to_selected) {
+	if (state.selectedEntity() == entity && m_scroll_to_selected) {
 		ImGui::SetScrollHereY();
 		m_scroll_to_selected = false;
 	}
 
-	// Render children recursively
 	if (has_visible_children && node_open) {
-		child = registry.firstChild(entity);
+		float guide_x = row_min.x + ImGui::GetTreeNodeToLabelSpacing() * 0.5f;
+		float guide_top = ImGui::GetCursorScreenPos().y;
+		Entity child = registry.firstChild(entity);
 		while (!child.isNull()) {
-			bool visible = (m_show_lights_in_tree || !isLightOnly(registry, child))
-			            && subtreeMatchesSearch(registry, child);
-			if (visible)
+			if (subtreeVisible(registry, child))
 				renderEntityNode(registry, child, state);
 			child = registry.nextSibling(child);
+		}
+		float guide_bottom = ImGui::GetCursorScreenPos().y - ImGui::GetStyle().ItemSpacing.y;
+		ImGui::GetWindowDrawList()->AddLine(ImVec2(guide_x, guide_top), ImVec2(guide_x, guide_bottom),
+			IM_COL32(130, 130, 130, 55), 1.0f);
+		ImGui::TreePop();
+	}
+}
+
+void HierarchyPanel::renderVisibilityToggle(Registry& registry, Entity entity, bool row_hovered) {
+	bool self_active = registry.isActive(entity);
+	bool eff_active = registry.isActiveInHierarchy(entity);
+	if (!row_hovered && self_active && eff_active)
+		return;
+
+	float sz = ImGui::GetTextLineHeight();
+	ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - sz);
+	ImGui::PushID(static_cast<int>(entity.id()));
+
+	bool ancestor_hidden = self_active && !eff_active;
+	if (ancestor_hidden)
+		ImGui::BeginDisabled();
+	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1, 1, 1, 0.10f));
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1, 1, 1, 0.16f));
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+	if (ImGui::Button(self_active ? ICON_EYE : ICON_EYE_OFF, ImVec2(sz, sz)))
+		registry.setActive(entity, !self_active);
+	ImGui::PopStyleVar();
+	ImGui::PopStyleColor(3);
+	if (ancestor_hidden)
+		ImGui::EndDisabled();
+	if (!ancestor_hidden && ImGui::IsItemHovered())
+		ImGui::SetTooltip(self_active ? "Hide" : "Show");
+
+	ImGui::PopID();
+}
+
+void HierarchyPanel::renderFilters(Registry& registry) {
+	uint32_t n_all = registry.entityCount();
+	uint32_t n_mesh = registry.meshes().size();
+	uint32_t n_light = registry.pointLights().size() + registry.spotLights().size()
+	                 + registry.directionalLights().size();
+	uint32_t n_cam = registry.cameras().size();
+
+	struct Filter { TreeFilter mode; const char* name; uint32_t count; };
+	Filter filters[] = {
+		{TreeFilter::All,     "All",     n_all},
+		{TreeFilter::Meshes,  "Meshes",  n_mesh},
+		{TreeFilter::Lights,  "Lights",  n_light},
+		{TreeFilter::Cameras, "Cameras", n_cam},
+	};
+	const ImVec4 accent = ImGui::GetStyle().Colors[ImGuiCol_ButtonHovered];
+	for (int i = 0; i < 4; ++i) {
+		if (i)
+			ImGui::SameLine();
+		bool active = (m_filter == filters[i].mode);
+		if (active)
+			ImGui::PushStyleColor(ImGuiCol_Button, accent);
+		char lbl[48];
+		snprintf(lbl, sizeof(lbl), "%s %u##filter%d", filters[i].name, filters[i].count, i);
+		if (ImGui::SmallButton(lbl))
+			m_filter = filters[i].mode;
+		if (active)
+			ImGui::PopStyleColor();
+	}
+}
+
+// Flat list of entities matching the active type filter or search
+void HierarchyPanel::renderFlatList(Registry& registry, EditorState& state) {
+	uint32_t scan = registry.maxEntityIndex();
+	for (uint32_t i = 0; i < scan; ++i) {
+		if (!registry.isAliveAtIndex(i))
+			continue;
+		Entity e = registry.entityFromIndex(i);
+		if (matchesTypeFilter(registry, e) && matchesNameSearch(registry, e))
+			renderEntityNode(registry, e, state, /*flat=*/true);
+	}
+}
+
+// Lights filter: grouped management view, each group collapsible with its own
+// bulk controls
+void HierarchyPanel::renderLightGroups(Registry& registry, EditorState& state) {
+	std::vector<Entity> dir, spot, point;
+	uint32_t scan = registry.maxEntityIndex();
+	for (uint32_t i = 0; i < scan; ++i) {
+		if (!registry.isAliveAtIndex(i))
+			continue;
+		Entity e = registry.entityFromIndex(i);
+		if (!matchesNameSearch(registry, e))
+			continue;
+		if (registry.hasComponent<DirectionalLightComponent>(e)) dir.push_back(e);
+		else if (registry.hasComponent<SpotLightComponent>(e)) spot.push_back(e);
+		else if (registry.hasComponent<PointLightComponent>(e)) point.push_back(e);
+	}
+	std::sort(point.begin(), point.end());
+
+	auto renderRows = [&](const std::vector<Entity>& es) {
+		for (Entity e : es)
+			renderEntityNode(registry, e, state, /*flat=*/true);
+	};
+
+	if (!dir.empty() && ImGui::TreeNodeEx("Directional", ImGuiTreeNodeFlags_DefaultOpen)) {
+		renderEnableCheckbox("Enable all", dir, registry);
+		renderRows(dir);
+		ImGui::TreePop();
+	}
+
+	if (!spot.empty() && ImGui::TreeNodeEx("Spot", ImGuiTreeNodeFlags_DefaultOpen)) {
+		renderEnableCheckbox("Enable all", spot, registry);
+		renderRows(spot);
+		ImGui::TreePop();
+	}
+
+	if (!point.empty() && ImGui::TreeNodeEx("Point", ImGuiTreeNodeFlags_DefaultOpen)) {
+		renderEnableCheckbox("Enable all", point, registry);
+		renderGroupControls("all_pl", point, registry);
+
+		std::vector<Entity> scene_lights, punctual_lights, emissive_lights;
+		for (Entity e : point) {
+			switch (registry.getLightSource(e)) {
+				case LightSource::Punctual: punctual_lights.push_back(e); break;
+				case LightSource::Emissive: emissive_lights.push_back(e); break;
+				default:                    scene_lights.push_back(e); break;
+			}
+		}
+
+		renderRows(scene_lights);
+
+		struct SourceGroup { const char* label; std::vector<Entity>& entities; };
+		SourceGroup source_groups[] = {
+			{"KHR Punctual", punctual_lights},
+			{"Emissive",     emissive_lights},
+		};
+		for (auto& [group_label, entities] : source_groups) {
+			if (entities.empty()) continue;
+			ImGui::PushID(group_label);
+			char group_header[64];
+			snprintf(group_header, sizeof(group_header), "%s (%zu)", group_label, entities.size());
+			if (ImGui::TreeNode(group_header)) {
+				renderEnableCheckbox("Enable all", entities, registry);
+				renderGroupControls(group_label, entities, registry);
+				renderLightNameGroups(registry, group_label, entities, state);
+				ImGui::TreePop();
+			}
+			ImGui::PopID();
 		}
 		ImGui::TreePop();
 	}
 }
 
-void HierarchyPanel::renderActiveToggle(Registry& registry, Entity entity) {
-	ImGui::PushID(static_cast<int>(entity.id()));
-	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 2));
-	float toggle_w = ImGui::GetFrameHeight();
-	ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - toggle_w);
-	bool active = registry.isActive(entity);
-	if (ImGui::Checkbox("##active", &active))
-		registry.setActive(entity, active);
-	ImGui::PopStyleVar();
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip(active ? "Active" : "Inactive");
-	ImGui::PopID();
-}
-
-void HierarchyPanel::renderSelectableLight(Registry& registry, Entity entity, EditorState& state) {
-	const std::string& name = registry.getName(entity);
-	char label[256];
-	if (name.empty())
-		snprintf(label, sizeof(label), "Light %u", entity.index());
-	else
-		snprintf(label, sizeof(label), "%s", name.c_str());
-
-	bool active = registry.isActiveInHierarchy(entity);
-	if (!active)
-		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
-
-	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen
-	                         | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowOverlap;
-	if (state.selected_entity == entity)
-		flags |= ImGuiTreeNodeFlags_Selected;
-
-	ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<uintptr_t>(entity.id())), flags, "%s", label);
-	bool clicked = ImGui::IsItemClicked();
-
-	if (ImGui::BeginPopupContextItem()) {
-		if (ImGui::MenuItem("Duplicate"))
-			m_pending_duplicate = entity;
-		if (ImGui::MenuItem("Delete"))
-			m_pending_delete = entity;
-		ImGui::EndPopup();
+void HierarchyPanel::renderLightNameGroups(Registry& registry, const std::string& source_key,
+                                           const std::vector<Entity>& group_lights, EditorState& state) {
+	// Sub-partition by name prefix (before ": ")
+	std::map<std::string, std::vector<Entity>> sub_groups;
+	for (auto e : group_lights) {
+		const auto& name = registry.getName(e);
+		auto sep = name.find(": ");
+		if (sep != std::string::npos)
+			sub_groups[name.substr(0, sep)].push_back(e);
+		else
+			sub_groups["Ungrouped"].push_back(e);
 	}
 
-	if (!active)
-		ImGui::PopStyleColor();
+	auto ungrouped_it = sub_groups.find("Ungrouped");
+	if (ungrouped_it != sub_groups.end())
+		for (auto e : ungrouped_it->second)
+			renderEntityNode(registry, e, state, /*flat=*/true);
 
-	// Right-aligned active toggle
-	renderActiveToggle(registry, entity);
-
-	if (clicked) {
-		state.selected_entity = entity;
-		state.selection_changed = true;
+	for (auto& [sub_name, sub_lights] : sub_groups) {
+		if (sub_name == "Ungrouped") continue;
+		ImGui::PushID(sub_name.c_str());
+		char sub_header[128];
+		snprintf(sub_header, sizeof(sub_header), "%s (%zu)", sub_name.c_str(), sub_lights.size());
+		if (ImGui::TreeNode(sub_header)) {
+			renderEnableCheckbox("Enable group", sub_lights, registry);
+			renderGroupControls(source_key + "/" + sub_name, sub_lights, registry);
+			for (auto e : sub_lights)
+				renderEntityNode(registry, e, state, /*flat=*/true);
+			ImGui::TreePop();
+		}
+		ImGui::PopID();
 	}
 }
 
@@ -414,130 +738,6 @@ void HierarchyPanel::renderGroupControls(const std::string& key, const std::vect
 			if (pl)
 				pl->setRange(state.range);
 		}
-	}
-}
-
-void HierarchyPanel::renderLightsSection(Registry& registry, EditorState& state) {
-	uint32_t dl_count = registry.directionalLights().size();
-	uint32_t pl_count = registry.pointLights().size();
-	uint32_t sl_count = registry.spotLights().size();
-	if (dl_count == 0 && pl_count == 0 && sl_count == 0)
-		return;
-
-	char header[64];
-	snprintf(header, sizeof(header), "Lights (%u)", dl_count + pl_count + sl_count);
-	if (!ImGui::CollapsingHeader(header))
-		return;
-
-	ImGui::PushID("lights_section");
-
-	// --- Directional Lights ---
-	if (dl_count > 0 && ImGui::TreeNodeEx("Directional", ImGuiTreeNodeFlags_DefaultOpen)) {
-		for (auto [e, dl] : registry.view<DirectionalLightComponent>().includeInactive())
-			renderSelectableLight(registry, e, state);
-		ImGui::TreePop();
-	}
-
-	// --- Spot Lights ---
-	if (sl_count > 0 && ImGui::TreeNodeEx("Spot Lights", ImGuiTreeNodeFlags_DefaultOpen)) {
-		auto sl_view = registry.view<SpotLightComponent, TransformComponent>().includeInactive();
-		for (auto [e, sl, tc] : sl_view)
-			renderSelectableLight(registry, e, state);
-		ImGui::TreePop();
-	}
-
-	// --- Point Lights ---
-	if (pl_count > 0 && ImGui::TreeNodeEx("Point Lights", ImGuiTreeNodeFlags_DefaultOpen)) {
-		// Collect and sort for stable UI order
-		auto pl_view = registry.view<PointLightComponent, TransformComponent>().includeInactive();
-		std::vector<Entity> lights;
-		lights.reserve(pl_view.sizeHint());
-		for (auto [e, pl, tc] : pl_view)
-			lights.push_back(e);
-		std::sort(lights.begin(), lights.end());
-
-		// Top-level enable checkbox + group controls
-		if (!lights.empty()) {
-			renderEnableCheckbox("Enable all", lights, registry);
-			renderGroupControls("all_pl", lights, registry);
-		}
-
-		// Partition by LightSource
-		std::vector<Entity> scene_lights, punctual_lights, emissive_lights;
-		for (auto e : lights) {
-			switch (registry.getLightSource(e)) {
-				case LightSource::Punctual: punctual_lights.push_back(e); break;
-				case LightSource::Emissive: emissive_lights.push_back(e); break;
-				default:                    scene_lights.push_back(e); break;
-			}
-		}
-
-		// Manual/scene lights listed directly
-		for (auto e : scene_lights)
-			renderSelectableLight(registry, e, state);
-
-		// Source groups (Punctual, Emissive)
-		struct SourceGroup { const char* label; std::vector<Entity>& entities; };
-		SourceGroup source_groups[] = {
-			{"KHR Punctual", punctual_lights},
-			{"Emissive",     emissive_lights},
-		};
-		for (auto& [group_label, entities] : source_groups) {
-			if (entities.empty()) continue;
-			ImGui::PushID(group_label);
-
-			char group_header[64];
-			snprintf(group_header, sizeof(group_header), "%s (%zu)", group_label, entities.size());
-			if (ImGui::TreeNode(group_header)) {
-				renderEnableCheckbox("Enable all", entities, registry);
-				renderGroupControls(group_label, entities, registry);
-				renderLightGroup(registry, group_label, entities, state);
-				ImGui::TreePop();
-			}
-			ImGui::PopID();
-		}
-
-		ImGui::TreePop();
-	}
-
-	ImGui::PopID();
-}
-
-void HierarchyPanel::renderLightGroup(Registry& registry, const std::string& source_key, const std::vector<Entity>& group_lights, EditorState& state) {
-	// Sub-partition by name prefix (before ": ")
-	std::map<std::string, std::vector<Entity>> sub_groups;
-	for (auto e : group_lights) {
-		const auto& name = registry.getName(e);
-		auto sep = name.find(": ");
-		if (sep != std::string::npos)
-			sub_groups[name.substr(0, sep)].push_back(e);
-		else
-			sub_groups["Ungrouped"].push_back(e);
-	}
-
-	// Ungrouped lights listed directly
-	auto ungrouped_it = sub_groups.find("Ungrouped");
-	if (ungrouped_it != sub_groups.end())
-		for (auto e : ungrouped_it->second)
-			renderSelectableLight(registry, e, state);
-
-	// Named sub-groups with enable toggle + group controls
-	for (auto& [sub_name, sub_lights] : sub_groups) {
-		if (sub_name == "Ungrouped") continue;
-		ImGui::PushID(sub_name.c_str());
-
-		char sub_header[128];
-		snprintf(sub_header, sizeof(sub_header), "%s (%zu)", sub_name.c_str(), sub_lights.size());
-		if (ImGui::TreeNode(sub_header)) {
-			renderEnableCheckbox("Enable group", sub_lights, registry);
-			renderGroupControls(source_key + "/" + sub_name, sub_lights, registry);
-
-			for (auto e : sub_lights)
-				renderSelectableLight(registry, e, state);
-
-			ImGui::TreePop();
-		}
-		ImGui::PopID();
 	}
 }
 

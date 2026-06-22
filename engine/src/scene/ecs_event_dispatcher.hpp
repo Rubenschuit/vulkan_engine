@@ -59,6 +59,11 @@ struct AnimationStateChangedEvent {
 	Entity entity;
 };
 
+struct ActiveChangedEvent {
+	Entity entity;
+	bool active_in_hierarchy;
+};
+
 // Deferred deletion request (emitted by UI, processed at safe frame boundary)
 struct DeleteEntityRequest {
 	Entity entity;
@@ -75,6 +80,9 @@ struct is_always_dispatched : std::false_type {};
 
 template <typename T>
 struct is_always_dispatched<ComponentRemovedEvent<T>> : std::true_type {};
+
+template <>
+struct is_always_dispatched<ActiveChangedEvent> : std::true_type {};
 
 template <typename E>
 inline constexpr bool is_always_dispatched_v = is_always_dispatched<E>::value;

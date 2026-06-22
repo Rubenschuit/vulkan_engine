@@ -10,6 +10,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/matrix_decompose.hpp>
+#include <algorithm>
 
 namespace ve {
 
@@ -65,12 +66,14 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 				glm::mat4 inv_vp = glm::inverse(m_camera_view->proj * m_camera_view->view);
 				Ray ray = screenToWorldRay(uv_x, uv_y, inv_vp);
 				RayHit hit;
+				bool additive = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift;
 				if (raycastScene(ray, *registry, hit)) {
-					state.selected_entity = hit.entity;
-					state.selection_changed = true;
-				} else if (!state.selected_entity.isNull()) {
-					state.selected_entity = Entity::null();
-					state.selection_changed = true;
+					if (additive)
+						state.toggleSelection(hit.entity);
+					else
+						state.selectSingle(hit.entity);
+				} else if (!additive && !state.selected_entities.empty()) {
+					state.clearSelection();
 				}
 			}
 		}
@@ -92,7 +95,7 @@ void ViewportPanel::renderGizmoToolbar(EditorState& state) {
 	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 2));
 
-	const ImVec4 active_color(0.88f, 0.40f, 0.10f, 1.0f);
+	const ImVec4 active_color = ImGui::GetStyle().Colors[ImGuiCol_ButtonHovered];
 	bool is_translate = state.gizmo_operation == GizmoOperation::Translate;
 	bool is_rotate = state.gizmo_operation == GizmoOperation::Rotate;
 	bool is_scale = state.gizmo_operation == GizmoOperation::Scale;
@@ -119,12 +122,16 @@ void ViewportPanel::renderGizmoToolbar(EditorState& state) {
 	ImGui::SameLine();
 
 	bool is_world = state.gizmo_space == GizmoSpace::World;
+	if (!is_world) ImGui::PushStyleColor(ImGuiCol_Button, active_color);
 	if (ImGui::SmallButton(is_world ? "World" : "Local"))
 		state.gizmo_space = is_world ? GizmoSpace::Local : GizmoSpace::World;
+	if (!is_world) ImGui::PopStyleColor();
 
 	ImGui::SameLine();
+	if (state.gizmo_snap_enabled) ImGui::PushStyleColor(ImGuiCol_Button, active_color);
 	if (ImGui::SmallButton(state.gizmo_snap_enabled ? "Snap: ON" : "Snap: OFF"))
 		state.gizmo_snap_enabled = !state.gizmo_snap_enabled;
+	if (state.gizmo_snap_enabled) ImGui::PopStyleColor();
 
 	ImGui::PopStyleVar(2);
 }
@@ -176,27 +183,34 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 
 	// Unfreeze if gizmo was active last frame but won't be this frame (early return paths)
 	auto unfreezeIfNeeded = [&]() {
-		if (m_was_gizmo_active && !state.gizmo_active && !m_frozen_entity.isNull() && m_physics_system) {
-			m_physics_system->unfreezeBody(m_frozen_entity);
-			m_frozen_entity = Entity::null();
+		if (m_was_gizmo_active && !state.gizmo_active && !m_frozen_entities.empty() && m_physics_system) {
+			for (Entity e : m_frozen_entities)
+				m_physics_system->unfreezeBody(e);
+			m_frozen_entities.clear();
 		}
 		m_was_gizmo_active = state.gizmo_active;
 	};
 
-	if (!m_camera_view || !registry || state.selected_entity.isNull()) {
+	if (!m_camera_view || !registry || state.selectedEntity().isNull()) {
 		unfreezeIfNeeded();
 		return;
 	}
-	if (!registry->isAlive(state.selected_entity)) {
+	if (!registry->isAlive(state.selectedEntity())) {
 		unfreezeIfNeeded();
 		return;
 	}
 
-	auto* transform = registry->getComponent<TransformComponent>(state.selected_entity);
+	auto* transform = registry->getComponent<TransformComponent>(state.selectedEntity());
 	if (!transform) {
 		unfreezeIfNeeded();
 		return;
 	}
+
+	// Entities the gizmo moves: every selected entity that is alive, transformable,
+	// and has no alive selected ancestor
+	std::vector<Entity> roots = topMostRoots(*registry, state.selected_entities);
+	roots.erase(std::remove_if(roots.begin(), roots.end(),
+		[&](Entity e) { return !registry->getComponent<TransformComponent>(e); }), roots.end());
 
 	// ImGuizmo setup
 	ImGuizmo::SetOrthographic(false);
@@ -227,7 +241,7 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 	}
 
 	// Get world transform
-	const glm::mat4& world = registry->getWorldTransform(state.selected_entity);
+	const glm::mat4& world = registry->getWorldTransform(state.selectedEntity());
 	glm::mat4 model = world;
 	const glm::mat4& view = m_camera_view->view;
 
@@ -242,40 +256,67 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 	glm::mat4 gizmo_proj = glm::perspective(m_camera_view->fov_y_radians, m_camera_view->aspect,
 	                                         m_camera_view->z_near, m_camera_view->z_far);
 
+	glm::mat4 model_before = model;
 	if (ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(gizmo_proj),
 	                         op, mode, glm::value_ptr(model), nullptr, snap_ptr)) {
-		// Remove the AABB offset before decomposing back
-		glm::vec3 new_world_offset = glm::vec3(model * glm::vec4(aabb_offset, 1.0f)) - glm::vec3(model[3]);
-		model[3] -= glm::vec4(new_world_offset, 0.0f);
+		if (roots.size() == 1 && roots[0] == state.selectedEntity()) {
+			// Single selection
+			// Remove the AABB offset before decomposing back
+			glm::vec3 new_world_offset = glm::vec3(model * glm::vec4(aabb_offset, 1.0f)) - glm::vec3(model[3]);
+			model[3] -= glm::vec4(new_world_offset, 0.0f);
 
-		// Convert back to local space if entity has a parent
-		Entity parent = registry->getParent(state.selected_entity);
-		glm::mat4 local_model = model;
-		if (!parent.isNull()) {
-			const glm::mat4& parent_world = registry->getWorldTransform(parent);
-			local_model = glm::inverse(parent_world) * model;
+			// Convert back to local space if entity has a parent
+			Entity parent = registry->getParent(state.selectedEntity());
+			glm::mat4 local_model = model;
+			if (!parent.isNull()) {
+				const glm::mat4& parent_world = registry->getWorldTransform(parent);
+				local_model = glm::inverse(parent_world) * model;
+			}
+
+			// Decompose into T/R/S
+			glm::vec3 translation, scale, skew;
+			glm::vec4 perspective;
+			glm::quat rotation;
+			glm::decompose(local_model, scale, rotation, translation, skew, perspective);
+
+			if (op == ImGuizmo::TRANSLATE)
+				transform->setTranslation(translation);
+			else if (op == ImGuizmo::ROTATE)
+				transform->setRotation(rotation);
+			else if (op == ImGuizmo::SCALE)
+				transform->setScale(scale);
+		} else {
+			// Multi selection
+			glm::mat4 delta = model * glm::inverse(model_before);
+			for (Entity r : roots) {
+				glm::mat4 world_new = delta * registry->getWorldTransform(r);
+				Entity parent = registry->getParent(r);
+				glm::mat4 local_model = parent.isNull() ? world_new
+					: glm::inverse(registry->getWorldTransform(parent)) * world_new;
+				glm::vec3 translation, scale, skew;
+				glm::vec4 perspective;
+				glm::quat rotation;
+				glm::decompose(local_model, scale, rotation, translation, skew, perspective);
+				auto* tc = registry->getComponent<TransformComponent>(r);
+				// Every op moves a satellite about the shared pivot, so translation
+				// always updates; only touch the rotation/scale the op actually changes.
+				tc->setTranslation(translation);
+				if (op == ImGuizmo::ROTATE)
+					tc->setRotation(rotation);
+				else if (op == ImGuizmo::SCALE)
+					tc->setScale(scale);
+			}
 		}
-
-		// Decompose into T/R/S
-		glm::vec3 translation, scale, skew;
-		glm::vec4 perspective;
-		glm::quat rotation;
-		glm::decompose(local_model, scale, rotation, translation, skew, perspective);
-
-		if (op == ImGuizmo::TRANSLATE)
-			transform->setTranslation(translation);
-		else if (op == ImGuizmo::ROTATE)
-			transform->setRotation(rotation);
-		else if (op == ImGuizmo::SCALE)
-			transform->setScale(scale);
 	}
 
 	state.gizmo_active = ImGuizmo::IsUsing();
 
-	// Freeze physics body when gizmo drag starts, unfreeze when it ends
+	// Freeze physics bodies when gizmo drag starts, unfreeze when it ends
 	if (state.gizmo_active && !m_was_gizmo_active && m_physics_system) {
-		m_physics_system->freezeBody(state.selected_entity);
-		m_frozen_entity = state.selected_entity;
+		for (Entity r : roots) {
+			m_physics_system->freezeBody(r);
+			m_frozen_entities.push_back(r);
+		}
 	}
 	unfreezeIfNeeded();
 }
@@ -391,10 +432,10 @@ static void drawWireCapsule(ImDrawList* dl, const glm::vec3& center, const glm::
 
 void ViewportPanel::renderCollisionShape(Registry* registry, EditorState& state,
 	float img_x, float img_y, float img_w, float img_h) {
-	if (!m_physics_system || !m_camera_view || !registry || state.selected_entity.isNull())
+	if (!m_physics_system || !m_camera_view || !registry || state.selectedEntity().isNull())
 		return;
 
-	auto shape = m_physics_system->getDebugShape(state.selected_entity, *registry);
+	auto shape = m_physics_system->getDebugShape(state.selectedEntity(), *registry);
 	if (!shape)
 		return;
 

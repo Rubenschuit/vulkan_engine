@@ -754,6 +754,12 @@ void ShadowRenderSystem::subscribeToRegistry(Registry& registry) {
 			m_static_drawables_dirty = true;
 			m_dynamic_drawables_dirty = true;
 		});
+	registry.events().subscribe<ActiveChangedEvent>(
+		[this](const ActiveChangedEvent&) {
+			m_static_drawables_dirty = true;
+			m_dynamic_drawables_dirty = true;
+			m_force_full_rerender = true;
+		});
 	registry.events().subscribe<MeshDataChangedEvent>(
 		[this](const MeshDataChangedEvent&) {
 			invalidateShadowDrawables();

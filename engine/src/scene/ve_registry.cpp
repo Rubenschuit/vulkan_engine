@@ -7,8 +7,27 @@
 #include <glm/gtx/matrix_decompose.hpp>
 #include <algorithm>
 #include <cassert>
+#include <unordered_set>
 
 namespace ve {
+
+std::vector<Entity> topMostRoots(const Registry& registry, std::span<const Entity> items) {
+	std::unordered_set<Entity> in_set(items.begin(), items.end());
+	std::vector<Entity> roots;
+	for (Entity e : items) {
+		if (!registry.isAlive(e))
+			continue;
+		bool ancestor_in_set = false;
+		for (Entity a = registry.getParent(e); !a.isNull(); a = registry.getParent(a))
+			if (in_set.count(a)) {
+				ancestor_in_set = true;
+				break;
+			}
+		if (!ancestor_in_set)
+			roots.push_back(e);
+	}
+	return roots;
+}
 
 Registry::Registry() {
 	m_events.subscribe<DeleteEntityRequest>([this](const DeleteEntityRequest& req) {
@@ -83,12 +102,14 @@ void Registry::destroyEntity(Entity e) {
 		}
 	}
 
-	// Orphan all children
+	// Orphan all children; recompute active_in_hierarchy now their parent link is
+	// gone 
 	Entity child = h.first_child;
 	while (!child.isNull()) {
-		auto& ch = m_hierarchy[child.index()];
-		ch.parent = Entity::null();
-		child = ch.next_sibling;
+		Entity next = m_hierarchy[child.index()].next_sibling;
+		m_hierarchy[child.index()].parent = Entity::null();
+		updateActiveInHierarchy(child);
+		child = next;
 	}
 
 	h.parent = Entity::null();
@@ -429,6 +450,7 @@ void Registry::updateActiveInHierarchy(Entity e) {
 	if (m_meta[idx].active_in_hierarchy == effective)
 		return;
 	m_meta[idx].active_in_hierarchy = effective;
+	m_events.emit(ActiveChangedEvent{e, effective});
 
 	Entity child = m_hierarchy[idx].first_child;
 	while (!child.isNull()) {

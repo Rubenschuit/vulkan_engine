@@ -9,9 +9,13 @@
 #include <unordered_set>
 #include <vector>
 
+struct ImGuiMultiSelectIO;
+
 namespace ve {
 
 class SceneManager;
+
+enum class TreeFilter { All, Meshes, Lights, Cameras };
 
 class VENGINE_API HierarchyPanel : public EditorPanel {
 public:
@@ -26,16 +30,21 @@ public:
 
 private:
 	void renderSceneSelector();
-	void renderEntityNode(Registry& registry, Entity entity, EditorState& state);
-	void renderLightsSection(Registry& registry, EditorState& state);
-	void renderLightGroup(Registry& registry, const std::string& source_key, const std::vector<Entity>& group_lights, EditorState& state);
-	void renderSelectableLight(Registry& registry, Entity entity, EditorState& state);
-	void renderActiveToggle(Registry& registry, Entity entity);
+	void renderEntityNode(Registry& registry, Entity entity, EditorState& state, bool flat = false);
+	void renderFilters(Registry& registry);
+	void renderFlatList(Registry& registry, EditorState& state);
+	void renderLightGroups(Registry& registry, EditorState& state);
+	void renderLightNameGroups(Registry& registry, const std::string& source_key, const std::vector<Entity>& group_lights, EditorState& state);
+	void renderVisibilityToggle(Registry& registry, Entity entity, bool row_hovered);
 	void renderGroupControls(const std::string& key, const std::vector<Entity>& lights, Registry& registry);
 	void renderEnableCheckbox(const char* label, const std::vector<Entity>& lights, Registry& registry);
+	void applySelectionRequests(ImGuiMultiSelectIO* ms, Registry& registry, EditorState& state);
+	void groupEntities(Registry& registry, EditorState& state, const std::vector<Entity>& targets);
+	void ungroupEntity(Registry& registry, EditorState& state, Entity group);
 
-	bool isLightOnly(Registry& registry, Entity entity);
-	bool subtreeMatchesSearch(Registry& registry, Entity entity);
+	bool matchesTypeFilter(Registry& registry, Entity entity);
+	bool matchesNameSearch(Registry& registry, Entity entity);
+	bool subtreeVisible(Registry& registry, Entity entity);
 
 	struct LightGroupState {
 		float intensity_multiplier = 1.0f;
@@ -52,15 +61,27 @@ private:
 
 	std::unordered_map<std::string, LightGroupState> m_group_states;
 	Registry* m_last_registry = nullptr;
-	Entity m_pending_delete = Entity::null();
-	Entity m_pending_duplicate = Entity::null();
+	std::vector<Entity> m_pending_deletes;
+	std::vector<Entity> m_pending_duplicates;
+	std::vector<Entity> m_pending_group;
+	std::vector<Entity> m_pending_ungroup;
 
 	// Auto-expand and scroll-to for selection changes
 	std::unordered_set<uint32_t> m_force_open_entities;
 	bool m_scroll_to_selected = false;
-	bool m_show_lights_in_tree = true;
+
+	TreeFilter m_filter = TreeFilter::All;
 
 	std::unordered_set<uint32_t> m_joint_entity_ids;
+
+	// Multi-select
+	std::vector<Entity> m_visible_order;
+	int m_visible_row_index = 0;
+
+	// Inline rename
+	Entity m_renaming_entity = Entity::null();
+	char m_rename_buf[256]{};
+	bool m_rename_focus = false;
 
 	// Search
 	char m_search_buf[256]{};

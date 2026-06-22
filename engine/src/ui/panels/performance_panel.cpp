@@ -295,6 +295,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	ImGui::Spacing();
 	ImGui::Separator();
 	ImGui::Checkbox("GPU Profiling", &context.settings.gpu_profiling);
+	ImGui::SetItemTooltip("Collect per-pass GPU timings (very small overhead)");
 	ImGui::Spacing();
 
 	// --- Per-system breakdown table ---
@@ -304,7 +305,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		"UI", "Skinning", "Cluster Lights", "Particles"
 	};
 
-	if (ImGui::BeginTable("##Breakdown", 3, ImGuiTableFlags_None)) {
+	if (ImGui::BeginTable("##Breakdown", 3, ImGuiTableFlags_RowBg)) {
 		ImGui::TableSetupColumn("System", ImGuiTableColumnFlags_WidthStretch);
 		ImGui::TableSetupColumn("CPU", ImGuiTableColumnFlags_WidthFixed, 65.0f);
 		ImGui::TableSetupColumn("GPU", ImGuiTableColumnFlags_WidthFixed, 65.0f);

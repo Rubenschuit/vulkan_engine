@@ -154,6 +154,7 @@ namespace ObjectFlag {
 	constexpr uint32_t NO_SHADOW      = 0x2;
 	constexpr uint32_t DYNAMIC        = 0x4;
 	constexpr uint32_t DEFORMED        = 0x8;
+	constexpr uint32_t INACTIVE       = 0x10;
 }
 
 // GPU-driven culling

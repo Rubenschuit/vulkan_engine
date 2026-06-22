@@ -33,10 +33,12 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 	if (tid.x >= cull_params.object_count)
 		return;
 
-	// Look up real GPU object ID from contiguous active IDs list
 	uint gpu_id = active_ids[tid.x].gpu_id;
 
 	ObjectDataGPU obj = objects[gpu_id];
+
+	if ((obj.object_flags & OBJ_FLAG_INACTIVE) != 0)
+		return;
 
 	if (VE_CULL_IS_SHADOW != 0) {
 		if ((obj.object_flags & OBJ_FLAG_IS_TRANSPARENT) != 0)

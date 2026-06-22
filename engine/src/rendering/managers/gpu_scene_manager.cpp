@@ -205,6 +205,11 @@ void GpuSceneManager::subscribeToRegistry(Registry& registry) {
 					setDynamic(target, isDynamicEntity(*m_registry, target));
 			}
 		});
+
+	m_active_changed_sub = registry.events().subscribe<ActiveChangedEvent>(
+		[this](const ActiveChangedEvent& event) {
+			setActive(event.entity, event.active_in_hierarchy);
+		});
 }
 
 uint32_t GpuSceneManager::registerObject(Entity entity, const MeshComponent& mesh,
@@ -226,6 +231,9 @@ uint32_t GpuSceneManager::registerObject(Entity entity, const MeshComponent& mes
 
 	if (isDynamicEntity(registry, entity))
 		setDynamic(entity, true);
+
+	if (!registry.isActiveInHierarchy(entity))
+		m_cpu_object_data[gpu_id].object_flags |= ObjectFlag::INACTIVE;
 
 	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
 		if (!m_id_in_dirty_set[f][gpu_id]) {
@@ -339,6 +347,21 @@ void GpuSceneManager::setDynamic(Entity entity, bool is_dynamic) {
 
 	m_object_data_dirty.fill(true);
 	m_dynamic_classification_changed = true;
+}
+
+void GpuSceneManager::setActive(Entity entity, bool active) {
+	auto it = m_entity_to_gpu_id.find(entity.index());
+	if (it == m_entity_to_gpu_id.end())
+		return;
+	auto& obj_flags = m_cpu_object_data[it->second].object_flags;
+	bool was_active = (obj_flags & ObjectFlag::INACTIVE) == 0;
+	if (was_active == active)
+		return;
+	if (active)
+		obj_flags &= ~ObjectFlag::INACTIVE;
+	else
+		obj_flags |= ObjectFlag::INACTIVE;
+	m_object_data_dirty.fill(true);
 }
 
 // Only skinned bounds change per frame. Morph-only meshes keep the
@@ -532,6 +555,7 @@ void GpuSceneManager::unsubscribeFromRegistry() {
 	events.unsubscribe<ComponentRemovedEvent<RigidbodyComponent>>(m_rb_removed_sub);
 	events.unsubscribe<AnimationStateChangedEvent>(m_anim_state_changed_sub);
 	events.unsubscribe<ComponentRemovedEvent<AnimatorComponent>>(m_anim_removed_sub);
+	events.unsubscribe<ActiveChangedEvent>(m_active_changed_sub);
 	m_mesh_removed_sub = 0;
 	m_transform_invalidated_sub = 0;
 	m_mesh_data_changed_sub = 0;
@@ -811,7 +835,7 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 		obj_flags = (is_transparent ? ObjectFlag::IS_TRANSPARENT : 0u)
 			| (!mesh.has_shadow ? ObjectFlag::NO_SHADOW : 0u);
 	}
-	obj_flags |= (m_cpu_object_data[gpu_id].object_flags & ObjectFlag::DYNAMIC);
+	obj_flags |= (m_cpu_object_data[gpu_id].object_flags & (ObjectFlag::DYNAMIC | ObjectFlag::INACTIVE));
 	if (is_deformed)
 		obj_flags |= ObjectFlag::DEFORMED;
 

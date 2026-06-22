@@ -16,7 +16,6 @@
 #include "rendering/managers/pbr_mega_buffer.hpp"
 
 #include <algorithm>
-#include <functional>
 
 namespace ve {
 
@@ -365,25 +364,21 @@ void OutlineSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 	}
 }
 
-void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, Entity root_entity,
-                                const PbrMegaBuffer& mega_buffer) {
-	if (root_entity.isNull() || !registry.isAlive(root_entity)) {
-		m_has_outline = false;
-		return;
-	}
+static void collectMeshEntities(Registry& registry, Entity e, std::vector<Entity>& out) {
+	if (registry.hasComponent<MeshComponent>(e))
+		out.push_back(e);
+	for (Entity child = registry.firstChild(e); !child.isNull(); child = registry.nextSibling(child))
+		collectMeshEntities(registry, child, out);
+}
 
-	// Recursively collect all mesh entities under the root entity
-	std::vector<Entity> mesh_entities;
-	std::function<void(Entity)> collect = [&](Entity e) {
-		if (registry.hasComponent<MeshComponent>(e))
-			mesh_entities.push_back(e);
-		Entity child = registry.firstChild(e);
-		while (!child.isNull()) {
-			collect(child);
-			child = registry.nextSibling(child);
-		}
-	};
-	collect(root_entity);
+void OutlineSystem::renderMask(VeFrameInfo& fi, Registry& registry, std::span<const Entity> roots,
+                                const PbrMegaBuffer& mega_buffer) {
+	// Recursively collect all mesh entities under each selected root
+	auto& mesh_entities = m_mask_mesh_entities;
+	mesh_entities.clear();
+	for (Entity root : roots)
+		if (!root.isNull() && registry.isAlive(root))
+			collectMeshEntities(registry, root, mesh_entities);
 
 	if (mesh_entities.empty()) {
 		m_has_outline = false;

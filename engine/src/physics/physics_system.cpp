@@ -2,6 +2,7 @@
 #include "physics/physics_system.hpp"
 #include <cstdarg>
 #include <set>
+#include <atomic>
 #include "scene/ve_registry.hpp"
 #include "scene/ve_component.hpp"
 #include "scene/ecs_event_dispatcher.hpp"
@@ -33,8 +34,15 @@
 
 JPH_SUPPRESS_WARNINGS
 
+static std::atomic<bool> s_in_physics_update{false};
+
 #ifdef JPH_ENABLE_ASSERTS
 static bool JoltAssertFailed(const char* inExpression, const char* inMessage, const char* inFile, JPH::uint inLine) {
+	if (s_in_physics_update) {
+		VE_LOGE("Jolt update assert (recoverable, continuing): " << inFile << ":" << inLine
+			<< ": (" << inExpression << ") " << (inMessage ? inMessage : ""));
+		return false;
+	}
 	VE_LOGE("Jolt assert failed: " << inFile << ":" << inLine << ": (" << inExpression << ") "
 		<< (inMessage ? inMessage : ""));
 	return true;
@@ -175,7 +183,7 @@ static int s_jolt_ref_count = 0;
 struct PhysicsSystem::Impl {
 	PhysicsConfig config;
 
-	std::unique_ptr<JPH::TempAllocatorImpl> temp_allocator;
+	std::unique_ptr<JPH::TempAllocatorImplWithMallocFallback> temp_allocator;
 	std::unique_ptr<JPH::JobSystemThreadPool> job_system;
 	std::unique_ptr<JPH::PhysicsSystem> physics_system;
 
@@ -205,6 +213,7 @@ struct PhysicsSystem::Impl {
 
 	float accumulator = 0.0f;
 	uint32_t dynamic_body_count = 0; // non-static bodies (dynamic + kinematic)
+	uint32_t logged_update_errors = 0;
 
 	// ── Body map helpers ───────────────────────────────────────────────────
 
@@ -254,7 +263,7 @@ struct PhysicsSystem::Impl {
 			JPH::RegisterTypes();
 		}
 
-		temp_allocator = std::make_unique<JPH::TempAllocatorImpl>(10 * 1024 * 1024);
+		temp_allocator = std::make_unique<JPH::TempAllocatorImplWithMallocFallback>(10 * 1024 * 1024);
 
 		auto thread_count = std::max(1u, std::thread::hardware_concurrency() - 1);
 		job_system = std::make_unique<JPH::JobSystemThreadPool>(
@@ -1021,9 +1030,35 @@ struct PhysicsSystem::Impl {
 			return;
 
 		float total_time = static_cast<float>(steps) * config.fixed_timestep;
-		physics_system->Update(total_time, steps, temp_allocator.get(), job_system.get());
+		s_in_physics_update = true;
+		JPH::EPhysicsUpdateError err =
+			physics_system->Update(total_time, steps, temp_allocator.get(), job_system.get());
+		s_in_physics_update = false;
+		reportUpdateErrors(err);
 
 		pullJoltResults(registry);
+	}
+
+	void reportUpdateErrors(JPH::EPhysicsUpdateError err) {
+		uint32_t bits = static_cast<uint32_t>(err);
+		if (bits == logged_update_errors)
+			return;
+
+		auto raised = [&](JPH::EPhysicsUpdateError flag) {
+			return (err & flag) != JPH::EPhysicsUpdateError::None
+				&& (static_cast<JPH::EPhysicsUpdateError>(logged_update_errors) & flag) == JPH::EPhysicsUpdateError::None;
+		};
+		if (raised(JPH::EPhysicsUpdateError::BodyPairCacheFull))
+			VE_LOGW("Physics: body-pair cache full. "
+				"Raise PhysicsConfig::max_body_pairs (current " << config.max_body_pairs << ").");
+		if (raised(JPH::EPhysicsUpdateError::ContactConstraintsFull))
+			VE_LOGW("Physics: contact-constraint buffer full. "
+				"Raise PhysicsConfig::max_contact_constraints (current " << config.max_contact_constraints << ").");
+		if (raised(JPH::EPhysicsUpdateError::ManifoldCacheFull))
+			VE_LOGW("Physics: manifold cache full. "
+				"Raise PhysicsConfig::max_contact_constraints (current " << config.max_contact_constraints << ").");
+
+		logged_update_errors = bits;
 	}
 
 	void rebuildDirtyBodies(Registry& registry) {

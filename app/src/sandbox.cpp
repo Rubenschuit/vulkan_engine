@@ -68,7 +68,7 @@ void Sandbox::registerInputActions() {
 	});
 
 	ic.registerAction({
-		.name = "Toggle Fireworks Panel", .key = GLFW_KEY_G,
+		.name = "Toggle Fireworks Panel", .key = GLFW_KEY_K,
 		.trigger = TriggerType::OnPress, .context = InputContext::Always,
 		.description = "Toggle fireworks parameter panel"
 	});
@@ -171,10 +171,10 @@ void Sandbox::renderGameModeOverlay() {
 		ImGui::Separator();
 		keyLabel("F", "Launch Firework");
 		ImGui::SameLine(0.0f, 16.0f);
+		keyLabel("K", "Customize Fireworks");
+		ImGui::Separator();
 		keyLabel("L", "Flashlight");
 		ImGui::SameLine(0.0f, 16.0f);
-		keyLabel("G", "Settings");
-		ImGui::Separator();
 		keyLabel("Tab", "Editor");
 		ImGui::SameLine(0.0f, 16.0f);
 		keyLabel("P", "Performance");

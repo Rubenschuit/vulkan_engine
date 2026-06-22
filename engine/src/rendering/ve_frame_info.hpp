@@ -11,6 +11,7 @@
 #include <vulkan/vulkan_raii.hpp>
 #include <glm/glm.hpp>
 #include <vector>
+#include <span>
 
 namespace ve {
 
@@ -203,7 +204,9 @@ struct VeFrameInfo {
 	VeScene*   active_scene = nullptr;
 	Registry*  registry = nullptr;
 	CameraView camera_view;
-	Entity     selected_entity = Entity::null();
+	// Aliases EditorState::selected_entities; valid only for the duration of
+	// renderFrame
+	std::span<const Entity> selected_entities;
 
 	// Per-frame state
 	uint32_t current_frame;

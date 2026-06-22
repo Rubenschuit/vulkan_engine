@@ -58,7 +58,8 @@ enum ShadowMode {
 #define OBJ_FLAG_IS_TRANSPARENT    0x1u
 #define OBJ_FLAG_NO_SHADOW         0x2u
 #define OBJ_FLAG_DYNAMIC           0x4u
-#define OBJ_FLAG_DEFORMED           0x8u
+#define OBJ_FLAG_DEFORMED          0x8u
+#define OBJ_FLAG_INACTIVE          0x10u
 
 [vk::constant_id(0)] const uint SHADOW_MODE_SPEC = 0;
 [vk::constant_id(1)] const uint PCF_SAMPLES_SPEC = 8; // PCF + PCSS blocker: 4, 8, 16, or 32

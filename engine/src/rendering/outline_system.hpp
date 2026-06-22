@@ -15,6 +15,8 @@
 #include <memory>
 #include <array>
 #include <filesystem>
+#include <span>
+#include <vector>
 
 namespace ve {
 class VeDevice;
@@ -43,8 +45,8 @@ public:
 	OutlineSystem(const OutlineSystem&) = delete;
 	OutlineSystem& operator=(const OutlineSystem&) = delete;
 
-	// Collects selected entity + all descendants with MeshComponent.
-	void renderMask(VeFrameInfo& frame_info, Registry& registry, Entity root_entity,
+	// Collects each selected root + all descendants with MeshComponent.
+	void renderMask(VeFrameInfo& frame_info, Registry& registry, std::span<const Entity> roots,
 	                const PbrMegaBuffer& mega_buffer);
 
 	// Called on graphics cmd buffer after mask.
@@ -89,6 +91,7 @@ private:
 	// --- Mask pass (graphics) ---
 	vk::raii::PipelineLayout m_mask_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_mask_pipeline;
+	std::vector<Entity> m_mask_mesh_entities;
 
 	// --- JFA Init (compute) ---
 	std::unique_ptr<VeDescriptorSetLayout> m_jfa_init_set_layout;

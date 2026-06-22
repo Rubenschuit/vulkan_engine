@@ -14,6 +14,10 @@
 #include <backends/imgui_impl_vulkan.h>
 #include <ImGuizmo.h>
 
+#include "ui/editor_icons.hpp"
+#include "ui/fonts/inter.inc"
+#include "ui/fonts/lucide.inc"
+
 
 namespace ve {
 
@@ -60,6 +64,7 @@ ImGuiLayer::ImGuiLayer(VeWindow& window, VeDevice& device, VeRenderer& renderer,
 
 	// Set style
 	applyEditorTheme();
+	uploadFonts();
 
     // Init GLFW backend
     ImGui_ImplGlfw_InitForVulkan(window.getGLFWwindow(), true);
@@ -376,7 +381,27 @@ void ImGuiLayer::recreatePipeline() {
 	main_vp->PlatformHandle = saved_platform_handle;
 }
 
-void ImGuiLayer::uploadFonts() {}
+void ImGuiLayer::uploadFonts() {
+	ImGuiIO& io = ImGui::GetIO();
+	constexpr float FONT_SIZE = 16.0f;
+
+
+	static const ImWchar icon_range[] = {ICON_MIN_LC, ICON_MAX_LC, 0};
+
+	// Inter font ships its own glyphs in Lucide's Private-Use icon range.
+	// Exclude that.
+	ImFontConfig base_cfg;
+	base_cfg.GlyphExcludeRanges = icon_range;
+	io.Fonts->AddFontFromMemoryCompressedTTF(
+		Inter_compressed_data, Inter_compressed_size, FONT_SIZE, &base_cfg);
+	ImFontConfig cfg;
+	cfg.MergeMode = true;
+	cfg.PixelSnapH = true;
+	cfg.GlyphMinAdvanceX = FONT_SIZE;
+	cfg.GlyphOffset.y = 3.0f;
+	io.Fonts->AddFontFromMemoryCompressedTTF(
+		LucideIcons_compressed_data, LucideIcons_compressed_size, FONT_SIZE, &cfg, icon_range);
+}
 
 
 }

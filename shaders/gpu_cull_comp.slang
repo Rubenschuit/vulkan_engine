@@ -38,10 +38,12 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 	if (tid.x >= cull_params.object_count)
 		return;
 
-	// Look up real GPU object ID from contiguous active IDs list
 	uint idx = active_ids[tid.x].gpu_id;
 
 	ObjectDataGPU obj = objects[idx];
+
+	if ((obj.object_flags & OBJ_FLAG_INACTIVE) != 0)
+		return;
 
 	// Determine bucket from material flags
 	uint alpha_mode = obj.material_flags & MAT_FLAG_ALPHA_MODE_MASK;

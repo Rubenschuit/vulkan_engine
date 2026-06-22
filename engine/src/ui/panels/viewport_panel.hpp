@@ -32,7 +32,7 @@ private:
 	VkDescriptorSet m_texture_id = VK_NULL_HANDLE;
 	const CameraView* m_camera_view = nullptr;
 	PhysicsSystem* m_physics_system = nullptr;
-	Entity m_frozen_entity = Entity::null();
+	std::vector<Entity> m_frozen_entities;
 	bool m_was_gizmo_active = false;
 	ImVec2 m_image_min{0.f, 0.f};
 	ImVec2 m_image_max{0.f, 0.f};

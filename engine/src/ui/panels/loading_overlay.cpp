@@ -18,8 +18,11 @@ constexpr float TOAST_MARGIN = 16.f;
 constexpr float BAR_HEIGHT = 8.f;
 constexpr float SPINNER_RADIUS = 8.f;
 constexpr float SPINNER_THICKNESS = 2.f;
-constexpr ImU32 ACCENT_COLOR = IM_COL32(225, 102, 26, 255);   // 0.88, 0.40, 0.10
 constexpr ImU32 BAR_BG_COLOR = IM_COL32(255, 255, 255, 30);
+
+inline ImU32 accentColor() {
+	return ImGui::ColorConvertFloat4ToU32(ImGui::GetStyle().Colors[ImGuiCol_ButtonHovered]);
+}
 
 void drawSpinner(ImDrawList* dl, ImVec2 center, float radius, float thickness, float t) {
 	const int segments = 32;
@@ -30,7 +33,7 @@ void drawSpinner(ImDrawList* dl, ImVec2 center, float radius, float thickness, f
 		float a = start + arc_len * (static_cast<float>(i) / segments);
 		dl->PathLineTo(ImVec2(center.x + std::cos(a) * radius, center.y + std::sin(a) * radius));
 	}
-	dl->PathStroke(ACCENT_COLOR, ImDrawFlags_None, thickness);
+	dl->PathStroke(accentColor(), ImDrawFlags_None, thickness);
 }
 
 void drawIndeterminateBar(ImDrawList* dl, ImVec2 min, ImVec2 max, float t) {
@@ -45,7 +48,7 @@ void drawIndeterminateBar(ImDrawList* dl, ImVec2 min, ImVec2 max, float t) {
 	const ImVec2 clipped_min(std::max(band_x0, min.x), min.y);
 	const ImVec2 clipped_max(std::min(band_x1, max.x), max.y);
 	if (clipped_max.x > clipped_min.x)
-		dl->AddRectFilled(clipped_min, clipped_max, ACCENT_COLOR, rounding);
+		dl->AddRectFilled(clipped_min, clipped_max, accentColor(), rounding);
 }
 
 void drawProgressBar(ImDrawList* dl, ImVec2 min, ImVec2 max, float fraction) {
@@ -55,7 +58,7 @@ void drawProgressBar(ImDrawList* dl, ImVec2 min, ImVec2 max, float fraction) {
 	const float fill_w = (max.x - min.x) * fraction;
 	if (fill_w > 0.5f) {
 		ImVec2 fill_max(min.x + fill_w, max.y);
-		dl->AddRectFilled(min, fill_max, ACCENT_COLOR, rounding);
+		dl->AddRectFilled(min, fill_max, accentColor(), rounding);
 	}
 }
 

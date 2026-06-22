@@ -382,12 +382,13 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			};
 			if (ctx.settings.hdr_enabled) {
 				int hdr_idx = (ctx.settings.tone_map_mode == TONEMAP_GT) ? 1 : 0;
-				ImGui::Combo("Tone Mapping", &hdr_idx, tone_map_names_hdr, 2);
+				ImGui::Combo("Tone Mapping (HDR)", &hdr_idx, tone_map_names_hdr, 2);
 				ctx.settings.tone_map_mode = (hdr_idx == 1) ? TONEMAP_GT : TONEMAP_NONE;
 				if (ImGui::IsItemHovered())
 					ImGui::SetTooltip("%s", tone_map_descriptions[ctx.settings.tone_map_mode]);
+				ImGui::TextDisabled("HDR output: only None and GT apply");
 			} else {
-				ImGui::Combo("Tone Mapping", &ctx.settings.tone_map_mode, tone_map_names_sdr, 5);
+				ImGui::Combo("Tone Mapping (SDR)", &ctx.settings.tone_map_mode, tone_map_names_sdr, 5);
 				if (ImGui::IsItemHovered())
 					ImGui::SetTooltip("%s", tone_map_descriptions[ctx.settings.tone_map_mode]);
 			}

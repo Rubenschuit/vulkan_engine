@@ -5,6 +5,8 @@
 #include <glm/gtc/quaternion.hpp>
 #include <variant>
 #include <optional>
+#include <vector>
+#include <algorithm>
 
 namespace ve {
 
@@ -80,8 +82,45 @@ struct VENGINE_API EditorState {
 	bool editor_mode = true; // true = docking editor, false = fullscreen
 
 	// Selection
-	Entity selected_entity = Entity::null();
+	std::vector<Entity> selected_entities;
 	bool selection_changed = false;
+
+	Entity selectedEntity() const {
+		return selected_entities.empty() ? Entity::null() : selected_entities.back();
+	}
+	bool isSelected(Entity e) const {
+		return std::find(selected_entities.begin(), selected_entities.end(), e) != selected_entities.end();
+	}
+	void clearSelection() {
+		selected_entities.clear();
+		selection_changed = true;
+	}
+	void selectSingle(Entity e) {
+		selected_entities.clear();
+		if (!e.isNull())
+			selected_entities.push_back(e);
+		selection_changed = true;
+	}
+	void removeFromSelection(Entity e) {
+		selected_entities.erase(std::remove(selected_entities.begin(), selected_entities.end(), e), selected_entities.end());
+		selection_changed = true;
+	}
+	void addToSelection(Entity e) {
+		if (e.isNull())
+			return;
+		selected_entities.erase(std::remove(selected_entities.begin(), selected_entities.end(), e), selected_entities.end());
+		selected_entities.push_back(e);
+		selection_changed = true;
+	}
+	void toggleSelection(Entity e) {
+		if (e.isNull())
+			return;
+		if (isSelected(e))
+			removeFromSelection(e);
+		else
+			selected_entities.push_back(e);
+		selection_changed = true;
+	}
 
 	// Camera the viewport renders through. Null = editor camera; otherwise an entity with
 	// CameraComponent. The application falls back to the editor camera if the entity becomes

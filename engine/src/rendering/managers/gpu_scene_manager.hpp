@@ -109,6 +109,7 @@ public:
 	void markTransformDirty(Entity entity);
 	void markObjectDataDirty(Entity entity);
 	void setDynamic(Entity entity, bool is_dynamic);
+	void setActive(Entity entity, bool active);
 
 	// True if the entity should be classified as dynamic for shadow caching.
 	// Animated entities, skinned entities, or entities with a Dynamic rigidbody.
@@ -255,6 +256,7 @@ private:
 	SubscriptionId m_skin_removed_sub = 0;
 	SubscriptionId m_morph_added_sub = 0;
 	SubscriptionId m_morph_removed_sub = 0;
+	SubscriptionId m_active_changed_sub = 0;
 };
 
 }

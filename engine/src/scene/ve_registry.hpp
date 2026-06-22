@@ -15,6 +15,7 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include <span>
 
 namespace ve {
 
@@ -318,6 +319,9 @@ T* Registry::getComponentInChildren(Entity e) {
 	}
 	return nullptr;
 }
+
+// Returns the subset of `items` whose ancestor chain contains no other item
+VENGINE_API std::vector<Entity> topMostRoots(const Registry& registry, std::span<const Entity> items);
 
 } // namespace ve
 

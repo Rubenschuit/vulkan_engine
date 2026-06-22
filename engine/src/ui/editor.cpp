@@ -93,15 +93,13 @@ void Editor::renderUI(UIContext& context, Registry* registry) {
 	bool editor_mode = m_state.editor_mode;
 
 	// Auto-show inspector when an entity is selected
-	if (m_state.selection_changed && !m_state.selected_entity.isNull())
+	if (m_state.selection_changed && !m_state.selectedEntity().isNull())
 		m_state.show_inspector = true;
 
 	m_imgui_layer->renderUI(context, m_state, [this, registry, editor_mode](UIContext& ctx) {
 		if (editor_mode) {
-			if (ImGui::IsKeyPressed(ImGuiKey_Escape) && !m_state.selected_entity.isNull()) {
-				m_state.selected_entity = Entity::null();
-				m_state.selection_changed = true;
-			}
+			if (ImGui::IsKeyPressed(ImGuiKey_Escape) && !m_state.selected_entities.empty())
+				m_state.clearSelection();
 
 			renderMenuBar();
 			if (m_state.show_keybindings)
@@ -146,7 +144,7 @@ void Editor::renderUI(UIContext& context, Registry* registry) {
 	// Cache AABB offset for gizmo/debug shape placement
 	if (m_state.selection_changed && registry) {
 		m_state.cached_aabb_offset = glm::vec3(0.0f);
-		Entity sel = m_state.selected_entity;
+		Entity sel = m_state.selectedEntity();
 		if (!sel.isNull() && registry->isAlive(sel)) {
 			auto* mc = registry->getComponent<MeshComponent>(sel);
 			if (mc && mc->hasMesh()) {

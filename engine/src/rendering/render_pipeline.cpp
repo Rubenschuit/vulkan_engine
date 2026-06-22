@@ -572,7 +572,7 @@ VeFrameInfo RenderPipeline::buildFrameInfo(VeScene& scene,
 		.active_scene = &scene,
 		.registry = &scene.getRegistry(),
 		.camera_view = camera_view,
-		.selected_entity = editor_state.selected_entity,
+		.selected_entities = editor_state.selected_entities,
 		.current_frame = current_frame,
 		.frame_time = frame_time,
 		.total_time = total_time,
@@ -990,14 +990,14 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 			gpu_scene, m_ve_renderer);
 	}
 
-	bool outline_active = editor_state.outline_enabled && !fi.selected_entity.isNull();
+	bool outline_active = editor_state.outline_enabled && !fi.selected_entities.empty();
 	if (outline_active) {
 		ScopedDebugLabel label(active_cb, "Selection Outline", {1.0f, 0.5f, 0.0f, 1.0f});
 		ZoneScopedN("Selection Outline");
 		TracyVkZone(tracy_gfx, *active_cb, "Selection Outline");
 		profiler.beginCpuTimer(ProfileTimer::OUTLINE);
 		profiler.beginGpuTimer(active_cb, ProfileTimer::OUTLINE);
-		m_outline_system->renderMask(fi, *fi.registry, fi.selected_entity,
+		m_outline_system->renderMask(fi, *fi.registry, fi.selected_entities,
 			m_scene_resources->getMegaBuffer());
 		if (m_outline_system->hasOutline())
 			m_outline_system->dispatchJFA(fi, editor_state.outline_width);
