@@ -181,17 +181,19 @@ void ImGuiLayer::renderDockSpace() {
 
 		ImGuiID dock_main = dockspace_id;
 		ImGuiID dock_left = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Left, 0.28f, nullptr, &dock_main);
-		ImGuiID dock_right = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.22f, nullptr, &dock_main);
+		ImGuiID dock_right = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.38f, nullptr, &dock_main);
 		ImGuiID dock_left_bottom = ImGui::DockBuilderSplitNode(dock_left, ImGuiDir_Down, 0.5f, nullptr, &dock_left);
-		ImGuiID dock_right_bottom = ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Down, 0.45f, nullptr, &dock_right);
+		ImGuiID dock_right_bottom = ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Down, 0.5f, nullptr, &dock_right);
+		ImGuiID dock_main_bottom = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Down, 0.32f, nullptr, &dock_main);
 
 		ImGui::DockBuilderDockWindow("Scene Hierarchy", dock_left);
 		ImGui::DockBuilderDockWindow(m_app_settings_window_name.c_str(), dock_left);
 		ImGui::DockBuilderDockWindow("Viewport", dock_main);
 		ImGui::DockBuilderDockWindow("Entity Inspector", dock_left_bottom);
 		ImGui::DockBuilderDockWindow("Environment", dock_left_bottom);
-		ImGui::DockBuilderDockWindow("Debug", dock_right);
+		ImGui::DockBuilderDockWindow("Asset Browser", dock_main_bottom);
 		ImGui::DockBuilderDockWindow("Graphics", dock_right);
+		ImGui::DockBuilderDockWindow("Debug", dock_right);
 		ImGui::DockBuilderDockWindow("Performance", dock_right_bottom);
 		ImGui::DockBuilderFinish(dockspace_id);
 	}

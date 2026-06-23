@@ -40,6 +40,7 @@ struct MaterialFactors {
 	glm::vec3 emissive_factor{0.0f, 0.0f, 0.0f};
 	float metallic_factor = 1.0f;
 	float roughness_factor = 1.0f;
+	float occlusion_strength = 1.0f;  // glTF occlusionTexture.strength: ao = lerp(1, sample.r, strength)
 	float emissive_strength = 0.00058f;  // Engine default: attenuates emissive to prevent over-bright surfaces when KHR_materials_emissive_strength is absent
 	float transmission_factor = 0.0f;
 	float ior = 1.5f;  // KHR_materials_ior: index of refraction (default 1.5 gives F0 ≈ 0.04)

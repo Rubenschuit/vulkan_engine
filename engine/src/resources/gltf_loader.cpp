@@ -1,12 +1,14 @@
 /* gltf_loader.cpp - generated from ve_model.cpp loader code */
 #include "pch.hpp"
 #include "resources/internal/gltf_loader.hpp"
+#include "resources/gltf_metadata.hpp"
 #include "resources/ve_texture.hpp"
 #include "resources/internal/loaded_asset_data.hpp"
 #include "resources/internal/asset_upload.hpp"
 #include "scene/ve_component.hpp"
 #include "utils/ve_log.hpp"
 #include "utils/ve_parallel.hpp"
+#include "utils/ve_string.hpp"
 
 #define TINYGLTF_IMPLEMENTATION
 #include <tiny_gltf.h>
@@ -128,9 +130,7 @@ static std::filesystem::path tryDerivePath(const std::filesystem::path& base,
                                            const std::vector<std::string>& from_suffixes,
                                            const std::vector<std::string>& to_suffixes) {
 	std::string base_str = base.generic_string();
-	std::string base_lower = base_str;
-	std::transform(base_lower.begin(), base_lower.end(), base_lower.begin(),
-	               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	std::string base_lower = ve::toLower(base_str);
 	for (const std::string& from : from_suffixes) {
 		size_t pos = base_lower.rfind(from);
 		if (pos == std::string::npos || pos + from.size() > base_str.size()) continue;
@@ -1556,8 +1556,7 @@ static bool loadGltfFile(const std::filesystem::path& model_path, tinygltf::Mode
 		loader.SetImageLoader(LoadImageDataVeModel, &load_opt);
 	std::string err, warn;
 	bool ret = false;
-	std::string path_ext = model_path.extension().string();
-	std::transform(path_ext.begin(), path_ext.end(), path_ext.begin(), ::tolower);
+	std::string path_ext = ve::toLower(model_path.extension().string());
 	if (path_ext == ".glb")
 		ret = loader.LoadBinaryFromFile(&gltf, &err, &warn, model_path.string());
 	else if (path_ext == ".gltf")
@@ -1727,17 +1726,12 @@ static void applyTexturePathFallbacks(
 	}
 	// Secondary heuristic: scan glTF images by URI for basecolor/albedo/diffuse + material name match
 	if (albedo.empty() && !gltf.images.empty()) {
-		std::string mat_name_lower = mat.name;
-		if (!mat_name_lower.empty())
-			std::transform(mat_name_lower.begin(), mat_name_lower.end(), mat_name_lower.begin(),
-			               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		std::string mat_name_lower = ve::toLower(mat.name);
 		for (size_t img_idx = 0; img_idx < gltf.images.size(); img_idx++) {
 			const auto& image = gltf.images[img_idx];
 			if (image.uri.empty())
 				continue;
-			std::string uri_lower = image.uri;
-			std::transform(uri_lower.begin(), uri_lower.end(), uri_lower.begin(),
-			               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			std::string uri_lower = ve::toLower(image.uri);
 			bool looks_base = (uri_lower.find("basecolor") != std::string::npos || uri_lower.find("albedo") != std::string::npos || uri_lower.find("diffuse") != std::string::npos);
 			if (!looks_base)
 				continue;
@@ -1932,8 +1926,10 @@ static ParsedMaterial parseSingleMaterial(
 			result.alpha_props.use_spec_gloss_texture = true;
 		}
 	}
-	if (mat.occlusionTexture.index >= 0)
+	if (mat.occlusionTexture.index >= 0) {
 		result.occlusion_path = resolveTexturePath(gltf, static_cast<size_t>(mat.occlusionTexture.index), model_dir, model_path_str, embedded);
+		factors.occlusion_strength = static_cast<float>(mat.occlusionTexture.strength);
+	}
 	if (mat.emissiveTexture.index >= 0)
 		result.emissive_path = resolveTexturePath(gltf, static_cast<size_t>(mat.emissiveTexture.index), model_dir, model_path_str, embedded);
 
@@ -2278,6 +2274,71 @@ ResourceHandle<VeMesh> loadFirstMesh(VeResourceManager& rm,
 		}
 	}
 	return {};
+}
+
+// No-op image loader
+static bool probeNoOpImageLoader(tinygltf::Image*, const int, std::string*,
+                                 std::string*, int, int, const unsigned char*, int, void*) {
+	return true;
+}
+
+GltfMetadata probeMetadata(const std::filesystem::path& model_path) {
+	GltfMetadata meta;
+
+	std::string ext = ve::toLower(model_path.extension().string());
+	if (ext != ".glb" && ext != ".gltf") {
+		meta.error = "unsupported file extension";
+		return meta;
+	}
+
+	tinygltf::TinyGLTF loader;
+	loader.SetImageLoader(probeNoOpImageLoader, nullptr);
+
+	tinygltf::Model gltf;
+	std::string err, warn;
+	std::string path_str = model_path.generic_string();
+	// The no-op image loader skips pixel decode; external .bin buffers are still
+	// fully read but unused.
+	bool ok = (ext == ".glb")
+	            ? loader.LoadBinaryFromFile(&gltf, &err, &warn, path_str)
+	            : loader.LoadASCIIFromFile(&gltf, &err, &warn, path_str);
+	if (!ok) {
+		meta.error = err.empty() ? "failed to parse glTF" : err;
+		return meta;
+	}
+
+	meta.mesh_count = static_cast<uint32_t>(gltf.meshes.size());
+	meta.material_count = static_cast<uint32_t>(gltf.materials.size());
+	meta.node_count = static_cast<uint32_t>(gltf.nodes.size());
+	meta.animation_count = static_cast<uint32_t>(gltf.animations.size());
+	meta.skin_count = static_cast<uint32_t>(gltf.skins.size());
+	meta.camera_count = static_cast<uint32_t>(gltf.cameras.size());
+	meta.texture_count = static_cast<uint32_t>(gltf.textures.size());
+
+	auto lext = gltf.extensions.find("KHR_lights_punctual");
+	if (lext != gltf.extensions.end() && lext->second.Has("lights")) {
+		const tinygltf::Value& lights = lext->second.Get("lights");
+		if (lights.IsArray())
+			meta.light_count = static_cast<uint32_t>(lights.ArrayLen());
+	}
+
+	uint64_t tris = 0;
+	for (const auto& mesh : gltf.meshes) {
+		for (const auto& prim : mesh.primitives) {
+			if (prim.mode != TINYGLTF_MODE_TRIANGLES)
+				continue;
+			int acc = prim.indices;
+			if (acc < 0) {
+				auto pos_it = prim.attributes.find("POSITION");
+				acc = (pos_it != prim.attributes.end()) ? pos_it->second : -1;
+			}
+			if (acc >= 0 && static_cast<size_t>(acc) < gltf.accessors.size())
+				tris += gltf.accessors[static_cast<size_t>(acc)].count / 3;
+		}
+	}
+	meta.triangle_count = tris;
+	meta.ok = true;
+	return meta;
 }
 
 } // namespace ve::gltf

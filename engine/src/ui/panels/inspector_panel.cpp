@@ -8,6 +8,7 @@
 #include "resources/ve_material.hpp"
 #include "resources/ve_texture.hpp"
 #include "resources/ve_material_properties.hpp"
+#include "utils/ve_string.hpp"
 #include <imgui.h>
 #include <backends/imgui_impl_vulkan.h>
 #include <glm/gtc/type_ptr.hpp>
@@ -719,6 +720,11 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 			changed = true;
 	}, [&]() { factors.roughness_factor = defaults.roughness_factor; changed = true; });
 
+	labeledWidget(mat_label_w, "Occlusion Str", [&]() {
+		if (ImGui::SliderFloat("##Occlusion", &factors.occlusion_strength, 0.0f, 1.0f))
+			changed = true;
+	}, [&]() { factors.occlusion_strength = defaults.occlusion_strength; changed = true; });
+
 	labeledWidget(mat_label_w, "Emissive", [&]() {
 		if (ImGui::ColorEdit3("##Emissive", glm::value_ptr(factors.emissive_factor)))
 			changed = true;
@@ -1022,17 +1028,12 @@ void InspectorPanel::renderAnimator(AnimatorComponent& animator) {
 
 	ImGui::Checkbox("Playing only", &m_animation_playing_only);
 
-	std::string filter_lower = m_animation_filter;
-	std::transform(filter_lower.begin(), filter_lower.end(), filter_lower.begin(),
-		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	std::string filter_lower = ve::toLower(m_animation_filter);
 
 	auto matches_filter = [&](const VeAnimationClip& clip) {
 		if (filter_lower.empty())
 			return true;
-		std::string name = clip.name;
-		std::transform(name.begin(), name.end(), name.begin(),
-			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-		return name.find(filter_lower) != std::string::npos;
+		return ve::toLower(clip.name).find(filter_lower) != std::string::npos;
 	};
 
 	ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, 320.0f));

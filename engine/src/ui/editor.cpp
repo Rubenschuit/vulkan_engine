@@ -31,6 +31,7 @@ Editor::Editor(VeWindow& window, VeDevice& device, VeRenderer& renderer,
 		[this](const SwapChainRecreatedEvent&) {
 			registerViewportImage();
 			m_texture_inspector.invalidateCache();
+			m_asset_browser_panel.invalidateThumbnails();
 		});
 }
 
@@ -111,6 +112,8 @@ void Editor::renderUI(UIContext& context, Registry* registry) {
 				m_hierarchy_panel.render(registry, m_state, ctx);
 			if (m_state.show_inspector)
 				m_inspector_panel.render(registry, m_state, ctx);
+			if (m_state.show_asset_browser)
+				m_asset_browser_panel.render(registry, m_state, ctx);
 			if (m_state.show_performance)
 				m_performance_panel->render(registry, m_state, ctx);
 			if (m_state.show_debug)
@@ -196,6 +199,13 @@ void Editor::setContext(const EditorContext& ctx, const RenderServices& services
 	m_hierarchy_panel.setEventBus(ctx.event_bus);
 	m_viewport_panel.setCameraView(&m_current_camera_view);
 	m_viewport_panel.setPhysicsSystem(ctx.physics);
+	m_viewport_panel.setEventBus(ctx.event_bus);
+	m_asset_browser_panel.setEventBus(ctx.event_bus);
+	m_asset_browser_panel.setResourceManager(ctx.resource_manager);
+	m_asset_browser_panel.setCameraView(&m_current_camera_view);
+	m_asset_browser_panel.setTextureInspector(&m_texture_inspector);
+	if (ctx.engine_config)
+		m_asset_browser_panel.setAssetRoot(ctx.engine_config->working_dir);
 	if (m_environment_panel)
 		m_environment_panel->setSkyboxSystem(services.skybox);
 	if (m_debug_panel)
@@ -213,6 +223,7 @@ void Editor::renderMenuBar() {
 			ImGui::MenuItem("Viewport", nullptr, &m_state.show_viewport);
 			ImGui::MenuItem("Hierarchy", nullptr, &m_state.show_hierarchy);
 			ImGui::MenuItem("Inspector", nullptr, &m_state.show_inspector);
+			ImGui::MenuItem("Asset Browser", nullptr, &m_state.show_asset_browser);
 			ImGui::MenuItem("Performance", nullptr, &m_state.show_performance);
 			ImGui::MenuItem("Graphics", nullptr, &m_state.show_settings);
 			ImGui::MenuItem("Environment", nullptr, &m_state.show_environment);

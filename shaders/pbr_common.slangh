@@ -201,6 +201,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		.Sample(bindless_sampler, uv_normal);
 	float4 occlusion_sample = bindless_textures[NonUniformResourceIndex(mat.occlusion_index)]
 		.Sample(bindless_sampler, uv_occlusion);
+	float occlusion = lerp(1.0, occlusion_sample.r, mat.occlusion_strength);
 	float3 emissive_sample = float3(0.0);
 	if (mat.pbr_params.z > 0.0)
 		emissive_sample = bindless_textures[NonUniformResourceIndex(mat.emissive_index)]
@@ -456,13 +457,13 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		float3 specular_ibl = prefiltered * (Fr + FmsEms);
 		specular_ibl *= saturate(NdotV * 4.0);
 
-		float diffuse_ao = occlusion_sample.r * ssao;
+		float diffuse_ao = occlusion * ssao;
 		float spec_ao = specularAO(NdotV, diffuse_ao, roughness);
 		ambient = diffuse_ibl * diffuse_ao * ubo.ibl_diffuse_intensity
 				+ specular_ibl * spec_ao * ubo.ibl_specular_intensity;
 		ambient *= 1.0 - transmission;
 	} else {
-		ambient = ubo.ambient_light_color.xyz * albedo.rgb * occlusion_sample.r * ssao;
+		ambient = ubo.ambient_light_color.xyz * albedo.rgb * occlusion * ssao;
 		ambient *= 1.0 - transmission;
 	}
 

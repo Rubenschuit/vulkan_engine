@@ -47,7 +47,15 @@ void TextureInspector::close() {
 }
 
 void TextureInspector::invalidateCache() {
-	clearCache();
+	for (auto& entry : m_layer_cache)
+		if (entry.descriptor_set != VK_NULL_HANDLE)
+			ImGui_ImplVulkan_RemoveTexture(entry.descriptor_set);
+	m_layer_cache.clear();
+	for (auto& pending : m_pending_deletions)
+		for (auto& entry : pending.entries)
+			if (entry.descriptor_set != VK_NULL_HANDLE)
+				ImGui_ImplVulkan_RemoveTexture(entry.descriptor_set);
+	m_pending_deletions.clear();
 	if (m_image && m_sampler)
 		rebuildCache();
 }

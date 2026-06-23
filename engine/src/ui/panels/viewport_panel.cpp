@@ -3,6 +3,8 @@
 #include "scene/ve_registry.hpp"
 #include "scene/ve_component.hpp"
 #include "scene/camera_view.hpp"
+#include "scene/scene_manager.hpp"
+#include "events/event_bus.hpp"
 #include "utils/ve_ray.hpp"
 #include "physics/physics_system.hpp"
 #include <imgui.h>
@@ -11,6 +13,7 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/matrix_decompose.hpp>
 #include <algorithm>
+#include <cmath>
 
 namespace ve {
 
@@ -43,10 +46,42 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 			m_image_max = ImVec2(image_pos.x + size.x, image_pos.y + size.y);
 		}
 
-		if (m_texture_id != VK_NULL_HANDLE && size.x > 0 && size.y > 0)
+		bool drew_image = m_texture_id != VK_NULL_HANDLE && size.x > 0 && size.y > 0;
+		if (drew_image)
 			ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(m_texture_id)), size);
 		else
 			ImGui::Text("No viewport image");
+
+		// Drop a model dragged from the Asset Browser at the cursor's surface point.
+		if (drew_image && ImGui::BeginDragDropTarget()) {
+			const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_GLTF_PATH");
+			if (payload && payload->Data && m_event_bus && m_camera_view && registry) {
+				ImVec2 mouse = ImGui::GetMousePos();
+				float uv_x = std::clamp((mouse.x - image_pos.x) / size.x, 0.0f, 1.0f);
+				float uv_y = std::clamp((mouse.y - image_pos.y) / size.y, 0.0f, 1.0f);
+				glm::mat4 inv_vp = glm::inverse(m_camera_view->proj * m_camera_view->view);
+				Ray ray = screenToWorldRay(uv_x, uv_y, inv_vp);
+
+				glm::vec3 placement;
+				RayHit hit;
+				if (raycastScene(ray, *registry, hit)) {
+					placement = hit.point;
+				} else if (std::abs(ray.direction.z) > 1e-4f) {
+					// No geometry under the cursor: fall back to the z=0 ground plane.
+					float t = -ray.origin.z / ray.direction.z;
+					placement = (t > 0.0f) ? ray.origin + t * ray.direction
+					                       : ray.origin + ray.direction * 10.0f;
+				} else {
+					placement = ray.origin + ray.direction * 10.0f;
+				}
+
+				m_event_bus->emitImmediate(AddModelRequestedEvent{
+					.gltf_path = std::filesystem::path(static_cast<const char*>(payload->Data)),
+					.translation = placement,
+					.flip_tex_coord_v = state.import_flip_v});
+			}
+			ImGui::EndDragDropTarget();
+		}
 
 		// Gizmo overlay (drawn on top of the image)
 		renderGizmo(registry, state, image_pos.x, image_pos.y, size.x, size.y);
@@ -298,8 +333,6 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 				glm::quat rotation;
 				glm::decompose(local_model, scale, rotation, translation, skew, perspective);
 				auto* tc = registry->getComponent<TransformComponent>(r);
-				// Every op moves a satellite about the shared pivot, so translation
-				// always updates; only touch the rotation/scale the op actually changes.
 				tc->setTranslation(translation);
 				if (op == ImGuizmo::ROTATE)
 					tc->setRotation(rotation);

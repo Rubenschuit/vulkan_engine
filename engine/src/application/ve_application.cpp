@@ -242,6 +242,7 @@ void VeApplication::initEditor() {
 		.input_controller = &m_input_controller,
 		.event_bus        = &m_event_bus,
 		.engine_config    = &m_config,
+		.resource_manager = &m_resource_manager,
 	}, m_render_pipeline->services());
 
 	auto& editor_cam = m_editor->editorCamera();

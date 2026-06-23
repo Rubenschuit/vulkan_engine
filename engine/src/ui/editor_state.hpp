@@ -130,6 +130,7 @@ struct VENGINE_API EditorState {
 	// Panel visibility
 	bool show_hierarchy = true;
 	bool show_inspector = true;
+	bool show_asset_browser = true;
 	bool show_viewport = true;
 	bool show_performance = true;
 	bool show_settings = true;
@@ -166,6 +167,9 @@ struct VENGINE_API EditorState {
 	float outline_width = 4.0f;
 	glm::vec3 outline_color{1.0f, 0.6f, 0.0f};
 	bool outline_enabled = true;
+
+	// Asset import
+	bool import_flip_v = false;
 };
 
 } // namespace ve

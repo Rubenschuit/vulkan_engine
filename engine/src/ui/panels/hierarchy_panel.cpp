@@ -8,9 +8,9 @@
 #include "scene/scene_manager.hpp"
 #include "scene/ve_registry.hpp"
 #include "scene/ve_scene.hpp"
+#include "utils/ve_string.hpp"
 #include <imgui.h>
 #include <imgui_internal.h>
-#include <portable-file-dialogs.h>
 #include <glm/gtc/type_ptr.hpp>
 #include <algorithm>
 #include <cstdint>
@@ -23,8 +23,7 @@ bool HierarchyPanel::matchesNameSearch(Registry& registry, Entity entity) {
 		return true;
 	const std::string& name = registry.getName(entity);
 	return std::search(name.begin(), name.end(), m_search_buf, m_search_buf + std::strlen(m_search_buf),
-		[](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); })
-		!= name.end();
+		ve::iequalsChar) != name.end();
 }
 
 bool HierarchyPanel::matchesTypeFilter(Registry& registry, Entity entity) {
@@ -774,23 +773,6 @@ void HierarchyPanel::renderSceneSelector() {
 		m_event_bus->emitImmediate(SceneLoadRequestedEvent{.scene_index = -1});
 		VE_LOGI("New empty scene load requested");
 	}
-
-	if (ImGui::Button("Add Model...")) {
-		auto selection = pfd::open_file(
-			"Add GLTF Model", "",
-			{"glTF Files", "*.gltf *.glb"},
-			pfd::opt::none
-		).result();
-		if (!selection.empty()) {
-			m_event_bus->emitImmediate(AddModelRequestedEvent{
-				.gltf_path = selection[0],
-				.flip_tex_coord_v = m_flip_tex_coord_v
-			});
-			VE_LOGI("Add model requested: path='" << selection[0] << "' flip_uv_v=" << m_flip_tex_coord_v);
-		}
-	}
-	ImGui::SameLine();
-	ImGui::Checkbox("Flip UV vertically", &m_flip_tex_coord_v);
 
 	ImGui::Separator();
 	ImGui::Spacing();

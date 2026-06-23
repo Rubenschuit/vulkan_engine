@@ -31,7 +31,7 @@ struct MaterialGPU {
 	uint32_t specular_index;
 	uint32_t specular_color_index;
 	float    specular_strength;
-	uint32_t _pad0;
+	float    occlusion_strength;
 	uint32_t _pad1;
 	// KHR_texture_transform, per slot: (offset.xy, scale.xy). Identity when unused.
 	glm::vec4 uv_albedo;

@@ -172,7 +172,7 @@ void MaterialSSBOManager::writeMaterialGPU(uint32_t index, VeMaterial* mat) {
 		.specular_index = getIdx(mat->getSpecularTexture(), TextureType::SPECULAR),
 		.specular_color_index = getIdx(mat->getSpecularColorTexture(), TextureType::SPECULAR_COLOR),
 		.specular_strength = factors.specular_strength,
-		._pad0 = 0,
+		.occlusion_strength = factors.occlusion_strength,
 		._pad1 = 0,
 		.uv_albedo = glm::vec4(uv.albedo.offset, uv.albedo.scale),
 		.uv_metal_rough = glm::vec4(uv.metallic_roughness.offset, uv.metallic_roughness.scale),

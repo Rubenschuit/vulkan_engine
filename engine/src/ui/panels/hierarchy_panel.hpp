@@ -57,8 +57,6 @@ private:
 	SceneManager* m_scene_manager = nullptr;
 	EventBus* m_event_bus = nullptr;
 
-	bool m_flip_tex_coord_v = false;
-
 	std::unordered_map<std::string, LightGroupState> m_group_states;
 	Registry* m_last_registry = nullptr;
 	std::vector<Entity> m_pending_deletes;

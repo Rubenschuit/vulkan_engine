@@ -13,6 +13,7 @@ class EventBus;
 class InputController;
 class PhysicsSystem;
 class SceneManager;
+class VeResourceManager;
 struct EngineConfig;
 
 struct VENGINE_API EditorContext {
@@ -21,6 +22,7 @@ struct VENGINE_API EditorContext {
 	const InputController* input_controller  = nullptr;
 	EventBus*              event_bus         = nullptr;
 	const EngineConfig*    engine_config     = nullptr;
+	VeResourceManager*     resource_manager  = nullptr;
 };
 
 } // namespace ve

@@ -169,12 +169,12 @@ void SceneManager::processPending() {
 	if (m_pending_add_models.empty())
 		return;
 
-	AddModelRequestedEvent req = std::move(m_pending_add_models.front());
-	m_pending_add_models.pop_front();
-
 	VeScene* target = m_loading_scene ? m_loading_scene.get() : m_active_scene.get();
 	if (!target)
 		return;
+
+	AddModelRequestedEvent req = std::move(m_pending_add_models.front());
+	m_pending_add_models.pop_front();
 
 	// Cache hit: instantiate immediately
 	std::string cache_key = req.gltf_path.lexically_normal().generic_string();
