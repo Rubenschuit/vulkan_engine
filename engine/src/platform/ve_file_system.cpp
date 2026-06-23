@@ -13,6 +13,8 @@
 #include <sys/wait.h>
 #if defined(__APPLE__)
 #include <crt_externs.h>
+#else
+extern char** environ;
 #endif
 #endif
 
@@ -23,7 +25,6 @@ static char** currentEnviron() {
 #if defined(__APPLE__)
 	return *_NSGetEnviron();
 #else
-	extern char** environ;
 	return environ;
 #endif
 }
