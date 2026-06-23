@@ -2,6 +2,7 @@
 #include "ui/panels/inspector_panel.hpp"
 #include "ui/imgui_layer.hpp"
 #include "ui/editor_icons.hpp"
+#include "ui/imgui_helpers.hpp"
 #include "ui/texture_inspector.hpp"
 #include "scene/ve_registry.hpp"
 #include "resources/ve_mesh.hpp"
@@ -17,6 +18,8 @@
 #include <glm/gtx/quaternion.hpp>
 
 namespace ve {
+
+using namespace ve::ui;
 
 static const char* textureFormatName(vk::Format fmt) {
 	switch (fmt) {
@@ -143,9 +146,9 @@ static bool drawVec3Control(const char* label, glm::vec3& values, float speed = 
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(spacing, spacing));
 
 	// X
-	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.15f, 0.15f, 1.0f));
-	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.2f, 0.2f, 1.0f));
-	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.7f, 0.15f, 0.15f, 1.0f));
+	ImGui::PushStyleColor(ImGuiCol_Button, COL_AXIS_X);
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, COL_AXIS_X_HOVER);
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive, COL_AXIS_X);
 	if (ImGui::Button("X", btn_size))
 		{ values.x = reset_value; changed = true; }
 	ImGui::PopStyleColor(3);
@@ -156,9 +159,9 @@ static bool drawVec3Control(const char* label, glm::vec3& values, float speed = 
 	ImGui::SameLine();
 
 	// Y
-	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.6f, 0.15f, 1.0f));
-	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.75f, 0.2f, 1.0f));
-	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.15f, 0.6f, 0.15f, 1.0f));
+	ImGui::PushStyleColor(ImGuiCol_Button, COL_AXIS_Y);
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, COL_AXIS_Y_HOVER);
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive, COL_AXIS_Y);
 	if (ImGui::Button("Y", btn_size))
 		{ values.y = reset_value; changed = true; }
 	ImGui::PopStyleColor(3);
@@ -169,9 +172,9 @@ static bool drawVec3Control(const char* label, glm::vec3& values, float speed = 
 	ImGui::SameLine();
 
 	// Z
-	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.15f, 0.7f, 1.0f));
-	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.2f, 0.85f, 1.0f));
-	ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.15f, 0.15f, 0.7f, 1.0f));
+	ImGui::PushStyleColor(ImGuiCol_Button, COL_AXIS_Z);
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, COL_AXIS_Z_HOVER);
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive, COL_AXIS_Z);
 	if (ImGui::Button("Z", btn_size))
 		{ values.z = reset_value; changed = true; }
 	ImGui::PopStyleColor(3);
@@ -184,30 +187,6 @@ static bool drawVec3Control(const char* label, glm::vec3& values, float speed = 
 	ImGui::Columns(1);
 	ImGui::PopID();
 	return changed;
-}
-
-// Two-column labeled widget with optional reset button (variadic resetFn)
-template <typename WidgetFn, typename... ResetFn>
-static void labeledWidget(float label_w, const char* text, WidgetFn widgetFn, ResetFn... resetFn) {
-	ImGui::Columns(2, nullptr, false);
-	ImGui::SetColumnWidth(0, label_w);
-	ImGui::AlignTextToFramePadding();
-	ImGui::Text("%s", text);
-	if constexpr (sizeof...(resetFn) > 0) {
-		ImGui::SameLine();
-		ImGui::PushID(text);
-		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 0));
-		if (ImGui::SmallButton("*"))
-			(resetFn(), ...);
-		ImGui::PopStyleVar();
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Reset to default");
-		ImGui::PopID();
-	}
-	ImGui::NextColumn();
-	ImGui::SetNextItemWidth(-FLT_MIN);
-	widgetFn();
-	ImGui::Columns(1);
 }
 
 void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /*context*/) {
@@ -682,12 +661,14 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 		ImGui::TextDisabled("No mesh data");
 	}
 
-	// Shadow toggle
-	if (ImGui::Checkbox("Cast Shadow", &mesh.has_shadow))
-		if (mesh.getRegistry())
-			mesh.getRegistry()->events().emit(MeshDataChangedEvent{mesh.getEntity()});
+	constexpr float label_w = 110.0f;
 
-	// Material editing
+	labeledWidget(label_w, "Cast Shadow", [&]() {
+		if (ImGui::Checkbox("##CastShadow", &mesh.has_shadow))
+			if (mesh.getRegistry())
+				mesh.getRegistry()->events().emit(MeshDataChangedEvent{mesh.getEntity()});
+	});
+
 	VeMaterial* mat = mesh.getMaterial();
 	if (!mat) {
 		ImGui::TextDisabled("No material");
@@ -698,98 +679,68 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 		return;
 
 	ImGui::TextDisabled("%s", mat->getId().c_str());
-
-	constexpr float mat_label_w = 85.0f;
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("%s", mat->getId().c_str());
 
 	auto factors = mat->getMaterialFactors();
+	auto alpha = mat->getAlphaProps();
 	MaterialFactors defaults;
 	bool changed = false;
+	bool alpha_changed = false;
 
-	labeledWidget(mat_label_w, "Base Color", [&]() {
+	ImGui::SeparatorText("Base");
+	labeledWidget(label_w, "Base Color", [&]() {
 		if (ImGui::ColorEdit4("##BaseColor", glm::value_ptr(factors.base_color_factor)))
 			changed = true;
 	}, [&]() { factors.base_color_factor = defaults.base_color_factor; changed = true; });
+	sliderRow(label_w, "Metallic", "##Metallic", &factors.metallic_factor, 0.0f, 1.0f, defaults.metallic_factor, changed);
+	sliderRow(label_w, "Roughness", "##Roughness", &factors.roughness_factor, 0.0f, 1.0f, defaults.roughness_factor, changed);
+	sliderRow(label_w, "Occlusion Str", "##Occlusion", &factors.occlusion_strength, 0.0f, 1.0f, defaults.occlusion_strength, changed);
 
-	labeledWidget(mat_label_w, "Metallic", [&]() {
-		if (ImGui::SliderFloat("##Metallic", &factors.metallic_factor, 0.0f, 1.0f))
-			changed = true;
-	}, [&]() { factors.metallic_factor = defaults.metallic_factor; changed = true; });
-
-	labeledWidget(mat_label_w, "Roughness", [&]() {
-		if (ImGui::SliderFloat("##Roughness", &factors.roughness_factor, 0.0f, 1.0f))
-			changed = true;
-	}, [&]() { factors.roughness_factor = defaults.roughness_factor; changed = true; });
-
-	labeledWidget(mat_label_w, "Occlusion Str", [&]() {
-		if (ImGui::SliderFloat("##Occlusion", &factors.occlusion_strength, 0.0f, 1.0f))
-			changed = true;
-	}, [&]() { factors.occlusion_strength = defaults.occlusion_strength; changed = true; });
-
-	labeledWidget(mat_label_w, "Emissive", [&]() {
+	ImGui::SeparatorText("Emission");
+	labeledWidget(label_w, "Emissive", [&]() {
 		if (ImGui::ColorEdit3("##Emissive", glm::value_ptr(factors.emissive_factor)))
 			changed = true;
 	}, [&]() { factors.emissive_factor = defaults.emissive_factor; changed = true; });
+	dragRow(label_w, "Emissive Str", "##EmissiveStr", &factors.emissive_strength, 0.001f, 0.0f, 100.0f, "%.4f", defaults.emissive_strength, changed);
 
-	labeledWidget(mat_label_w, "Emissive Str", [&]() {
-		if (ImGui::DragFloat("##EmissiveStr", &factors.emissive_strength, 0.001f, 0.0f, 100.0f))
-			changed = true;
-	}, [&]() { factors.emissive_strength = defaults.emissive_strength; changed = true; });
-
-	labeledWidget(mat_label_w, "Transmission", [&]() {
-		if (ImGui::SliderFloat("##Transmission", &factors.transmission_factor, 0.0f, 1.0f))
-			changed = true;
-	}, [&]() { factors.transmission_factor = defaults.transmission_factor; changed = true; });
-
-	labeledWidget(mat_label_w, "IOR", [&]() {
-		if (ImGui::DragFloat("##IOR", &factors.ior, 0.01f, 1.0f, 3.0f, "%.2f"))
-			changed = true;
-	}, [&]() { factors.ior = defaults.ior; changed = true; });
-
-	labeledWidget(mat_label_w, "Specular Color", [&]() {
+	ImGui::SeparatorText("Specular");
+	labeledWidget(label_w, "Specular Color", [&]() {
 		if (ImGui::ColorEdit3("##SpecularColor", glm::value_ptr(factors.specular_factor),
 				ImGuiColorEditFlags_Float))
 			changed = true;
 	}, [&]() { factors.specular_factor = defaults.specular_factor; changed = true; });
+	sliderRow(label_w, "Specular Str", "##SpecularStr", &factors.specular_strength, 0.0f, 1.0f, defaults.specular_strength, changed);
 
-	labeledWidget(mat_label_w, "Specular Str", [&]() {
-		if (ImGui::SliderFloat("##SpecularStr", &factors.specular_strength, 0.0f, 1.0f))
-			changed = true;
-	}, [&]() { factors.specular_strength = defaults.specular_strength; changed = true; });
+	ImGui::SeparatorText("Transparency & Refraction");
+	sliderRow(label_w, "Transmission", "##Transmission", &factors.transmission_factor, 0.0f, 1.0f, defaults.transmission_factor, changed);
+	dragRow(label_w, "IOR", "##IOR", &factors.ior, 0.01f, 1.0f, 3.0f, "%.2f", defaults.ior, changed);
 
-	if (changed) {
-		mat->setMaterialFactors(factors);
-		if (mesh.getRegistry())
-			mesh.getRegistry()->events().emit(MeshDataChangedEvent{mesh.getEntity()});
-	}
-
-	// Alpha properties
-	auto alpha = mat->getAlphaProps();
-	bool alpha_changed = false;
-
+	ImGui::SeparatorText("Alpha & Render");
 	const char* alpha_modes[] = { "Opaque", "Mask", "Blend" };
 	int alpha_idx = static_cast<int>(alpha.alpha_mode);
-	labeledWidget(mat_label_w, "Alpha Mode", [&]() {
+	labeledWidget(label_w, "Alpha Mode", [&]() {
 		if (ImGui::Combo("##AlphaMode", &alpha_idx, alpha_modes, 3)) {
 			alpha.alpha_mode = static_cast<AlphaMode>(alpha_idx);
 			alpha_changed = true;
 		}
 	});
-
-	if (alpha.alpha_mode == AlphaMode::MASK) {
-		labeledWidget(mat_label_w, "Alpha Cutoff", [&]() {
+	if (alpha.alpha_mode == AlphaMode::MASK)
+		labeledWidget(label_w, "Alpha Cutoff", [&]() {
 			if (ImGui::SliderFloat("##AlphaCutoff", &alpha.alpha_cutoff, 0.0f, 1.0f))
 				alpha_changed = true;
 		});
-	}
+	labeledWidget(label_w, "Double Sided", [&]() {
+		if (ImGui::Checkbox("##DoubleSided", &alpha.double_sided))
+			alpha_changed = true;
+	});
 
-	if (ImGui::Checkbox("Double Sided", &alpha.double_sided))
-		alpha_changed = true;
-
-	if (alpha_changed) {
+	if (changed)
+		mat->setMaterialFactors(factors);
+	if (alpha_changed)
 		mat->setAlphaProps(alpha);
-		if (mesh.getRegistry())
-			mesh.getRegistry()->events().emit(MeshDataChangedEvent{mesh.getEntity()});
-	}
+	if ((changed || alpha_changed) && mesh.getRegistry())
+		mesh.getRegistry()->events().emit(MeshDataChangedEvent{mesh.getEntity()});
 
 	// Texture thumbnails
 	if (ImGui::TreeNode(ICON_TEXTURE "  Textures")) {

@@ -32,3 +32,6 @@
 #define ICON_LC_BOT             "\xEE\x86\xBB"  // bot U+E1BB
 #define ICON_LC_USERS           "\xEE\x86\xA4"  // users U+E1A4
 #define ICON_LC_FOOTPRINTS      "\xEE\x8E\xB9"  // footprints U+E3B9
+#define ICON_LC_ROTATE_CW       "\xEE\x85\x89"  // rotate-cw U+E149
+#define ICON_LC_SCALING         "\xEE\x8B\xAC"  // scaling U+E2EC
+#define ICON_LC_MAGNET          "\xEE\x8A\xB5"  // magnet U+E2B5

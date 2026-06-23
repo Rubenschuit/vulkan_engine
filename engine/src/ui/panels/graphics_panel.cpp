@@ -2,6 +2,7 @@
 #include "ui/panels/graphics_panel.hpp"
 #include "ui/editor_state.hpp"
 #include "ui/imgui_layer.hpp"
+#include "ui/imgui_helpers.hpp"
 #include "platform/ve_window.hpp"
 #include "rendering/particle_backend.hpp"
 #include "rendering/ve_renderer.hpp"
@@ -14,6 +15,8 @@
 
 namespace ve {
 
+using namespace ve::ui;
+
 void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext& ctx) {
 	if (!ImGui::Begin("Graphics", &state.show_settings, ImGuiWindowFlags_NoFocusOnAppearing)) {
 		ImGui::End();
@@ -22,7 +25,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 
 	// --- Display ---
 	if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen)) {
-		ImGui::SliderFloat("FOV (Degrees)", &ctx.settings.fov, 30.0f, 120.0f, "%.1f");
+		ImGui::SliderFloat("FOV (deg)", &ctx.settings.fov, 30.0f, 120.0f, "%.1f");
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Field of View in degrees.");
 
@@ -131,7 +134,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			m_event_bus.emitImmediate(DepthPrePassChangedEvent{ctx.settings.depth_prepass_enabled});
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Early depth pass. Required by GTAO, shadow mask, and Hi-Z occlusion culling.");
-		ImGui::Checkbox("Frustum culling", &ctx.settings.enable_frustum_culling);
+		ImGui::Checkbox("Frustum Culling", &ctx.settings.enable_frustum_culling);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Skip drawing objects outside the camera view");
 		ImGui::Text("Culling Backend");
@@ -165,9 +168,8 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Use 3D cluster grid to cull lights per-fragment");
 
-		ImGui::Separator();
-		ImGui::Text("Multi-threading:");
-		ImGui::SliderInt("Min cull entities", &ctx.settings.min_parallel_cull_entities, 0, 4096);
+		ImGui::SeparatorText("Multi-threading");
+		ImGui::SliderInt("Min Cull Entities", &ctx.settings.min_parallel_cull_entities, 0, 4096);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Minimum mesh entities to enable parallel cpu frustum culling.\n0 = always parallel");
 	}
@@ -199,7 +201,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			ImGui::BeginTooltip();
 			ImGui::Text("Multi-Sample Anti-Aliasing");
 			ImGui::Separator();
-			ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Smooths jagged edges on geometry.");
+			ImGui::TextColored(COL_MUTED, "Smooths jagged edges on geometry.");
 			ImGui::Text("Off (1x): No MSAA, best performance");
 			ImGui::Text("2x-4x: Balanced quality/performance");
 			ImGui::Text("8x+: High quality, significant cost");
@@ -224,9 +226,9 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			ImGui::Text("Off: No shadows, best performance");
 			ImGui::Text("Normal: Hard shadows, good performance");
 			ImGui::Text("PCF: Percentage Closer Filtering");
-			ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "     Soft shadow edges, higher cost");
+			ImGui::TextColored(COL_MUTED, "     Soft shadow edges, higher cost");
 			ImGui::Text("PCSS: Percentage Closer Soft Shadows");
-			ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "     Contact-hardening soft shadows, highest cost");
+			ImGui::TextColored(COL_MUTED, "     Contact-hardening soft shadows, highest cost");
 			ImGui::EndTooltip();
 		}
 		if (ctx.settings.shadow_mode != ShadowMode::DISABLED) {
@@ -244,7 +246,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 					ImGui::Text("%s: CSM %u/%u/%u  Spot/Point %u",
 						names[i], v.csm[0], v.csm[1], v.csm[2], v.point);
 				}
-				ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f),
+				ImGui::TextColored(COL_MUTED,
 					"Changing rebuilds the atlas.");
 				ImGui::EndTooltip();
 			}

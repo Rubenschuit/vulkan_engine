@@ -26,3 +26,9 @@
 // Visibility toggle
 #define ICON_EYE          ICON_LC_EYE
 #define ICON_EYE_OFF      ICON_LC_EYE_OFF
+
+// Gizmo / viewport toolbar
+#define ICON_GIZMO_TRANSLATE  ICON_LC_MOVE_3D
+#define ICON_GIZMO_ROTATE     ICON_LC_ROTATE_CW
+#define ICON_GIZMO_SCALE      ICON_LC_SCALING
+#define ICON_SNAP             ICON_LC_MAGNET

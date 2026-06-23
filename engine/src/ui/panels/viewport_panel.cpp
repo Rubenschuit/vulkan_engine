@@ -30,6 +30,7 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 
 		renderGizmoToolbar(state);
 		ImGui::SameLine();
+		ImGui::AlignTextToFramePadding();
 		ImGui::TextDisabled("|");
 		ImGui::SameLine();
 		renderCameraSelector(registry, state);
@@ -127,48 +128,45 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 }
 
 void ViewportPanel::renderGizmoToolbar(EditorState& state) {
-	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
-	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 2));
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 2));
 
 	const ImVec4 active_color = ImGui::GetStyle().Colors[ImGuiCol_ButtonHovered];
-	bool is_translate = state.gizmo_operation == GizmoOperation::Translate;
-	bool is_rotate = state.gizmo_operation == GizmoOperation::Rotate;
-	bool is_scale = state.gizmo_operation == GizmoOperation::Scale;
 
-	if (is_translate) ImGui::PushStyleColor(ImGuiCol_Button, active_color);
-	if (ImGui::SmallButton("T Translate"))
+	// Toolbar button that highlights when `active` and carries a tooltip.
+	auto toggleButton = [&](const char* label, bool active, const char* tooltip) {
+		if (active)
+			ImGui::PushStyleColor(ImGuiCol_Button, active_color);
+		bool clicked = ImGui::Button(label);
+		if (active)
+			ImGui::PopStyleColor();
+		ImGui::SetItemTooltip("%s", tooltip);
+		return clicked;
+	};
+
+	if (toggleButton("Translate", state.gizmo_operation == GizmoOperation::Translate, "Translate (T)"))
 		state.gizmo_operation = GizmoOperation::Translate;
-	if (is_translate) ImGui::PopStyleColor();
-
 	ImGui::SameLine();
-	if (is_rotate) ImGui::PushStyleColor(ImGuiCol_Button, active_color);
-	if (ImGui::SmallButton("R Rotate"))
+	if (toggleButton("Rotate", state.gizmo_operation == GizmoOperation::Rotate, "Rotate (R)"))
 		state.gizmo_operation = GizmoOperation::Rotate;
-	if (is_rotate) ImGui::PopStyleColor();
-
 	ImGui::SameLine();
-	if (is_scale) ImGui::PushStyleColor(ImGuiCol_Button, active_color);
-	if (ImGui::SmallButton("E Scale"))
+	if (toggleButton("Scale", state.gizmo_operation == GizmoOperation::Scale, "Scale (E)"))
 		state.gizmo_operation = GizmoOperation::Scale;
-	if (is_scale) ImGui::PopStyleColor();
 
 	ImGui::SameLine();
+	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("|");
 	ImGui::SameLine();
 
 	bool is_world = state.gizmo_space == GizmoSpace::World;
-	if (!is_world) ImGui::PushStyleColor(ImGuiCol_Button, active_color);
-	if (ImGui::SmallButton(is_world ? "World" : "Local"))
+	if (ImGui::Button(is_world ? "World" : "Local"))
 		state.gizmo_space = is_world ? GizmoSpace::Local : GizmoSpace::World;
-	if (!is_world) ImGui::PopStyleColor();
+	ImGui::SetItemTooltip("Transform space: %s (click to toggle)", is_world ? "World" : "Local");
 
 	ImGui::SameLine();
-	if (state.gizmo_snap_enabled) ImGui::PushStyleColor(ImGuiCol_Button, active_color);
-	if (ImGui::SmallButton(state.gizmo_snap_enabled ? "Snap: ON" : "Snap: OFF"))
+	if (toggleButton("Snap", state.gizmo_snap_enabled, "Grid snapping (click to toggle)"))
 		state.gizmo_snap_enabled = !state.gizmo_snap_enabled;
-	if (state.gizmo_snap_enabled) ImGui::PopStyleColor();
 
-	ImGui::PopStyleVar(2);
+	ImGui::PopStyleVar();
 }
 
 void ViewportPanel::renderCameraSelector(Registry* registry, EditorState& state) {

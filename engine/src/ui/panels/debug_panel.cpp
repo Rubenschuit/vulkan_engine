@@ -14,12 +14,10 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 		return;
 	}
 
-	// --- Render mode ---
-	ImGui::Text("Render mode:");
+	ImGui::SeparatorText("Render Mode");
 	int current_render_mode = static_cast<int>(ctx.settings.render_mode);
 	if (ImGui::RadioButton("BRDF Microfacets", &current_render_mode, static_cast<int>(RenderMode::BRDF_MICROFACET)))
 		ctx.settings.render_mode = RenderMode::BRDF_MICROFACET;
-	ImGui::SameLine();
 	if (ImGui::RadioButton("BRDF Smooth", &current_render_mode, static_cast<int>(RenderMode::BRDF)))
 		ctx.settings.render_mode = RenderMode::BRDF;
 	if (ImGui::RadioButton("Normal vector", &current_render_mode, static_cast<int>(RenderMode::NORMAL_VECTOR)))
@@ -55,9 +53,7 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Visualize meshlet boundaries (hash-colored per draw command).\nMost useful with meshlet culling enabled.");
 
-	ImGui::Separator();
-
-	// --- Debug overlays ---
+	ImGui::SeparatorText("Overlays");
 	ImGui::Checkbox("Show Axes", &ctx.settings.show_axes);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Display XYZ coordinate axes in the scene.\nRed=X, Green=Y, Blue=Z");
@@ -67,7 +63,7 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 	ImGui::Checkbox("Show skinned points", &ctx.settings.show_skinned_points);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Draw post-skin mesh vertices as a colored point cloud.");
-	ImGui::Text("Topology:");
+	ImGui::Text("Topology");
 	ImGui::SameLine();
 	int topology_int = static_cast<int>(ctx.settings.topology);
 	if (ImGui::RadioButton("Triangle List", &topology_int, static_cast<int>(Topology::TRIANGLE_LIST)))
@@ -76,9 +72,7 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 	if (ImGui::RadioButton("Line List", &topology_int, static_cast<int>(Topology::LINE_LIST)))
 		ctx.settings.topology = Topology::LINE_LIST;
 
-	ImGui::Separator();
-
-	// --- Texture inspection ---
+	ImGui::SeparatorText("Textures");
 	if (m_shadow_render_system) {
 		const VeImage* atlas = m_shadow_render_system->getAtlasImage();
 		if (atlas) {
