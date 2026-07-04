@@ -45,6 +45,13 @@ struct CopiedSpotLight {
 	bool casts_shadow{false};
 };
 
+struct CopiedAreaLight {
+	float intensity{1.0f};
+	glm::vec3 color{1.0f};
+	bool two_sided{false};
+	float range{0.0f};
+};
+
 struct CopiedRigidbody {
 	uint8_t motion_type{0};
 	uint8_t shape_type{0};
@@ -64,7 +71,7 @@ struct CopiedCamera {
 	int priority{0};
 };
 
-using ComponentClipboard = std::variant<CopiedTransform, CopiedPointLight, CopiedDirectionalLight, CopiedSpotLight, CopiedRigidbody, CopiedCamera>;
+using ComponentClipboard = std::variant<CopiedTransform, CopiedPointLight, CopiedDirectionalLight, CopiedSpotLight, CopiedAreaLight, CopiedRigidbody, CopiedCamera>;
 
 enum class GizmoOperation : int {
 	Translate = 0,

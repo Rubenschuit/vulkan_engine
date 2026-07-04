@@ -35,8 +35,7 @@
 #include "ui/imgui_layer.hpp"
 
 #include "rendering/culling/culling_system.hpp"
-#include "rendering/aabb_debug_render_system.hpp"
-#include "rendering/axes_render_system.hpp"
+#include "rendering/debug_draw_system.hpp"
 #include "rendering/light_system.hpp"
 #include "rendering/particle_backend.hpp"
 #include "rendering/render_services.hpp"

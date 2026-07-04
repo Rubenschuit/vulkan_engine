@@ -103,7 +103,7 @@ void Registry::destroyEntity(Entity e) {
 	}
 
 	// Orphan all children; recompute active_in_hierarchy now their parent link is
-	// gone 
+	// gone
 	Entity child = h.first_child;
 	while (!child.isNull()) {
 		Entity next = m_hierarchy[child.index()].next_sibling;
@@ -253,6 +253,15 @@ uint32_t Registry::activeDirectionalLightCount() const {
 uint32_t Registry::activeSpotLightCount() const {
 	uint32_t count = 0;
 	auto& p = pool<SpotLightComponent>();
+	for (uint32_t i = 0; i < p.size(); ++i)
+		if (m_meta[p.entityAt(i)].active_in_hierarchy)
+			++count;
+	return count;
+}
+
+uint32_t Registry::activeAreaLightCount() const {
+	uint32_t count = 0;
+	auto& p = pool<AreaLightComponent>();
 	for (uint32_t i = 0; i < p.size(); ++i)
 		if (m_meta[p.entityAt(i)].active_in_hierarchy)
 			++count;
@@ -560,6 +569,7 @@ Entity Registry::cloneEntityRecursive(Entity source) {
 
 // ── Convenience factories ───────────────────────────────────────────────────
 
+// Create a new entity with a TransformComponent and name.
 Entity Registry::createGameObject(const std::string& name) {
 	Entity e = createEntity(name);
 	addComponent<TransformComponent>(e);
@@ -580,7 +590,7 @@ Entity Registry::createPointLight(float intensity, float radius, glm::vec3 color
 }
 
 Entity Registry::createDirectionalLight(float intensity, glm::vec3 color, glm::vec3 direction) {
-	Entity e = createEntity();
+	Entity e = createGameObject();
 	m_events.beginBatch();
 	auto& dl = addComponent<DirectionalLightComponent>(e);
 	dl.setIntensity(intensity);
@@ -604,6 +614,17 @@ Entity Registry::createSpotLight(float intensity, float radius, glm::vec3 color,
 	m_events.endBatch();
 	auto* transform = getComponent<TransformComponent>(e);
 	transform->setScale(glm::vec3(radius));
+	return e;
+}
+
+Entity Registry::createAreaLight(float intensity, glm::vec3 color, float width, float height) {
+	Entity e = createGameObject();
+	m_events.beginBatch();
+	auto& al = addComponent<AreaLightComponent>(e);
+	al.setIntensity(intensity);
+	al.setColor(color);
+	m_events.endBatch();
+	getComponent<TransformComponent>(e)->setScale({width, 1.0f, height});
 	return e;
 }
 

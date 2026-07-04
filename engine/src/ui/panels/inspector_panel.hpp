@@ -12,6 +12,7 @@ class MeshComponent;
 class PointLightComponent;
 class DirectionalLightComponent;
 class SpotLightComponent;
+class AreaLightComponent;
 class RigidbodyComponent;
 class AnimatorComponent;
 class SkinComponent;
@@ -36,6 +37,7 @@ private:
 	void renderPointLight(PointLightComponent& light);
 	void renderDirectionalLight(DirectionalLightComponent& light);
 	void renderSpotLight(SpotLightComponent& light);
+	void renderAreaLight(AreaLightComponent& light, TransformComponent& transform);
 	void renderRigidbody(RigidbodyComponent& rb, EditorState& state);
 	void renderAnimator(AnimatorComponent& animator);
 	void renderSkin(Registry& registry, SkinComponent& skin, EditorState& state);

@@ -177,6 +177,37 @@ inline bool rayIntersectsSphere(const Ray& ray, const glm::vec3& center, float r
 }
 
 // Cast ray against scene: AABB broad phase into triangle narrow phase with early-out.
+
+// Accepts a hit when it lands inside the parallelogram spanned by right_half
+// and up_half, centered at center. The vectors are not required to be
+// orthogonal or normalized.
+inline bool rayIntersectsQuad(const Ray& ray, const glm::vec3& center,
+                              const glm::vec3& right_half, const glm::vec3& up_half, float& t_out) {
+	glm::vec3 n = glm::cross(up_half, right_half);
+	float denom = glm::dot(ray.direction, n);
+	if (std::abs(denom) < 1e-8f)
+		return false;
+	float t = glm::dot(center - ray.origin, n) / denom;
+	if (t < 0.0f)
+		return false;
+	glm::vec3 d = ray.origin + ray.direction * t - center;
+	// Solve d = a*right_half + b*up_half. Accept |a|,|b| <= 1
+	float rr = glm::dot(right_half, right_half);
+	float uu = glm::dot(up_half, up_half);
+	float ru = glm::dot(right_half, up_half);
+	float det = rr * uu - ru * ru;
+	if (det < 1e-12f)
+		return false;
+	float dr = glm::dot(d, right_half);
+	float du = glm::dot(d, up_half);
+	float a = (dr * uu - du * ru) / det;
+	float b = (du * rr - dr * ru) / det;
+	if (std::abs(a) > 1.0f || std::abs(b) > 1.0f)
+		return false;
+	t_out = t;
+	return true;
+}
+
 // Also tests light entities against spheres for viewport picking.
 inline bool raycastScene(const Ray& ray, Registry& registry, RayHit& closest_hit) {
 	struct AabbCandidate {
@@ -248,6 +279,27 @@ inline bool raycastScene(const Ray& ray, Registry& registry, RayHit& closest_hit
 		testLightEntity(entity);
 	for (auto [entity, sl, tc] : registry.view<SpotLightComponent, TransformComponent>())
 		testLightEntity(entity);
+
+	for (auto [entity, al, tc] : registry.view<AreaLightComponent, TransformComponent>()) {
+		// Quad picking only while the gizmo is shown
+		if (al.getShowGizmo()) {
+			const glm::mat4& world = registry.getWorldTransform(entity);
+			AreaLightBasis basis = areaLightWorldBasis(world);
+			glm::vec3 center = glm::vec3(world[3]);
+			glm::vec3 n_raw = glm::cross(basis.up_half, basis.right_half);
+			float t;
+			if (glm::length(n_raw) > 1e-12f
+				&& rayIntersectsQuad(ray, center, basis.right_half, basis.up_half, t)
+				&& t < best_t) {
+				best_t = t;
+				best_entity = entity;
+				glm::vec3 n = glm::normalize(n_raw);
+				best_normal = (glm::dot(n, ray.direction) > 0.0f) ? -n : n;
+				continue;
+			}
+		}
+		testLightEntity(entity);
+	}
 
 	if (best_entity.isNull())
 		return false;

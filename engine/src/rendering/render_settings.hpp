@@ -80,6 +80,7 @@ struct VENGINE_API RenderSettings {
 	bool show_axes = false;
 	bool show_aabb_debug = false;
 	bool show_skinned_points = false;
+	bool show_area_lights = false;
 
 	// profiling
 	bool gpu_profiling = false;

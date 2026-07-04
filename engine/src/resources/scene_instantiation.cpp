@@ -7,6 +7,8 @@
 #include "utils/ve_log.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -237,8 +239,6 @@ Entity instantiateModel(const VeModel& model, Registry& registry,
 		return wrapper;
 	};
 
-	// L.position is in wrapper-local space (glTF world, before root transform).
-	// Convert to parent-local space: first apply wrapper transform to get scene world, then invert parent.
 	glm::mat4 wrapper_world = registry.getWorldTransform(wrapper);
 	auto toLocalPos = [&](const glm::vec3& pos, Entity parent) -> glm::vec3 {
 		if (parent == wrapper)
@@ -248,9 +248,32 @@ Entity instantiateModel(const VeModel& model, Registry& registry,
 		return glm::vec3(inv_parent * glm::vec4(scene_world, 1.0f));
 	};
 
-	// Extracted lights: parent to source node entity (or wrapper as fallback)
 	constexpr float size = 0.1f;
 	for (const ExtractedLight& L : emissive_lights) {
+		if (L.type == ExtractedLightType::Rectangle) {
+			Entity parent = lightParent(L);
+			float w = L.width > 0.f ? L.width : 1.0f;
+			float h = L.height > 0.f ? L.height : 1.0f;
+			glm::mat4 panel_wl = glm::translate(glm::mat4(1.f), L.position) * glm::mat4_cast(L.orientation)
+				* glm::scale(glm::mat4(1.f), glm::vec3(w, 1.0f, h));
+			glm::mat4 local = (parent == wrapper)
+				? panel_wl
+				: glm::inverse(registry.getWorldTransform(parent)) * wrapper_world * panel_wl;
+			Entity light = registry.createAreaLight(L.intensity, L.color);
+			registry.setName(light, L.name.empty() ? "Panel (emissive)" : L.name);
+			registry.setLightSource(light, LightSource::Emissive);
+			glm::vec3 lt, ls, lskew;
+			glm::quat lr;
+			glm::vec4 lpersp;
+			glm::decompose(local, ls, lr, lt, lskew, lpersp);
+			auto* tc = registry.getComponent<TransformComponent>(light);
+			tc->setTranslation(lt);
+			tc->setRotation(lr);
+			tc->setScale(ls);
+			registry.setParent(light, parent);
+			registry.setActive(light, false);
+			continue;
+		}
 		Entity parent = lightParent(L);
 		Entity light = registry.createPointLight(L.intensity * EMISSIVE_LIGHT_INTENSITY_SCALE, size, L.color);
 		registry.setName(light, L.name.empty() ? "Light (emissive)" : L.name);

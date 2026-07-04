@@ -5,6 +5,7 @@
 // Included by pbr_shader.slang and pbr_wboit.slang.
 
 #include "ve_common.slangh"
+#include "ltc.slangh"
 
 // Per-light early-out thresholds
 static const float LIGHT_RADIANCE_CUTOFF = 1e-3;
@@ -287,13 +288,24 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	float kD_factor = (1.0 - metallic) * (1.0 - transmission);
 	float3 diffuse_brdf = albedo.rgb / PI;
 
-	// Accumulate point + spot light contribution
+	// Accumulate light contribution
 	float3 Lo = float3(0.0);
+	LtcTerms ltc_terms = (LtcTerms)0;
 	if (cluster_params.cluster_enabled != 0) {
 		uint cid = getClusterIndex(in_vert.pos.xy, frag_view_z, cluster_params);
 		uint2 counts = cluster_light_counts[cid];
+		// Area lights are appended after point+spot
+		uint rect_base = cluster_params.num_point_lights + cluster_params.num_spot_lights;
 		for (uint j = 0; j < counts.y; j++) {
 			uint light_idx = cluster_light_indices[counts.x + j];
+
+			if (light_idx >= rect_base) {
+				uint rect_idx = light_idx - rect_base;
+				Lo += ltcRectLight(ubo.rect_lights[rect_idx], world_normal, view_dir, in_vert.frag_pos_world,
+					roughness, F0, albedo.rgb * kD_factor, ltc_terms);
+				continue;
+			}
+
 			PointLight light = cluster_lights[light_idx];
 
 			float3 light_dir = light.position.xyz - in_vert.frag_pos_world;
@@ -407,6 +419,12 @@ float4 computePbrLighting(VertexOutput in_vert) {
 			float3 kD = (1.0 - F) * kD_factor;
 			float spot_shadow = getPointShadow(MAX_CLUSTER_LIGHTS + i, shadow_terms, shadow_for_light);
 			Lo += (kD * diffuse_brdf + specular) * radiance * NdotL * spot_shadow;
+		}
+
+		// Area lights non clustered
+		for (uint32_t i = 0; i < ubo.num_rect_lights; i++) {
+			Lo += ltcRectLight(ubo.rect_lights[i], world_normal, view_dir, in_vert.frag_pos_world,
+				roughness, F0, albedo.rgb * kD_factor, ltc_terms);
 		}
 	}
 

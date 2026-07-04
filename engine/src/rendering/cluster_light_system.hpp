@@ -31,8 +31,8 @@ struct ClusterParams {
 	alignas(16) glm::uvec4 grid_dims{};           // xyz = (tiles_x, tiles_y, z_slices), w = total clusters
 	alignas(4)  uint32_t cluster_enabled = 0;     // 0 = brute-force fallback
 	alignas(4)  uint32_t max_lights_per_cluster = ve::MAX_LIGHTS_PER_CLUSTER;
-	alignas(4)  uint32_t num_point_lights = 0;    // amount of num_lights that are point lights (rest are spot)
-	alignas(4)  uint32_t _pad1 = 0;
+	alignas(4)  uint32_t num_point_lights = 0;    // num_lights[0, num_point) are point lights
+	alignas(4)  uint32_t num_spot_lights = 0;     // num_lights[num_point, num_point+num_spot) are spot; rest are area
 };
 
 class VENGINE_API ClusterLightSystem {
@@ -84,8 +84,9 @@ private:
 	std::filesystem::path m_shader_path;
 	bool m_enabled = false;
 	bool m_ui_enabled = true;
-	uint32_t m_last_light_count = 0;       // total (point + spot), set by uploadLightData()
-	uint32_t m_last_point_light_count = 0; // point lights only, for cluster_params.num_point_lights
+	uint32_t m_last_light_count = 0;
+	uint32_t m_last_point_light_count = 0;
+	uint32_t m_last_spot_light_count = 0;
 
 	// Grid dimensions
 	uint32_t m_tiles_x = 0;

@@ -5,6 +5,7 @@
 #include "ui/imgui_helpers.hpp"
 #include "ui/texture_inspector.hpp"
 #include "scene/ve_registry.hpp"
+#include "scene/ve_component.hpp"
 #include "resources/ve_mesh.hpp"
 #include "resources/ve_material.hpp"
 #include "resources/ve_texture.hpp"
@@ -337,6 +338,40 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 			renderSpotLight(*registry->getComponent<SpotLightComponent>(entity));
 	}
 
+	// Area Light
+	if (registry->hasComponent<AreaLightComponent>(entity)) {
+		bool open = ImGui::CollapsingHeader(ICON_AREA_LIGHT "  Area Light", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		if (ImGui::BeginPopupContextItem("al_ctx")) {
+			if (ImGui::MenuItem("Copy")) {
+				auto* al = registry->getComponent<AreaLightComponent>(entity);
+				CopiedAreaLight cal;
+				cal.intensity = al->getIntensity();
+				cal.color = al->getColor();
+				cal.two_sided = al->getTwoSided();
+				cal.range = al->getRange();
+				state.component_clipboard = cal;
+			}
+			if (state.component_clipboard && std::holds_alternative<CopiedAreaLight>(*state.component_clipboard))
+				if (ImGui::MenuItem("Paste")) {
+					auto* al = registry->getComponent<AreaLightComponent>(entity);
+					auto& cal = std::get<CopiedAreaLight>(*state.component_clipboard);
+					al->setIntensity(cal.intensity);
+					al->setColor(cal.color);
+					al->setTwoSided(cal.two_sided);
+					al->setRange(cal.range);
+				}
+			ImGui::EndPopup();
+		}
+		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
+		ImGui::PushID("remove_al");
+		if (ImGui::SmallButton("X"))
+			registry->queueComponentRemoval<AreaLightComponent>(entity);
+		ImGui::PopID();
+		if (open && registry->hasComponent<AreaLightComponent>(entity))
+			renderAreaLight(*registry->getComponent<AreaLightComponent>(entity),
+				*registry->getComponent<TransformComponent>(entity));
+	}
+
 	// Directional Light
 	if (registry->hasComponent<DirectionalLightComponent>(entity)) {
 		bool open = ImGui::CollapsingHeader(ICON_DIR_LIGHT "  Directional Light", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
@@ -510,11 +545,12 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		bool no_pl = !registry->hasComponent<PointLightComponent>(entity);
 		bool no_sl = !registry->hasComponent<SpotLightComponent>(entity);
 		bool no_dl = !registry->hasComponent<DirectionalLightComponent>(entity);
+		bool no_al = !registry->hasComponent<AreaLightComponent>(entity);
 		bool no_cam = !registry->hasComponent<CameraComponent>(entity);
 		bool no_emitter = !registry->hasComponent<ParticleEmitterComponent>(entity);
 		bool no_rb = !registry->hasComponent<RigidbodyComponent>(entity);
 
-		if (no_pl || no_sl || no_dl) {
+		if (no_pl || no_sl || no_dl || no_al) {
 			ImGui::SeparatorText("Lights");
 			if (no_pl && ImGui::MenuItem(ICON_POINT_LIGHT "  Point Light"))
 				registry->addComponent<PointLightComponent>(entity);
@@ -522,17 +558,16 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 				registry->addComponent<SpotLightComponent>(entity);
 			if (no_dl && ImGui::MenuItem(ICON_DIR_LIGHT "  Directional Light"))
 				registry->addComponent<DirectionalLightComponent>(entity);
+			if (no_al && ImGui::MenuItem(ICON_AREA_LIGHT "  Area Light"))
+				registry->addComponent<AreaLightComponent>(entity);
 		}
 
-		ImGui::SeparatorText("Rendering");
-		if (no_cam && ImGui::MenuItem(ICON_CAMERA "  Camera"))
-			registry->addComponent<CameraComponent>(entity);
-		if (no_emitter && ImGui::MenuItem(ICON_PARTICLE "  Particle Emitter"))
-			registry->addComponent<ParticleEmitterComponent>(entity);
-		if (!registry->hasComponent<MeshComponent>(entity)) {
-			ImGui::BeginDisabled(true);
-			ImGui::MenuItem(ICON_MESH "  Mesh (load model first)");
-			ImGui::EndDisabled();
+		if (no_cam || no_emitter) {
+			ImGui::SeparatorText("Rendering");
+			if (no_cam && ImGui::MenuItem(ICON_CAMERA "  Camera"))
+				registry->addComponent<CameraComponent>(entity);
+			if (no_emitter && ImGui::MenuItem(ICON_PARTICLE "  Particle Emitter"))
+				registry->addComponent<ParticleEmitterComponent>(entity);
 		}
 
 		if (no_rb) {
@@ -540,6 +575,9 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 			if (ImGui::MenuItem(ICON_RIGIDBODY "  Rigidbody"))
 				registry->addComponent<RigidbodyComponent>(entity);
 		}
+
+		if (!no_pl && !no_sl && !no_dl && !no_al && !no_cam && !no_emitter && !no_rb)
+			ImGui::TextDisabled("No components to add");
 
 		ImGui::EndPopup();
 	}
@@ -848,6 +886,47 @@ void InspectorPanel::renderSpotLight(SpotLightComponent& light) {
 	bool show_billboard = light.getShowBillboard();
 	if (ImGui::Checkbox("Show Billboard", &show_billboard))
 		light.setShowBillboard(show_billboard);
+}
+
+void InspectorPanel::renderAreaLight(AreaLightComponent& light, TransformComponent& transform) {
+	constexpr float light_label_w = 110.0f;
+
+	glm::vec3 color = light.getColor();
+	labeledWidget(light_label_w, "Color", [&]() {
+		if (ImGui::ColorEdit3("##Color", glm::value_ptr(color)))
+			light.setColor(color);
+	}, [&]() { light.setColor(glm::vec3(1.0f)); });
+
+	float intensity = light.getIntensity();
+	labeledWidget(light_label_w, "Intensity", [&]() {
+		if (ImGui::DragFloat("##Intensity", &intensity, 0.1f, 0.0f, 10000.0f))
+			light.setIntensity(intensity);
+	}, [&]() { light.setIntensity(1.0f); });
+
+	glm::vec3 scale = transform.getScale();
+	labeledWidget(light_label_w, "Width", [&]() {
+		if (ImGui::DragFloat("##Width", &scale.x, 0.05f, 0.01f, 1000.0f, "%.2f"))
+			transform.setScale(scale);
+	}, [&]() { scale.x = 1.0f; transform.setScale(scale); });
+
+	labeledWidget(light_label_w, "Height", [&]() {
+		if (ImGui::DragFloat("##Height", &scale.z, 0.05f, 0.01f, 1000.0f, "%.2f"))
+			transform.setScale(scale);
+	}, [&]() { scale.z = 1.0f; transform.setScale(scale); });
+
+	float range = light.getRange();
+	labeledWidget(light_label_w, "Range", [&]() {
+		if (ImGui::DragFloat("##Range", &range, 0.1f, 0.0f, 1000.0f, light.getRange() <= 0.0f ? "auto" : "%.1f"))
+			light.setRange(range);
+	}, [&]() { light.setRange(0.0f); });
+
+	bool two_sided = light.getTwoSided();
+	if (ImGui::Checkbox("Two-Sided", &two_sided))
+		light.setTwoSided(two_sided);
+
+	bool show_gizmo = light.getShowGizmo();
+	if (ImGui::Checkbox("Show Gizmo", &show_gizmo))
+		light.setShowGizmo(show_gizmo);
 }
 
 void InspectorPanel::renderDirectionalLight(DirectionalLightComponent& light) {

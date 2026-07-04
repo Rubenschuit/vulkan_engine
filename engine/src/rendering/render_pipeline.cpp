@@ -5,8 +5,7 @@
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
 #include "events/render_events.hpp"
-#include "rendering/aabb_debug_render_system.hpp"
-#include "rendering/axes_render_system.hpp"
+#include "rendering/debug_draw_system.hpp"
 #include "rendering/bloom_system.hpp"
 #include "rendering/cluster_light_system.hpp"
 #include "rendering/culling/cpu_culling_backend.hpp"
@@ -221,18 +220,11 @@ void RenderPipeline::initRenderSystems() {
 		m_ve_renderer.getWboitRevealageImageView(),
 		m_ve_renderer.getOffscreenImageFormat());
 
-	m_aabb_debug_render_system = std::make_unique<AabbDebugRenderSystem>(
-		m_ve_device, m_resources.globalSetLayout().getDescriptorSetLayout(),
-		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
-		shader("axes_shader.spv"),
-		m_event_bus
-	);
-
-	m_axes_render_system = std::make_unique<AxesRenderSystem>(
+	m_debug_draw_system = std::make_unique<DebugDrawSystem>(
 		m_ve_device, m_resource_manager,
 		m_resources.globalSetLayout().getDescriptorSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
-		shader("axes_shader.spv"),
+		shader("debug_line_shader.spv"), shader("axes_shader.spv"),
 		m_event_bus
 	);
 
@@ -962,13 +954,17 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 			TracyVkZone(tracy_gfx, *active_cb, "Particles");
 			m_particle_backend->render(fi);
 		}
-		if (m_settings.show_axes || m_settings.show_aabb_debug || m_settings.show_skinned_points) {
+		if (m_settings.show_axes || m_settings.show_aabb_debug || m_settings.show_skinned_points
+			|| m_settings.show_area_lights) {
 			ZoneScopedN("Debug Overlays");
 			TracyVkZone(tracy_gfx, *active_cb, "Debug Overlays");
 			if (m_settings.show_axes)
-				m_axes_render_system->render(fi);
+				m_debug_draw_system->renderAxes(fi);
 			if (m_settings.show_aabb_debug)
-				m_aabb_debug_render_system->render(fi);
+				m_debug_draw_system->addVisibleAabbs(fi);
+			if (m_settings.show_area_lights)
+				m_debug_draw_system->addAreaLightGizmos(fi);
+			m_debug_draw_system->render(fi);
 			if (m_settings.show_skinned_points)
 				m_skinned_points_render_system->render(fi, *m_deform_pre_pass,
 					m_scene_resources->getMegaBuffer());
@@ -1041,6 +1037,7 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	m_stats.num_point_lights = registry.activePointLightCount();
 	m_stats.num_directional_lights = registry.activeDirectionalLightCount();
 	m_stats.num_spot_lights = registry.activeSpotLightCount();
+	m_stats.num_area_lights = registry.activeAreaLightCount();
 
 	const auto& results = profiler.getResults();
 	m_stats.gpu_culling = results.gpu(ProfileTimer::CULLING);

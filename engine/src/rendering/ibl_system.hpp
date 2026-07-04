@@ -49,6 +49,7 @@ private:
 	void createSetLayout();
 	void createSamplers();
 	void createDummyResources();
+	void createLtcLuts();
 	void writeDescriptorSet(vk::raii::DescriptorSet& set,
 	                        const vk::raii::ImageView& prefiltered_view,
 	                        const vk::raii::ImageView& brdf_lut_view);
@@ -68,6 +69,10 @@ private:
 	// Dummy resources for valid descriptors when IBL unavailable
 	std::unique_ptr<VeImage> m_dummy_cubemap;
 	std::unique_ptr<VeImage> m_dummy_2d;
+
+	// LTC area light lookup tables
+	std::unique_ptr<VeImage> m_ltc_mat;
+	std::unique_ptr<VeImage> m_ltc_mag;
 
 	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_active_descriptor_sets = makeNullArray<vk::raii::DescriptorSet>();
 	vk::raii::DescriptorSet m_dummy_descriptor_set{nullptr};

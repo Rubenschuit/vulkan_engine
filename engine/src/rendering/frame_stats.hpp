@@ -55,6 +55,7 @@ struct VENGINE_API FrameStats {
 	uint32_t num_point_lights = 0;
 	uint32_t num_directional_lights = 0;
 	uint32_t num_spot_lights = 0;
+	uint32_t num_area_lights = 0;
 
 	// IBL exposure compensation computed by the IBL system; displayed by EnvironmentPanel.
 	float ibl_exposure_compensation = 1.0f;

@@ -11,11 +11,44 @@ SimpleScene::SimpleScene(const SceneContext& ctx, const AssetPaths& paths)
 }
 
 void SimpleScene::loadGameObjects(const AssetPaths& paths) {
-	// Directional light
 	{
 		Entity dl = m_registry.createDirectionalLight(3.0f, glm::vec3(0.2f), glm::vec3(0.6f, 0.7f, -1.0f));
 		m_registry.setName(dl, "Directional Light");
 		m_registry.getComponent<DirectionalLightComponent>(dl)->setCastsShadow(true);
+	}
+
+	{
+		const glm::vec3 color{1.0f, 0.85f, 0.7f};
+		const float width = 14.0f, height = 7.0f;
+
+		// Area light
+		Entity al = m_registry.createAreaLight(25.0f, color, width, height);
+		m_registry.setName(al, "Area Light");
+		m_registry.getComponent<TransformComponent>(al)->setTranslation({0.0f, -70.0f, 9.0f});
+		m_registry.getComponent<AreaLightComponent>(al)->setTwoSided(false);
+
+		// Emissive panel mesh
+		const glm::vec3 n{0.0f, 1.0f, 0.0f};
+		const glm::vec4 t{1.0f, 0.0f, 0.0f, 1.0f};
+		auto quad_mesh = m_resource_manager.createMesh("simple_scene::area_light_quad",
+			{
+				{{-0.5f, 0.0f, -0.5f}, n, {0.0f, 1.0f}, t},
+				{{ 0.5f, 0.0f,  0.5f}, n, {1.0f, 0.0f}, t},
+				{{-0.5f, 0.0f,  0.5f}, n, {0.0f, 0.0f}, t},
+				{{ 0.5f, 0.0f, -0.5f}, n, {1.0f, 1.0f}, t},
+			},
+			{0, 1, 2, 0, 3, 1});
+		auto emissive_mat = m_resource_manager.createMaterial("simple_scene::area_light_emissive",
+			MaterialTextures{}, MaterialAlphaProps{.double_sided = true},
+			MaterialFactors{
+				.base_color_factor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),
+				.emissive_factor = color,
+				.metallic_factor = 0.0f,
+				.emissive_strength = 44.0f});
+
+		Entity panel = m_registry.createGameObject("Area Light Panel");
+		m_registry.addComponent<MeshComponent>(panel, quad_mesh, emissive_mat).has_shadow = false;
+		m_registry.setParent(panel, al);
 	}
 
 	// Create some point lights with ranging colors
@@ -50,8 +83,6 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 		pl->setCastsShadow(false);
 		pl->setRotates(true);
 	}
-
-
 
 	// floor (grid texture, tiled at ~1m intervals)
 	{

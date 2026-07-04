@@ -71,6 +71,13 @@ struct SpotLight {
 	alignas(16) glm::vec4 color;      // xyz = color * intensity, w = cos(innerConeAngle)
 };
 
+struct RectLight {
+	alignas(16) glm::vec4 center;     // w = influence radius (cluster bound)
+	alignas(16) glm::vec4 color;      // xyz = color * intensity, w = two-sided flag
+	alignas(16) glm::vec4 right_half; // xyz = world right axis * half-width
+	alignas(16) glm::vec4 up_half;    // xyz = world up axis * half-height
+};
+
 struct ShadowLight {
 	alignas(16) glm::mat4 light_view;
 	alignas(16) glm::mat4 light_proj;
@@ -142,11 +149,17 @@ struct UniformBufferObject {
 	alignas(4) float    ibl_specular_intensity = 0.0f;
 	alignas(4) float    ibl_min_ambient = 0.0f;
 	alignas(16) glm::vec4 sh_coefficients[9]{};
+
+	// LTC area lights
+	alignas(16) RectLight rect_lights[ve::MAX_RECT_LIGHTS];
+	alignas(4)  uint32_t num_rect_lights = 0;
 };
 static_assert(offsetof(UniformBufferObject, dir_lights) % 16 == 0,
 	"dir_lights must be 16-byte aligned for GPU UBO layout");
 static_assert(offsetof(UniformBufferObject, sh_coefficients) % 16 == 0,
 	"sh_coefficients must be 16-byte aligned for GPU UBO layout");
+static_assert(offsetof(UniformBufferObject, rect_lights) % 16 == 0,
+	"rect_lights must be 16-byte aligned for GPU UBO layout");
 
 // --- Push constants ---
 

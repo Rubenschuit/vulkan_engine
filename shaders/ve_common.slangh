@@ -27,6 +27,13 @@ struct SpotLight {
 	float4 color;       // xyz = color*intensity, w = cos(innerConeAngle)
 };
 
+struct RectLight {
+	float4 center;     // xyz = world center, w = influence radius
+	float4 color;      // xyz = color*intensity, w = two-sided flag
+	float4 right_half; // xyz = world right axis * half-width
+	float4 up_half;    // xyz = world up axis * half-height
+};
+
 struct ShadowLight {
 	float4x4 light_view;
 	float4x4 light_proj;
@@ -103,6 +110,13 @@ struct UniformBuffer {
 	float    ibl_specular_intensity;
 	float    ibl_min_ambient;
 	float4   sh_coefficients[9];
+
+	// LTC rectangular area lights
+	RectLight rect_lights[MAX_RECT_LIGHTS];
+	uint32_t num_rect_lights;
+	float    _pad_rect_0;
+	float    _pad_rect_1;
+	float    _pad_rect_2;
 };
 [vk::binding(0, 0)]
 ConstantBuffer<UniformBuffer> ubo;
@@ -202,6 +216,12 @@ SamplerState ao_sampler;
 SamplerCube ibl_prefiltered;
 [vk::binding(1, 6)]
 Sampler2D<float2> ibl_brdf_lut;
+
+// LTC area-light lookup tables
+[vk::binding(2, 6)]
+Sampler2D<float4> ltc_mat;   // inverse-transform matrix terms
+[vk::binding(3, 6)]
+Sampler2D<float4> ltc_mag;   // BRDF magnitude + Fresnel terms
 
 // ============================================================================
 // Utilities

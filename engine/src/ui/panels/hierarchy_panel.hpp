@@ -36,6 +36,7 @@ private:
 	void renderLightGroups(Registry& registry, EditorState& state);
 	void renderLightNameGroups(Registry& registry, const std::string& source_key, const std::vector<Entity>& group_lights, EditorState& state);
 	void renderVisibilityToggle(Registry& registry, Entity entity, bool row_hovered);
+	template <typename LightT>
 	void renderGroupControls(const std::string& key, const std::vector<Entity>& lights, Registry& registry);
 	void renderEnableCheckbox(const char* label, const std::vector<Entity>& lights, Registry& registry);
 	void applySelectionRequests(ImGuiMultiSelectIO* ms, Registry& registry, EditorState& state);
@@ -63,6 +64,8 @@ private:
 	std::vector<Entity> m_pending_duplicates;
 	std::vector<Entity> m_pending_group;
 	std::vector<Entity> m_pending_ungroup;
+	Entity m_pending_create_child = Entity::null();
+	bool m_pending_create_empty = false;
 
 	// Auto-expand and scroll-to for selection changes
 	std::unordered_set<uint32_t> m_force_open_entities;

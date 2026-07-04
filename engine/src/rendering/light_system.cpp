@@ -521,5 +521,28 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 	}
 	ubo.num_spot_lights = num_spot_lights;
 	ubo.num_shadow_lights = num_shadow_lights;
+
+	// LTC rectangular area lights
+	uint32_t num_rect_lights = 0;
+	for (auto [entity, al, tc] : registry.view<AreaLightComponent, TransformComponent>()) {
+		if (num_rect_lights >= MAX_RECT_LIGHTS)
+			break;
+
+		glm::vec3 color = al.getColor();
+		float intensity = al.getIntensity();
+		const glm::mat4& world = registry.getWorldTransform(entity);
+		glm::vec3 center = glm::vec3(world[3]);
+		AreaLightBasis basis = areaLightWorldBasis(world);
+		float width = glm::length(glm::vec3(world[0]));
+		float height = glm::length(glm::vec3(world[2]));
+		float radius = areaLightInfluenceRadius(width, height, color, intensity, al.getRange());
+
+		ubo.rect_lights[num_rect_lights].center = glm::vec4{center, radius}; // w: falloff radius
+		ubo.rect_lights[num_rect_lights].color = glm::vec4{color * intensity, al.getTwoSided() ? 1.0f : 0.0f};
+		ubo.rect_lights[num_rect_lights].right_half = glm::vec4{basis.right_half, 0.0f};
+		ubo.rect_lights[num_rect_lights].up_half = glm::vec4{basis.up_half, 0.0f};
+		num_rect_lights++;
+	}
+	ubo.num_rect_lights = num_rect_lights;
 }
 } // namespace ve

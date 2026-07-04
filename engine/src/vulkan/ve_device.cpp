@@ -612,12 +612,12 @@ void VeDevice::copyBuffer(vk::raii::CommandBuffer& cmd,
 
 void VeDevice::copyBufferToImage(vk::raii::CommandBuffer& cmd,
 	vk::Buffer src_buffer, vk::Image dst_image,
-	uint32_t width, uint32_t height, uint32_t array_layers) {
+	uint32_t width, uint32_t height, uint32_t array_layers, vk::DeviceSize src_offset) {
 	assert(width > 0 && height > 0 && "Image width and height must be greater than zero");
 	assert(src_buffer && "Source buffer must be valid");
 	assert(dst_image && "Destination image must be valid");
 	vk::BufferImageCopy copy_region{
-		.bufferOffset = 0,
+		.bufferOffset = src_offset,
 		.bufferRowLength = 0,
 		.bufferImageHeight = 0,
 		.imageSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, array_layers },

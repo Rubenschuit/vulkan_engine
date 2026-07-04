@@ -27,6 +27,7 @@ constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.
 constexpr uint32_t MAX_BRUTE_FORCE_POINT_LIGHTS = 64;    // UBO inline array, only used when clustering is disabled
 constexpr uint32_t MAX_DIR_LIGHTS               = 4;
 constexpr uint32_t MAX_SPOT_LIGHTS              = 32;
+constexpr uint32_t MAX_RECT_LIGHTS              = 64;    // LTC rectangular area lights
 
 // Clustered forward shading
 constexpr uint32_t CLUSTER_TILE_SIZE             = 64;     // screen-space tile size in pixels
@@ -35,26 +36,20 @@ constexpr uint32_t MAX_LIGHTS_PER_CLUSTER        = 128;    // per-cluster light 
 constexpr uint32_t MAX_CLUSTER_LIGHTS            = 8192;   // total point + spot lights for cluster path
 constexpr uint32_t CLUSTER_ASSIGN_WORKGROUP_SIZE = 256;
 
-// KHR_lights_punctual range derivation: for lights with range=0 (= unbounded),
-// the CPU synthesises an effective range at the distance where 1/d² falls to
-// CLUSTER_LIGHT_CUTOFF of peak intensity, capped at CLUSTER_MAX_EFFECTIVE_RANGE.
-// Used for cluster-AABB tests only; the shader still uses the windowed quartic.
 constexpr float CLUSTER_LIGHT_CUTOFF        = 0.02f;
 constexpr float CLUSTER_MAX_EFFECTIVE_RANGE = 500.0f;
+constexpr float AREA_LIGHT_CLUSTER_CUTOFF   = 0.004f;
 
-// Shadow casters (subset of the above that own shadow maps in the atlas)
+// Shadow
 constexpr uint32_t MAX_POINT_SHADOW_LIGHTS = 2;
 constexpr uint32_t MAX_SPOT_SHADOW_LIGHTS  = 2;
 constexpr uint32_t MAX_SHADOW_LIGHTS       = MAX_POINT_SHADOW_LIGHTS + MAX_SPOT_SHADOW_LIGHTS;
 
-// Celestial billboard (sun/moon) configuration
+// Sun / Moon billboard for dir light
 constexpr float CELESTIAL_DISTANCE         = 200.0f;
 constexpr float CELESTIAL_SCALE            = 22.0f;
 constexpr float CELESTIAL_INTENSITY_BOOST  = 100.0f;
 
-// ---------------------------------------------------------------------------
-// Shadow mapping
-// ---------------------------------------------------------------------------
 constexpr float SHADOW_BIAS                 = 0.0001f;
 constexpr float CSM_NORMAL_BIAS             = 2.0f;  // CSM normal offset in shadow texels, auto-scaled per cascade by world-texel size
 constexpr float SHADOW_DEPTH_BIAS_CONSTANT  = 0.5f;
@@ -62,7 +57,7 @@ constexpr float SHADOW_DEPTH_BIAS_SLOPE     = 1.0f;
 constexpr float SHADOW_DEPTH_BIAS_CLAMP     = 0.005f;
 constexpr float DIR_SHADOW_MAX_DISTANCE     = 300.0f;
 
-// Cascaded Shadow Maps (CSM)
+// Cascaded Shadow Maps
 constexpr uint32_t NUM_CSM_CASCADES                       = 3; // keep in sync with shader
 constexpr uint32_t CSM_CASCADE_RESOLUTIONS[NUM_CSM_CASCADES] = {2048, 1024, 1024};
 constexpr float    CSM_SPLIT_LAMBDA                       = 0.80f;
@@ -113,13 +108,12 @@ enum class ShadowCullMode : uint32_t {
 	None  = 2,
 };
 
-// Primitive topology selection for the main PBR pass (wireframe debug).
 enum class Topology : uint32_t {
 	TRIANGLE_LIST = 0,
 	LINE_LIST = 1,
 };
 
-// LOD (Level of Detail) configuration
+// Level of Detail configuration
 constexpr uint32_t MAX_LOD_LEVELS = 4;           // LOD 0 = full, LOD 1..3 = simplified
 constexpr float LOD_RATIOS[] = {1.0f, 0.5f, 0.25f, 0.125f};  // target triangle ratio per LOD
 constexpr float LOD_ERROR_THRESHOLD = 0.01f;     // meshoptimizer simplification error threshold

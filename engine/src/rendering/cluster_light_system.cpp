@@ -197,6 +197,25 @@ uint32_t ClusterLightSystem::uploadLightData(VeFrameInfo& frame_info) {
 		count++;
 		spot_count++;
 	}
+	m_last_spot_light_count = spot_count;
+
+	// Area lights appended after spots
+	uint32_t rect_count = 0;
+	for (auto [entity, al, tc] : registry.view<AreaLightComponent, TransformComponent>()) {
+		if (count >= MAX_CLUSTER_LIGHTS || rect_count >= MAX_RECT_LIGHTS)
+			break;
+		glm::vec3 color = al.getColor();
+		float intensity = al.getIntensity();
+		const glm::mat4& world = registry.getWorldTransform(entity);
+		glm::vec3 world_pos = glm::vec3(world[3]);
+		float width = glm::length(glm::vec3(world[0]));
+		float height = glm::length(glm::vec3(world[2]));
+		float radius = areaLightInfluenceRadius(width, height, color, intensity, al.getRange());
+		buffer[count].position = glm::vec4{world_pos, radius};
+		buffer[count].color = glm::vec4{color * intensity, intensity};
+		count++;
+		rect_count++;
+	}
 
 	m_last_light_count = count;
 	return count;
@@ -221,6 +240,7 @@ void ClusterLightSystem::dispatch(VeFrameInfo& frame_info, vk::Extent2D screen_e
 	params.cluster_enabled = 1;
 	params.max_lights_per_cluster = MAX_LIGHTS_PER_CLUSTER;
 	params.num_point_lights = m_last_point_light_count;
+	params.num_spot_lights = m_last_spot_light_count;
 	m_cluster_param_ubos[frame]->writeToBuffer(&params);
 
 	// Each cluster owns a fixed slice of light_index_list and is fully written every

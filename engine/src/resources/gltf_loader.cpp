@@ -30,6 +30,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/euler_angles.hpp>
+#include <glm/gtx/pca.hpp>
 
 namespace ve {
 
@@ -825,6 +826,141 @@ static std::vector<ExtractedLight> extractPunctualLights(
 	return punctual_lights;
 }
 
+// True if a node is tagged extras.emissive_panel = true
+static bool isPanelNode(const tinygltf::Model& gltf, int node_idx) {
+	const tinygltf::Value& extras = gltf.nodes[static_cast<size_t>(node_idx)].extras;
+	if (!extras.Has("emissive_panel"))
+		return false;
+	const tinygltf::Value& v = extras.Get("emissive_panel");
+	return v.IsBool() && v.Get<bool>();
+}
+
+// Read a float3 attribute of every material-matching primitive on a node,
+// converted Y-up to Z-up; POSITION additionally gets the world transform.
+static void readNodeAttribute(const tinygltf::Model& gltf, const NodePrim& np, const char* attr,
+                              const glm::mat4& W, bool as_position, std::vector<glm::vec3>& out) {
+	int mesh_idx = gltf.nodes[static_cast<size_t>(np.node_idx)].mesh;
+	if (mesh_idx < 0)
+		return;
+	for (const auto& prim : gltf.meshes[static_cast<size_t>(mesh_idx)].primitives) {
+		size_t pmat = (prim.material >= 0) ? static_cast<size_t>(prim.material) : 0;
+		if (pmat != np.mat_idx)
+			continue;
+		auto it = prim.attributes.find(attr);
+		if (it == prim.attributes.end())
+			continue;
+		const tinygltf::Accessor& acc = gltf.accessors[static_cast<size_t>(it->second)];
+		if (acc.bufferView < 0)
+			continue;
+		const auto& bv = gltf.bufferViews[static_cast<size_t>(acc.bufferView)];
+		const auto& buf = gltf.buffers[static_cast<size_t>(bv.buffer)];
+		const uint8_t* data = buf.data.data() + bv.byteOffset + acc.byteOffset;
+		int sv = acc.ByteStride(bv);
+		size_t comp_sz = gltfComponentSize(acc.componentType);
+		size_t stride = sv > 0 ? static_cast<size_t>(sv) : comp_sz * 3;
+		out.reserve(out.size() + acc.count);
+		for (size_t vi = 0; vi < acc.count; vi++) {
+			const uint8_t* vp = data + vi * stride;
+			float x = readGltfComponent(vp + 0 * comp_sz, acc.componentType, acc.normalized);
+			float y = readGltfComponent(vp + 1 * comp_sz, acc.componentType, acc.normalized);
+			float z = readGltfComponent(vp + 2 * comp_sz, acc.componentType, acc.normalized);
+			glm::vec3 v(x, -z, y); // Y-up to Z-up
+			out.push_back(as_position ? glm::vec3(W * glm::vec4(v, 1.f)) : v);
+		}
+	}
+}
+
+// Fit one rectangular area light to a marked emissive-panel node: gather every
+// material-matching primitive, fit a min-area rectangle in the panel plane, and push a
+// Rectangle light facing the way the mesh faces. Returns true if the node was consumed
+// as a panel (a light was placed, or its spot was already taken).
+static bool tryPanelLight(const tinygltf::Model& gltf, const NodePrim& np, const glm::mat4& W,
+                          const glm::vec3& color, float radiance, const std::string& mat_name,
+                          const std::string& individual_name, PosDedup& dedup,
+                          std::vector<ExtractedLight>& out, uint32_t& light_count) {
+	std::vector<glm::vec3> wpos;
+	readNodeAttribute(gltf, np, "POSITION", W, true, wpos);
+	if (wpos.size() < 3)
+		return false;
+	glm::dvec3 cw(0.0);
+	for (const glm::vec3& wp : wpos)
+		cw += glm::dvec3(wp);
+	cw /= double(wpos.size());
+	glm::vec3 c = glm::vec3(cw);
+
+	// Average mesh face normal
+	glm::vec3 mesh_normal(0.f);
+	std::vector<glm::vec3> normals;
+	readNodeAttribute(gltf, np, "NORMAL", W, false, normals);
+	if (!normals.empty()) {
+		glm::vec3 nsum(0.f);
+		for (const glm::vec3& n : normals)
+			nsum += n;
+		glm::vec3 wn = glm::transpose(glm::inverse(glm::mat3(W))) * nsum;
+		if (glm::length(wn) > 1e-5f)
+			mesh_normal = glm::normalize(wn);
+	}
+
+	glm::mat3 cov = glm::computeCovarianceMatrix(wpos.data(), wpos.size(), c);
+	glm::vec3 evals;
+	glm::mat3 evecs;
+	if (glm::findEigenvaluesSymReal(cov, evals, evecs) < 3)
+		return false;
+	int min_axis = 0;  // smallest-variance eigenvector = panel plane normal
+	if (evals[1] < evals[min_axis]) min_axis = 1;
+	if (evals[2] < evals[min_axis]) min_axis = 2;
+	glm::vec3 axN = glm::normalize(glm::vec3(evecs[min_axis]));
+
+	glm::vec3 e1 = glm::normalize(std::abs(axN.x) < 0.9f ? glm::cross(axN, glm::vec3(1, 0, 0))
+	                                                     : glm::cross(axN, glm::vec3(0, 1, 0)));
+	glm::vec3 e2 = glm::cross(axN, e1);
+	glm::vec3 right = e1, up = e2, panel_center = c;
+	float du = 0.f, dv = 0.f, best_area = 1e30f;
+	for (int s = 0; s < 180; s++) {  // 0..90deg in 0.5deg steps
+		float t = static_cast<float>(s) * (glm::pi<float>() / 360.0f);
+		glm::vec3 r = e1 * std::cos(t) + e2 * std::sin(t);
+		glm::vec3 u = -e1 * std::sin(t) + e2 * std::cos(t);
+		float rlo = 1e18f, rhi = -1e18f, ulo = 1e18f, uhi = -1e18f;
+		for (const glm::vec3& wp : wpos) {
+			glm::vec3 d = wp - c;
+			float pr = glm::dot(d, r), pu = glm::dot(d, u);
+			rlo = std::min(rlo, pr); rhi = std::max(rhi, pr);
+			ulo = std::min(ulo, pu); uhi = std::max(uhi, pu);
+		}
+		float area = (rhi - rlo) * (uhi - ulo);
+		if (area < best_area) {
+			best_area = area;
+			right = r; up = u; du = rhi - rlo; dv = uhi - ulo;
+			panel_center = c + r * ((rlo + rhi) * 0.5f) + u * ((ulo + uhi) * 0.5f);
+		}
+	}
+	glm::vec3 normal = axN;
+	// Face the emit normal the way the panel mesh faces. Keep the basis
+	// right-handed.
+	if (glm::length(mesh_normal) > 0.5f && glm::dot(normal, mesh_normal) < 0.f)
+		normal = -normal;
+	if (glm::determinant(glm::mat3(right, normal, up)) < 0.f)
+		up = -up;
+	if (!dedup.insert(quantize(panel_center)).second)
+		return true;  // already placed at this spot
+	out.push_back({
+		.type = ExtractedLightType::Rectangle,
+		.position = panel_center,
+		.color = color,
+		.intensity = radiance,
+		.width = du,
+		.height = dv,
+		.orientation = glm::quat_cast(glm::mat3(right, normal, up)),
+		.name = mat_name + ": " + individual_name + " [panel]",
+		.node_idx = np.node_idx
+	});
+	light_count++;
+	VE_LOGI("Emissive panel light " << individual_name
+	        << ", size=" << du << "x" << dv
+	        << ", intensity=" << radiance);
+	return true;
+}
+
 // Extract lights from emissive materials, with vertex clustering for large meshes
 static std::vector<ExtractedLight> extractEmissiveLights(
     const tinygltf::Model& gltf,
@@ -841,21 +977,6 @@ static std::vector<ExtractedLight> extractEmissiveLights(
 	constexpr float EMISSIVE_CLUSTER_EXTENT = 0.02f;
 	constexpr float EMISSIVE_INTENSITY_SCALE = 0.08f;
 
-	auto findPositionAccessor = [&](const NodePrim& np) -> const tinygltf::Accessor* {
-		int mesh_idx = gltf.nodes[static_cast<size_t>(np.node_idx)].mesh;
-		if (mesh_idx < 0)
-			return nullptr;
-		const auto& mesh = gltf.meshes[static_cast<size_t>(mesh_idx)];
-		for (const auto& prim : mesh.primitives) {
-			size_t pmat = (prim.material >= 0) ? static_cast<size_t>(prim.material) : 0;
-			if (pmat != np.mat_idx) continue;
-			auto pos_it = prim.attributes.find("POSITION");
-			if (pos_it == prim.attributes.end()) continue;
-			return &gltf.accessors[static_cast<size_t>(pos_it->second)];
-		}
-		return nullptr;
-	};
-
 	for (size_t mat_i = 0; mat_i < material_factors.size(); mat_i++) {
 		const MaterialFactors& mf = material_factors[mat_i];
 		float chroma = glm::length(mf.emissive_factor);
@@ -864,10 +985,14 @@ static std::vector<ExtractedLight> extractEmissiveLights(
 		float radiance = has_hint ? mf.emissive_light_lum : chroma * strength;
 		if (radiance < (has_hint ? 0.01f : emissive_light_threshold))
 			continue;
+		float panel_radiance = (has_hint ? mf.emissive_light_lum : chroma) * strength;
 		glm::vec3 color_n = has_hint ? mf.emissive_light_color
 		                             : ((chroma > 1e-6f) ? (mf.emissive_factor / chroma) : mf.emissive_factor);
+		std::unordered_set<int> processed_nodes;
 		for (const NodePrim& np : node_primitives) {
 			if (np.mat_idx != mat_i)
+				continue;
+			if (!processed_nodes.insert(np.node_idx).second)
 				continue;
 			auto ce_it = geometry_center_extent.find(np.key);
 			if (ce_it == geometry_center_extent.end())
@@ -881,6 +1006,12 @@ static std::vector<ExtractedLight> extractEmissiveLights(
 			                       ? gltf.materials[mat_i].name : "Emissive " + std::to_string(emissive_light_count);
 			const std::string& node_name = gltf.nodes[static_cast<size_t>(np.node_idx)].name;
 			std::string individual_name = !node_name.empty() ? node_name : "light " + std::to_string(emissive_light_count);
+
+			// Marked emissive panel -> one rectangular area light
+			if (isPanelNode(gltf, np.node_idx)
+			    && tryPanelLight(gltf, np, W, color_n, panel_radiance, mat_name, individual_name,
+			                     dedup, emissive_lights, emissive_light_count))
+				continue;
 
 			auto pushLight = [&](const glm::vec3& world_pos, float light_intensity, const std::string& suffix = "") -> bool {
 				if (!dedup.insert(quantize(world_pos)).second)
@@ -905,27 +1036,13 @@ static std::vector<ExtractedLight> extractEmissiveLights(
 				if (!pushLight(world_pos, intensity))
 					continue;
 			} else {
-				const tinygltf::Accessor* pos_acc = findPositionAccessor(np);
-				if (!pos_acc) {
+				std::vector<glm::vec3> positions;
+				readNodeAttribute(gltf, np, "POSITION", W, false, positions);
+				if (positions.empty()) {
 					const glm::vec3& center = ce_it->second.first;
 					glm::vec3 world_pos = glm::vec3(W * glm::vec4(center, 1.f));
 					pushLight(world_pos, intensity);
 					continue;
-				}
-				const auto& bv = gltf.bufferViews[static_cast<size_t>(pos_acc->bufferView)];
-				const auto& buf = gltf.buffers[static_cast<size_t>(bv.buffer)];
-				const uint8_t* data = buf.data.data() + bv.byteOffset + pos_acc->byteOffset;
-				int sv = pos_acc->ByteStride(bv);
-				size_t comp_sz = gltfComponentSize(pos_acc->componentType);
-				size_t stride = sv > 0 ? static_cast<size_t>(sv) : comp_sz * 3;
-
-				std::vector<glm::vec3> positions(pos_acc->count);
-				for (size_t vi = 0; vi < pos_acc->count; vi++) {
-					const uint8_t* vp = data + vi * stride;
-					float x = readGltfComponent(vp + 0 * comp_sz, pos_acc->componentType, pos_acc->normalized);
-					float y = readGltfComponent(vp + 1 * comp_sz, pos_acc->componentType, pos_acc->normalized);
-					float z = readGltfComponent(vp + 2 * comp_sz, pos_acc->componentType, pos_acc->normalized);
-					positions[vi] = {x, -z, y};  // Y-up to Z-up
 				}
 
 				std::vector<glm::vec3> centroids = clusterVertices(positions, EMISSIVE_CLUSTER_GAP, EMISSIVE_CLUSTER_EXTENT);

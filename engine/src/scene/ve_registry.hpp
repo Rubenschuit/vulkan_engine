@@ -62,6 +62,7 @@ using ComponentPools = std::tuple<
 	ComponentPool<PointLightComponent>,
 	ComponentPool<DirectionalLightComponent>,
 	ComponentPool<SpotLightComponent>,
+	ComponentPool<AreaLightComponent>,
 	ComponentPool<RigidbodyComponent>,
 	ComponentPool<AnimatorComponent>,
 	ComponentPool<SkinComponent>,
@@ -140,6 +141,10 @@ public:
 	const ComponentPool<SpotLightComponent>& spotLights() const { return pool<SpotLightComponent>(); }
 	uint32_t activeSpotLightCount() const;
 
+	ComponentPool<AreaLightComponent>& areaLights() { return pool<AreaLightComponent>(); }
+	const ComponentPool<AreaLightComponent>& areaLights() const { return pool<AreaLightComponent>(); }
+	uint32_t activeAreaLightCount() const;
+
 	ComponentPool<RigidbodyComponent>& rigidbodies() { return pool<RigidbodyComponent>(); }
 	const ComponentPool<RigidbodyComponent>& rigidbodies() const { return pool<RigidbodyComponent>(); }
 
@@ -198,6 +203,8 @@ public:
 	                       glm::vec3 direction = glm::vec3(0.f, 0.f, -1.f),
 	                       float inner_cone = glm::radians(25.0f),
 	                       float outer_cone = glm::radians(35.0f));
+	Entity createAreaLight(float intensity = 1.0f, glm::vec3 color = glm::vec3(1.0f),
+	                       float width = 1.0f, float height = 1.0f);
 
 	void clear();
 

@@ -31,7 +31,8 @@ bool HierarchyPanel::matchesTypeFilter(Registry& registry, Entity entity) {
 		case TreeFilter::Meshes:  return registry.hasComponent<MeshComponent>(entity);
 		case TreeFilter::Lights:  return registry.hasComponent<PointLightComponent>(entity)
 		                              || registry.hasComponent<SpotLightComponent>(entity)
-		                              || registry.hasComponent<DirectionalLightComponent>(entity);
+		                              || registry.hasComponent<DirectionalLightComponent>(entity)
+		                              || registry.hasComponent<AreaLightComponent>(entity);
 		case TreeFilter::Cameras: return registry.hasComponent<CameraComponent>(entity);
 		default:                  return true;
 	}
@@ -131,6 +132,9 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 	    && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_G))
 		m_pending_group = state.selected_entities;
 
+	if (ImGui::Button("New Entity"))
+		m_pending_create_empty = true;
+
 	ImGui::Separator();
 
 	ImGuiMultiSelectFlags ms_flags = ImGuiMultiSelectFlags_ClearOnEscape
@@ -200,18 +204,38 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 		m_pending_ungroup.clear();
 	}
 
+	// Create a child entity (transform only) under the chosen parent and select it
+	if (!m_pending_create_child.isNull() && registry) {
+		Entity child = registry->createGameObject("Entity");
+		registry->setParent(child, m_pending_create_child);
+		state.selected_entities.clear();
+		state.selected_entities.push_back(child);
+		state.selection_changed = true;
+		m_pending_create_child = Entity::null();
+	}
+
+	// Create a top-level empty entity (transform only) and select it
+	if (m_pending_create_empty && registry) {
+		Entity e = registry->createGameObject("Entity");
+		state.selected_entities.clear();
+		state.selected_entities.push_back(e);
+		state.selection_changed = true;
+		m_pending_create_empty = false;
+	}
+
 	ImGui::End();
 }
 
 namespace {
 
-enum class EntityKind { Group, Mesh, PointLight, SpotLight, DirLight, Camera, Particle, Joint, Skin };
+enum class EntityKind { Group, Mesh, PointLight, SpotLight, DirLight, AreaLight, Camera, Particle, Joint, Skin };
 
 EntityKind primaryKind(Registry& r, Entity e, bool is_joint) {
 	if (r.hasComponent<CameraComponent>(e)) return EntityKind::Camera;
 	if (r.hasComponent<DirectionalLightComponent>(e)) return EntityKind::DirLight;
 	if (r.hasComponent<SpotLightComponent>(e)) return EntityKind::SpotLight;
 	if (r.hasComponent<PointLightComponent>(e)) return EntityKind::PointLight;
+	if (r.hasComponent<AreaLightComponent>(e)) return EntityKind::AreaLight;
 	if (r.hasComponent<MeshComponent>(e)) return EntityKind::Mesh;
 	if (r.hasComponent<ParticleEmitterComponent>(e)) return EntityKind::Particle;
 	if (is_joint) return EntityKind::Joint;
@@ -225,6 +249,7 @@ const char* kindIcon(EntityKind k) {
 		case EntityKind::DirLight:   return ICON_DIR_LIGHT;
 		case EntityKind::SpotLight:  return ICON_SPOT_LIGHT;
 		case EntityKind::PointLight: return ICON_POINT_LIGHT;
+		case EntityKind::AreaLight:  return ICON_AREA_LIGHT;
 		case EntityKind::Mesh:       return ICON_MESH;
 		case EntityKind::Particle:   return ICON_PARTICLE;
 		case EntityKind::Joint:      return ICON_BONE;
@@ -334,6 +359,7 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 	bool has_pl = registry.hasComponent<PointLightComponent>(entity);
 	bool has_sl = registry.hasComponent<SpotLightComponent>(entity);
 	bool has_dl = registry.hasComponent<DirectionalLightComponent>(entity);
+	bool has_al = registry.hasComponent<AreaLightComponent>(entity);
 	bool has_anim = registry.hasComponent<AnimatorComponent>(entity);
 	bool has_skin = registry.hasComponent<SkinComponent>(entity);
 	bool has_cam = registry.hasComponent<CameraComponent>(entity);
@@ -400,6 +426,9 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 	if (ImGui::BeginPopupContextItem()) {
 		bool in_sel = state.isSelected(entity);
 		bool many = in_sel && state.selected_entities.size() > 1;
+		if (ImGui::MenuItem("Create Child Entity"))
+			m_pending_create_child = entity;
+		ImGui::Separator();
 		if (ImGui::MenuItem(many ? "Group selected" : "Group", "Ctrl+G"))
 			m_pending_group = in_sel ? state.selected_entities : std::vector<Entity>{entity};
 		if (pk == EntityKind::Group && !registry.firstChild(entity).isNull())
@@ -447,6 +476,7 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 			{has_pl && pk != EntityKind::PointLight,    ICON_POINT_LIGHT, "Point light"},
 			{has_sl && pk != EntityKind::SpotLight,     ICON_SPOT_LIGHT,  "Spot light"},
 			{has_dl && pk != EntityKind::DirLight,      ICON_DIR_LIGHT,   "Directional light"},
+			{has_al && pk != EntityKind::AreaLight,     ICON_AREA_LIGHT,  "Area light"},
 			{has_cam && pk != EntityKind::Camera,       ICON_CAMERA,      "Camera"},
 			{has_emitter && pk != EntityKind::Particle, ICON_PARTICLE,    "Emitter"},
 		};
@@ -562,7 +592,7 @@ void HierarchyPanel::renderFlatList(Registry& registry, EditorState& state) {
 // Lights filter: grouped management view, each group collapsible with its own
 // bulk controls
 void HierarchyPanel::renderLightGroups(Registry& registry, EditorState& state) {
-	std::vector<Entity> dir, spot, point;
+	std::vector<Entity> dir, spot, point, area;
 	uint32_t scan = registry.maxEntityIndex();
 	for (uint32_t i = 0; i < scan; ++i) {
 		if (!registry.isAliveAtIndex(i))
@@ -573,6 +603,7 @@ void HierarchyPanel::renderLightGroups(Registry& registry, EditorState& state) {
 		if (registry.hasComponent<DirectionalLightComponent>(e)) dir.push_back(e);
 		else if (registry.hasComponent<SpotLightComponent>(e)) spot.push_back(e);
 		else if (registry.hasComponent<PointLightComponent>(e)) point.push_back(e);
+		else if (registry.hasComponent<AreaLightComponent>(e)) area.push_back(e);
 	}
 	std::sort(point.begin(), point.end());
 
@@ -589,13 +620,21 @@ void HierarchyPanel::renderLightGroups(Registry& registry, EditorState& state) {
 
 	if (!spot.empty() && ImGui::TreeNodeEx("Spot", ImGuiTreeNodeFlags_DefaultOpen)) {
 		renderEnableCheckbox("Enable all", spot, registry);
+		renderGroupControls<SpotLightComponent>("all_sl", spot, registry);
 		renderRows(spot);
+		ImGui::TreePop();
+	}
+
+	if (!area.empty() && ImGui::TreeNodeEx("Area", ImGuiTreeNodeFlags_DefaultOpen)) {
+		renderEnableCheckbox("Enable all", area, registry);
+		renderGroupControls<AreaLightComponent>("all_al", area, registry);
+		renderRows(area);
 		ImGui::TreePop();
 	}
 
 	if (!point.empty() && ImGui::TreeNodeEx("Point", ImGuiTreeNodeFlags_DefaultOpen)) {
 		renderEnableCheckbox("Enable all", point, registry);
-		renderGroupControls("all_pl", point, registry);
+		renderGroupControls<PointLightComponent>("all_pl", point, registry);
 
 		std::vector<Entity> scene_lights, punctual_lights, emissive_lights;
 		for (Entity e : point) {
@@ -620,7 +659,7 @@ void HierarchyPanel::renderLightGroups(Registry& registry, EditorState& state) {
 			snprintf(group_header, sizeof(group_header), "%s (%zu)", group_label, entities.size());
 			if (ImGui::TreeNode(group_header)) {
 				renderEnableCheckbox("Enable all", entities, registry);
-				renderGroupControls(group_label, entities, registry);
+				renderGroupControls<PointLightComponent>(group_label, entities, registry);
 				renderLightNameGroups(registry, group_label, entities, state);
 				ImGui::TreePop();
 			}
@@ -655,7 +694,7 @@ void HierarchyPanel::renderLightNameGroups(Registry& registry, const std::string
 		snprintf(sub_header, sizeof(sub_header), "%s (%zu)", sub_name.c_str(), sub_lights.size());
 		if (ImGui::TreeNode(sub_header)) {
 			renderEnableCheckbox("Enable group", sub_lights, registry);
-			renderGroupControls(source_key + "/" + sub_name, sub_lights, registry);
+			renderGroupControls<PointLightComponent>(source_key + "/" + sub_name, sub_lights, registry);
 			for (auto e : sub_lights)
 				renderEntityNode(registry, e, state, /*flat=*/true);
 			ImGui::TreePop();
@@ -681,19 +720,20 @@ void HierarchyPanel::renderEnableCheckbox(const char* label, const std::vector<E
 		ImGui::PopItemFlag();
 }
 
+template <typename LightT>
 void HierarchyPanel::renderGroupControls(const std::string& key, const std::vector<Entity>& lights, Registry& registry) {
 	if (lights.empty()) return;
 
 	auto& state = m_group_states[key];
 
 	if (!state.initialized) {
-		if (auto* pl = registry.getComponent<PointLightComponent>(lights[0])) {
-			state.color = pl->getColor();
-			state.range = pl->getRange();
+		if (auto* l = registry.getComponent<LightT>(lights[0])) {
+			state.color = l->getColor();
+			state.range = l->getRange();
 		}
 		for (auto e : lights)
-			if (auto* pl = registry.getComponent<PointLightComponent>(e))
-				state.base_intensity[e.id()] = pl->getIntensity();
+			if (auto* l = registry.getComponent<LightT>(e))
+				state.base_intensity[e.id()] = l->getIntensity();
 		state.initialized = true;
 	}
 
@@ -701,15 +741,15 @@ void HierarchyPanel::renderGroupControls(const std::string& key, const std::vect
 	ImGui::Text("Intensity");
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(70.0f);
-	if (ImGui::DragFloat("##intensity", &state.intensity_multiplier, 0.01f, 0.01f, 10.0f, "%.2fx")) {
+	if (ImGui::DragFloat("##intensity", &state.intensity_multiplier, 0.001f, 0.001f, 10.0f, "%.3fx")) {
 		for (auto e : lights) {
-			auto* pl = registry.getComponent<PointLightComponent>(e);
-			if (!pl) continue;
+			auto* l = registry.getComponent<LightT>(e);
+			if (!l) continue;
 			auto it = state.base_intensity.find(e.id());
-			float base = (it != state.base_intensity.end()) ? it->second : pl->getIntensity();
+			float base = (it != state.base_intensity.end()) ? it->second : l->getIntensity();
 			if (it == state.base_intensity.end())
 				state.base_intensity[e.id()] = base;
-			pl->setIntensity(base * state.intensity_multiplier);
+			l->setIntensity(base * state.intensity_multiplier);
 		}
 	}
 
@@ -720,9 +760,9 @@ void HierarchyPanel::renderGroupControls(const std::string& key, const std::vect
 	if (ImGui::ColorEdit3("##color", glm::value_ptr(state.color),
 			ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel)) {
 		for (auto e : lights) {
-			auto* pl = registry.getComponent<PointLightComponent>(e);
-			if (pl)
-				pl->setColor(state.color);
+			auto* l = registry.getComponent<LightT>(e);
+			if (l)
+				l->setColor(state.color);
 		}
 	}
 
@@ -733,9 +773,9 @@ void HierarchyPanel::renderGroupControls(const std::string& key, const std::vect
 	ImGui::SetNextItemWidth(70.0f);
 	if (ImGui::DragFloat("##range", &state.range, 0.1f, 0.0f, 1000.0f, "%.1f")) {
 		for (auto e : lights) {
-			auto* pl = registry.getComponent<PointLightComponent>(e);
-			if (pl)
-				pl->setRange(state.range);
+			auto* l = registry.getComponent<LightT>(e);
+			if (l)
+				l->setRange(state.range);
 		}
 	}
 }

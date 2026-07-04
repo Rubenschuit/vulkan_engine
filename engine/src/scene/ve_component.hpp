@@ -248,6 +248,44 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// AreaLightComponent (LTC rectangular area light)
+// ---------------------------------------------------------------------------
+// The light is a unit quad in the entity's local XZ plane
+class VENGINE_API AreaLightComponent : public Component {
+public:
+	float getIntensity() const { return m_intensity; }
+	const glm::vec3& getColor() const { return m_color; }
+	bool getTwoSided() const { return m_two_sided; }
+	float getRange() const { return m_range; }
+	bool getShowGizmo() const { return m_show_gizmo; }
+
+	void setIntensity(float v);
+	void setColor(const glm::vec3& v);
+	void setTwoSided(bool v);
+	void setRange(float v);
+	void setShowGizmo(bool v) { m_show_gizmo = v; }
+
+private:
+	float m_intensity{1.0f};
+	glm::vec3 m_color{1.0f};
+	bool m_two_sided{false};
+	float m_range{0.0f}; // explicit influence radius; 0 = auto-derive from intensity/size
+	bool m_show_gizmo{true};
+};
+
+struct AreaLightBasis {
+	glm::vec3 right_half; // 0.5 * world X column 
+	glm::vec3 up_half;    // 0.5 * world Z column
+};
+
+inline AreaLightBasis areaLightWorldBasis(const glm::mat4& world) {
+	return {0.5f * glm::vec3(world[0]), 0.5f * glm::vec3(world[2])};
+}
+
+VENGINE_API float areaLightInfluenceRadius(float width, float height, const glm::vec3& color,
+                                           float intensity, float range);
+
+// ---------------------------------------------------------------------------
 // RigidbodyComponent
 // ---------------------------------------------------------------------------
 enum class PhysicsShapeType : uint8_t {
@@ -516,6 +554,7 @@ extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<PointLightCo
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<DirectionalLightComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MeshComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SpotLightComponent>();
+extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<AreaLightComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<RigidbodyComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<AnimatorComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SkinComponent>();

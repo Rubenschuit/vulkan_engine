@@ -38,7 +38,7 @@ struct SkyboxEntry {
 /** Settings exposed for UI. All mutable by app. */
 struct SkyboxSettings {
 	bool rotate = false;
-	float exposure = 0.5f;
+	float exposure = 0.3f;
 	bool is_day = true;  // day: warmer tint, night: cooler tint
 };
 

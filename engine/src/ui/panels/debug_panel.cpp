@@ -63,6 +63,9 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 	ImGui::Checkbox("Show skinned points", &ctx.settings.show_skinned_points);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Draw post-skin mesh vertices as a colored point cloud.");
+	ImGui::Checkbox("Show area light gizmos", &ctx.settings.show_area_lights);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Draw wireframe quads + facing normal for area lights\n.");
 	ImGui::Text("Topology");
 	ImGui::SameLine();
 	int topology_int = static_cast<int>(ctx.settings.topology);

@@ -264,7 +264,7 @@ TEST_CASE("Registry createDirectionalLight adds Transform + DirectionalLight", "
 	ve::Registry reg;
 	ve::Entity e = reg.createDirectionalLight(10.0f, {1.0f, 0.5f, 0.0f}, {0.0f, -1.0f, 0.0f});
 
-	REQUIRE(!reg.hasComponent<ve::TransformComponent>(e));
+	REQUIRE(reg.hasComponent<ve::TransformComponent>(e));
 	REQUIRE(reg.hasComponent<ve::DirectionalLightComponent>(e));
 	REQUIRE(!reg.hasComponent<ve::PointLightComponent>(e));
 

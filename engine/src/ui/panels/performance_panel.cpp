@@ -241,13 +241,14 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		formatCount(meshlet_buf, sizeof(meshlet_buf), context.stats.visible_meshlets);
 		row("Meshlets", meshlet_buf);
 	}
+	int light_len = snprintf(val, sizeof(val), "%u point, %u dir",
+		context.stats.num_point_lights, context.stats.num_directional_lights);
 	if (context.stats.num_spot_lights > 0)
-		snprintf(val, sizeof(val), "%u point, %u dir, %u spot",
-			context.stats.num_point_lights, context.stats.num_directional_lights,
+		light_len += snprintf(val + light_len, sizeof(val) - static_cast<size_t>(light_len), ", %u spot",
 			context.stats.num_spot_lights);
-	else
-		snprintf(val, sizeof(val), "%u point, %u dir",
-			context.stats.num_point_lights, context.stats.num_directional_lights);
+	if (context.stats.num_area_lights > 0)
+		snprintf(val + light_len, sizeof(val) - static_cast<size_t>(light_len), ", %u area",
+			context.stats.num_area_lights);
 	row("Lights", val);
 
 	ImGui::Spacing();

@@ -23,6 +23,7 @@ template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<PointLightComponent
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<DirectionalLightComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MeshComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SpotLightComponent>();
+template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<AreaLightComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<RigidbodyComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<AnimatorComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SkinComponent>();
@@ -321,6 +322,47 @@ void SpotLightComponent::updateEffectiveRange() const {
 }
 
 // ---------------------------------------------------------------------------
+// AreaLightComponent
+// ---------------------------------------------------------------------------
+
+void AreaLightComponent::setIntensity(float v) {
+	m_intensity = v;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
+}
+
+void AreaLightComponent::setColor(const glm::vec3& v) {
+	m_color = v;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
+}
+
+void AreaLightComponent::setTwoSided(bool v) {
+	m_two_sided = v;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
+}
+
+void AreaLightComponent::setRange(float v) {
+	m_range = v;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
+}
+
+float areaLightInfluenceRadius(float width, float height, const glm::vec3& color,
+                               float intensity, float range) {
+	float half_diag = 0.5f * std::sqrt(width * width + height * height);
+	if (range > 0.0f)
+		return std::min(range + half_diag, CLUSTER_MAX_EFFECTIVE_RANGE);
+	// Distance where the rect's irradiance (radiance * area / (2*pi*d^2)) falls below the
+	// cutoff.
+	float max_radiance = std::max({color.r, color.g, color.b}) * std::max(intensity, 0.0f);
+	float area = std::max(width * height, 1e-4f);
+	float reach = std::sqrt(max_radiance * area / (glm::two_pi<float>() * AREA_LIGHT_CLUSTER_CUTOFF));
+	return std::min(half_diag + reach, CLUSTER_MAX_EFFECTIVE_RANGE);
+}
+
+// ---------------------------------------------------------------------------
 // RigidbodyComponent
 // ---------------------------------------------------------------------------
 
@@ -498,9 +540,9 @@ static glm::quat sampleQuat(const AnimationSampler& sampler, float t, AnimationI
 	return glm::normalize(result);
 }
 
-// `n` is how many weights this mesh wants, 
-// `m` is how many the animation stores per keyframe. 
-// They match for normal meshes, but a multi-primitive mesh split across nodes 
+// `n` is how many weights this mesh wants,
+// `m` is how many the animation stores per keyframe.
+// They match for normal meshes, but a multi-primitive mesh split across nodes
 // can share one channel whose width differs from a given primitive's target count.
 // Weights are unclamped.
 static void sampleScalarArray(const AnimationSampler& sampler, float t,

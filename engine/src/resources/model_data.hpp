@@ -27,7 +27,7 @@ struct ModelSkin {
 	int skeleton_root_node = -1;
 };
 
-enum class ExtractedLightType { Point, Directional, Spot };
+enum class ExtractedLightType { Point, Directional, Spot, Rectangle };
 
 struct ExtractedLight {
 	ExtractedLightType type = ExtractedLightType::Point;
@@ -35,9 +35,12 @@ struct ExtractedLight {
 	glm::vec3 direction{0.f, 0.f, -1.f};
 	glm::vec3 color{1.f};
 	float intensity = 1.f;
-	float range = 0.f;                       
-	float inner_cone_angle = 0.f;                  
+	float range = 0.f;
+	float inner_cone_angle = 0.f;
 	float outer_cone_angle = glm::radians(45.0f);
+	float width = 0.f;
+	float height = 0.f;
+	glm::quat orientation{1.f, 0.f, 0.f, 0.f};
 	std::string name;
 	int node_idx = -1; // glTF node that produced this light (-1 = unknown)
 };

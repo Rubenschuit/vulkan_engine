@@ -96,7 +96,7 @@ public:
 		vk::DeviceSize src_offset = 0, vk::DeviceSize dst_offset = 0);
 	static void copyBufferToImage(vk::raii::CommandBuffer& cmd,
 		vk::Buffer src_buffer, vk::Image dst_image,
-		uint32_t width, uint32_t height, uint32_t array_layers = 1);
+		uint32_t width, uint32_t height, uint32_t array_layers = 1, vk::DeviceSize src_offset = 0);
 	static void copyBufferToImageWithMipmaps(vk::raii::CommandBuffer& cmd,
 		vk::Buffer src_buffer, vk::Image dst_image,
 		uint32_t array_layers, uint32_t mip_levels,

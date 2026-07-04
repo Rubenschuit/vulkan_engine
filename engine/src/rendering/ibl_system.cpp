@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "rendering/ibl_system.hpp"
+#include "rendering/ltc_tables.h"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_descriptors.hpp"
 #include "vulkan/ve_image.hpp"
@@ -26,6 +27,7 @@ IblSystem::IblSystem(VeDevice& device, VeDescriptorPool& descriptor_pool,
 
 	createSetLayout();
 	createSamplers();
+	createLtcLuts();
 	createDummyResources();
 
 	// Load shared BRDF LUT if available
@@ -43,6 +45,8 @@ void IblSystem::createSetLayout() {
 	m_ibl_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment) // prefiltered
 		.addBinding(1, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment) // BRDF LUT
+		.addBinding(2, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment) // LTC matrix LUT
+		.addBinding(3, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment) // LTC magnitude LUT
 		.build();
 }
 
@@ -153,6 +157,50 @@ void IblSystem::createDummyResources() {
 	m_has_dummy_set = true;
 }
 
+void IblSystem::createLtcLuts() {
+	constexpr uint32_t size = LTC_LUT_SIZE;
+	constexpr uint32_t byte_count = size * size * 4 * sizeof(uint16_t); // RGBA16F
+
+	auto make_image = [&]() {
+		return std::make_unique<VeImage>(
+			m_ve_device, size, size,
+			vk::SampleCountFlagBits::e1, vk::Format::eR16G16B16A16Sfloat,
+			vk::ImageTiling::eOptimal,
+			vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			vk::ImageAspectFlagBits::eColor,
+			false, 1, 1);
+	};
+	m_ltc_mat = make_image();
+	m_ltc_mag = make_image();
+
+	VeBuffer staging(m_ve_device, byte_count, 2,
+		vk::BufferUsageFlagBits::eTransferSrc,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	staging.map();
+	staging.writeToBuffer(const_cast<uint16_t*>(LTC_MAT_HALF), byte_count, 0);
+	staging.writeToBuffer(const_cast<uint16_t*>(LTC_MAG_HALF), byte_count, byte_count);
+
+	auto cmd = m_ve_device.beginSingleTimeCommands(QueueKind::Graphics);
+	VeImage* images[] = {m_ltc_mat.get(), m_ltc_mag.get()};
+	for (uint32_t i = 0; i < 2; i++) {
+		images[i]->transitionImageLayout(*cmd,
+			vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
+			{}, vk::AccessFlagBits2::eTransferWrite,
+			vk::PipelineStageFlagBits2::eTopOfPipe, vk::PipelineStageFlagBits2::eTransfer);
+		VeDevice::copyBufferToImage(*cmd, staging.getBuffer(), images[i]->getImage(), size, size, 1,
+			i * byte_count);
+		images[i]->transitionImageLayout(*cmd,
+			vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
+			vk::AccessFlagBits2::eTransferWrite, vk::AccessFlagBits2::eShaderRead,
+			vk::PipelineStageFlagBits2::eTransfer, vk::PipelineStageFlagBits2::eFragmentShader);
+	}
+	m_ve_device.endSingleTimeCommands(*cmd, QueueKind::Graphics);
+
+	m_ltc_mat->setDebugName("LTC Matrix LUT");
+	m_ltc_mag->setDebugName("LTC Magnitude LUT");
+}
+
 void IblSystem::writeDescriptorSet(vk::raii::DescriptorSet& set,
                                     const vk::raii::ImageView& prefiltered_view,
                                     const vk::raii::ImageView& brdf_lut_view) {
@@ -167,9 +215,22 @@ void IblSystem::writeDescriptorSet(vk::raii::DescriptorSet& set,
 		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 	};
 
+	vk::DescriptorImageInfo ltc_mat_info{
+		.sampler = *m_brdf_lut_sampler,
+		.imageView = *m_ltc_mat->getImageView(),
+		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+	};
+	vk::DescriptorImageInfo ltc_mag_info{
+		.sampler = *m_brdf_lut_sampler,
+		.imageView = *m_ltc_mag->getImageView(),
+		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+	};
+
 	auto writer = VeDescriptorWriter(*m_ibl_set_layout, m_descriptor_pool)
 		.writeImage(0, &pref_info)
-		.writeImage(1, &brdf_info);
+		.writeImage(1, &brdf_info)
+		.writeImage(2, &ltc_mat_info)
+		.writeImage(3, &ltc_mag_info);
 
 	if (*set != vk::DescriptorSet{})
 		writer.overwrite(set);
