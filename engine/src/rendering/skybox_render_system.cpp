@@ -222,8 +222,7 @@ void SkyboxRenderSystem::createPipeline(vk::Format color_format, vk::SampleCount
 	assert(m_ve_pipeline && "Failed to create skybox pipeline");
 }
 
-// Draws a big cube and binds cubemap texture for shader
-// TODO: move update logic to a separate function
+// Applies a queued skybox switch; waits for device idle before replacing the cubemap
 void SkyboxRenderSystem::processPendingLoad() {
 	if (!m_pending_load.has_value())
 		return;

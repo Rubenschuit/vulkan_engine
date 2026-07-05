@@ -123,7 +123,7 @@ void DebugDrawSystem::createAxesMesh(VeResourceManager& resource_manager) {
 			push_tri(dir * L + r1, r1, r0, col);
 		}
 	}
-	// Generate dummy indices for draw call. TODO add createMesh() with indices.
+	// createMesh() requires index data, but this mesh is drawn non-indexed so the contents are unused
 	std::vector<uint32_t> indices(vertices.size());
 	m_axes_mesh = resource_manager.createMesh("__axes_mesh", vertices, indices);
 }

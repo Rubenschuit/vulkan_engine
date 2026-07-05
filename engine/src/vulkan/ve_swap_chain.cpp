@@ -188,7 +188,7 @@ vk::Result VeSwapChain::submitUIOnly(vk::CommandBuffer ui_cb, uint32_t* image_in
 void VeSwapChain::createSwapChain() {
 	m_swap_chain_support = m_ve_device.getSwapChainSupport();
 	m_surface_format = chooseSwapSurfaceFormat(m_swap_chain_support.formats);
-	m_present_mode = chooseSwapPresentMode(m_swap_chain_support.presentModes);
+	m_present_mode = chooseSwapPresentMode(m_swap_chain_support.present_modes);
 	m_swap_chain_extent = chooseSwapExtent(m_swap_chain_support.capabilities);
 	m_swap_chain_image_format = m_surface_format.format;
 	m_offscreen_image_format = m_ve_device.findSupportedFormat(

@@ -1,5 +1,5 @@
 /* Resource manager and handle for caching and lifetime management of resources
- * such as models and textures. TODO: add support for other resource types suchh as audio and shaders.
+ * such as models and textures. TODO: add support for other resource types such as audio and shaders.
  * Based on:
  * https://docs.vulkan.org/tutorial/latest/Building_a_Simple_Engine/Engine_Architecture/04_resource_management.html
  */

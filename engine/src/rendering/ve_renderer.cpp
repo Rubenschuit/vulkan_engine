@@ -111,7 +111,6 @@ void VeRenderer::recreateSwapChain() {
 		glfwWaitEvents();
 	}
 
-	// Precondition: device must be idle (caller responsibility)
 	m_ve_device.assertDeviceIdle();
 	extent = m_ve_window.getExtent();
 	if (m_ve_swap_chain == nullptr) {
@@ -132,7 +131,6 @@ void VeRenderer::recreateSwapChain() {
 	m_event_bus.emitImmediate(SwapChainRecreatedEvent{});
 }
 
-// Acquire is deferred to ensureImageAcquired() so phase 1 can submit before blocking.
 bool VeRenderer::beginFrame() {
 	assert(!m_is_frame_started && "Can't call beginFrame while already in progress");
 
@@ -216,8 +214,6 @@ bool VeRenderer::ensureImageAcquired() {
 void VeRenderer::endFrame() {
 	assert(m_is_frame_started && "Can't call endFrame while frame is not in progress");
 
-	// Abort path: wait for phase 1, skip submit + present.
-	// Fence is not reset on this path.
 	if (m_frame_aborted) {
 		m_ve_device.getDevice().waitIdle();
 		m_is_frame_started = false;

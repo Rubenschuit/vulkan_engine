@@ -184,6 +184,8 @@ jobs:
           cmake --build build --config ${{ matrix.build_type }} --parallel 2
 
       # ── Test ───────────────────────────────────────────────────────
+      # pipeline_config and resource_manager construct a VeDevice, which needs 
+      # a GPU + display; CI runners have neither so these tests are excluded.
 
       - name: Test (Unix / MSVC)
         if: "!matrix.mingw"

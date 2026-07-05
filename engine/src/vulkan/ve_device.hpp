@@ -1,9 +1,9 @@
-/* This class is responsible for creating and managing the Vulkan device
-and its associated resources, such as the command pool and queues.
-It selects the appropriate physical device and creates a logical device.
-It also sets up validation layers if enabled. Moreover it provides
-methods for creating and managing Vulkan resources, such as buffers and images.
-There are also methods for submitting single time command buffers to a queue. */
+/* Owns the Vulkan instance, physical + logical device, VMA allocator, and one
+queue plus transient command pool per queue kind (graphics/present, compute,
+transfer). Compute and transfer fall back to the graphics family when no
+dedicated family exists; uniqueFamilies() drives buffer/image sharing mode.
+Also provides single-time command submission and format/feature queries. 
+*/
 #pragma once
 #include "ve_export.hpp"
 #include "platform/ve_window.hpp"
@@ -26,22 +26,22 @@ enum class QueueKind { Graphics, Compute, Transfer };
 struct SwapChainSupportDetails {
 	vk::SurfaceCapabilitiesKHR capabilities;
 	std::vector<vk::SurfaceFormatKHR> formats;
-	std::vector<vk::PresentModeKHR> presentModes;
+	std::vector<vk::PresentModeKHR> present_modes;
 };
 
 struct QueueFamilyIndices {
-	uint32_t graphicsFamily = UINT32_MAX;
-	uint32_t computeFamily  = UINT32_MAX;
-	uint32_t transferFamily = UINT32_MAX;
+	uint32_t graphics_family = UINT32_MAX;
+	uint32_t compute_family  = UINT32_MAX;
+	uint32_t transfer_family = UINT32_MAX;
 
 	bool isComplete() const {
-		return graphicsFamily != UINT32_MAX && computeFamily != UINT32_MAX && transferFamily != UINT32_MAX;
+		return graphics_family != UINT32_MAX && compute_family != UINT32_MAX && transfer_family != UINT32_MAX;
 	}
 	bool allSameFamily() const {
-		return graphicsFamily == computeFamily && computeFamily == transferFamily;
+		return graphics_family == compute_family && compute_family == transfer_family;
 	}
 	std::vector<uint32_t> uniqueFamilies() const {
-		std::vector<uint32_t> v{graphicsFamily, computeFamily, transferFamily};
+		std::vector<uint32_t> v{graphics_family, compute_family, transfer_family};
 		std::sort(v.begin(), v.end());
 		v.erase(std::unique(v.begin(), v.end()), v.end());
 		return v;
@@ -137,8 +137,6 @@ private:
 	SwapChainSupportDetails querySwapChainSupport(const vk::raii::PhysicalDevice& device) const;
 	vk::SampleCountFlagBits queryMaxUsableSampleCount() const;
 
-
-
 	VeWindow &m_window;
 	vk::raii::Context m_context;
 	vk::raii::Instance m_instance{nullptr};
@@ -158,7 +156,6 @@ private:
 	uint32_t m_queue_index = UINT32_MAX; // queue family index for graphics and present
 	uint32_t m_transfer_queue_index = UINT32_MAX;
 	uint32_t m_compute_queue_index = UINT32_MAX;
-	//vk::raii::Queue present_queue{nullptr};
 
 	// MSAA samples
 	vk::SampleCountFlagBits m_max_msaa_samples = vk::SampleCountFlagBits::e1; // set in pickPhysicalDevice

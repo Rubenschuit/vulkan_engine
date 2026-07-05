@@ -10,8 +10,6 @@
 
 namespace ve {
 
-//local function
-
 #if defined(__x86_64__) && defined(__APPLE__)
 // macOS Intel: C-style types required
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -92,10 +90,10 @@ VeDevice::~VeDevice() {
 }
 
 void VeDevice::createInstance() {
-	constexpr vk::ApplicationInfo appInfo{
-			.pApplicationName   = "Hello Triangle",
+	constexpr vk::ApplicationInfo app_info{
+			.pApplicationName   = "VeApp",
 			.applicationVersion = VK_MAKE_VERSION( 1, 0, 0 ),
-			.pEngineName        = "No Engine",
+			.pEngineName        = "VEngine",
 			.engineVersion      = VK_MAKE_VERSION( 1, 0, 0 ),
 			.apiVersion         = vk::ApiVersion13
 	};
@@ -116,12 +114,8 @@ void VeDevice::createInstance() {
 		required_layers.assign(m_validation_layers.begin(), m_validation_layers.end());
 	}
 
-	// Check if the required layers are supported by the device
+	// Error out if any required layer is missing from the available layers
 	auto layer_properties = m_context.enumerateInstanceLayerProperties();
-	//any_of returns true if any element in the range satisfies the predicate
-	//none_of returns true if no elements in the range satisfy the predicate
-	// Here we check if any of the required layers are in none of the available layers
-	// If so, we throw an error
 	if (std::ranges::any_of(required_layers, [&layer_properties](auto const& required_layer) {
 		return std::ranges::none_of(layer_properties,
 									[required_layer](auto const& layer_property)
@@ -157,15 +151,15 @@ void VeDevice::createInstance() {
 		}
 	}
 
-	vk::InstanceCreateInfo createInfo{
+	vk::InstanceCreateInfo create_info{
 		.flags = m_has_portability_enumeration ? vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR : vk::InstanceCreateFlags{},
-		.pApplicationInfo = &appInfo,
+		.pApplicationInfo = &app_info,
 		.enabledLayerCount = static_cast<uint32_t>(required_layers.size()),
 		.ppEnabledLayerNames = required_layers.data(),
 		.enabledExtensionCount = static_cast<uint32_t>(required_extensions.size()),
 		.ppEnabledExtensionNames = required_extensions.data()};
 
-	m_instance = vk::raii::Instance(m_context, createInfo);
+	m_instance = vk::raii::Instance(m_context, create_info);
 }
 
 void VeDevice::setupDebugMessenger() {
@@ -233,15 +227,15 @@ void VeDevice::createSurface() {
 
 // Checks if a physical device supports Vulkan 1.3,
 // a graphics queue and the required extensions defined in ve_device.hpp
-bool VeDevice::isDeviceSuitable(const vk::raii::PhysicalDevice& phyisical_device) const {
+bool VeDevice::isDeviceSuitable(const vk::raii::PhysicalDevice& physical_device) const {
 
 	// First, the device must support at least Vulkan 1.3
-	if (phyisical_device.getProperties().apiVersion < VK_API_VERSION_1_3) {
+	if (physical_device.getProperties().apiVersion < VK_API_VERSION_1_3) {
 		return false;
 	}
 
 	// Second, it must have a queue family that supports graphics
-	auto queue_families = phyisical_device.getQueueFamilyProperties();
+	auto queue_families = physical_device.getQueueFamilyProperties();
 	// return an iterator to the first queue family that supports graphics
 	const auto qfp_iter = std::ranges::find_if(queue_families,
 		[](vk::QueueFamilyProperties const& qfp) {
@@ -252,7 +246,7 @@ bool VeDevice::isDeviceSuitable(const vk::raii::PhysicalDevice& phyisical_device
 	}
 
 	// Third, it must support the required device extensions
-	auto physical_device_extensions = phyisical_device.enumerateDeviceExtensionProperties();
+	auto physical_device_extensions = physical_device.enumerateDeviceExtensionProperties();
 	bool found = true;
 	// For every required device extension, check if it is in the list of available extensions
 	for (auto const& r_extension : m_required_device_extensions) {
@@ -266,9 +260,9 @@ bool VeDevice::isDeviceSuitable(const vk::raii::PhysicalDevice& phyisical_device
 		return false;
 	}
 
-	// Todo centralize features to check
-	// Fourth, it must support the required features
-	auto features = phyisical_device.getFeatures2<vk::PhysicalDeviceFeatures2,
+	// Fourth, it must support the required features.
+	// Keep this list in sync with the feature chain enabled in createLogicalDevice().
+	auto features = physical_device.getFeatures2<vk::PhysicalDeviceFeatures2,
 											vk::PhysicalDeviceVulkan11Features,
 											vk::PhysicalDeviceVulkan12Features,
 											vk::PhysicalDeviceVulkan13Features,
@@ -283,32 +277,38 @@ bool VeDevice::isDeviceSuitable(const vk::raii::PhysicalDevice& phyisical_device
 	}
 
 	// Finally, it must support swapchain for the given surface
-	const auto swap_chain_support = querySwapChainSupport(phyisical_device);
-	return !swap_chain_support.formats.empty() && !swap_chain_support.presentModes.empty();
+	const auto swap_chain_support = querySwapChainSupport(physical_device);
+	return !swap_chain_support.formats.empty() && !swap_chain_support.present_modes.empty();
 }
 
-// TODO scoring system to select the best GPU
-// Selects a physical device (GPU) that is suitable for the application's needs
-// We require Vulkan 1.3, a graphics queue and the extensions defined in ve_device.hpp
+// Selects a suitable physical device (Vulkan 1.3, required queues/extensions/features,
+// swapchain support), preferring discrete over integrated
 void VeDevice::pickPhysicalDevice() {
 	assert(*m_surface != VK_NULL_HANDLE && "Surface must be created before picking a physical device");
 	auto p_devices = m_instance.enumeratePhysicalDevices();
 	assert(p_devices.size() > 0 && "No GPU with Vulkan support found!");
 	VE_LOGI("Found " << p_devices.size() << " physical device(s)");
 
-	// Find the first suitable device from 'p_devices'
-	const auto dev_iter = std::ranges::find_if(p_devices,
-		[this](auto const& phyisical_device) {
-			return isDeviceSuitable(phyisical_device);
+	auto type_score = [](vk::PhysicalDeviceType type) {
+		switch (type) {
+			case vk::PhysicalDeviceType::eDiscreteGpu:   return 2;
+			case vk::PhysicalDeviceType::eIntegratedGpu: return 1;
+			default:                                     return 0;
 		}
-	);
-	if (dev_iter == p_devices.end()) {
-		throw std::runtime_error("No suitable GPU found");
-	}
-	assert(dev_iter != p_devices.end() && "No suitable GPU found");
+	};
 
-	// found a suitable physical device
-	m_physical_device = *dev_iter;
+	int best_score = -1;
+	for (auto const& physical_device : p_devices) {
+		if (!isDeviceSuitable(physical_device))
+			continue;
+		int score = type_score(physical_device.getProperties().deviceType);
+		if (score > best_score) {
+			best_score = score;
+			m_physical_device = physical_device;
+		}
+	}
+	if (best_score < 0)
+		throw std::runtime_error("No suitable GPU found");
 
 	if (!hasHdrColorSpaceExtension()) {
 		VE_LOGW("HDR Support: VK_EXT_swapchain_colorspace NOT found.");
@@ -337,16 +337,16 @@ void VeDevice::createLogicalDevice() {
 	// Check if the compute queue family is a dedicated async compute engine
 	// (compute without graphics), meaning real parallel overlap is possible.
 	auto qf_props = m_physical_device.getQueueFamilyProperties();
-	auto compute_flags = qf_props[m_queue_family_indices.computeFamily].queueFlags;
+	auto compute_flags = qf_props[m_queue_family_indices.compute_family].queueFlags;
 	m_has_dedicated_compute = (compute_flags & vk::QueueFlagBits::eCompute) != vk::QueueFlags{}
 		&& (compute_flags & vk::QueueFlagBits::eGraphics) == vk::QueueFlags{};
 	VE_LOGI("Dedicated async compute: " << (m_has_dedicated_compute ? "yes" : "no")
-		<< " (compute family " << m_queue_family_indices.computeFamily
+		<< " (compute family " << m_queue_family_indices.compute_family
 		<< " flags: " << vk::to_string(compute_flags) << ")");
 
-	m_queue_index          = m_queue_family_indices.graphicsFamily;
-	m_compute_queue_index  = m_queue_family_indices.computeFamily;
-	m_transfer_queue_index = m_queue_family_indices.transferFamily;
+	m_queue_index          = m_queue_family_indices.graphics_family;
+	m_compute_queue_index  = m_queue_family_indices.compute_family;
+	m_transfer_queue_index = m_queue_family_indices.transfer_family;
 
 	// Query drawIndirectCount support
 	{
@@ -459,62 +459,62 @@ QueueFamilyIndices VeDevice::findAllQueueFamilies(const vk::raii::PhysicalDevice
 		bool has_present  = physical_device.getSurfaceSupportKHR(i, *m_surface);
 
 		if (has_graphics && has_compute && has_present) {
-			indices.graphicsFamily = i;
+			indices.graphics_family = i;
 			break;
 		}
 	}
-	if (indices.graphicsFamily == UINT32_MAX) {
+	if (indices.graphics_family == UINT32_MAX) {
 		throw std::runtime_error("Could not find a queue family for graphics and present");
 	}
 
 	// Pass 2: find a compute family different from graphics
 	for (uint32_t i = 0; i < static_cast<uint32_t>(qf_props.size()); i++) {
 		bool has_compute = (qf_props[i].queueFlags & vk::QueueFlagBits::eCompute) != vk::QueueFlags{};
-		if (has_compute && i != indices.graphicsFamily) {
-			indices.computeFamily = i;
+		if (has_compute && i != indices.graphics_family) {
+			indices.compute_family = i;
 			break;
 		}
 	}
-	if (indices.computeFamily == UINT32_MAX) {
-		indices.computeFamily = indices.graphicsFamily;
-		VE_LOGW("No separate compute queue family found, sharing graphics family " << indices.graphicsFamily);
+	if (indices.compute_family == UINT32_MAX) {
+		indices.compute_family = indices.graphics_family;
+		VE_LOGW("No separate compute queue family found, sharing graphics family " << indices.graphics_family);
 	}
 
 	// Pass 3: find a transfer family different from graphics and compute
 	for (uint32_t i = 0; i < static_cast<uint32_t>(qf_props.size()); i++) {
 		bool has_transfer = (qf_props[i].queueFlags & vk::QueueFlagBits::eTransfer) != vk::QueueFlags{};
-		if (has_transfer && i != indices.graphicsFamily && i != indices.computeFamily) {
-			indices.transferFamily = i;
+		if (has_transfer && i != indices.graphics_family && i != indices.compute_family) {
+			indices.transfer_family = i;
 			break;
 		}
 	}
-	if (indices.transferFamily == UINT32_MAX) {
-		indices.transferFamily = indices.graphicsFamily;
-		VE_LOGW("No separate transfer queue family found, sharing graphics family " << indices.graphicsFamily);
+	if (indices.transfer_family == UINT32_MAX) {
+		indices.transfer_family = indices.graphics_family;
+		VE_LOGW("No separate transfer queue family found, sharing graphics family " << indices.graphics_family);
 	}
 
 	// Summary
 	auto unique = indices.uniqueFamilies();
 	if (indices.allSameFamily()) {
-		VE_LOGI("All queues on single family " << indices.graphicsFamily);
+		VE_LOGI("All queues on single family " << indices.graphics_family);
 	} else {
 		VE_LOGI("Using " << unique.size() << " separate queue families: "
-			<< "Graphics=" << indices.graphicsFamily
-			<< " Compute=" << indices.computeFamily
-			<< " Transfer=" << indices.transferFamily);
+			<< "Graphics=" << indices.graphics_family
+			<< " Compute=" << indices.compute_family
+			<< " Transfer=" << indices.transfer_family);
 	}
 
 	return indices;
 }
 
 std::vector<const char *> VeDevice::getRequiredInstanceExtensions() {
-	uint32_t glfw_extensionCount = 0;
-	auto glfw_extensions = glfwGetRequiredInstanceExtensions(&glfw_extensionCount);
+	uint32_t glfw_extension_count = 0;
+	auto glfw_extensions = glfwGetRequiredInstanceExtensions(&glfw_extension_count);
 
-	assert(glfw_extensions != VK_NULL_HANDLE && glfw_extensionCount > 0 && "GLFW did not provide required instance extensions");
+	assert(glfw_extensions != VK_NULL_HANDLE && glfw_extension_count > 0 && "GLFW did not provide required instance extensions");
 
 	// glfw extensions are always required
-	std::vector<const char*> extensions(glfw_extensions, glfw_extensions + glfw_extensionCount);
+	std::vector<const char*> extensions(glfw_extensions, glfw_extensions + glfw_extension_count);
 #ifndef NDEBUG
 	extensions.push_back(vk::EXTDebugUtilsExtensionName);
 #endif
@@ -545,7 +545,7 @@ SwapChainSupportDetails VeDevice::querySwapChainSupport(const vk::raii::Physical
 	SwapChainSupportDetails details;
 	details.capabilities = ve_device.getSurfaceCapabilitiesKHR(*m_surface);
 	details.formats = ve_device.getSurfaceFormatsKHR(*m_surface);
-	details.presentModes = ve_device.getSurfacePresentModesKHR(*m_surface);
+	details.present_modes = ve_device.getSurfacePresentModesKHR(*m_surface);
 	return details;
 }
 

@@ -125,7 +125,6 @@ void InspectorPanel::renderTextureSlot(const char* label, const std::string& id,
 }
 
 // Draws a vec3 editor with colored X/Y/Z labels
-// TODO: make fit better
 static bool drawVec3Control(const char* label, glm::vec3& values, float speed = 0.1f, float reset_value = 0.0f, int decimals = 2) {
 	bool changed = false;
 	ImGui::PushID(label);

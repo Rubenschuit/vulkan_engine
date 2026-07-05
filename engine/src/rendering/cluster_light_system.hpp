@@ -52,7 +52,6 @@ public:
 	// Upload point light data from the ECS registry into the light SSBO.
 	// Must be called after LightSystem::updateUniformBuffer() so light order matches.
 	// Returns the number of lights uploaded.
-	// TODO: decouple this
 	uint32_t uploadLightData(VeFrameInfo& frame_info);
 
 	// Record the cluster assignment compute dispatch on the compute command buffer.

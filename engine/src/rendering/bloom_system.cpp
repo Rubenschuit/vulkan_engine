@@ -265,7 +265,7 @@ void BloomSystem::render(vk::raii::CommandBuffer& command_buffer) {
 	// 2. Upsampling
 	command_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_upsample_pipeline->getPipeline());
 
-	// Filter radius in texel space. TODO: Could be configurable.
+	// Filter radius in texel space
 	float filter_radius = 0.005f;
 
 	for (uint32_t i = m_mip_count - 1; i > 0; i--) {

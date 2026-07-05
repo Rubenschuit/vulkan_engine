@@ -13,7 +13,7 @@ static const float LIGHT_SPECULAR_CUTOFF = 5e-3;
 
 // ============================================================================
 // Bindless textures (set 1): sampler at binding 0, texture array at binding 1
-// ============================================================================3
+// ============================================================================
 
 [vk::binding(0, 1)]
 SamplerState bindless_sampler;
@@ -34,7 +34,7 @@ struct VertexInput {
 
 struct VertexOutput {
 	float4 pos : SV_Position;
-    float3 frag_pos_world;
+	float3 frag_pos_world;
 	float3 frag_normal_world;
 	float3 frag_tangent_world;
 	float3 frag_bitangent_world;
@@ -52,7 +52,7 @@ struct VertexOutput {
 
 [shader("vertex")]
 VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID) {
-    VertexOutput output;
+	VertexOutput output;
 
 	// Meshlet path packs (gpu_id | meshlet_local << 16) into firstInstance.
 	// Non-meshlet path uses firstInstance < 65536, so upper bits are zero.
