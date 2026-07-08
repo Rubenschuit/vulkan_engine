@@ -19,7 +19,8 @@ AssetLoadingSystem::AssetLoadingSystem(VeResourceManager& resource_manager)
 		.initialValue = 0,
 	};
 	vk::SemaphoreCreateInfo create_info{ .pNext = &type_info };
-	m_upload_timeline = vk::raii::Semaphore(m_resource_manager.getDevice().getDevice(), create_info);
+	m_transfer_timeline = vk::raii::Semaphore(m_resource_manager.getDevice().getDevice(), create_info);
+	m_graphics_timeline = vk::raii::Semaphore(m_resource_manager.getDevice().getDevice(), create_info);
 }
 
 AssetLoadingSystem::~AssetLoadingSystem() {
@@ -131,8 +132,10 @@ void AssetLoadingSystem::tick() {
 		auto& device = m_resource_manager.getDevice();
 
 		// Drain retired batches from the front. Their arenas return to the pool.
-		uint64_t current_value = m_upload_timeline.getCounterValue();
-		while (!m_in_flight.empty() && m_in_flight.front().target_timeline_value <= current_value) {
+		// Counter >= batch_value proves the batch's
+		// graphics CB (and its awaited transfer CB) completed.
+		uint64_t current_value = m_graphics_timeline.getCounterValue();
+		while (!m_in_flight.empty() && m_in_flight.front().batch_value <= current_value) {
 			auto& batch = m_in_flight.front();
 			if (batch.arena) {
 				batch.arena->reset();
@@ -182,17 +185,16 @@ void AssetLoadingSystem::tick() {
 				continue;
 			}
 
-			vk::Semaphore sem = *m_upload_timeline;
-
-			// Transfer queue signals V+1; graphics queue waits V+1, signals V+2.
-			uint64_t transfer_signal = ++m_last_signaled_value;
-			uint64_t graphics_signal = ++m_last_signaled_value;
+			// Both queues signal their own timeline with the same batch value:
+			uint64_t batch_value = ++m_batch_counter;
+			vk::Semaphore transfer_sem = *m_transfer_timeline;
+			vk::Semaphore graphics_sem = *m_graphics_timeline;
 
 			{
 				vk::TimelineSemaphoreSubmitInfo timeline_info{
 					.sType = vk::StructureType::eTimelineSemaphoreSubmitInfo,
 					.signalSemaphoreValueCount = 1,
-					.pSignalSemaphoreValues = &transfer_signal,
+					.pSignalSemaphoreValues = &batch_value,
 				};
 				vk::CommandBuffer cb = **transfer_cmd;
 				vk::SubmitInfo submit_info{
@@ -200,7 +202,7 @@ void AssetLoadingSystem::tick() {
 					.commandBufferCount = 1,
 					.pCommandBuffers = &cb,
 					.signalSemaphoreCount = 1,
-					.pSignalSemaphores = &sem,
+					.pSignalSemaphores = &transfer_sem,
 				};
 				device.getTransferQueue().submit(submit_info, nullptr);
 			}
@@ -213,20 +215,20 @@ void AssetLoadingSystem::tick() {
 				vk::TimelineSemaphoreSubmitInfo timeline_info{
 					.sType = vk::StructureType::eTimelineSemaphoreSubmitInfo,
 					.waitSemaphoreValueCount = 1,
-					.pWaitSemaphoreValues = &transfer_signal,
+					.pWaitSemaphoreValues = &batch_value,
 					.signalSemaphoreValueCount = 1,
-					.pSignalSemaphoreValues = &graphics_signal,
+					.pSignalSemaphoreValues = &batch_value,
 				};
 				vk::CommandBuffer cb = **graphics_cmd;
 				vk::SubmitInfo submit_info{
 					.pNext = &timeline_info,
 					.waitSemaphoreCount = 1,
-					.pWaitSemaphores = &sem,
+					.pWaitSemaphores = &transfer_sem,
 					.pWaitDstStageMask = &wait_stage,
 					.commandBufferCount = 1,
 					.pCommandBuffers = &cb,
 					.signalSemaphoreCount = 1,
-					.pSignalSemaphores = &sem,
+					.pSignalSemaphores = &graphics_sem,
 				};
 				device.getQueue().submit(submit_info, nullptr);
 			}
@@ -235,7 +237,7 @@ void AssetLoadingSystem::tick() {
 			batch.transfer_cmd = std::move(transfer_cmd);
 			batch.graphics_cmd = std::move(graphics_cmd);
 			batch.arena = std::move(arena);
-			batch.target_timeline_value = graphics_signal;
+			batch.batch_value = batch_value;
 			m_in_flight.push_back(std::move(batch));
 		}
 
@@ -258,8 +260,8 @@ void AssetLoadingSystem::waitForInFlight() {
 	if (m_in_flight.empty())
 		return;
 	// Wait on the latest batch
-	uint64_t target = m_in_flight.back().target_timeline_value;
-	vk::Semaphore sem = *m_upload_timeline;
+	uint64_t target = m_in_flight.back().batch_value;
+	vk::Semaphore sem = *m_graphics_timeline;
 	vk::SemaphoreWaitInfo wait_info{
 		.sType = vk::StructureType::eSemaphoreWaitInfo,
 		.semaphoreCount = 1,

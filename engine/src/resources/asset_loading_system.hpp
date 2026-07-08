@@ -1,8 +1,7 @@
 /* AssetLoadingSystem - orchestrates two-phase async asset loading.
  * Phase 1 (background thread): CPU work (glTF parse, image decode, mesh processing)
  * Phase 2 (main thread): GPU uploads, batched into one transfer-queue CB +
- *   (when textures are uploaded) one graphics-queue CB per tick, joined by a
- *   single timeline semaphore. Polled across frames before advancing to FINALIZING.
+ *   one graphics-queue CB per batch.
  */
 #pragma once
 #include "ve_export.hpp"
@@ -81,7 +80,7 @@ private:
 		std::unique_ptr<vk::raii::CommandBuffer> transfer_cmd;
 		std::unique_ptr<vk::raii::CommandBuffer> graphics_cmd;
 		std::unique_ptr<StagingArena> arena;
-		uint64_t target_timeline_value = 0;
+		uint64_t batch_value = 0;
 	};
 	std::deque<InFlightBatch> m_in_flight;
 
@@ -89,10 +88,10 @@ private:
 	// MAX_IN_FLIGHT_BATCHES
 	std::vector<std::unique_ptr<StagingArena>> m_arena_pool;
 
-	// Persistent across the whole loader lifetime. Incremented monotonically
-	// per submit; each batch consumes 1 (mesh-only) or 2 (textures) values.
-	vk::raii::Semaphore m_upload_timeline{nullptr};
-	uint64_t m_last_signaled_value = 0;
+	// One timeline per queue, signaled with the batch counter
+	vk::raii::Semaphore m_transfer_timeline{nullptr};
+	vk::raii::Semaphore m_graphics_timeline{nullptr};
+	uint64_t m_batch_counter = 0;
 
 	std::shared_ptr<VeModel> m_completed_model;
 	std::chrono::steady_clock::time_point m_load_start_time;
