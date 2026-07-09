@@ -25,7 +25,8 @@ public:
 
 	void cull(VeFrameInfo& fi, GpuSceneManager& gpu_scene) override;
 	void renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
-	                        DepthPrePassSystem& dps) const override;
+	                        DepthPrePassSystem& dps,
+	                        const vk::raii::DescriptorSet& bindless_set) const override;
 	void renderShadows(VeFrameInfo& fi, ShadowRenderSystem& srs,
 	                   PbrMegaBuffer& mega, GpuSceneManager& gpu_scene) const override;
 	void renderOpaque(VeFrameInfo& fi, PbrRenderSystem& pbr,

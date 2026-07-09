@@ -224,8 +224,29 @@ Sampler2D<float4> ltc_mat;   // inverse-transform matrix terms
 Sampler2D<float4> ltc_mag;   // BRDF magnitude + Fresnel terms
 
 // ============================================================================
+// SSR bindings (set 7)
+// ============================================================================
+
+[vk::binding(0, 7)]
+Texture2D<float4> ssr_texture;   // a: confidence
+[vk::binding(1, 7)]
+SamplerState ssr_sampler;
+
+// ============================================================================
 // Utilities
 // ============================================================================
+
+// KHR_texture_transform: uv' = (Translate * Rotate * Scale) * uv.
+// identity (offset 0, scale 1, rot 0) is a no-op.
+float2 applyUvTransform(float2 uv, float4 off_scale, float rot) {
+	float2 t = uv * off_scale.zw;
+	float s = sin(rot), c = cos(rot);
+	return float2(c * t.x - s * t.y, s * t.x + c * t.y) + off_scale.xy;
+}
+
+float spatialNoise(uint2 coord) {
+	return frac(52.9829189 * frac(dot(float2(coord), float2(0.06711056, 0.00583715))));
+}
 
 float3 fresnelSchlickRoughness(float cos_theta, float3 F0, float roughness) {
 	float t = clamp(1.0 - cos_theta, 0.0, 1.0);

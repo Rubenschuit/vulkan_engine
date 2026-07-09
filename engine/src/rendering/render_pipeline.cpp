@@ -33,6 +33,7 @@
 #include "rendering/shadow_mask_system.hpp"
 #include "rendering/shadow_render_system.hpp"
 #include "rendering/skinned_points_render_system.hpp"
+#include "rendering/ssr_system.hpp"
 #include "rendering/deform_pre_pass.hpp"
 #include "rendering/skybox_render_system.hpp"
 #include "rendering/ve_frame_info.hpp"
@@ -82,6 +83,7 @@ RenderPipeline::RenderPipeline(VeDevice& device,
 	m_scene_loaded_sub = m_event_bus.subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
 		if (!e.scene)
 			return;
+		m_ssr_system->invalidateHistory();
 		// Configure particle backend
 		uint32_t requested = e.scene->getParticleCapacity();
 		uint32_t target = (requested > 0)
@@ -163,7 +165,9 @@ void RenderPipeline::initRenderSystems() {
 
 	m_depth_prepass_system = std::make_unique<DepthPrePassSystem>(
 		m_ve_device, m_resources.globalSetLayout().getDescriptorSetLayout(),
-		m_ve_renderer.getSampleCount(), shader("depth_prepass_shader.spv"),
+		m_scene_resources->getBindlessRegistry().getSetLayout(),
+		m_ve_renderer.getSampleCount(), m_ve_renderer.getOffscreenImageFormat(),
+		shader("depth_prepass_shader.spv"),
 		m_event_bus
 	);
 
@@ -183,6 +187,19 @@ void RenderPipeline::initRenderSystems() {
 		m_config.shaders_dir, halveExtent(m_ve_renderer.getExtent(), m_settings.gtao_half_res),
 		m_ve_renderer.getExtent(),
 		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage(),
+		m_ve_renderer.getResolvedNormalRoughnessImageView(),
+		m_event_bus
+	);
+
+	m_ssr_system = std::make_unique<SsrSystem>(
+		m_ve_device, *m_resources.pool(),
+		m_resources.globalSetLayout().getDescriptorSetLayout(),
+		m_config.shaders_dir,
+		halveExtent(m_ve_renderer.getExtent(), m_settings.ssr_half_res),
+		m_ve_renderer.getExtent(),
+		m_ve_renderer.getOffscreenImageFormat(),
+		m_ve_renderer.getResolvedDepthImageView(),
+		m_ve_renderer.getResolvedNormalRoughnessImageView(),
 		m_event_bus
 	);
 
@@ -209,6 +226,7 @@ void RenderPipeline::initRenderSystems() {
 		m_cluster_light_system->getOutputSetLayout(),
 		m_gtao_system->getAoSetLayout(),
 		m_ibl_system->getIblSetLayout(),
+		m_ssr_system->getSsrSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getSampleCount(),
 		shader("pbr_shader.spv"),
@@ -331,10 +349,12 @@ void RenderPipeline::emitResolutionChangedEvent() {
 		.resolve_target_view = m_ve_renderer.getResolveTargetImageView(),
 		.depth_image_view = m_ve_renderer.getResolvedDepthImageView(),
 		.depth_image = m_ve_renderer.getResolvedDepthImage(),
+		.normal_roughness_image_view = m_ve_renderer.getResolvedNormalRoughnessImageView(),
 		.wboit_accum_view = m_ve_renderer.getWboitAccumImageView(),
 		.wboit_revealage_view = m_ve_renderer.getWboitRevealageImageView(),
 		.shadow_mask_half_res = m_settings.shadow_mask_half_res,
-		.gtao_half_res = m_settings.gtao_half_res
+		.gtao_half_res = m_settings.gtao_half_res,
+		.ssr_half_res = m_settings.ssr_half_res
 	});
 }
 
@@ -729,6 +749,9 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 	bool hiz_active = fi.gpu_culling_active && m_active_backend->isHizEnabled()
 		&& m_settings.depth_prepass_enabled;
 	bool gtao_active = m_settings.gtao_enabled && m_settings.depth_prepass_enabled;
+	bool ssr_active = m_settings.ssr_enabled && m_settings.depth_prepass_enabled;
+	bool perspective_cam = fi.camera_view.proj[3][3] == 0.0f;
+	bool ssr_trace_active = ssr_active && perspective_cam && m_ssr_system->historyValid();
 
 	if (m_settings.depth_prepass_enabled) {
 		ZoneScopedN("Depth Prepass");
@@ -737,7 +760,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		profiler.beginGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
 		m_ve_renderer.beginDepthPrePass(command_buffer);
 		m_active_backend->renderDepthPrePass(fi, m_scene_resources->getMegaBuffer(),
-			*m_depth_prepass_system);
+			*m_depth_prepass_system, bindless_set);
 		m_ve_renderer.endDepthPrePass(command_buffer);
 		profiler.endGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
 		profiler.endCpuTimer(ProfileTimer::DEPTH_PREPASS);
@@ -745,7 +768,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 	bool shadows_enabled = m_settings.shadow_mode != ShadowMode::DISABLED;
 	bool any_depth_consumer = m_settings.depth_prepass_enabled
-		&& (hiz_active || fi.shadow_mask_active || gtao_active);
+		&& (hiz_active || fi.shadow_mask_active || gtao_active || ssr_trace_active);
 	bool any_async_consumer = m_ve_device.hasDedicatedComputeQueue()
 		&& (gtao_active || hiz_active);
 
@@ -762,22 +785,39 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 	}
 
 	if (any_depth_consumer) {
-		vk::ImageMemoryBarrier2 depth_to_read{
-			.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
-				| vk::PipelineStageFlagBits2::eLateFragmentTests
-				| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-			.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
-				| vk::AccessFlagBits2::eColorAttachmentWrite,
-			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-			.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
-			.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-			.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = m_ve_renderer.getResolvedDepthImage(),
-			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
+		std::array<vk::ImageMemoryBarrier2, 2> to_read = {
+			vk::ImageMemoryBarrier2{
+				.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+					| vk::PipelineStageFlagBits2::eLateFragmentTests
+					| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+				.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+					| vk::AccessFlagBits2::eColorAttachmentWrite,
+				.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+				.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+				.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+				.newLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = m_ve_renderer.getResolvedDepthImage(),
+				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
+			},
+			vk::ImageMemoryBarrier2{
+				.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+				.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+				.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+				.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+				.oldLayout = vk::ImageLayout::eColorAttachmentOptimal,
+				.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = m_ve_renderer.getResolvedNormalRoughnessImage(),
+				.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+			}
 		};
-		vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_read};
+		vk::DependencyInfo dep{
+			.imageMemoryBarrierCount = static_cast<uint32_t>(to_read.size()),
+			.pImageMemoryBarriers = to_read.data()
+		};
 		command_buffer.pipelineBarrier2(dep);
 
 		if (any_async_consumer) {
@@ -835,30 +875,16 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 				fi.shadow_mask_descriptor_set = &m_shadow_mask_system->getOutputDescriptorSet(fi.current_frame);
 			}
 
+			if (ssr_trace_active)
+				recordSsrTrace(fi, shadow_cb);
+
 			m_ve_renderer.submitShadowGraphics(shadow_cb);
 			m_ve_renderer.submitDepthCompute(depth_compute_cb);
 
 			auto& swap_cb = m_ve_renderer.getSwapGraphicsCommandBuffer();
 			fi.command_buffer = &swap_cb;
 
-			vk::ImageMemoryBarrier2 depth_to_attach{
-				.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-				.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-				.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
-					| vk::PipelineStageFlagBits2::eLateFragmentTests
-					| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-				.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
-					| vk::AccessFlagBits2::eDepthStencilAttachmentWrite
-					| vk::AccessFlagBits2::eColorAttachmentWrite,
-				.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-				.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.image = m_ve_renderer.getResolvedDepthImage(),
-				.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
-			};
-			vk::DependencyInfo dep2{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_attach};
-			swap_cb.pipelineBarrier2(dep2);
+			recordDepthConsumerToAttachBarriers(swap_cb);
 		} else {
 			if (fi.shadow_mask_active) {
 				ScopedDebugLabel label(command_buffer, "Shadow Mask", {0.5f, 0.3f, 0.5f, 1.0f});
@@ -894,34 +920,21 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 				profiler.endGpuTimer(command_buffer, ProfileTimer::HIZ);
 				profiler.endCpuTimer(ProfileTimer::HIZ);
 			}
+
+			if (ssr_trace_active)
+				recordSsrTrace(fi, command_buffer);
 		}
 	}
 
-	if (!any_async_consumer && any_depth_consumer) {
-		vk::ImageMemoryBarrier2 depth_to_attach{
-			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
-			.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
-				| vk::PipelineStageFlagBits2::eLateFragmentTests
-				| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
-				| vk::AccessFlagBits2::eDepthStencilAttachmentWrite
-				| vk::AccessFlagBits2::eColorAttachmentWrite,
-			.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-			.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = m_ve_renderer.getResolvedDepthImage(),
-			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
-		};
-		vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_to_attach};
-		command_buffer.pipelineBarrier2(dep);
-	}
+	if (!any_async_consumer && any_depth_consumer)
+		recordDepthConsumerToAttachBarriers(command_buffer);
 
 	if (!fi.shadow_mask_active)
 		fi.shadow_mask_descriptor_set = &m_shadow_mask_system->getDummyOutputDescriptorSet();
 	if (!gtao_active)
 		fi.ao_descriptor_set = &m_gtao_system->getDummyOutputDescriptorSet();
+	if (!ssr_trace_active)
+		fi.ssr_descriptor_set = &m_ssr_system->getDummyOutputDescriptorSet();
 
 	auto& active_cb = fi.cmd();
 
@@ -986,6 +999,14 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 			gpu_scene, m_ve_renderer);
 	}
 
+	if (ssr_active && perspective_cam) {
+		ScopedDebugLabel label(active_cb, "SSR History Copy", {0.3f, 0.6f, 1.0f, 1.0f});
+		ZoneScopedN("SSR History Copy");
+		TracyVkZone(tracy_gfx, *active_cb, "SSR History Copy");
+		m_ssr_system->recordHistoryCopy(active_cb, m_ve_renderer.getResolveTargetImage());
+	} else
+		m_ssr_system->invalidateHistory();
+
 	bool outline_active = editor_state.outline_enabled && !fi.selected_entities.empty();
 	if (outline_active) {
 		ScopedDebugLabel label(active_cb, "Selection Outline", {1.0f, 0.5f, 0.0f, 1.0f});
@@ -1030,6 +1051,59 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 	}
 }
 
+void RenderPipeline::recordSsrTrace(VeFrameInfo& fi, vk::raii::CommandBuffer& cmd) {
+	[[maybe_unused]] auto tracy_gfx = m_ve_renderer.getTracyGraphicsCtx();
+	auto& profiler = m_ve_renderer.getProfiler();
+	ScopedDebugLabel label(cmd, "SSR Trace", {0.3f, 0.6f, 1.0f, 1.0f});
+	ZoneScopedN("SSR Trace");
+	TracyVkZone(tracy_gfx, *cmd, "SSR Trace");
+	profiler.beginCpuTimer(ProfileTimer::SSR);
+	profiler.beginGpuTimer(cmd, ProfileTimer::SSR);
+	m_ssr_system->dispatch(fi, cmd);
+	profiler.endGpuTimer(cmd, ProfileTimer::SSR);
+	profiler.endCpuTimer(ProfileTimer::SSR);
+	fi.ssr_descriptor_set = &m_ssr_system->getOutputDescriptorSet();
+}
+
+void RenderPipeline::recordDepthConsumerToAttachBarriers(vk::raii::CommandBuffer& cmd) {
+	std::array<vk::ImageMemoryBarrier2, 2> to_attach = {
+		vk::ImageMemoryBarrier2{
+			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
+			.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
+				| vk::PipelineStageFlagBits2::eLateFragmentTests
+				| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
+				| vk::AccessFlagBits2::eDepthStencilAttachmentWrite
+				| vk::AccessFlagBits2::eColorAttachmentWrite,
+			.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+			.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_ve_renderer.getResolvedDepthImage(),
+			.subresourceRange = {vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1},
+		},
+		vk::ImageMemoryBarrier2{
+			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
+			.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+			.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentRead
+				| vk::AccessFlagBits2::eColorAttachmentWrite,
+			.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+			.newLayout = vk::ImageLayout::eColorAttachmentOptimal,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_ve_renderer.getResolvedNormalRoughnessImage(),
+			.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+		}
+	};
+	vk::DependencyInfo dep{
+		.imageMemoryBarrierCount = static_cast<uint32_t>(to_attach.size()),
+		.pImageMemoryBarriers = to_attach.data()
+	};
+	cmd.pipelineBarrier2(dep);
+}
+
 void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	auto& profiler = m_ve_renderer.getProfiler();
 
@@ -1045,6 +1119,7 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	m_stats.gpu_depth_prepass = results.gpu(ProfileTimer::DEPTH_PREPASS);
 	m_stats.gpu_gtao = results.gpu(ProfileTimer::GTAO);
 	m_stats.gpu_scene_render = results.gpu(ProfileTimer::SCENE_RENDER);
+	m_stats.gpu_ssr = results.gpu(ProfileTimer::SSR);
 	m_stats.gpu_bloom = results.gpu(ProfileTimer::BLOOM);
 	m_stats.gpu_post_process = results.gpu(ProfileTimer::POST_PROCESS);
 	m_stats.gpu_hiz = results.gpu(ProfileTimer::HIZ);
@@ -1059,6 +1134,7 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	m_stats.cpu_depth_prepass = results.cpu(ProfileTimer::DEPTH_PREPASS);
 	m_stats.cpu_gtao = results.cpu(ProfileTimer::GTAO);
 	m_stats.cpu_scene_render = results.cpu(ProfileTimer::SCENE_RENDER);
+	m_stats.cpu_ssr = results.cpu(ProfileTimer::SSR);
 	m_stats.cpu_bloom = results.cpu(ProfileTimer::BLOOM);
 	m_stats.cpu_post_process = results.cpu(ProfileTimer::POST_PROCESS);
 	m_stats.cpu_hiz = results.cpu(ProfileTimer::HIZ);

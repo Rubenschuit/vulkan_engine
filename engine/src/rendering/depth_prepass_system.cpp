@@ -15,27 +15,33 @@ namespace ve {
 DepthPrePassSystem::DepthPrePassSystem(
 	VeDevice& device,
 	const vk::raii::DescriptorSetLayout& global_set_layout,
+	const vk::raii::DescriptorSetLayout& bindless_set_layout,
 	vk::SampleCountFlagBits sample_count,
+	vk::Format normal_roughness_format,
 	std::filesystem::path shader_path,
 	EventBus& event_bus)
-	: m_ve_device(device), m_shader_path(std::move(shader_path)) {
+	: m_ve_device(device), m_shader_path(std::move(shader_path)),
+	  m_normal_roughness_format(normal_roughness_format) {
 
 	event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
+		m_normal_roughness_format = e.offscreen_format;
 		recreatePipeline(e.sample_count);
 	});
 
-	createPipelineLayout(global_set_layout);
+	createPipelineLayout(global_set_layout, bindless_set_layout);
 	createPipeline(sample_count);
 }
 
 DepthPrePassSystem::~DepthPrePassSystem() = default;
 
 void DepthPrePassSystem::createPipelineLayout(
-	const vk::raii::DescriptorSetLayout& global_set_layout) {
-	vk::DescriptorSetLayout layouts[1] = {*global_set_layout};
+	const vk::raii::DescriptorSetLayout& global_set_layout,
+	const vk::raii::DescriptorSetLayout& bindless_set_layout) {
+	// Set 1 (bindless) feeds the metallic-roughness texture sample in the G-buffer output
+	vk::DescriptorSetLayout layouts[2] = {*global_set_layout, *bindless_set_layout};
 	vk::PipelineLayoutCreateInfo pipeline_layout_info{
 		.sType = vk::StructureType::ePipelineLayoutCreateInfo,
-		.setLayoutCount = 1,
+		.setLayoutCount = 2,
 		.pSetLayouts = layouts,
 		.pushConstantRangeCount = 0,
 		.pPushConstantRanges = nullptr
@@ -48,9 +54,14 @@ void DepthPrePassSystem::createPipeline(vk::SampleCountFlagBits sample_count) {
 	PipelineConfigInfo pipeline_config{};
 	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
 
-	pipeline_config.color_format = vk::Format::eUndefined;
-	pipeline_config.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptionsShadow();
-	pipeline_config.binding_descriptions = VeMesh::Vertex::getShadowBindingDescriptions();
+	pipeline_config.color_format = m_normal_roughness_format;
+	// True would use roughness as blend factor
+	pipeline_config.color_blend_attachment.blendEnable = VK_FALSE;
+	// Only position + normal + uv (locations 0-2) are required
+	auto attributes = VeMesh::Vertex::getAttributeDescriptions();
+	attributes.resize(3);
+	pipeline_config.attribute_descriptions = std::move(attributes);
+	pipeline_config.binding_descriptions = VeMesh::Vertex::getBindingDescriptions();
 	pipeline_config.multisample_info.rasterizationSamples = sample_count;
 	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eBack;
 	pipeline_config.dynamic_state_enables.push_back(vk::DynamicState::eCullMode);
@@ -68,6 +79,7 @@ void DepthPrePassSystem::createPipeline(vk::SampleCountFlagBits sample_count) {
 void DepthPrePassSystem::render(
 	VeFrameInfo& frame_info,
 	PbrMegaBuffer& mega_buffer,
+	const vk::raii::DescriptorSet& bindless_set,
 	const VeBuffer& indirect_buffer,
 	const uint32_t* bucket_offsets,
 	const uint32_t* bucket_counts,
@@ -80,8 +92,10 @@ void DepthPrePassSystem::render(
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		0, {*frame_info.global_descriptor_set}, {});
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		1, {*bindless_set}, {});
 
-	mega_buffer.bindShadow(cmd);
+	mega_buffer.bind(cmd);
 
 	for (uint32_t bucket = 0; bucket < bucket_count; bucket++) {
 		if (bucket_counts[bucket] == 0)
@@ -99,6 +113,7 @@ void DepthPrePassSystem::render(
 void DepthPrePassSystem::renderGpuCulled(
 	VeFrameInfo& frame_info,
 	PbrMegaBuffer& mega_buffer,
+	const vk::raii::DescriptorSet& bindless_set,
 	const VeBuffer& indirect_buffer,
 	const uint32_t* bucket_group_offsets,
 	const uint32_t* bucket_group_counts,
@@ -115,8 +130,10 @@ void DepthPrePassSystem::renderGpuCulled(
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		0, {*global_set}, {});
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		1, {*bindless_set}, {});
 
-	mega_buffer.bindShadow(cmd);
+	mega_buffer.bind(cmd);
 
 	for (uint32_t bucket = 0; bucket < bucket_count; bucket++) {
 		if (bucket_group_counts[bucket] == 0)
@@ -140,6 +157,7 @@ void DepthPrePassSystem::renderGpuCulled(
 void DepthPrePassSystem::renderGpuCulledMeshlets(
 	VeFrameInfo& frame_info,
 	PbrMegaBuffer& mega_buffer,
+	const vk::raii::DescriptorSet& bindless_set,
 	const VeBuffer& meshlet_indirect, const VeBuffer& draw_counts,
 	const uint32_t* cpu_draw_counts,
 	const vk::raii::DescriptorSet* global_set_override) const {
@@ -152,8 +170,10 @@ void DepthPrePassSystem::renderGpuCulledMeshlets(
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		0, {*global_set}, {});
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
+		1, {*bindless_set}, {});
 
-	mega_buffer.bindShadowMeshletIbo(cmd);
+	mega_buffer.bindMeshletIbo(cmd);
 
 	// Depth prepass only draws non-mask buckets (0 = opaque-back, 1 = opaque-double-sided)
 	for (uint32_t bucket = 0; bucket < 2; bucket++) {

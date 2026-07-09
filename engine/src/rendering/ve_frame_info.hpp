@@ -209,6 +209,7 @@ struct VeFrameInfo {
 	vk::raii::DescriptorSet* cluster_descriptor_set = nullptr;       // set 4 (null when clustering disabled)
 	vk::raii::DescriptorSet* ao_descriptor_set = nullptr;            // set 5 (dummy white when AO disabled)
 	vk::raii::DescriptorSet* ibl_descriptor_set = nullptr;           // set 6 (dummy black when IBL unavailable)
+	vk::raii::DescriptorSet* ssr_descriptor_set = nullptr;           // set 7 (dummy zero-confidence when SSR inactive)
 	vk::raii::DescriptorSet& cubemap_descriptor_set;
 	vk::raii::DescriptorSet& shadow_descriptor_set;
 	vk::raii::DescriptorSet* cpu_global_descriptor_set = nullptr;

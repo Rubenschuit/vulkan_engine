@@ -21,7 +21,8 @@ public:
 	virtual void cull(VeFrameInfo& fi, GpuSceneManager& gpu_scene) = 0;
 
 	virtual void renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
-	                                DepthPrePassSystem& dps) const = 0;
+	                                DepthPrePassSystem& dps,
+	                                const vk::raii::DescriptorSet& bindless_set) const = 0;
 
 	virtual void renderShadows(VeFrameInfo& fi, ShadowRenderSystem& srs,
 	                           PbrMegaBuffer& mega, GpuSceneManager& gpu_scene) const = 0;

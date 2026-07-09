@@ -138,14 +138,6 @@ float geometrySmith(float NdotV, float NdotL, float roughness) {
 	return ggx1 * ggx2;
 }
 
-// KHR_texture_transform: uv' = (Translate * Rotate * Scale) * uv.
-// identity (offset 0, scale 1, rot 0) is a no-op.
-float2 applyUvTransform(float2 uv, float4 off_scale, float rot) {
-	float2 t = uv * off_scale.zw;
-	float s = sin(rot), c = cos(rot);
-	return float2(c * t.x - s * t.y, s * t.x + c * t.y) + off_scale.xy;
-}
-
 // ============================================================================
 // PBR Lighting Computation
 // Returns the fully-lit fragment color (rgb = HDR color, a = alpha).
@@ -468,17 +460,21 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		float3 prefiltered = ibl_prefiltered.SampleLevel(R_yup, lod).rgb;
 		float2 env_brdf = ibl_brdf_lut.SampleLevel(float2(NdotV, 1.0 - roughness), 0).rg;
 
+		// SSR replaces the prefiltered environment sample where confident.
+		float4 ssr = ssr_texture.SampleLevel(ssr_sampler, screen_uv, 0);
+		float3 spec_env = lerp(prefiltered * ubo.ibl_specular_intensity, ssr.rgb, ssr.a);
+
 		// Multiscatter energy compensation (Fdez-Aguera 2019). env_brdf precomputed assuming F90=1, so scale by F90.
 		float3 Fr = max(F0 * env_brdf.x + F90 * env_brdf.y, 0.0);
 		float3 F_avg = F0 + (F90 - F0) / 21.0;
 		float3 FmsEms = (1.0 - Fr) * F_avg / max(1.0 - F_avg * (1.0 - env_brdf.x - env_brdf.y), 0.001);
-		float3 specular_ibl = prefiltered * (Fr + FmsEms);
+		float3 specular_ibl = spec_env * (Fr + FmsEms);
 		specular_ibl *= saturate(NdotV * 4.0);
 
 		float diffuse_ao = occlusion * ssao;
 		float spec_ao = specularAO(NdotV, diffuse_ao, roughness);
 		ambient = diffuse_ibl * diffuse_ao * ubo.ibl_diffuse_intensity
-				+ specular_ibl * spec_ao * ubo.ibl_specular_intensity;
+				+ specular_ibl * spec_ao;
 		ambient *= 1.0 - transmission;
 	} else {
 		ambient = ubo.ambient_light_color.xyz * albedo.rgb * occlusion * ssao;

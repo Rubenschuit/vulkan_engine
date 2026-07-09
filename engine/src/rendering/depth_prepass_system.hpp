@@ -22,7 +22,9 @@ public:
 	DepthPrePassSystem(
 		VeDevice& device,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
+		const vk::raii::DescriptorSetLayout& bindless_set_layout,
 		vk::SampleCountFlagBits sample_count,
+		vk::Format normal_roughness_format,
 		std::filesystem::path shader_path,
 		EventBus& event_bus);
 	~DepthPrePassSystem();
@@ -34,6 +36,7 @@ public:
 	// Must be called AFTER PbrRenderSystem::prepareFrame().
 	void render(VeFrameInfo& frame_info,
 	            PbrMegaBuffer& mega_buffer,
+	            const vk::raii::DescriptorSet& bindless_set,
 	            const VeBuffer& indirect_buffer,
 	            const uint32_t* bucket_offsets,
 	            const uint32_t* bucket_counts,
@@ -41,6 +44,7 @@ public:
 
 	void renderGpuCulled(VeFrameInfo& frame_info,
 	                     PbrMegaBuffer& mega_buffer,
+	                     const vk::raii::DescriptorSet& bindless_set,
 	                     const VeBuffer& indirect_buffer,
 	                     const uint32_t* bucket_group_offsets,
 	                     const uint32_t* bucket_group_counts,
@@ -50,6 +54,7 @@ public:
 	                     const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 	void renderGpuCulledMeshlets(VeFrameInfo& frame_info,
 	                              PbrMegaBuffer& mega_buffer,
+	                              const vk::raii::DescriptorSet& bindless_set,
 	                              const VeBuffer& meshlet_indirect, const VeBuffer& draw_counts,
 	                              const uint32_t* cpu_draw_counts = nullptr,
 	                              const vk::raii::DescriptorSet* global_set_override = nullptr) const;
@@ -57,11 +62,13 @@ public:
 	void recreatePipeline(vk::SampleCountFlagBits sample_count);
 
 private:
-	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout);
+	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout,
+	                          const vk::raii::DescriptorSetLayout& bindless_set_layout);
 	void createPipeline(vk::SampleCountFlagBits sample_count);
 
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;
+	vk::Format m_normal_roughness_format;
 
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_ve_pipeline;

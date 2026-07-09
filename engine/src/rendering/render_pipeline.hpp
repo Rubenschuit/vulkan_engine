@@ -37,6 +37,7 @@ class ShadowRenderSystem;
 class DepthPrePassSystem;
 class ShadowMaskSystem;
 class GtaoSystem;
+class SsrSystem;
 class ClusterLightSystem;
 class PbrRenderSystem;
 class DebugDrawSystem;
@@ -96,6 +97,8 @@ private:
 	void emitResolutionChangedEvent();
 	void pushPerFrameSettings();
 	void selectBackend();
+	void recordDepthConsumerToAttachBarriers(vk::raii::CommandBuffer& cmd);
+	void recordSsrTrace(VeFrameInfo& fi, vk::raii::CommandBuffer& cmd);
 	void ensureHizInfrastructure();
 	void ensureGpuCullingInfrastructure();
 	void ensureMeshletCullingInfrastructure();
@@ -134,6 +137,7 @@ private:
 	std::unique_ptr<DepthPrePassSystem> m_depth_prepass_system;
 	std::unique_ptr<ShadowMaskSystem> m_shadow_mask_system;
 	std::unique_ptr<GtaoSystem> m_gtao_system;
+	std::unique_ptr<SsrSystem> m_ssr_system;
 	std::unique_ptr<ClusterLightSystem> m_cluster_light_system;
 	std::unique_ptr<PbrRenderSystem> m_pbr_render_system;
 	std::unique_ptr<DebugDrawSystem> m_debug_draw_system;

@@ -31,6 +31,7 @@ SettingsWatcher::SettingsWatcher(VeDevice& device, VeRenderer& renderer,
 void SettingsWatcher::seed() {
 	m_shadow_mask_half_res = m_settings.shadow_mask_half_res;
 	m_gtao_half_res = m_settings.gtao_half_res;
+	m_ssr_half_res = m_settings.ssr_half_res;
 	m_shadow_resolution_preset = m_settings.shadow_resolution_preset;
 	m_pcf_samples = m_settings.pcf_samples;
 	m_pcss_filter_samples = m_settings.pcss_filter_samples;
@@ -53,9 +54,10 @@ void SettingsWatcher::tick() {
 		|| m_settings.pcss_filter_samples != m_pcss_filter_samples;
 	bool shadow_mask_res_changed = m_settings.shadow_mask_half_res != m_shadow_mask_half_res;
 	bool gtao_res_changed = m_settings.gtao_half_res != m_gtao_half_res;
+	bool ssr_res_changed = m_settings.ssr_half_res != m_ssr_half_res;
 	bool shadow_atlas_res_changed = m_settings.shadow_resolution_preset != m_shadow_resolution_preset;
 
-	if (samples_changed || shadow_mask_res_changed || gtao_res_changed || shadow_atlas_res_changed)
+	if (samples_changed || shadow_mask_res_changed || gtao_res_changed || ssr_res_changed || shadow_atlas_res_changed)
 		m_ve_device.getDevice().waitIdle();
 
 	if (depth_bias_changed) {
@@ -98,7 +100,16 @@ void SettingsWatcher::tick() {
 			.ao_extent = halveExtent(extent, m_gtao_half_res),
 			.depth_extent = extent,
 			.depth_image_view = m_ve_renderer.getResolvedDepthImageView(),
-			.depth_image = m_ve_renderer.getResolvedDepthImage()
+			.depth_image = m_ve_renderer.getResolvedDepthImage(),
+			.normal_roughness_image_view = m_ve_renderer.getResolvedNormalRoughnessImageView()
+		});
+	}
+
+	if (ssr_res_changed) {
+		m_ssr_half_res = m_settings.ssr_half_res;
+		m_event_bus.emitImmediate(SsrResolutionChangedEvent{
+			.pool = *m_resources.pool(),
+			.ssr_extent = halveExtent(extent, m_ssr_half_res)
 		});
 	}
 

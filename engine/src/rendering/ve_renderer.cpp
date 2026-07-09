@@ -317,6 +317,21 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer,
 		depth_attachment_info.resolveImageLayout = vk::ImageLayout::eDepthAttachmentOptimal;
 	}
 
+	vk::RenderingAttachmentInfo normal_attachment_info = {
+		.imageView = *m_ve_swap_chain->getNormalRoughnessImageView(),
+		.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+		.loadOp = clear ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad,
+		.storeOp = vk::AttachmentStoreOp::eStore,
+		// Roughness (w) clears to 1 so MSAA eAverage blends towards max
+		// roughness at edges
+		.clearValue = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f)
+	};
+	if (m_ve_swap_chain->hasResolvedNormalRoughness()) {
+		normal_attachment_info.resolveMode = vk::ResolveModeFlagBits::eAverage;
+		normal_attachment_info.resolveImageView = *m_ve_swap_chain->getResolvedNormalRoughnessImageView();
+		normal_attachment_info.resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+	}
+
 	vk::RenderingFlags flags{};
 	if (secondary_contents)
 		flags |= vk::RenderingFlagBits::eContentsSecondaryCommandBuffers;
@@ -325,8 +340,8 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer,
 		.flags = flags,
 		.renderArea = { .offset = { 0, 0 }, .extent = extent },
 		.layerCount = 1,
-		.colorAttachmentCount = 0,
-		.pColorAttachments = nullptr,
+		.colorAttachmentCount = 1,
+		.pColorAttachments = &normal_attachment_info,
 		.pDepthAttachment = &depth_attachment_info
 	};
 
@@ -1076,14 +1091,6 @@ vk::CommandBufferInheritanceRenderingInfo VeRenderer::getSceneInheritanceInfo() 
 	return vk::CommandBufferInheritanceRenderingInfo{
 		.colorAttachmentCount = 1,
 		.pColorAttachmentFormats = &m_scene_color_format,
-		.depthAttachmentFormat = m_depth_format,
-		.rasterizationSamples = m_desired_num_samples
-	};
-}
-
-vk::CommandBufferInheritanceRenderingInfo VeRenderer::getDepthPrepassInheritanceInfo() const {
-	return vk::CommandBufferInheritanceRenderingInfo{
-		.colorAttachmentCount = 0,
 		.depthAttachmentFormat = m_depth_format,
 		.rasterizationSamples = m_desired_num_samples
 	};

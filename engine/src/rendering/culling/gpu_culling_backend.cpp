@@ -33,9 +33,10 @@ GpuCullingBackend::IndirectDrawSource GpuCullingBackend::getDrawSource(uint32_t 
 }
 
 void GpuCullingBackend::renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
-                                           DepthPrePassSystem& dps) const {
+                                           DepthPrePassSystem& dps,
+                                           const vk::raii::DescriptorSet& bindless_set) const {
 	auto src = getDrawSource(fi.current_frame);
-	dps.renderGpuCulled(fi, mega, src.indirect,
+	dps.renderGpuCulled(fi, mega, bindless_set, src.indirect,
 		src.bucket_offsets, src.bucket_counts, 2,
 		src.compact_indirect, src.compact_counts);
 }

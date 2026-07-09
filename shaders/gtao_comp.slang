@@ -1,9 +1,9 @@
 // Ground Truth Ambient Occlusion (GTAO) compute shader.
 // Jimenez 2016 — horizon-based AO with analytical integration.
-// Dispatched inline on graphics queue after depth prepass.
-// Always reads single-sample depth (resolved from MSAA if active).
+// Runs after the depth prepass, on the graphics or async compute queue.
+// Reads single-sample resolved depth plus the prepass G-buffer normal+roughness texture.
 
-#include "ve_constants.slangh"
+#include "ve_common.slangh"
 
 #define GTAO_PI 3.1415926536
 
@@ -12,6 +12,8 @@
 Texture2D<float> depth_texture;
 [vk::binding(1, 1)]
 RWTexture2D<float> ao_out;
+[vk::binding(2, 1)]
+Texture2D<float4> normal_roughness_texture;
 
 struct GtaoPush {
 	float2 ao_size;
@@ -49,27 +51,6 @@ float fetchDepth(int2 coord) {
 	return depth_texture.Load(int3(coord, 0));
 }
 
-// Reconstruct view-space normal from depth buffer cross products
-float3 reconstructNormal(int2 coord, float3 view_pos) {
-	float3 left  = getViewPos(coord + int2(-1, 0), fetchDepth(coord + int2(-1, 0)));
-	float3 right = getViewPos(coord + int2( 1, 0), fetchDepth(coord + int2( 1, 0)));
-	float3 up    = getViewPos(coord + int2( 0,-1), fetchDepth(coord + int2( 0,-1)));
-	float3 down  = getViewPos(coord + int2( 0, 1), fetchDepth(coord + int2( 0, 1)));
-
-	// Use the pair with the smaller depth difference (avoids edge artifacts)
-	float3 dx = (abs(left.z - view_pos.z) < abs(right.z - view_pos.z))
-		? (view_pos - left) : (right - view_pos);
-	float3 dy = (abs(up.z - view_pos.z) < abs(down.z - view_pos.z))
-		? (view_pos - up) : (down - view_pos);
-
-	return normalize(cross(dx, dy));
-}
-
-// Spatial noise for slice rotation and step jitter
-float spatialNoise(uint2 coord) {
-	return frac(52.9829189 * frac(dot(float2(coord), float2(0.06711056, 0.00583715))));
-}
-
 static const uint NUM_SLICES = 4;
 static const uint NUM_STEPS  = 4;
 
@@ -88,7 +69,8 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	}
 
 	float3 view_pos = getViewPos(depth_coord, depth);
-	float3 view_normal = reconstructNormal(depth_coord, view_pos);
+	float3 world_normal = normal_roughness_texture.Load(int3(depth_coord, 0)).xyz;
+	float3 view_normal = normalize(mul((float3x3)ubo.view, world_normal));
 
 	// Screen-space radius from world-space radius
 	float ss_radius = push.proj_scale * push.radius / abs(view_pos.z);

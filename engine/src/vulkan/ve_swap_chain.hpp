@@ -64,6 +64,7 @@ public:
 	const vk::raii::ImageView& getImageView(size_t index) const { return m_swap_chain_image_views[index]; };
 	const vk::raii::ImageView& getColorImageView() const { return m_color_image->getImageView(); }
 	const vk::raii::ImageView& getResolveTargetImageView() const { return m_resolve_target_image->getImageView(); }
+	vk::Image getResolveTargetImage() const { return m_resolve_target_image->getImage(); }
 	const vk::raii::ImageView& getDepthImageView() const { return m_depth_image->getImageView(); }
 	vk::Image getDepthImage() const { return m_depth_image->getImage(); }
 	/// Single-sample depth (resolved from MSAA prepass, or same as depth when no MSAA)
@@ -74,6 +75,14 @@ public:
 		return m_resolved_depth_image ? m_resolved_depth_image->getImage() : m_depth_image->getImage();
 	}
 	bool hasResolvedDepth() const { return m_resolved_depth_image != nullptr; }
+	const vk::raii::ImageView& getNormalRoughnessImageView() const { return m_normal_roughness_image->getImageView(); }
+	const vk::raii::ImageView& getResolvedNormalRoughnessImageView() const {
+		return m_resolved_normal_roughness_image ? m_resolved_normal_roughness_image->getImageView() : m_normal_roughness_image->getImageView();
+	}
+	vk::Image getResolvedNormalRoughnessImage() const {
+		return m_resolved_normal_roughness_image ? m_resolved_normal_roughness_image->getImage() : m_normal_roughness_image->getImage();
+	}
+	bool hasResolvedNormalRoughness() const { return m_resolved_normal_roughness_image != nullptr; }
 	const std::vector<vk::Image>& getSwapChainImages() const { return m_swap_chain_images; }
 	const std::vector<vk::raii::ImageView>& getSwapChainImageViews() const { return m_swap_chain_image_views; }
 	float getExtentAspectRatio() const;
@@ -147,6 +156,8 @@ private:
 	std::unique_ptr<VeImage> m_resolve_target_image;
 	std::unique_ptr<VeImage> m_depth_image;
 	std::unique_ptr<VeImage> m_resolved_depth_image;  // 1x resolve target when MSAA active
+	std::unique_ptr<VeImage> m_normal_roughness_image;           // prepass world normal (xyz) + roughness (w)
+	std::unique_ptr<VeImage> m_resolved_normal_roughness_image;
 	vk::PresentModeKHR m_present_mode;
 	vk::SampleCountFlagBits m_desired_num_samples;
 	bool m_hdr_enabled;

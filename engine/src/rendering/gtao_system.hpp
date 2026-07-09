@@ -38,6 +38,7 @@ public:
 		vk::Extent2D depth_extent,
 		const vk::raii::ImageView& depth_image_view,
 		vk::Image depth_image,
+		const vk::raii::ImageView& normal_roughness_image_view,
 		EventBus& event_bus);
 	~GtaoSystem();
 
@@ -52,7 +53,8 @@ public:
 	// Recreate AO images when swapchain resizes or resolution toggle changes.
 	void recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D ao_extent,
 		vk::Extent2D depth_extent,
-		const vk::raii::ImageView& depth_image_view, vk::Image depth_image);
+		const vk::raii::ImageView& depth_image_view, vk::Image depth_image,
+		const vk::raii::ImageView& normal_roughness_image_view);
 
 	// Acquire the per-frame GTAO output.
 	// Pair with the release-only barrier emitted at the end of dispatch().
@@ -128,6 +130,8 @@ private:
 	// Cached depth image for barriers + descriptors (single-sample resolved depth)
 	vk::Image m_depth_image{};
 	vk::ImageView m_depth_image_view{};
+	// Prepass G-buffer: world normal (xyz) + roughness (w), single-sample
+	vk::ImageView m_normal_image_view{};
 
 	// Shader modules
 	vk::raii::ShaderModule m_gtao_module{nullptr};

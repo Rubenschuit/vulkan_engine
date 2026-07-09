@@ -21,6 +21,7 @@ struct VENGINE_API FrameStats {
 	float gpu_depth_prepass = 0.0f;
 	float gpu_gtao = 0.0f;
 	float gpu_scene_render = 0.0f;
+	float gpu_ssr = 0.0f;
 	float gpu_bloom = 0.0f;
 	float gpu_post_process = 0.0f;
 	float gpu_hiz = 0.0f;
@@ -36,6 +37,7 @@ struct VENGINE_API FrameStats {
 	float cpu_depth_prepass = 0.0f;
 	float cpu_gtao = 0.0f;
 	float cpu_scene_render = 0.0f;
+	float cpu_ssr = 0.0f;
 	float cpu_bloom = 0.0f;
 	float cpu_post_process = 0.0f;
 	float cpu_hiz = 0.0f;

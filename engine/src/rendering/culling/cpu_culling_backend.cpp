@@ -32,8 +32,9 @@ void CpuCullingBackend::cull(VeFrameInfo& fi, GpuSceneManager&) {
 }
 
 void CpuCullingBackend::renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
-                                           DepthPrePassSystem& dps) const {
-	dps.render(fi, mega,
+                                           DepthPrePassSystem& dps,
+                                           const vk::raii::DescriptorSet& bindless_set) const {
+	dps.render(fi, mega, bindless_set,
 		m_pbr.getIndirectBuffer(fi.current_frame),
 		m_pbr.getDepthBucketOffsets(),
 		m_pbr.getDepthBucketCounts(), 2);

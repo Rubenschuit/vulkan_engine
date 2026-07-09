@@ -53,6 +53,12 @@ struct VENGINE_API RenderSettings {
 	bool gtao_half_res = true;
 	float gtao_radius = 0.25f;
 	float gtao_intensity = 0.5f;
+	bool ssr_enabled = true;
+	bool ssr_half_res = true;
+	int ssr_max_steps = 24;
+	float ssr_thickness = 0.3f;
+	float ssr_max_roughness = 0.6f;
+	float ssr_max_distance = 25.0f;
 
 	// culling
 	bool enable_frustum_culling = true;

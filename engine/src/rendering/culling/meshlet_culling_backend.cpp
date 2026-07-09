@@ -24,8 +24,9 @@ void MeshletCullingBackend::cull(VeFrameInfo& fi, GpuSceneManager& gpu_scene) {
 }
 
 void MeshletCullingBackend::renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
-                                               DepthPrePassSystem& dps) const {
-	dps.renderGpuCulledMeshlets(fi, mega,
+                                               DepthPrePassSystem& dps,
+                                               const vk::raii::DescriptorSet& bindless_set) const {
+	dps.renderGpuCulledMeshlets(fi, mega, bindless_set,
 		m_meshlet_cull_system.getMeshletIndirectBuffer(fi.current_frame),
 		m_meshlet_cull_system.getMeshletDrawCounts(fi.current_frame),
 		m_meshlet_cull_system.getCpuDrawCounts());

@@ -32,6 +32,12 @@ struct GtaoResolutionChangedEvent : ImmediateOnly {
 	vk::Extent2D depth_extent;
 	const vk::raii::ImageView& depth_image_view;
 	vk::Image depth_image;
+	const vk::raii::ImageView& normal_roughness_image_view;
+};
+
+struct SsrResolutionChangedEvent : ImmediateOnly {
+	VeDescriptorPool& pool;
+	vk::Extent2D ssr_extent;
 };
 
 struct ShadowAtlasResolutionChangedEvent : ImmediateOnly {
@@ -52,10 +58,12 @@ struct ResolutionChangedEvent : ImmediateOnly {
 	const vk::raii::ImageView& resolve_target_view;
 	const vk::raii::ImageView& depth_image_view;
 	vk::Image depth_image;
+	const vk::raii::ImageView& normal_roughness_image_view;
 	const vk::raii::ImageView& wboit_accum_view;
 	const vk::raii::ImageView& wboit_revealage_view;
 	bool shadow_mask_half_res;
 	bool gtao_half_res;
+	bool ssr_half_res;
 };
 
 // Emitted when RenderPipeline switches its active culling backend.

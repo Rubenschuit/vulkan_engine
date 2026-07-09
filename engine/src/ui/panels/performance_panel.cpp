@@ -57,7 +57,8 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		context.stats.gpu_culling, context.stats.gpu_depth_prepass,
 		context.stats.gpu_hiz, context.stats.gpu_shadow_maps,
 		context.stats.gpu_shadow_mask, context.stats.gpu_gtao,
-		context.stats.gpu_scene_render, context.stats.gpu_outline,
+		context.stats.gpu_scene_render, context.stats.gpu_ssr,
+		context.stats.gpu_outline,
 		context.stats.gpu_bloom, context.stats.gpu_post_process,
 		0.0f, 0.0f,
 		context.stats.gpu_skinning, context.stats.gpu_cluster_lights,
@@ -67,7 +68,8 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		context.stats.cpu_culling, context.stats.cpu_depth_prepass,
 		context.stats.cpu_hiz, context.stats.cpu_shadow_maps,
 		context.stats.cpu_shadow_mask, context.stats.cpu_gtao,
-		context.stats.cpu_scene_render, context.stats.cpu_outline,
+		context.stats.cpu_scene_render, context.stats.cpu_ssr,
+		context.stats.cpu_outline,
 		context.stats.cpu_bloom, context.stats.cpu_post_process,
 		context.stats.cpu_physics, context.stats.cpu_ui,
 		context.stats.cpu_skinning, context.stats.cpu_cluster_lights,
@@ -302,7 +304,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	// --- Per-system breakdown table ---
 	static const char* breakdown_labels[] = {
 		"Culling", "Depth Pass", "Hi-Z", "Shadows", "Shadow Mask", "GTAO",
-		"Scene", "Outline", "Bloom", "Post Process", "Physics",
+		"Scene", "SSR", "Outline", "Bloom", "Post Process", "Physics",
 		"UI", "Skinning", "Cluster Lights", "Particles"
 	};
 

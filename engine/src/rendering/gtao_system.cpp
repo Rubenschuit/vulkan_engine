@@ -44,17 +44,20 @@ GtaoSystem::GtaoSystem(
 	vk::Extent2D depth_extent,
 	const vk::raii::ImageView& depth_image_view,
 	vk::Image depth_image,
+	const vk::raii::ImageView& normal_roughness_image_view,
 	EventBus& event_bus)
 	: m_ve_device(device), m_shader_path(std::move(shader_path)),
 	  m_extent(ao_extent), m_depth_extent(depth_extent) {
 
 	event_bus.subscribe<GtaoResolutionChangedEvent>([this](const GtaoResolutionChangedEvent& e) {
-		recreate(e.pool, e.ao_extent, e.depth_extent, e.depth_image_view, e.depth_image);
+		recreate(e.pool, e.ao_extent, e.depth_extent, e.depth_image_view, e.depth_image,
+			e.normal_roughness_image_view);
 	});
 	event_bus.subscribe<ResolutionChangedEvent>([this](const ResolutionChangedEvent& e) {
 		vk::Extent2D ao_extent = e.gtao_half_res
 			? vk::Extent2D{e.extent.width / 2, e.extent.height / 2} : e.extent;
-		recreate(e.pool, ao_extent, e.extent, e.depth_image_view, e.depth_image);
+		recreate(e.pool, ao_extent, e.extent, e.depth_image_view, e.depth_image,
+			e.normal_roughness_image_view);
 	});
 	event_bus.subscribe<GtaoParametersChangedEvent>([this](const GtaoParametersChangedEvent& e) {
 		m_radius = e.radius;
@@ -63,6 +66,7 @@ GtaoSystem::GtaoSystem(
 
 	m_depth_image = depth_image;
 	m_depth_image_view = *depth_image_view;
+	m_normal_image_view = *normal_roughness_image_view;
 	m_default_ao_texture = resource_manager.load<VeTexture>("default_albedo");
 	createAoImages(m_extent);
 	createComputeSetLayout();
@@ -119,6 +123,7 @@ void GtaoSystem::createComputeSetLayout() {
 	m_compute_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // depth
 		.addBinding(1, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute) // AO out
+		.addBinding(2, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // prepass normal+roughness
 		.build();
 }
 
@@ -245,6 +250,10 @@ void GtaoSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 		.imageView = m_depth_image_view,
 		.imageLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
 	};
+	vk::DescriptorImageInfo normal_info{
+		.imageView = m_normal_image_view,
+		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+	};
 	vk::DescriptorImageInfo sampler_info{
 		.sampler = *m_linear_clamp_sampler,
 	};
@@ -263,10 +272,11 @@ void GtaoSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 			.imageLayout = vk::ImageLayout::eGeneral,
 		};
 
-		// GTAO compute: depth + raw AO storage
+		// GTAO compute: depth + raw AO storage + prepass normals
 		VeDescriptorWriter(*m_compute_set_layout, descriptor_pool)
 			.writeImage(0, &depth_info)
 			.writeImage(1, &ao_raw_storage_info)
+			.writeImage(2, &normal_info)
 			.build(m_compute_descriptor_sets[frame]);
 
 		// Blur H: depth + raw AO (storage read, eGeneral) + blur AO (storage write)
@@ -450,13 +460,15 @@ void GtaoSystem::acquireForRead(vk::raii::CommandBuffer& cmd, uint32_t frame_ind
 
 void GtaoSystem::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D ao_extent,
 	vk::Extent2D depth_extent,
-	const vk::raii::ImageView& depth_image_view, vk::Image depth_image) {
+	const vk::raii::ImageView& depth_image_view, vk::Image depth_image,
+	const vk::raii::ImageView& normal_roughness_image_view) {
 	// Precondition: device must be idle
 	m_ve_device.assertDeviceIdle();
 	m_extent = ao_extent;
 	m_depth_extent = depth_extent;
 	m_depth_image = depth_image;
 	m_depth_image_view = *depth_image_view;
+	m_normal_image_view = *normal_roughness_image_view;
 	createAoImages(ao_extent);
 	createDescriptorSets(descriptor_pool);
 }

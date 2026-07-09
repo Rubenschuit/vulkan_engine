@@ -101,7 +101,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 
 		MaterialFactors floor_factors{};
 		floor_factors.roughness_factor = 0.3f;
-		floor_factors.metallic_factor = 0.0f;
+		floor_factors.metallic_factor = 0.4f;
 		auto floor_mat = m_resource_manager.createMaterial(
 			"simple_scene::floor",
 			MaterialTextures{

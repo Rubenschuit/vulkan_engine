@@ -37,6 +37,7 @@ public:
 		const vk::raii::DescriptorSetLayout& cluster_set_layout,
 		const vk::raii::DescriptorSetLayout& ao_set_layout,
 		const vk::raii::DescriptorSetLayout& ibl_set_layout,
+		const vk::raii::DescriptorSetLayout& ssr_set_layout,
 		vk::Format color_format,
 		vk::SampleCountFlagBits sample_count,
 		std::filesystem::path shader_path,
@@ -120,7 +121,8 @@ private:
 		const vk::raii::DescriptorSetLayout& shadow_mask_set_layout,
 		const vk::raii::DescriptorSetLayout& cluster_set_layout,
 		const vk::raii::DescriptorSetLayout& ao_set_layout,
-		const vk::raii::DescriptorSetLayout& ibl_set_layout);
+		const vk::raii::DescriptorSetLayout& ibl_set_layout,
+		const vk::raii::DescriptorSetLayout& ssr_set_layout);
 	void createPipelines(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
 	void createWboitGeometryPipelines();
 	void bindPbrResources(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,

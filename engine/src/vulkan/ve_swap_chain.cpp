@@ -288,7 +288,7 @@ void VeSwapChain::createColorResources() {
 		vk::SampleCountFlagBits::e1,
 		m_offscreen_image_format,
 		vk::ImageTiling::eOptimal,
-		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		vk::ImageAspectFlagBits::eColor,
 		false,
@@ -302,6 +302,51 @@ void VeSwapChain::createColorResources() {
 		vk::PipelineStageFlagBits2::eTopOfPipe,
 		vk::PipelineStageFlagBits2::eFragmentShader
 	);
+
+	m_normal_roughness_image = std::make_unique<VeImage>(
+		m_ve_device,
+		m_offscreen_extent.width,
+		m_offscreen_extent.height,
+		m_desired_num_samples,
+		m_offscreen_image_format,
+		vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		vk::ImageAspectFlagBits::eColor,
+		false,
+		1);
+	m_normal_roughness_image->transitionImageLayout(
+		vk::ImageLayout::eUndefined,
+		vk::ImageLayout::eColorAttachmentOptimal,
+		{},
+		vk::AccessFlagBits2::eColorAttachmentRead | vk::AccessFlagBits2::eColorAttachmentWrite,
+		vk::PipelineStageFlagBits2::eTopOfPipe,
+		vk::PipelineStageFlagBits2::eColorAttachmentOutput
+	);
+
+	if (m_desired_num_samples != vk::SampleCountFlagBits::e1) {
+		m_resolved_normal_roughness_image = std::make_unique<VeImage>(
+			m_ve_device,
+			m_offscreen_extent.width,
+			m_offscreen_extent.height,
+			vk::SampleCountFlagBits::e1,
+			m_offscreen_image_format,
+			vk::ImageTiling::eOptimal,
+			vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			vk::ImageAspectFlagBits::eColor,
+			false,
+			1);
+		m_resolved_normal_roughness_image->transitionImageLayout(
+			vk::ImageLayout::eUndefined,
+			vk::ImageLayout::eColorAttachmentOptimal,
+			{},
+			vk::AccessFlagBits2::eColorAttachmentRead | vk::AccessFlagBits2::eColorAttachmentWrite,
+			vk::PipelineStageFlagBits2::eTopOfPipe,
+			vk::PipelineStageFlagBits2::eColorAttachmentOutput
+		);
+	} else
+		m_resolved_normal_roughness_image.reset();
 
 	VE_LOGD("Color resources created (including resolve target)");
 }
@@ -721,6 +766,10 @@ void VeSwapChain::resizeOffscreenResources(vk::Extent2D extent) {
 		m_resolve_target_image->setDebugName("Resolve Target");
 	if (m_resolved_depth_image)
 		m_resolved_depth_image->setDebugName("Resolved Depth");
+	if (m_normal_roughness_image)
+		m_normal_roughness_image->setDebugName("Normal Roughness");
+	if (m_resolved_normal_roughness_image)
+		m_resolved_normal_roughness_image->setDebugName("Resolved Normal Roughness");
 	VE_LOGI("Offscreen resources resized to " << extent.width << "x" << extent.height);
 }
 

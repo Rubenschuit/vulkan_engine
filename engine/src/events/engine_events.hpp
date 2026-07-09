@@ -91,6 +91,13 @@ struct GtaoParametersChangedEvent {
 	float intensity;
 };
 
+struct SsrParametersChangedEvent {
+	int max_steps;
+	float thickness;
+	float max_roughness;
+	float max_distance;
+};
+
 struct DepthPrePassChangedEvent {
 	bool enabled;
 };

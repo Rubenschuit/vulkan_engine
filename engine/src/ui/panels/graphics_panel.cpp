@@ -133,7 +133,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		if (ImGui::Checkbox("Depth Pre-pass", &ctx.settings.depth_prepass_enabled))
 			m_event_bus.emitImmediate(DepthPrePassChangedEvent{ctx.settings.depth_prepass_enabled});
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Early depth pass. Required by GTAO, shadow mask, and Hi-Z occlusion culling.");
+			ImGui::SetTooltip("Early depth pass. Required by GTAO, shadow mask, SSR, and Hi-Z occlusion culling.");
 		ImGui::Checkbox("Frustum Culling", &ctx.settings.enable_frustum_culling);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Skip drawing objects outside the camera view");
@@ -341,6 +341,35 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 				ImGui::SetTooltip("Power curve applied to AO.\nHigher = darker/stronger occlusion effect.");
 			if (radius_changed || intensity_changed)
 				m_event_bus.emitImmediate(GtaoParametersChangedEvent{ctx.settings.gtao_radius, ctx.settings.gtao_intensity});
+			ImGui::Unindent();
+		}
+	}
+
+	// --- Reflections ---
+	if (ImGui::CollapsingHeader("Reflections")) {
+		ImGui::Checkbox("SSR", &ctx.settings.ssr_enabled);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Screen-space reflections: traces the depth buffer\nand reflects last frame's image; falls back to IBL.\nRequires depth pre-pass enabled.");
+		if (ctx.settings.ssr_enabled) {
+			ImGui::Indent();
+			ImGui::Checkbox("Half Resolution##ssr", &ctx.settings.ssr_half_res);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Trace at half screen resolution.\n4x fewer rays, bilinear upsampled.");
+			bool steps_changed = ImGui::SliderInt("Max Steps", &ctx.settings.ssr_max_steps, 8, 64);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Ray-march samples per pixel.");
+			bool thickness_changed = ImGui::SliderFloat("Thickness", &ctx.settings.ssr_thickness, 0.05f, 1.0f, "%.2f");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("View-space depth tolerance for hits.");
+			bool rough_changed = ImGui::SliderFloat("Max Roughness", &ctx.settings.ssr_max_roughness, 0.0f, 1.0f, "%.2f");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Surfaces rougher than this fall back to IBL.");
+			bool dist_changed = ImGui::SliderFloat("Max Distance", &ctx.settings.ssr_max_distance, 5.0f, 100.0f, "%.0f");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("World-space ray length.");
+			if (steps_changed || thickness_changed || rough_changed || dist_changed)
+				m_event_bus.emitImmediate(SsrParametersChangedEvent{ctx.settings.ssr_max_steps,
+					ctx.settings.ssr_thickness, ctx.settings.ssr_max_roughness, ctx.settings.ssr_max_distance});
 			ImGui::Unindent();
 		}
 	}
