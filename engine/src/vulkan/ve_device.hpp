@@ -2,7 +2,7 @@
 queue plus transient command pool per queue kind (graphics/present, compute,
 transfer). Compute and transfer fall back to the graphics family when no
 dedicated family exists; uniqueFamilies() drives buffer/image sharing mode.
-Also provides single-time command submission and format/feature queries. 
+Also provides single-time command submission and format/feature queries.
 */
 #pragma once
 #include "ve_export.hpp"
@@ -14,6 +14,7 @@ Also provides single-time command submission and format/feature queries.
 #include <vulkan/vulkan_beta.h> // required for macOS portability subset extension
 #include <vector>
 #include <algorithm>
+#include <filesystem>
 
 // Forward-declare VMA types
 struct VmaAllocator_T;
@@ -79,6 +80,13 @@ public:
 
 	SwapChainSupportDetails getSwapChainSupport() { return querySwapChainSupport(m_physical_device); }
 	VmaAllocator getAllocator() const { return m_allocator; }
+
+	// Shared pipeline cache used by all VePipeline/VeComputePipeline creation.
+	// loadPipelineCache seeds it from disk (ignored on device/UUID mismatch) and
+	// remembers the path; the destructor writes the cache back automatically.
+	vk::raii::PipelineCache& getPipelineCache() { return m_pipeline_cache; }
+	void loadPipelineCache(const std::filesystem::path& file);
+	void savePipelineCache() noexcept;
 
 	vk::Format findSupportedFormat(const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features);
 	vk::Format findDepthFormat();
@@ -170,6 +178,9 @@ private:
 	bool m_has_dedicated_compute = false;
 
 	VmaAllocator m_allocator = nullptr;
+
+	vk::raii::PipelineCache m_pipeline_cache{nullptr};
+	std::filesystem::path m_pipeline_cache_path;
 
 	const std::vector<const char *> m_validation_layers = ve::VALIDATION_LAYERS;
 	std::vector<const char*> m_required_device_extensions = ve::REQUIRED_DEVICE_EXTENSIONS;

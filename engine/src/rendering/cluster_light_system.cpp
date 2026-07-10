@@ -28,9 +28,6 @@ ClusterLightSystem::ClusterLightSystem(
 	event_bus.subscribe<ResolutionChangedEvent>([this](const ResolutionChangedEvent& e) {
 		recreate(e.pool, e.extent);
 	});
-	event_bus.subscribe<ClusterEnabledChangedEvent>([this](const ClusterEnabledChangedEvent& e) {
-		m_ui_enabled = e.enabled;
-	});
 	createBuffers(screen_extent);
 	createComputeSetLayout();
 	createOutputSetLayout();
@@ -42,7 +39,7 @@ ClusterLightSystem::ClusterLightSystem(
 ClusterLightSystem::~ClusterLightSystem() = default;
 
 void ClusterLightSystem::setLightCountActive(bool has_lights) {
-	m_enabled = m_ui_enabled && has_lights;
+	m_enabled = has_lights;
 }
 
 void ClusterLightSystem::createBuffers(vk::Extent2D screen_extent) {

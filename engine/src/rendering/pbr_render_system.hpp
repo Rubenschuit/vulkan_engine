@@ -13,6 +13,7 @@
 namespace ve {
 	class VeDevice;
 	class VePipeline;
+	struct PipelineConfigInfo;
 	class VeBuffer;
 	class VeMesh;
 	class MeshComponent;
@@ -128,6 +129,17 @@ private:
 	void bindPbrResources(VeFrameInfo& frame_info, const vk::raii::DescriptorSet& bindless_set,
 	                      const vk::raii::DescriptorSet* global_set_override = nullptr) const;
 
+	void buildForwardConfig(PipelineConfigInfo& config, vk::Format color_format,
+	                        vk::SampleCountFlagBits sample_count) const;
+	void buildWboitConfig(PipelineConfigInfo& config) const;
+	std::unordered_map<uint32_t, uint32_t> specConstants(uint32_t shadow_mode, uint32_t shadow_mask,
+	                                                     uint32_t area_lights, uint32_t debug_shading) const;
+
+	void ensureDebugPipelines() const;
+	void recreateAllPipelines();
+	VePipeline& forwardPipeline(const VeFrameInfo& frame_info) const;
+	VePipeline& wboitPipeline(const VeFrameInfo& frame_info) const;
+
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;
 	vk::PrimitiveTopology m_topology = vk::PrimitiveTopology::eTriangleList;
@@ -137,14 +149,21 @@ private:
 	uint32_t m_pcf_samples = 8;
 	uint32_t m_pcss_filter_samples = 16;
 	static constexpr uint32_t SHADOW_MODE_COUNT = 4;
+	static constexpr uint32_t AREA_VARIANTS = 2; // AREA_LIGHTS_SPEC off/on
+	using ShadowModeSet = std::array<std::unique_ptr<VePipeline>, SHADOW_MODE_COUNT>;
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
-	std::array<std::unique_ptr<VePipeline>, SHADOW_MODE_COUNT> m_pipelines;
-	std::array<std::unique_ptr<VePipeline>, SHADOW_MODE_COUNT> m_pipelines_mask;
+	// Indexed [area_lights][shadow_mode], DEBUG_SHADING_SPEC = 0
+	std::array<ShadowModeSet, AREA_VARIANTS> m_pipelines;
+	std::array<ShadowModeSet, AREA_VARIANTS> m_pipelines_mask;
+
+	mutable ShadowModeSet m_pipelines_dbg;
+	mutable ShadowModeSet m_pipelines_mask_dbg;
+	mutable ShadowModeSet m_wboit_pipelines_dbg;
 
 	PbrMegaBuffer& m_mega_buffer;
 
-	// WBOIT geometry pipeline (one per shadow mode, same layout as PBR)
-	std::array<std::unique_ptr<VePipeline>, SHADOW_MODE_COUNT> m_wboit_pipelines;
+	// WBOIT geometry pipeline (same layout as PBR)
+	std::array<ShadowModeSet, AREA_VARIANTS> m_wboit_pipelines;
 
 	// WBOIT composite pipeline (separate layout, 2 combined image samplers)
 	std::unique_ptr<VeDescriptorSetLayout> m_wboit_composite_set_layout;

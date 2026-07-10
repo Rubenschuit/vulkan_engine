@@ -33,6 +33,8 @@ VeApplication::VeApplication(const EngineConfig& config)
 	  m_input_controller(m_ve_window, m_event_bus),
 	  m_config(config) {
 
+	m_ve_device.loadPipelineCache(config.working_dir / ".cache" / "vk_pipeline_cache.bin");
+
 	m_render_resources = std::make_unique<RenderResources>(m_ve_device, m_resource_manager, m_event_bus);
 	m_render_pipeline = std::make_unique<RenderPipeline>(
 		m_ve_device, m_ve_renderer, m_resource_manager, *m_render_resources, m_event_bus, m_config);

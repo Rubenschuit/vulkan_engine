@@ -112,9 +112,7 @@ struct UniformBufferObject {
 	alignas(16) glm::mat4 projection_view;
 	alignas(16) glm::vec4 camera_position;
 	alignas(16) glm::vec4 ambient_light_color = DEFAULT_AMBIENT_LIGHT_COLOR;
-	alignas(16) PointLight point_lights[ve::MAX_BRUTE_FORCE_POINT_LIGHTS];
 	alignas(16) ShadowLight shadow_lights[ve::MAX_SHADOW_LIGHTS];
-	alignas(4)  uint32_t num_lights = 0;
 	alignas(4)  uint32_t num_shadow_lights = 0;
 	alignas(4)  RenderMode render_mode = RenderMode::BRDF;
 	alignas(4)  ShadowMode shadow_mode = ShadowMode::REGULAR;
@@ -248,6 +246,9 @@ struct VeFrameInfo {
 	const uint32_t* csm_cascade_resolutions = nullptr; // NUM_CSM_CASCADES entries
 	bool     shadow_mask_active = false;  // true when mask pipeline variant should be used
 
+
+	bool     area_lights_active = false;  // any active rect area light this frame (AREA_LIGHTS_SPEC variant)
+	bool     debug_shading = false;       // render_mode != BRDF_MICROFACET
 	// Post-processing
 	PostProcessPushConstant post_process_push;
 

@@ -7,6 +7,10 @@
 #include "ve_common.slangh"
 #include "ltc.slangh"
 
+// PBR-family pipeline variants
+[vk::constant_id(4)] const uint AREA_LIGHTS_SPEC = 1;   // 0 compiles out LTC rect-light evaluation
+[vk::constant_id(5)] const uint DEBUG_SHADING_SPEC = 1; // 0 compiles out ubo.render_mode debug views
+
 // Per-light early-out thresholds
 static const float LIGHT_RADIANCE_CUTOFF = 1e-3;
 static const float LIGHT_SPECULAR_CUTOFF = 5e-3;
@@ -174,16 +178,18 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	float3 N = normalize(in_vert.frag_normal_world);
 	float3 T = normalize(in_vert.frag_tangent_world);
 	float3 B = normalize(in_vert.frag_bitangent_world);
-	if (ubo.render_mode == RenderMode::NORMAL_VECTOR)
-		return float4(0.5 * N + 0.5, 1.0f);
-	else if (ubo.render_mode == RenderMode::TANGENT_VECTOR)
-		return float4(0.5 * T + 0.5, 1.0f);
-	else if (ubo.render_mode == RenderMode::BITANGENT_VECTOR)
-		return float4(0.5 * B + 0.5, 1.0f);
-	else if (ubo.render_mode == RenderMode::LOD_LEVEL)
-		return float4(lodDebugColor(albedo.rgb, in_vert.lod_level), albedo.a);
-	else if (ubo.render_mode == RenderMode::MESHLET_ID)
-		return float4(meshletDebugColor(albedo.rgb, in_vert.meshlet_id), albedo.a);
+	if (DEBUG_SHADING_SPEC != 0) {
+		if (ubo.render_mode == RenderMode::NORMAL_VECTOR)
+			return float4(0.5 * N + 0.5, 1.0f);
+		else if (ubo.render_mode == RenderMode::TANGENT_VECTOR)
+			return float4(0.5 * T + 0.5, 1.0f);
+		else if (ubo.render_mode == RenderMode::BITANGENT_VECTOR)
+			return float4(0.5 * B + 0.5, 1.0f);
+		else if (ubo.render_mode == RenderMode::LOD_LEVEL)
+			return float4(lodDebugColor(albedo.rgb, in_vert.lod_level), albedo.a);
+		else if (ubo.render_mode == RenderMode::MESHLET_ID)
+			return float4(meshletDebugColor(albedo.rgb, in_vert.meshlet_id), albedo.a);
+	}
 
 	if ((mat.material_flags & MAT_FLAG_UNLIT) != 0u)
 		return albedo;
@@ -215,10 +221,14 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		float ior = mat.specular_color_ior.w;
 		float f0_dielectric = ((ior - 1.0) / (ior + 1.0)) * ((ior - 1.0) / (ior + 1.0));
 		// KHR_materials_specular dielectric: F0 = min(f0_ior * specColor, 1) * specular, F90 = specular
-		float3 spec_col_tex = bindless_textures[NonUniformResourceIndex(mat.specular_color_index)]
-			.Sample(bindless_sampler, tex_coord).rgb;
-		float spec_tex_alpha = bindless_textures[NonUniformResourceIndex(mat.specular_index)]
-			.Sample(bindless_sampler, tex_coord).a;
+		float3 spec_col_tex = float3(1.0);
+		float spec_tex_alpha = 1.0;
+		if ((mat.material_flags & MAT_FLAG_SPECULAR_TEX) != 0u) {
+			spec_col_tex = bindless_textures[NonUniformResourceIndex(mat.specular_color_index)]
+				.Sample(bindless_sampler, tex_coord).rgb;
+			spec_tex_alpha = bindless_textures[NonUniformResourceIndex(mat.specular_index)]
+				.Sample(bindless_sampler, tex_coord).a;
+		}
 		specular_weight = mat.specular_strength * spec_tex_alpha;
 		float3 dielectric_F0 = min(f0_dielectric * mat.specular_color_ior.xyz * spec_col_tex, float3(1.0)) * specular_weight;
 		F0 = lerp(dielectric_F0, albedo.rgb, metallic);
@@ -227,13 +237,15 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	float transmission = mat.pbr_params.w;
 	float3 F90 = float3(lerp(specular_weight, 1.0, metallic));
 
+	// Without debug shading the render mode is always BRDF_MICROFACET
 	float3 world_normal = N;
-	if (ubo.render_mode == RenderMode::BRDF_MICROFACET || ubo.render_mode == RenderMode::NORMAL_MAP) {
+	if (DEBUG_SHADING_SPEC == 0
+		|| ubo.render_mode == RenderMode::BRDF_MICROFACET || ubo.render_mode == RenderMode::NORMAL_MAP) {
 		float3 tangent_space_normal = normalize(normal_map.xyz * 2.0 - float3(1.0, 1.0, 1.0));
 		world_normal = normalize(tangent_space_normal.x * T + tangent_space_normal.y * B + tangent_space_normal.z * N);
 	}
 
-	if (ubo.render_mode == RenderMode::NORMAL_MAP)
+	if (DEBUG_SHADING_SPEC != 0 && ubo.render_mode == RenderMode::NORMAL_MAP)
 		return float4(0.5 * world_normal + 0.5, 1.0f);
 
 	float3 view_dir = normalize(ubo.camera_position.xyz - in_vert.frag_pos_world);
@@ -251,14 +263,14 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		if (use_mask) {
 			float2 mask_uv = in_vert.pos.xy / ubo.screen_size;
 			csm_shadow = shadow_mask.SampleLevel(shadow_mask_sampler, mask_uv, 0);
-			if (ubo.render_mode == RenderMode::CSM_CASCADE)
+			if (DEBUG_SHADING_SPEC != 0 && ubo.render_mode == RenderMode::CSM_CASCADE)
 				calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, N, csm_cascade_idx, csm_blend_t);
 		} else {
 			csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, N, csm_cascade_idx, csm_blend_t);
 		}
 	}
 
-	if (ubo.render_mode == RenderMode::CSM_CASCADE)
+	if (DEBUG_SHADING_SPEC != 0 && ubo.render_mode == RenderMode::CSM_CASCADE)
 		return float4(csmDebugColor(albedo.rgb, csm_cascade_idx, csm_blend_t, csm_shadow), albedo.a);
 
 	// Point light shadow terms
@@ -267,7 +279,8 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	calculatePointShadowTerms(in_vert.shadow_coord, shadow_terms, shadow_for_light);
 
 	// Cluster heatmap debug
-	if (ubo.render_mode == RenderMode::CLUSTER_HEATMAP && cluster_params.cluster_enabled != 0) {
+	if (DEBUG_SHADING_SPEC != 0
+		&& ubo.render_mode == RenderMode::CLUSTER_HEATMAP && cluster_params.cluster_enabled != 0) {
 		uint cid = getClusterIndex(in_vert.pos.xy, frag_view_z, cluster_params);
 		uint count = cluster_light_counts[cid].y;
 		float3 heat = clusterHeatmapColor(in_vert.pos.xy, frag_view_z, count, cluster_params);
@@ -280,7 +293,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	float kD_factor = (1.0 - metallic) * (1.0 - transmission);
 	float3 diffuse_brdf = albedo.rgb / PI;
 
-	// Accumulate light contribution
+	// Accumulate punctual + area light contribution
 	float3 Lo = float3(0.0);
 	LtcTerms ltc_terms = (LtcTerms)0;
 	if (cluster_params.cluster_enabled != 0) {
@@ -292,9 +305,11 @@ float4 computePbrLighting(VertexOutput in_vert) {
 			uint light_idx = cluster_light_indices[counts.x + j];
 
 			if (light_idx >= rect_base) {
-				uint rect_idx = light_idx - rect_base;
-				Lo += ltcRectLight(ubo.rect_lights[rect_idx], world_normal, view_dir, in_vert.frag_pos_world,
-					roughness, F0, albedo.rgb * kD_factor, ltc_terms);
+				if (AREA_LIGHTS_SPEC != 0) {
+					uint rect_idx = light_idx - rect_base;
+					Lo += ltcRectLight(ubo.rect_lights[rect_idx], world_normal, view_dir, in_vert.frag_pos_world,
+						roughness, F0, albedo.rgb * kD_factor, ltc_terms);
+				}
 				continue;
 			}
 
@@ -341,82 +356,6 @@ float4 computePbrLighting(VertexOutput in_vert) {
 				shadow_key = MAX_CLUSTER_LIGHTS + (light_idx - cluster_params.num_point_lights);
 			float pt_shadow = getPointShadow(shadow_key, shadow_terms, shadow_for_light);
 			Lo += (kD * diffuse_brdf + specular) * radiance * NdotL * pt_shadow;
-		}
-	} else {
-		// Brute-force point lights
-		for (uint32_t i = 0; i < ubo.num_lights; i++) {
-			float3 light_dir = ubo.point_lights[i].position.xyz - in_vert.frag_pos_world;
-			float distance_sq = dot(light_dir, light_dir);
-			float range = ubo.point_lights[i].position.w;
-			if (range > 0.0 && distance_sq >= range * range) continue;
-
-			float3 L = light_dir * rsqrt(max(distance_sq, 1e-8));
-			float NdotL = clamp(dot(world_normal, L), 0.0, 1.0);
-			if (NdotL <= 0.0) continue;
-
-			float attenuation = calculateAttenuation(distance_sq, range);
-			float3 radiance = ubo.point_lights[i].color.xyz * attenuation;
-			float max_radiance = max(max(radiance.r, radiance.g), radiance.b);
-			if (max_radiance * NdotL < LIGHT_RADIANCE_CUTOFF) continue;
-
-			float3 H = normalize(view_dir + L);
-			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0, F90);
-
-			float3 specular = float3(0.0);
-			if (max_radiance > LIGHT_SPECULAR_CUTOFF) {
-				float D = distributionGGX(world_normal, H, roughness);
-				float G = G1_V * geometrySchlickGGX(NdotL, roughness);
-				specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
-			}
-
-			float3 kD = (1.0 - F) * kD_factor;
-			float pt_shadow = getPointShadow(i, shadow_terms, shadow_for_light);
-			Lo += (kD * diffuse_brdf + specular) * radiance * NdotL * pt_shadow;
-		}
-
-		// Brute-force spot lights
-		for (uint32_t i = 0; i < ubo.num_spot_lights; i++) {
-			float3 light_dir = ubo.spot_lights[i].position.xyz - in_vert.frag_pos_world;
-			float distance_sq = dot(light_dir, light_dir);
-			float range = ubo.spot_lights[i].position.w;
-			if (range > 0.0 && distance_sq >= range * range) continue;
-
-			float3 L = light_dir * rsqrt(max(distance_sq, 1e-8));
-			float NdotL = clamp(dot(world_normal, L), 0.0, 1.0);
-			if (NdotL <= 0.0) continue;
-
-			float attenuation = calculateAttenuation(distance_sq, range);
-
-			float cos_outer = ubo.spot_lights[i].direction.w;
-			float cos_inner = ubo.spot_lights[i].color.w;
-			float spot_atten = calculateSpotAttenuation(L,
-				ubo.spot_lights[i].direction.xyz, cos_outer, cos_inner);
-			if (spot_atten <= 0.0) continue;
-			attenuation *= spot_atten;
-
-			float3 radiance = ubo.spot_lights[i].color.xyz * attenuation;
-			float max_radiance = max(max(radiance.r, radiance.g), radiance.b);
-			if (max_radiance * NdotL < LIGHT_RADIANCE_CUTOFF) continue;
-
-			float3 H = normalize(view_dir + L);
-			float3 F = fresnelSchlick(max(dot(H, view_dir), 0.0), F0, F90);
-
-			float3 specular = float3(0.0);
-			if (max_radiance > LIGHT_SPECULAR_CUTOFF) {
-				float D = distributionGGX(world_normal, H, roughness);
-				float G = G1_V * geometrySchlickGGX(NdotL, roughness);
-				specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.00001);
-			}
-
-			float3 kD = (1.0 - F) * kD_factor;
-			float spot_shadow = getPointShadow(MAX_CLUSTER_LIGHTS + i, shadow_terms, shadow_for_light);
-			Lo += (kD * diffuse_brdf + specular) * radiance * NdotL * spot_shadow;
-		}
-
-		// Area lights non clustered
-		for (uint32_t i = 0; i < ubo.num_rect_lights; i++) {
-			Lo += ltcRectLight(ubo.rect_lights[i], world_normal, view_dir, in_vert.frag_pos_world,
-				roughness, F0, albedo.rgb * kD_factor, ltc_terms);
 		}
 	}
 

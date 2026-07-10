@@ -67,7 +67,7 @@ void VeComputePipeline::createComputePipeline(const std::filesystem::path& comp_
 		.layout = *pipeline_layout
 	};
 
-	m_pipeline = vk::raii::Pipeline{m_ve_device.getDevice(), nullptr, pipeline_info};
+	m_pipeline = vk::raii::Pipeline{m_ve_device.getDevice(), m_ve_device.getPipelineCache(), pipeline_info};
 	setDebugName(m_ve_device, m_pipeline, comp_spv_path.stem().string().c_str());
 }
 

@@ -81,12 +81,71 @@ VeDevice::VeDevice(VeWindow &window) : m_window(window) {
 	createLogicalDevice();
 	createCommandPools();
 	createAllocator();
+	m_pipeline_cache = vk::raii::PipelineCache(m_device, vk::PipelineCacheCreateInfo{});
 }
 
 VeDevice::~VeDevice() {
+	savePipelineCache();
 	if (m_allocator)
 		vmaDestroyAllocator(m_allocator);
 	// command pool, ve_device, surface, debug messenger and instance are RAII objects and will be cleaned up automatically
+}
+
+void VeDevice::loadPipelineCache(const std::filesystem::path& file) {
+	m_pipeline_cache_path = file;
+
+	std::ifstream in(file, std::ios::binary | std::ios::ate);
+	if (!in.is_open())
+		return;
+	auto size = static_cast<size_t>(in.tellg());
+	if (size < sizeof(vk::PipelineCacheHeaderVersionOne))
+		return;
+	std::vector<uint8_t> data(size);
+	in.seekg(0);
+	in.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(size));
+	if (!in.good())
+		return;
+
+	vk::PipelineCacheHeaderVersionOne header{};
+	std::memcpy(&header, data.data(), sizeof(header));
+	auto props = m_physical_device.getProperties();
+	if (header.headerVersion != vk::PipelineCacheHeaderVersion::eOne
+		|| header.vendorID != props.vendorID
+		|| header.deviceID != props.deviceID
+		|| std::memcmp(header.pipelineCacheUUID.data(), props.pipelineCacheUUID.data(), VK_UUID_SIZE) != 0) {
+		VE_LOGI("Pipeline cache on disk does not match this device, starting empty");
+		return;
+	}
+
+	try {
+		vk::PipelineCacheCreateInfo create_info{
+			.initialDataSize = data.size(),
+			.pInitialData = data.data(),
+		};
+		m_pipeline_cache = vk::raii::PipelineCache(m_device, create_info);
+		VE_LOGI("Pipeline cache loaded (" << data.size() << " bytes)");
+	} catch (const vk::Error& e) {
+		VE_LOGW("Failed to load pipeline cache, starting empty: " << e.what());
+		m_pipeline_cache = vk::raii::PipelineCache(m_device, vk::PipelineCacheCreateInfo{});
+	}
+}
+
+void VeDevice::savePipelineCache() noexcept {
+	if (m_pipeline_cache_path.empty() || *m_pipeline_cache == vk::PipelineCache{})
+		return;
+	try {
+		std::vector<uint8_t> data = m_pipeline_cache.getData();
+		if (data.empty())
+			return;
+		std::error_code ec;
+		std::filesystem::create_directories(m_pipeline_cache_path.parent_path(), ec);
+		std::ofstream out(m_pipeline_cache_path, std::ios::binary | std::ios::trunc);
+		out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+		if (!out.good())
+			VE_LOGW("Failed to write pipeline cache to " << m_pipeline_cache_path.string());
+	} catch (const std::exception& e) {
+		VE_LOGW("Failed to save pipeline cache: " << e.what());
+	}
 }
 
 void VeDevice::createInstance() {

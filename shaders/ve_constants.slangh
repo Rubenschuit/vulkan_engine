@@ -2,7 +2,6 @@
 #define VE_CONSTANTS_SLANGH
 
 // Lighting (keep in sync with engine/src/ve_config.hpp)
-#define MAX_BRUTE_FORCE_POINT_LIGHTS   64
 #define MAX_DIR_LIGHTS                 4
 #define MAX_SPOT_LIGHTS                32
 #define MAX_RECT_LIGHTS                64
@@ -54,6 +53,7 @@ enum ShadowMode {
 #define MAT_FLAG_SPEC_GLOSS        0x10u
 #define MAT_FLAG_HAS_TEXTURE       0x20u
 #define MAT_FLAG_UNLIT             0x40u
+#define MAT_FLAG_SPECULAR_TEX      0x80u
 
 // Object flags (in object_flags field)
 #define OBJ_FLAG_IS_TRANSPARENT    0x1u

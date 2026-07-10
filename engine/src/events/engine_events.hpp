@@ -102,10 +102,6 @@ struct DepthPrePassChangedEvent {
 	bool enabled;
 };
 
-struct ClusterEnabledChangedEvent {
-	bool enabled;
-};
-
 // ── Rendering state changes ────────────────────────────────────────────────
 
 // Emitted by VeRenderer after its swap chain has been recreated

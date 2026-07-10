@@ -27,7 +27,6 @@ TEST_CASE("ve_config basic constants and lists", "[config]") {
 }
 
 TEST_CASE("ve_config lighting and shadow constants", "[config]") {
-    REQUIRE(ve::MAX_BRUTE_FORCE_POINT_LIGHTS >= 1);
     REQUIRE(ve::MAX_CLUSTER_LIGHTS >= 1);
     REQUIRE(ve::MAX_SHADOW_LIGHTS >= 1);
 

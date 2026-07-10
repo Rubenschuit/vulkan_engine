@@ -21,8 +21,8 @@ RWTexture2D<float4> ssr_out;
 struct SsrPush {
 	float2 out_size;
 	float2 depth_size;
-	float proj_22;        // proj[2][2] for depth linearization
-	float proj_32;        // proj[3][2] for depth linearization
+	float proj_22;
+	float proj_32;
 	float thickness;      // view-space hit tolerance
 	float max_roughness;  // no reflections above this roughness
 	float max_distance;   // world-space ray length
@@ -31,7 +31,7 @@ struct SsrPush {
 };
 [[vk::push_constant]] SsrPush push;
 
-// Reverse-Z view-space depth (negative in front of the camera)
+// Reverse-Z view-space depth
 float linearViewZ(float depth) {
 	return push.proj_32 / (-depth - push.proj_22);
 }

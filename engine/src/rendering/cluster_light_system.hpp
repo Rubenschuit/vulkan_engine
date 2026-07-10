@@ -29,7 +29,7 @@ struct ClusterParams {
 	alignas(8)  glm::uvec2 screen_size{};
 	alignas(8)  glm::uvec2 tile_size{};           // pixels per tile
 	alignas(16) glm::uvec4 grid_dims{};           // xyz = (tiles_x, tiles_y, z_slices), w = total clusters
-	alignas(4)  uint32_t cluster_enabled = 0;     // 0 = brute-force fallback
+	alignas(4)  uint32_t cluster_enabled = 0;     // 0 = shader skips punctual+area lighting
 	alignas(4)  uint32_t max_lights_per_cluster = ve::MAX_LIGHTS_PER_CLUSTER;
 	alignas(4)  uint32_t num_point_lights = 0;    // num_lights[0, num_point) are point lights
 	alignas(4)  uint32_t num_spot_lights = 0;     // num_lights[num_point, num_point+num_spot) are spot; rest are area
@@ -82,7 +82,6 @@ private:
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;
 	bool m_enabled = false;
-	bool m_ui_enabled = true;
 	uint32_t m_last_light_count = 0;
 	uint32_t m_last_point_light_count = 0;
 	uint32_t m_last_spot_light_count = 0;

@@ -24,7 +24,6 @@ auto makeNullArray() {
 constexpr glm::vec4 DEFAULT_AMBIENT_LIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.04f);
 
 // Light count caps
-constexpr uint32_t MAX_BRUTE_FORCE_POINT_LIGHTS = 64;    // UBO inline array, only used when clustering is disabled
 constexpr uint32_t MAX_DIR_LIGHTS               = 4;
 constexpr uint32_t MAX_SPOT_LIGHTS              = 32;
 constexpr uint32_t MAX_RECT_LIGHTS              = 64;    // LTC rectangular area lights
@@ -141,6 +140,7 @@ namespace MaterialFlag {
 	constexpr uint32_t SPEC_GLOSS      = 0x10;
 	constexpr uint32_t HAS_TEXTURE     = 0x20;
 	constexpr uint32_t UNLIT           = 0x40;  // KHR_materials_unlit: output base color, skip lighting
+	constexpr uint32_t SPECULAR_TEX    = 0x80;  // KHR_materials_specular: has specular/specularColor texture(s)
 }
 
 namespace ObjectFlag {

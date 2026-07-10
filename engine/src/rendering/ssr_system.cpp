@@ -10,10 +10,10 @@
 namespace ve {
 
 struct SsrPushConstant {
-	glm::vec2 out_size;    // SSR output resolution
-	glm::vec2 depth_size;  // depth / normal / history resolution
-	float proj_22;         // proj[2][2] for depth linearization
-	float proj_32;         // proj[3][2] for depth linearization
+	glm::vec2 out_size;
+	glm::vec2 depth_size;
+	float proj_22;
+	float proj_32;
 	float thickness;       // view-space hit tolerance
 	float max_roughness;   // no reflections above this roughness
 	float max_distance;    // world-space ray length

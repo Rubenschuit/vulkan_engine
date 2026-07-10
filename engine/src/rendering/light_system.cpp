@@ -234,18 +234,7 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 
 	auto& registry = *frame_info.registry;
 	for (auto [entity, pl, tc] : registry.view<PointLightComponent, TransformComponent>()) {
-		glm::vec3 color = pl.getColor();
-		float intensity = pl.getIntensity();
-
 		glm::vec3 world_pos = glm::vec3(registry.getWorldTransform(entity)[3]);
-
-		if (num_lights < MAX_BRUTE_FORCE_POINT_LIGHTS) {
-			ubo.point_lights[num_lights].position = glm::vec4{world_pos, pl.getEffectiveRange()};
-			ubo.point_lights[num_lights].color.x = color.x * intensity;
-			ubo.point_lights[num_lights].color.y = color.y * intensity;
-			ubo.point_lights[num_lights].color.z = color.z * intensity;
-			ubo.point_lights[num_lights].color.w = intensity;
-		}
 
 		if (pl.getCastsShadow() && num_shadow_lights < MAX_POINT_SHADOW_LIGHTS) {
 			glm::vec3 light_pos = world_pos;
@@ -267,8 +256,6 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 
 		num_lights++;
 	}
-
-	ubo.num_lights = std::min(num_lights, MAX_BRUTE_FORCE_POINT_LIGHTS);
 
 	// Directional lights (first shadow-casting directional gets CSM)
 	uint32_t num_dir_lights = 0;

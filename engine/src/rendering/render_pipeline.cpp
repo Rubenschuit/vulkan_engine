@@ -660,6 +660,10 @@ void RenderPipeline::populateUBO(VeFrameInfo& fi) {
 	writeUniformBuffer(current_frame, fi.camera_view, ubo);
 
 	fi.shadow_mask_active = shadow_mask_active;
+
+	// Pipeline-variant selectors
+	fi.area_lights_active = ubo.num_rect_lights > 0;
+	fi.debug_shading = m_settings.render_mode != RenderMode::BRDF_MICROFACET;
 }
 
 void RenderPipeline::dispatchCompute(VeFrameInfo& fi) {

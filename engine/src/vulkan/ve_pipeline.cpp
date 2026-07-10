@@ -226,7 +226,7 @@ void VePipeline::createGraphicsPipeline(
 	};
 	assert(config_info.pipeline_layout != VK_NULL_HANDLE && "Cannot create graphics pipeline: no pipelineLayout provided in config_info");
 
-	m_graphics_pipeline = vk::raii::Pipeline{m_ve_device.getDevice(), nullptr, pipeline_info};
+	m_graphics_pipeline = vk::raii::Pipeline{m_ve_device.getDevice(), m_ve_device.getPipelineCache(), pipeline_info};
 	setDebugName(m_ve_device, m_graphics_pipeline, shader_file_path.stem().string().c_str());
 }
 

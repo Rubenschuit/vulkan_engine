@@ -38,7 +38,6 @@ struct VENGINE_API RenderSettings {
 	// lighting
 	glm::vec3 ambient_light_color = glm::vec3(1.0f);
 	float ambient_light_intensity = 0.006f;
-	bool cluster_enabled = true;
 	bool ibl_enabled = true;
 	float ibl_diffuse_intensity = 0.2f;
 	float ibl_specular_intensity = 0.2f;

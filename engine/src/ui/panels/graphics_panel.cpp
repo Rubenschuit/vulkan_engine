@@ -163,11 +163,6 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 				ImGui::SetTooltip("Also spin up the GPU culling system and use its object-level shadow path.\nFaster shadow culling in some cases (especially on MoltenVK),\nat the cost of extra VRAM.");
 			ImGui::Unindent();
 		}
-		if (ImGui::Checkbox("Clustered Lighting", &ctx.settings.cluster_enabled))
-			m_event_bus.emitImmediate(ClusterEnabledChangedEvent{ctx.settings.cluster_enabled});
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Use 3D cluster grid to cull lights per-fragment");
-
 		ImGui::SeparatorText("Multi-threading");
 		ImGui::SliderInt("Min Cull Entities", &ctx.settings.min_parallel_cull_entities, 0, 4096);
 		if (ImGui::IsItemHovered())
