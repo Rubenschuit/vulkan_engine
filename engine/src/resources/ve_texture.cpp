@@ -345,14 +345,7 @@ bool VeTexture::doLoad() {
 		decoded.width = 4;
 		decoded.height = 4;
 		if (m_resource_id == "default_mr_unit") {
-			// Full metallic (B=255) and full roughness (G=255) so MaterialFactors alone control the values
-			decoded.pixels.resize(decoded.width * decoded.height * 4);
-			for (size_t i = 0; i < 16; i++) {
-				decoded.pixels[i * 4 + 0] = 0;
-				decoded.pixels[i * 4 + 1] = 255;  // roughness = 1.0
-				decoded.pixels[i * 4 + 2] = 255;  // metallic = 1.0
-				decoded.pixels[i * 4 + 3] = 255;
-			}
+			decoded.pixels.assign(static_cast<size_t>(decoded.width) * decoded.height * 4, 255);
 		} else if (m_resource_id == "default_particle") {
 			// Soft radial gradient
 			decoded.width = 64;

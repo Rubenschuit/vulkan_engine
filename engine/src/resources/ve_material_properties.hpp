@@ -14,7 +14,7 @@ struct MaterialAlphaProps {
 	AlphaMode alpha_mode = AlphaMode::ALPHA_OPAQUE;
 	float alpha_cutoff = 0.5f;
 	bool double_sided = false;
-	bool use_spec_gloss_texture = false;  // MR texture is specularGlossinessTexture (RGB=specular, A=glossiness)
+	bool use_spec_gloss = false;  // KHR_materials_pbrSpecularGlossiness: MR slot is specular(RGB)+glossiness(A), texture or unit default
 	bool unlit = false;                   // KHR_materials_unlit: render base color, no lighting
 };
 

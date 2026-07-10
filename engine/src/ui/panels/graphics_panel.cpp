@@ -350,9 +350,9 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			ImGui::Checkbox("Half Resolution##ssr", &ctx.settings.ssr_half_res);
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Trace at half screen resolution.\n4x fewer rays, bilinear upsampled.");
-			bool steps_changed = ImGui::SliderInt("Max Steps", &ctx.settings.ssr_max_steps, 8, 64);
+			bool steps_changed = ImGui::SliderInt("Max Steps", &ctx.settings.ssr_max_steps, 8, 128);
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Ray-march samples per pixel.");
+				ImGui::SetTooltip("Hi-Z traversal iteration cap per ray.");
 			bool thickness_changed = ImGui::SliderFloat("Thickness", &ctx.settings.ssr_thickness, 0.05f, 1.0f, "%.2f");
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("View-space depth tolerance for hits.");

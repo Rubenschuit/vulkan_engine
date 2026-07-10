@@ -831,7 +831,7 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 		mat_flags = static_cast<uint32_t>(alpha.alpha_mode)
 			| (alpha.double_sided ? MaterialFlag::DOUBLE_SIDED : 0u)
 			| (mesh.getMaterial()->getFlipTexCoordV() ? MaterialFlag::FLIP_TEX_V : 0u)
-			| (alpha.use_spec_gloss_texture ? MaterialFlag::SPEC_GLOSS : 0u);
+			| (alpha.use_spec_gloss ? MaterialFlag::SPEC_GLOSS : 0u);
 		obj_flags = (is_transparent ? ObjectFlag::IS_TRANSPARENT : 0u)
 			| (!mesh.has_shadow ? ObjectFlag::NO_SHADOW : 0u);
 	}

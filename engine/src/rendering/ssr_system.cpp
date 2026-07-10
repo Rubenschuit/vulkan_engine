@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "rendering/ssr_system.hpp"
+#include "rendering/ssr_hiz_pyramid.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "platform/ve_file_system.hpp"
 #include "events/event_bus.hpp"
@@ -17,8 +18,9 @@ struct SsrPushConstant {
 	float thickness;       // view-space hit tolerance
 	float max_roughness;   // no reflections above this roughness
 	float max_distance;    // world-space ray length
-	int max_steps;
-	glm::vec2 _pad;
+	int max_steps;         // traversal iteration cap
+	uint32_t hiz_mip_count;
+	float _pad;
 };
 
 SsrSystem::SsrSystem(
@@ -42,6 +44,7 @@ SsrSystem::SsrSystem(
 			? vk::Extent2D{std::max(1u, e.extent.width / 2), std::max(1u, e.extent.height / 2)} : e.extent;
 		m_depth_image_view = *e.depth_image_view;
 		m_normal_image_view = *e.normal_roughness_image_view;
+		m_hiz_pyramid->recreate(e.pool, e.extent, e.depth_image_view);
 		createHistoryImage();
 		createOutputImage();
 		createDescriptorSets(e.pool);
@@ -61,6 +64,8 @@ SsrSystem::SsrSystem(
 
 	m_depth_image_view = *depth_image_view;
 	m_normal_image_view = *normal_roughness_image_view;
+	m_hiz_pyramid = std::make_unique<SsrHizPyramid>(
+		device, descriptor_pool, m_full_extent, depth_image_view, m_shader_path);
 	createHistoryImage();
 	createOutputImage();
 	createDummyImage();
@@ -155,6 +160,7 @@ void SsrSystem::createSetLayouts() {
 		.addBinding(2, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // history color
 		.addBinding(3, vk::DescriptorType::eSampler, vk::ShaderStageFlagBits::eCompute)
 		.addBinding(4, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute) // SSR out
+		.addBinding(5, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // min/max depth pyramid
 		.build();
 	m_output_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eFragment)
@@ -246,6 +252,10 @@ void SsrSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 		.imageView = *m_dummy_image->getImageView(),
 		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 	};
+	vk::DescriptorImageInfo pyramid_info{
+		.imageView = *m_hiz_pyramid->getPyramidView(),
+		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+	};
 
 	VeDescriptorWriter(*m_io_set_layout, descriptor_pool)
 		.writeImage(0, &depth_info)
@@ -253,6 +263,7 @@ void SsrSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 		.writeImage(2, &history_info)
 		.writeImage(3, &sampler_info)
 		.writeImage(4, &output_storage_info)
+		.writeImage(5, &pyramid_info)
 		.build(m_io_descriptor_set);
 
 	VeDescriptorWriter(*m_output_set_layout, descriptor_pool)
@@ -267,6 +278,8 @@ void SsrSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 }
 
 void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd) {
+	m_hiz_pyramid->generate(cmd);
+
 	// Output: eShaderReadOnlyOptimal -> eGeneral for storage write
 	vk::ImageMemoryBarrier2 to_general{
 		.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
@@ -300,7 +313,8 @@ void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd) 
 		.max_roughness = m_max_roughness,
 		.max_distance = m_max_distance,
 		.max_steps = m_max_steps,
-		._pad = glm::vec2(0.0f),
+		.hiz_mip_count = m_hiz_pyramid->getMipLevels(),
+		._pad = 0.0f,
 	};
 	cmd.pushConstants(
 		*m_pipeline_layout,

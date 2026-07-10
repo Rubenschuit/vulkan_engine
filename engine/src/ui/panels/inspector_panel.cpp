@@ -10,6 +10,7 @@
 #include "resources/ve_material.hpp"
 #include "resources/ve_texture.hpp"
 #include "resources/ve_material_properties.hpp"
+#include "resources/ve_resource_manager.hpp"
 #include "utils/ve_string.hpp"
 #include <imgui.h>
 #include <backends/imgui_impl_vulkan.h>
@@ -730,8 +731,27 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 		if (ImGui::ColorEdit4("##BaseColor", glm::value_ptr(factors.base_color_factor)))
 			changed = true;
 	}, [&]() { factors.base_color_factor = defaults.base_color_factor; changed = true; });
-	sliderRow(label_w, "Metallic", "##Metallic", &factors.metallic_factor, 0.0f, 1.0f, defaults.metallic_factor, changed);
-	sliderRow(label_w, "Roughness", "##Roughness", &factors.roughness_factor, 0.0f, 1.0f, defaults.roughness_factor, changed);
+	// Spec-gloss materials store glossiness in the roughness slot and force
+	// metallic to 0 in the shader
+	bool spec_gloss = alpha.use_spec_gloss;
+	const std::string& mr_id = mat->getMetallicRoughnessTexture().getId();
+	bool mr_textured = !mr_id.empty()
+		&& mr_id != "default_metallic_roughness" && mr_id != "default_mr_unit";
+	if (!spec_gloss)
+		sliderRow(label_w, "Metallic", "##Metallic", &factors.metallic_factor, 0.0f, 1.0f, defaults.metallic_factor, changed);
+	sliderRow(label_w, spec_gloss ? "Glossiness" : "Roughness", "##Roughness", &factors.roughness_factor, 0.0f, 1.0f, defaults.roughness_factor, changed);
+	if (mr_textured) {
+		ImGui::TextDisabled(spec_gloss ? "Multiplied by the Spec/Gloss texture (RGB spec, A gloss)"
+		                               : "Multiplied by the Metal/Rgh texture (B metal, G rough)");
+		if (m_resource_manager) {
+			if (ImGui::SmallButton(spec_gloss ? "Detach Spec/Gloss texture" : "Detach Metal/Rgh texture")) {
+				mat->setMetallicRoughnessTexture(m_resource_manager->load<VeTexture>("default_mr_unit"));
+				changed = true;
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Replace with the all-white unit texture so the sliders above are authoritative.");
+		}
+	}
 	sliderRow(label_w, "Occlusion Str", "##Occlusion", &factors.occlusion_strength, 0.0f, 1.0f, defaults.occlusion_strength, changed);
 
 	ImGui::SeparatorText("Emission");
@@ -787,7 +807,7 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 			ImGui::TableSetupColumn("Info", ImGuiTableColumnFlags_WidthStretch);
 			renderTextureSlot("Albedo",    mat->getAlbedoTexture().getId(), mat->getAlbedoTexture().get());
 			renderTextureSlot("Normal",    mat->getNormalTexture().getId(), mat->getNormalTexture().get());
-			renderTextureSlot("Metal/Rgh", mat->getMetallicRoughnessTexture().getId(), mat->getMetallicRoughnessTexture().get());
+			renderTextureSlot(spec_gloss ? "Spec/Gloss" : "Metal/Rgh", mat->getMetallicRoughnessTexture().getId(), mat->getMetallicRoughnessTexture().get());
 			renderTextureSlot("Occlusion", mat->getOcclusionTexture().getId(), mat->getOcclusionTexture().get());
 			renderTextureSlot("Emissive",  mat->getEmissiveTexture().getId(), mat->getEmissiveTexture().get());
 			renderTextureSlot("Specular",  mat->getSpecularTexture().getId(), mat->getSpecularTexture().get());

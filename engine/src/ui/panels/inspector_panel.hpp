@@ -20,6 +20,7 @@ class CameraComponent;
 class ParticleEmitterComponent;
 class VeTexture;
 class TextureInspector;
+class VeResourceManager;
 
 class VENGINE_API InspectorPanel : public EditorPanel {
 public:
@@ -29,6 +30,7 @@ public:
 	const char* getName() const override { return "Entity Inspector"; }
 
 	void setTextureInspector(TextureInspector* inspector) { m_texture_inspector = inspector; }
+	void setResourceManager(VeResourceManager* rm) { m_resource_manager = rm; }
 
 private:
 	void renderEntityHeader(Registry& registry, Entity entity, EditorState& state);
@@ -52,6 +54,7 @@ private:
 	std::unordered_map<std::string, TextureCacheEntry> m_texture_cache;
 	uint32_t m_frame_counter = 0;
 	Registry* m_last_registry = nullptr;
+	VeResourceManager* m_resource_manager = nullptr;
 	static constexpr uint32_t MAX_CACHED_TEXTURES = 32;
 	static constexpr uint32_t TEXTURE_CACHE_TTL = 300;
 

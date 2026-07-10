@@ -206,6 +206,7 @@ void Editor::setContext(const EditorContext& ctx, const RenderServices& services
 	m_asset_browser_panel.setTextureInspector(&m_texture_inspector);
 	if (ctx.engine_config)
 		m_asset_browser_panel.setAssetRoot(ctx.engine_config->working_dir);
+	m_inspector_panel.setResourceManager(ctx.resource_manager);
 	if (m_environment_panel)
 		m_environment_panel->setSkyboxSystem(services.skybox);
 	if (m_debug_panel)

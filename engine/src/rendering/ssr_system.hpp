@@ -1,8 +1,8 @@
-// Screen-space reflections: traces the current-frame depth buffer along
-// reflection rays built from the prepass normals, fetching radiance
-// from the previous frame's HDR history (reprojected via prev_projection_view).
-// Output is rgb radiance + confidence in alpha, composited into the IBL
-// specular term by the PBR shader
+// Screen-space reflections: Hi-Z traversal of a min/max pyramid built from
+// the current-frame depth (SsrHizPyramid) along reflection rays from the
+// prepass normals, fetching radiance from the previous frame's HDR history
+// (reprojected via prev_projection_view). Output is rgb radiance + confidence
+// in alpha, composited into the IBL specular term by the PBR shader
 #pragma once
 #include "ve_export.hpp"
 #include "vulkan/ve_device.hpp"
@@ -16,6 +16,7 @@
 namespace ve {
 
 class EventBus;
+class SsrHizPyramid;
 
 class VENGINE_API SsrSystem {
 public:
@@ -70,7 +71,7 @@ private:
 	vk::Format m_format;
 
 	// Trace parameters
-	int m_max_steps = 24;
+	int m_max_steps = 48;
 	float m_thickness = 0.3f;
 	float m_max_roughness = 0.6f;
 	float m_max_distance = 25.0f;
@@ -78,6 +79,7 @@ private:
 	std::unique_ptr<VeImage> m_history_image;
 	std::unique_ptr<VeImage> m_output_image;
 	std::unique_ptr<VeImage> m_dummy_image;
+	std::unique_ptr<SsrHizPyramid> m_hiz_pyramid;
 	bool m_history_valid = false;
 
 	vk::raii::Sampler m_linear_clamp_sampler{nullptr};

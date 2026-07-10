@@ -48,6 +48,7 @@ public:
 	const ResourceHandle<VeTexture>& getAlbedoTexture() const { return m_textures.albedo; }
 	const ResourceHandle<VeTexture>& getNormalTexture() const { return m_textures.normal; }
 	const ResourceHandle<VeTexture>& getMetallicRoughnessTexture() const { return m_textures.metallic_roughness; }
+	void setMetallicRoughnessTexture(ResourceHandle<VeTexture> tex) { m_textures.metallic_roughness = std::move(tex); }
 	const ResourceHandle<VeTexture>& getOcclusionTexture() const { return m_textures.occlusion; }
 	const ResourceHandle<VeTexture>& getEmissiveTexture() const { return m_textures.emissive; }
 	const ResourceHandle<VeTexture>& getSpecularTexture() const { return m_textures.specular; }

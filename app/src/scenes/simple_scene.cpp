@@ -114,7 +114,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 				.alpha_mode = AlphaMode::ALPHA_OPAQUE,
 				.alpha_cutoff = 0.5f,
 				.double_sided = true,
-				.use_spec_gloss_texture = false},
+				.use_spec_gloss = false},
 			floor_factors);
 
 		Entity e = m_registry.createEntity("floor");
@@ -187,7 +187,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 						.alpha_mode = AlphaMode::ALPHA_OPAQUE,
 						.alpha_cutoff = 0.5f,
 						.double_sided = false,
-						.use_spec_gloss_texture = false
+						.use_spec_gloss = false
 					},
 					factors);
 

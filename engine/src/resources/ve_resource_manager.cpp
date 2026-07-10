@@ -160,7 +160,8 @@ ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& 
 	if (!textures.normal.isValid())
 		textures.normal = load<VeTexture>("default_normal");
 	if (!textures.metallic_roughness.isValid())
-		textures.metallic_roughness = load<VeTexture>("default_metallic_roughness");
+		textures.metallic_roughness = load<VeTexture>(
+			alpha_props.use_spec_gloss ? "default_mr_unit" : "default_metallic_roughness");
 	if (!textures.occlusion.isValid())
 		textures.occlusion = load<VeTexture>("default_occlusion");
 	if (!textures.emissive.isValid())

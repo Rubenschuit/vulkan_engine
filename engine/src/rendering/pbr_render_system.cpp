@@ -274,7 +274,7 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		inst.material_flags = static_cast<uint32_t>(alpha.alpha_mode)
 			| (alpha.double_sided ? MaterialFlag::DOUBLE_SIDED : 0u)
 			| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? MaterialFlag::FLIP_TEX_V : 0u)
-			| (alpha.use_spec_gloss_texture ? MaterialFlag::SPEC_GLOSS : 0u);
+			| (alpha.use_spec_gloss ? MaterialFlag::SPEC_GLOSS : 0u);
 	}
 
 	// Build indirect draw commands directly into persistent vector.
@@ -380,7 +380,7 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		inst.material_flags = static_cast<uint32_t>(alpha.alpha_mode)
 			| (alpha.double_sided ? MaterialFlag::DOUBLE_SIDED : 0u)
 			| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? MaterialFlag::FLIP_TEX_V : 0u)
-			| (alpha.use_spec_gloss_texture ? MaterialFlag::SPEC_GLOSS : 0u);
+			| (alpha.use_spec_gloss ? MaterialFlag::SPEC_GLOSS : 0u);
 	}
 
 }
@@ -447,7 +447,7 @@ void PbrRenderSystem::prepareTransparents(VeFrameInfo& frame_info, MaterialSSBOM
 		inst.material_flags = static_cast<uint32_t>(alpha.alpha_mode)
 			| (alpha.double_sided ? MaterialFlag::DOUBLE_SIDED : 0u)
 			| (d.material_ptr && d.material_ptr->getFlipTexCoordV() ? MaterialFlag::FLIP_TEX_V : 0u)
-			| (alpha.use_spec_gloss_texture ? MaterialFlag::SPEC_GLOSS : 0u);
+			| (alpha.use_spec_gloss ? MaterialFlag::SPEC_GLOSS : 0u);
 	}
 }
 

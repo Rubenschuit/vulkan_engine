@@ -153,7 +153,7 @@ void MaterialSSBOManager::writeMaterialGPU(uint32_t index, VeMaterial* mat) {
 	uint32_t flags = static_cast<uint32_t>(alpha_props.alpha_mode)
 		| (alpha_props.double_sided ? MaterialFlag::DOUBLE_SIDED : 0u)
 		| (mat->getFlipTexCoordV() ? MaterialFlag::FLIP_TEX_V : 0u)
-		| (alpha_props.use_spec_gloss_texture ? MaterialFlag::SPEC_GLOSS : 0u)
+		| (alpha_props.use_spec_gloss ? MaterialFlag::SPEC_GLOSS : 0u)
 		| (has_texture ? MaterialFlag::HAS_TEXTURE : 0u)
 		| (alpha_props.unlit ? MaterialFlag::UNLIT : 0u)
 		| (has_specular_tex ? MaterialFlag::SPECULAR_TEX : 0u);

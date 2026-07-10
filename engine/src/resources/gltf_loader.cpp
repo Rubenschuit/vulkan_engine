@@ -1973,6 +1973,8 @@ static ParsedMaterial parseSingleMaterial(
 	}
 	// KHR_materials_pbrSpecularGlossiness
 	if (it_sg != mat.extensions.end()) {
+		result.alpha_props.use_spec_gloss = true;
+		factors.metallic_factor = 0.0f;
 		const tinygltf::Value& ext = it_sg->second;
 		if (ext.Has("diffuseFactor") && ext.Get("diffuseFactor").IsArray()) {
 			const auto& df = ext.Get("diffuseFactor");
@@ -2020,28 +2022,26 @@ static ParsedMaterial parseSingleMaterial(
 	}
 
 	// Resolve texture paths
-	if (mat.pbrMetallicRoughness.baseColorTexture.index >= 0) {
+	bool has_sg_diffuse = it_sg != mat.extensions.end()
+		&& it_sg->second.Has("diffuseTexture") && it_sg->second.Get("diffuseTexture").Has("index");
+	if (has_sg_diffuse) {
+		int tex_idx = it_sg->second.Get("diffuseTexture").Get("index").Get<int>();
+		result.albedo_path = resolveTexturePath(gltf, static_cast<size_t>(tex_idx), model_dir, model_path_str, embedded);
+	} else if (mat.pbrMetallicRoughness.baseColorTexture.index >= 0) {
 		result.albedo_path = resolveTexturePath(gltf,
 			static_cast<size_t>(mat.pbrMetallicRoughness.baseColorTexture.index), model_dir, model_path_str, embedded);
-	} else if (it_sg != mat.extensions.end()) {
-		const tinygltf::Value& ext = it_sg->second;
-		if (ext.Has("diffuseTexture") && ext.Get("diffuseTexture").Has("index")) {
-			int tex_idx = ext.Get("diffuseTexture").Get("index").Get<int>();
-			result.albedo_path = resolveTexturePath(gltf, static_cast<size_t>(tex_idx), model_dir, model_path_str, embedded);
-		}
 	}
 	if (mat.normalTexture.index >= 0)
 		result.normal_path = resolveTexturePath(gltf, static_cast<size_t>(mat.normalTexture.index), model_dir, model_path_str, embedded);
-	if (mat.pbrMetallicRoughness.metallicRoughnessTexture.index >= 0) {
-		result.metallic_roughness_path = resolveTexturePath(gltf,
-			static_cast<size_t>(mat.pbrMetallicRoughness.metallicRoughnessTexture.index), model_dir, model_path_str, embedded);
-	} else if (it_sg != mat.extensions.end()) {
+	if (it_sg != mat.extensions.end()) {
 		const tinygltf::Value& ext = it_sg->second;
 		if (ext.Has("specularGlossinessTexture") && ext.Get("specularGlossinessTexture").Has("index")) {
 			int tex_idx = ext.Get("specularGlossinessTexture").Get("index").Get<int>();
 			result.metallic_roughness_path = resolveTexturePath(gltf, static_cast<size_t>(tex_idx), model_dir, model_path_str, embedded);
-			result.alpha_props.use_spec_gloss_texture = true;
 		}
+	} else if (mat.pbrMetallicRoughness.metallicRoughnessTexture.index >= 0) {
+		result.metallic_roughness_path = resolveTexturePath(gltf,
+			static_cast<size_t>(mat.pbrMetallicRoughness.metallicRoughnessTexture.index), model_dir, model_path_str, embedded);
 	}
 	if (mat.occlusionTexture.index >= 0) {
 		result.occlusion_path = resolveTexturePath(gltf, static_cast<size_t>(mat.occlusionTexture.index), model_dir, model_path_str, embedded);
