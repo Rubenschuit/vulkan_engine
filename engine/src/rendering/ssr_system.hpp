@@ -41,9 +41,10 @@ public:
 	// compute-read layouts, before scene render.
 	void dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd);
 
-	// Copies the resolve target into the history image. Expects the resolve
-	// target in eShaderReadOnlyOptimal and returns both images there.
-	// Must be recorded on the graphics queue
+	// Copies the resolve target into the history image and rebuilds its mip
+	// chain.
+	// Expects the resolve target in eShaderReadOnlyOptimal and returns both images
+	// there. Must be recorded on the graphics queue
 	void recordHistoryCopy(vk::raii::CommandBuffer& command_buffer, vk::Image resolve_target);
 	void invalidateHistory() { m_history_valid = false; }
 	bool historyValid() const { return m_history_valid; }
@@ -58,6 +59,7 @@ public:
 private:
 	void createHistoryImage();
 	void createOutputImage();
+	void createResolvedImage();
 	void createDummyImage();
 	void createSetLayouts();
 	void createSampler();
@@ -78,20 +80,26 @@ private:
 
 	std::unique_ptr<VeImage> m_history_image;
 	std::unique_ptr<VeImage> m_output_image;
+	std::unique_ptr<VeImage> m_resolved_image;
 	std::unique_ptr<VeImage> m_dummy_image;
 	std::unique_ptr<SsrHizPyramid> m_hiz_pyramid;
 	bool m_history_valid = false;
 
 	vk::raii::Sampler m_linear_clamp_sampler{nullptr};
 
-	std::unique_ptr<VeDescriptorSetLayout> m_io_set_layout;      // trace inputs + output storage
-	std::unique_ptr<VeDescriptorSetLayout> m_output_set_layout;  // sampled + sampler
+	std::unique_ptr<VeDescriptorSetLayout> m_io_set_layout;       // trace inputs + output storage
+	std::unique_ptr<VeDescriptorSetLayout> m_resolve_set_layout;  // raw + depth + resolved storage
+	std::unique_ptr<VeDescriptorSetLayout> m_output_set_layout;   // sampled + sampler
 
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	vk::raii::Pipeline m_pipeline{nullptr};
 	vk::raii::ShaderModule m_shader_module{nullptr};
+	vk::raii::PipelineLayout m_resolve_pipeline_layout{nullptr};
+	vk::raii::Pipeline m_resolve_pipeline{nullptr};
+	vk::raii::ShaderModule m_resolve_shader_module{nullptr};
 
 	vk::raii::DescriptorSet m_io_descriptor_set{nullptr};
+	vk::raii::DescriptorSet m_resolve_descriptor_set{nullptr};
 	vk::raii::DescriptorSet m_output_descriptor_set{nullptr};
 	vk::raii::DescriptorSet m_dummy_output_descriptor_set{nullptr};
 

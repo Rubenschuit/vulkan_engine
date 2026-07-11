@@ -73,12 +73,13 @@ float cellExitS(float3 s0, float3 inv_d, float3 d, float2 p_xy, int level) {
 	return min(s2.x, s2.y);
 }
 
-// At or behind the full-res depth surface within the linear-Z thickness window
-bool validateHit(float3 p, float2 uv_to_pyr, out float2 hit_uv, out float scene_d) {
+bool slabHit(float3 p, float cell_max, float2 uv_to_pyr, out float2 hit_uv, out float scene_d) {
 	hit_uv = p.xy / uv_to_pyr;
-	scene_d = depth_texture.Load(int3(depthCoord(hit_uv), 0));
-	return scene_d > 0.0 && p.z <= scene_d
-		&& (linearViewZ(scene_d) - linearViewZ(p.z)) < push.thickness;
+	float texel_d = depth_texture.Load(int3(depthCoord(hit_uv), 0));
+	scene_d = cell_max;
+	if (abs(linearViewZ(texel_d) - linearViewZ(cell_max)) < push.thickness)
+		scene_d = texel_d;
+	return p.z <= cell_max && (linearViewZ(cell_max) - linearViewZ(p.z)) < push.thickness;
 }
 
 [numthreads(16, 16, 1)]
@@ -133,15 +134,16 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 		return;
 	}
 
-	// Clip s to the near plane remnant (ndc z <= 1) and the real content
-	// rect [0, uv_to_pyr]
+	// slangc 2026.1 miscompiles a ternary nested in the min() in the s_max
+	// assignments below, zeroing s_max for up-screen rays (killed all floor reflections)
 	float s_max = 1.0;
 	if (s1.z > 1.0)
 		s_max = min(s_max, (1.0 - s0.z) / d.z);
+	float2 rect_edge = step(float2(0.0, 0.0), d.xy) * uv_to_pyr;
 	if (abs(d.x) > 1e-6)
-		s_max = min(s_max, ((d.x > 0.0 ? uv_to_pyr.x : 0.0) - s0.x) / d.x);
+		s_max = min(s_max, (rect_edge.x - s0.x) / d.x);
 	if (abs(d.y) > 1e-6)
-		s_max = min(s_max, ((d.y > 0.0 ? uv_to_pyr.y : 0.0) - s0.y) / d.y);
+		s_max = min(s_max, (rect_edge.y - s0.y) / d.y);
 
 	// Sign-clamped reciprocals: a near-zero axis yields a huge exit s that
 	// min() never selects; inv_d.z is only read when d.z < 0 strictly
@@ -198,20 +200,24 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 			continue;
 		}
 
-		if (validateHit(p, uv_to_pyr, hit_uv, scene_d)) {
+		if (slabHit(p, zz.y, uv_to_pyr, hit_uv, scene_d)) {
 			hit = true;
 			break;
 		}
-		// Behind by more than thickness: step through and re-coarsen
+		// Outside the slab (in front, or behind by more than thickness):
+		// step through and re-coarsen
 		s = s_exit;
 		p = s0 + s * d;
 		level = min(level + 1, max_level);
 	}
 
 	// Iteration cap mid-descent: give the final position one validation
-	// chance so converging rays don't pop to a miss
-	if (!hit && i >= push.max_steps && s < s_max)
-		hit = validateHit(p, uv_to_pyr, hit_uv, scene_d);
+	// chance
+	if (!hit && i >= push.max_steps && s < s_max) {
+		float cap_max = hiz_pyramid.Load(int3(int2(p.xy), 0)).y;
+		if (cap_max > 0.0)
+			hit = slabHit(p, cap_max, uv_to_pyr, hit_uv, scene_d);
+	}
 
 #ifdef SSR_DEBUG_HEATMAP
 	{
@@ -239,13 +245,16 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 		ssr_out[id.xy] = float4(0, 0, 0, 0);
 		return;
 	}
-	float3 color = history_texture.SampleLevel(history_sampler, prev_uv, 0).rgb;
+	float hit_dist = distance(hit_world, world_pos);
+	float travel = distance(world_pos, ubo.camera_position.xyz) + hit_dist;
+	float footprint = travel / max(-linearViewZ(scene_d), 1e-3) * (push.depth_size.y / push.out_size.y);
+	float3 color = history_texture.SampleLevel(history_sampler, prev_uv, log2(max(footprint, 1.0))).rgb;
 
 	float2 border = saturate((0.5 - abs(hit_uv - 0.5)) / 0.1);
 	float edge_fade = border.x * border.y;
 	float2 prev_border = saturate((0.5 - abs(prev_uv - 0.5)) / 0.1);
 	float history_fade = prev_border.x * prev_border.y;
-	float dist_fade = 1.0 - saturate(distance(hit_world, world_pos) / push.max_distance);
+	float dist_fade = 1.0 - saturate(hit_dist / push.max_distance);
 	float rough_fade = 1.0 - smoothstep(push.max_roughness * 0.7, max(push.max_roughness, 1e-4), roughness);
 	float confidence = edge_fade * history_fade * dist_fade * rough_fade;
 
