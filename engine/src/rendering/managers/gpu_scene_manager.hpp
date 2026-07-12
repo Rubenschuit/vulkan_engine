@@ -179,6 +179,12 @@ private:
 
 	void buildObjectData(uint32_t gpu_id, ObjectDataGPU& out) const;
 	void stageObjectData(uint32_t frame);
+	void markObjectContentDirty(uint32_t gpu_id);
+
+	bool uploadDirtyTransforms(uint32_t frame, const Registry& registry, vk::raii::CommandBuffer& cmd);
+	bool restageAllObjects(uint32_t frame, vk::raii::CommandBuffer& cmd, bool& wrote_template);
+	bool uploadDirtyObjectData(uint32_t frame, vk::raii::CommandBuffer& cmd);
+	void recordUploadBarrier(vk::raii::CommandBuffer& cmd, bool wrote_template) const;
 
 	void rebuildDrawGroups();
 	void unsubscribeFromRegistry();
@@ -234,9 +240,19 @@ private:
 	// for this frame index was last updated
 	std::array<std::vector<uint32_t>, MAX_FRAMES_IN_FLIGHT> m_dirty_ids;
 	std::array<std::vector<bool>, MAX_FRAMES_IN_FLIGHT> m_id_in_dirty_set;
+	// Per-frame ObjectData content dirty queue: gpu_ids whose 96B ObjectDataGPU entry
+	// changed (skinned AABB refresh, active/dynamic flag) but whose draw-group membership
+	// did NOT.
+	std::array<std::vector<uint32_t>, MAX_FRAMES_IN_FLIGHT> m_obj_dirty_ids;
+	std::array<std::vector<bool>, MAX_FRAMES_IN_FLIGHT> m_obj_id_in_dirty_set;
 	std::array<bool, MAX_FRAMES_IN_FLIGHT> m_object_data_dirty{};
 	bool m_draw_groups_dirty = false;
 	bool m_dynamic_classification_changed = false;
+	
+	// Scratch reused across restages to avoid per-frame heap allocation.
+	std::vector<DrawGroupGPU> m_draw_group_scratch;
+	std::vector<VkDrawIndexedIndirectCommand> m_indirect_cmd_scratch;
+	std::vector<vk::BufferCopy> m_obj_copy_scratch;
 
 	// Pre-filtered list of entity indices that have transparent/blend materials.
 	// Updated on register/unregister/material-change; consumed by prepareTransparents.

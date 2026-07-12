@@ -88,6 +88,8 @@ GpuSceneManager::GpuSceneManager(VeDevice& device) : m_ve_device(device) {
 	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
 		m_id_in_dirty_set[f].assign(MAX_GPU_OBJECTS, false);
 		m_dirty_ids[f].reserve(1024);
+		m_obj_id_in_dirty_set[f].assign(MAX_GPU_OBJECTS, false);
+		m_obj_dirty_ids[f].reserve(1024);
 	}
 	m_object_lod_group_ids.resize(MAX_GPU_OBJECTS);
 	m_cpu_object_data.resize(MAX_GPU_OBJECTS);
@@ -299,6 +301,15 @@ void GpuSceneManager::markTransformDirty(Entity entity) {
 	}
 }
 
+void GpuSceneManager::markObjectContentDirty(uint32_t gpu_id) {
+	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
+		if (!m_obj_id_in_dirty_set[f][gpu_id]) {
+			m_obj_id_in_dirty_set[f][gpu_id] = true;
+			m_obj_dirty_ids[f].push_back(gpu_id);
+		}
+	}
+}
+
 void GpuSceneManager::markObjectDataDirty(Entity entity) {
 	auto it = m_entity_to_gpu_id.find(entity.index());
 	if (it == m_entity_to_gpu_id.end() || !m_mega_buffer || !m_mat_mgr || !m_registry)
@@ -345,7 +356,7 @@ void GpuSceneManager::setDynamic(Entity entity, bool is_dynamic) {
 			VE_LOGE("GpuSceneManager: dynamic count underflow on setDynamic(false) for gpu_id " << gpu_id);
 	}
 
-	m_object_data_dirty.fill(true);
+	markObjectContentDirty(gpu_id);
 	m_dynamic_classification_changed = true;
 }
 
@@ -361,14 +372,13 @@ void GpuSceneManager::setActive(Entity entity, bool active) {
 		obj_flags &= ~ObjectFlag::INACTIVE;
 	else
 		obj_flags |= ObjectFlag::INACTIVE;
-	m_object_data_dirty.fill(true);
+	markObjectContentDirty(it->second);
 }
 
 // Only skinned bounds change per frame. Morph-only meshes keep the
 // static conservative bound set at registration (does not account for weights
 // exceeding 1.0 for now).
 void GpuSceneManager::refreshSkinnedAabbs(Registry& registry) {
-	bool any = false;
 	auto write_aabb = [&](Entity entity, MeshComponent& mc) {
 		auto it = m_entity_to_gpu_id.find(entity.index());
 		if (it == m_entity_to_gpu_id.end())
@@ -380,145 +390,197 @@ void GpuSceneManager::refreshSkinnedAabbs(Registry& registry) {
 		auto& cpu = m_cpu_object_data[gpu_id];
 		cpu.aabb_min = local.min;
 		cpu.aabb_max = local.max;
-		any = true;
+		markObjectContentDirty(gpu_id);
 	};
 	for (auto [entity, mc, sc] : registry.view<MeshComponent, SkinComponent>())
 		write_aabb(entity, mc);
-	if (any)
-		m_object_data_dirty.fill(true);
 }
 
 void GpuSceneManager::updateDirtyTransforms(uint32_t current_frame, const Registry& registry,
                                              vk::raii::CommandBuffer& cmd) {
-	auto& dirty_ids = m_dirty_ids[current_frame];
-	auto& dirty_set = m_id_in_dirty_set[current_frame];
+	bool any_copy = uploadDirtyTransforms(current_frame, registry, cmd);
 
-	std::vector<vk::BufferCopy> copy_regions;
-	if (!dirty_ids.empty()) {
-		// Sort so consecutive gpu_ids coalesce into a single buffer copy.
-		std::sort(dirty_ids.begin(), dirty_ids.end());
-		copy_regions.reserve(dirty_ids.size());
-
-		for (size_t i = 0; i < dirty_ids.size(); i++) {
-			uint32_t gpu_id = dirty_ids[i];
-			dirty_set[gpu_id] = false;
-
-			auto entity_it = m_gpu_id_to_entity.find(gpu_id);
-			if (entity_it == m_gpu_id_to_entity.end())
-				continue;
-			Entity entity = entity_it->second;
-			if (!registry.isAlive(entity))
-				continue;
-
-			writeTransform(gpu_id, current_frame, registry, entity);
-
-			vk::DeviceSize offset = static_cast<vk::DeviceSize>(gpu_id) * sizeof(TransformGPU);
-			if (!copy_regions.empty()
-			    && copy_regions.back().srcOffset + copy_regions.back().size == offset) {
-				copy_regions.back().size += sizeof(TransformGPU);
-			} else {
-				copy_regions.push_back({offset, offset, sizeof(TransformGPU)});
-			}
-		}
-		dirty_ids.clear();
-	}
-	if (!copy_regions.empty()) {
-		cmd.copyBuffer(m_transform_staging[current_frame]->getBuffer(),
-		               m_transform_buffers[current_frame]->getBuffer(),
-		               copy_regions);
-	}
-
-	// Rebuild draw groups first (updates m_object_lod_group_ids),
-	// then materialise staging[current_frame] from CPU caches, then record
-	bool did_object_copy = false;
 	bool wrote_template = false;
-	if (m_object_data_dirty[current_frame]) {
-		if (m_draw_groups_dirty) {
-			rebuildDrawGroups();
-			m_draw_groups_dirty = false;
+	if (m_object_data_dirty[current_frame])
+		any_copy |= restageAllObjects(current_frame, cmd, wrote_template);
+	else
+		any_copy |= uploadDirtyObjectData(current_frame, cmd);
+
+	if (any_copy)
+		recordUploadBarrier(cmd, wrote_template);
+}
+
+// Coalesced per-object transform copies for gpu_ids queued via markTransformDirty.
+bool GpuSceneManager::uploadDirtyTransforms(uint32_t frame, const Registry& registry,
+                                             vk::raii::CommandBuffer& cmd) {
+	auto& dirty_ids = m_dirty_ids[frame];
+	auto& dirty_set = m_id_in_dirty_set[frame];
+	if (dirty_ids.empty())
+		return false;
+
+	// Sort so consecutive gpu_ids coalesce into a single buffer copy.
+	std::sort(dirty_ids.begin(), dirty_ids.end());
+	std::vector<vk::BufferCopy> copy_regions;
+	copy_regions.reserve(dirty_ids.size());
+
+	for (uint32_t gpu_id : dirty_ids) {
+		dirty_set[gpu_id] = false;
+
+		auto entity_it = m_gpu_id_to_entity.find(gpu_id);
+		if (entity_it == m_gpu_id_to_entity.end())
+			continue;
+		Entity entity = entity_it->second;
+		if (!registry.isAlive(entity))
+			continue;
+
+		writeTransform(gpu_id, frame, registry, entity);
+
+		vk::DeviceSize offset = static_cast<vk::DeviceSize>(gpu_id) * sizeof(TransformGPU);
+		if (!copy_regions.empty()
+		    && copy_regions.back().srcOffset + copy_regions.back().size == offset) {
+			copy_regions.back().size += sizeof(TransformGPU);
+		} else {
+			copy_regions.push_back({offset, offset, sizeof(TransformGPU)});
 		}
+	}
+	dirty_ids.clear();
 
-		stageObjectData(current_frame);
+	if (copy_regions.empty())
+		return false;
+	cmd.copyBuffer(m_transform_staging[frame]->getBuffer(),
+	               m_transform_buffers[frame]->getBuffer(),
+	               copy_regions);
+	return true;
+}
 
-		vk::DeviceSize size = static_cast<vk::DeviceSize>(m_next_id) * sizeof(ObjectDataGPU);
-		if (size > 0) {
-			cmd.copyBuffer(m_object_data_staging[current_frame]->getBuffer(),
-			               m_object_data_buffers[current_frame]->getBuffer(),
-			               vk::BufferCopy{0, 0, size});
-			did_object_copy = true;
-		}
-
-		vk::DeviceSize moi_size = static_cast<vk::DeviceSize>(m_next_id) * sizeof(MeshletObjectInfo);
-		if (moi_size > 0) {
-			cmd.copyBuffer(m_meshlet_object_info_staging[current_frame]->getBuffer(),
-			               m_meshlet_object_info_buffers[current_frame]->getBuffer(),
-			               vk::BufferCopy{0, 0, moi_size});
-		}
-
-		if (!m_active_ids.empty()) {
-			vk::DeviceSize id_size = static_cast<vk::DeviceSize>(m_active_ids.size()) * sizeof(ActiveIdEntry);
-			m_active_id_staging[current_frame]->writeToBuffer(
-				m_active_ids.data(), id_size, 0);
-			vk::BufferCopy id_copy{0, 0, id_size};
-			cmd.copyBuffer(m_active_id_staging[current_frame]->getBuffer(),
-			               m_active_id_buffers[current_frame]->getBuffer(),
-			               id_copy);
-			did_object_copy = true;
-		}
-
-		if (m_total_groups > 0) {
-			std::vector<DrawGroupGPU> gpu_groups(m_total_groups);
-			for (uint32_t g = 0; g < m_total_groups; g++) {
-				gpu_groups[g].instance_base = m_draw_groups[g].instance_base;
-				gpu_groups[g].max_instances = m_draw_groups[g].max_instances;
-			}
-			vk::DeviceSize group_size = static_cast<vk::DeviceSize>(m_total_groups) * sizeof(DrawGroupGPU);
-			m_draw_group_staging[current_frame]->writeToBuffer(
-				gpu_groups.data(), group_size, 0);
-			vk::BufferCopy group_copy{0, 0, group_size};
-			cmd.copyBuffer(m_draw_group_staging[current_frame]->getBuffer(),
-			               m_draw_group_buffers[current_frame]->getBuffer(),
-			               group_copy);
-
-			// Pre-filled indirect commands. vertexOffset is left zero: the cull shader
-			// writes the correct value.
-			std::vector<VkDrawIndexedIndirectCommand> cmds(m_total_groups);
-			for (uint32_t g = 0; g < m_total_groups; g++) {
-				cmds[g].indexCount = m_draw_groups[g].index_count;
-				cmds[g].instanceCount = 0;
-				cmds[g].firstIndex = m_draw_groups[g].first_index;
-				cmds[g].vertexOffset = 0;
-				cmds[g].firstInstance = m_draw_groups[g].instance_base;
-			}
-			vk::DeviceSize cmd_size = static_cast<vk::DeviceSize>(m_total_groups) * sizeof(VkDrawIndexedIndirectCommand);
-			m_indirect_staging[current_frame]->writeToBuffer(
-				cmds.data(), cmd_size, 0);
-			cmd.copyBuffer(m_indirect_staging[current_frame]->getBuffer(),
-			               m_indirect_template[current_frame]->getBuffer(),
-			               vk::BufferCopy{0, 0, cmd_size});
-			did_object_copy = true;
-			wrote_template = true;
-		}
-
-		m_object_data_dirty[current_frame] = false;
+// Full restage: the object set or draw-group membership changed, so ObjectData,
+// MeshletObjectInfo, ActiveId, DrawGroup and the indirect template are all rebuilt
+// and re-uploaded for this frame. Rebuilds draw groups first (updates
+// m_object_lod_group_ids), then materialises staging from the CPU caches.
+bool GpuSceneManager::restageAllObjects(uint32_t frame, vk::raii::CommandBuffer& cmd,
+                                         bool& wrote_template) {
+	bool did_copy = false;
+	if (m_draw_groups_dirty) {
+		rebuildDrawGroups();
+		m_draw_groups_dirty = false;
 	}
 
-	if (!copy_regions.empty() || did_object_copy) {
-		auto dst_stage = wrote_template
-			? (vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eTransfer)
-			: vk::PipelineStageFlags2(vk::PipelineStageFlagBits2::eComputeShader);
-		auto dst_access = wrote_template
-			? (vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eTransferRead)
-			: vk::AccessFlags2(vk::AccessFlagBits2::eShaderStorageRead);
-		vk::MemoryBarrier2 barrier{
-			.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-			.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-			.dstStageMask = dst_stage,
-			.dstAccessMask = dst_access,
-		};
-		vk::DependencyInfo dep{.memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
-		cmd.pipelineBarrier2(dep);
+	stageObjectData(frame);
+
+	vk::DeviceSize size = static_cast<vk::DeviceSize>(m_next_id) * sizeof(ObjectDataGPU);
+	if (size > 0) {
+		cmd.copyBuffer(m_object_data_staging[frame]->getBuffer(),
+		               m_object_data_buffers[frame]->getBuffer(),
+		               vk::BufferCopy{0, 0, size});
+		did_copy = true;
 	}
+
+	vk::DeviceSize moi_size = static_cast<vk::DeviceSize>(m_next_id) * sizeof(MeshletObjectInfo);
+	if (moi_size > 0) {
+		cmd.copyBuffer(m_meshlet_object_info_staging[frame]->getBuffer(),
+		               m_meshlet_object_info_buffers[frame]->getBuffer(),
+		               vk::BufferCopy{0, 0, moi_size});
+	}
+
+	if (!m_active_ids.empty()) {
+		vk::DeviceSize id_size = static_cast<vk::DeviceSize>(m_active_ids.size()) * sizeof(ActiveIdEntry);
+		m_active_id_staging[frame]->writeToBuffer(m_active_ids.data(), id_size, 0);
+		cmd.copyBuffer(m_active_id_staging[frame]->getBuffer(),
+		               m_active_id_buffers[frame]->getBuffer(),
+		               vk::BufferCopy{0, 0, id_size});
+		did_copy = true;
+	}
+
+	if (m_total_groups > 0) {
+		m_draw_group_scratch.resize(m_total_groups);
+		for (uint32_t g = 0; g < m_total_groups; g++) {
+			m_draw_group_scratch[g].instance_base = m_draw_groups[g].instance_base;
+			m_draw_group_scratch[g].max_instances = m_draw_groups[g].max_instances;
+		}
+		vk::DeviceSize group_size = static_cast<vk::DeviceSize>(m_total_groups) * sizeof(DrawGroupGPU);
+		m_draw_group_staging[frame]->writeToBuffer(m_draw_group_scratch.data(), group_size, 0);
+		cmd.copyBuffer(m_draw_group_staging[frame]->getBuffer(),
+		               m_draw_group_buffers[frame]->getBuffer(),
+		               vk::BufferCopy{0, 0, group_size});
+
+		// Pre-filled indirect commands. vertexOffset is left zero: the cull shader
+		// writes the correct value.
+		m_indirect_cmd_scratch.resize(m_total_groups);
+		for (uint32_t g = 0; g < m_total_groups; g++) {
+			m_indirect_cmd_scratch[g].indexCount = m_draw_groups[g].index_count;
+			m_indirect_cmd_scratch[g].instanceCount = 0;
+			m_indirect_cmd_scratch[g].firstIndex = m_draw_groups[g].first_index;
+			m_indirect_cmd_scratch[g].vertexOffset = 0;
+			m_indirect_cmd_scratch[g].firstInstance = m_draw_groups[g].instance_base;
+		}
+		vk::DeviceSize cmd_size = static_cast<vk::DeviceSize>(m_total_groups) * sizeof(VkDrawIndexedIndirectCommand);
+		m_indirect_staging[frame]->writeToBuffer(m_indirect_cmd_scratch.data(), cmd_size, 0);
+		cmd.copyBuffer(m_indirect_staging[frame]->getBuffer(),
+		               m_indirect_template[frame]->getBuffer(),
+		               vk::BufferCopy{0, 0, cmd_size});
+		did_copy = true;
+		wrote_template = true;
+	}
+
+	m_object_data_dirty[frame] = false;
+	// A full restage rewrote every object; drop any pending per-object content copies.
+	for (uint32_t gpu_id : m_obj_dirty_ids[frame])
+		m_obj_id_in_dirty_set[frame][gpu_id] = false;
+	m_obj_dirty_ids[frame].clear();
+	return did_copy;
+}
+
+// Content-only path: some objects' 96B ObjectDataGPU changed (skinned AABB,
+// active/dynamic flag) but draw-group membership did not, so MeshletObjectInfo,
+// ActiveId, DrawGroup and the indirect template are all still valid. Rebuilds only
+// the dirty entries and copies coalesced 96B ranges instead of the whole array.
+bool GpuSceneManager::uploadDirtyObjectData(uint32_t frame, vk::raii::CommandBuffer& cmd) {
+	auto& ids = m_obj_dirty_ids[frame];
+	auto& in_set = m_obj_id_in_dirty_set[frame];
+	if (ids.empty())
+		return false;
+
+	// Sort so consecutive gpu_ids coalesce into a single buffer copy.
+	std::sort(ids.begin(), ids.end());
+	auto* obj_staging = static_cast<ObjectDataGPU*>(
+		m_object_data_staging[frame]->getMappedMemory());
+	m_obj_copy_scratch.clear();
+	for (uint32_t gpu_id : ids) {
+		in_set[gpu_id] = false;
+		buildObjectData(gpu_id, obj_staging[gpu_id]);
+		vk::DeviceSize offset = static_cast<vk::DeviceSize>(gpu_id) * sizeof(ObjectDataGPU);
+		if (!m_obj_copy_scratch.empty()
+		    && m_obj_copy_scratch.back().srcOffset + m_obj_copy_scratch.back().size == offset)
+			m_obj_copy_scratch.back().size += sizeof(ObjectDataGPU);
+		else
+			m_obj_copy_scratch.push_back({offset, offset, sizeof(ObjectDataGPU)});
+	}
+	ids.clear();
+
+	if (m_obj_copy_scratch.empty())
+		return false;
+	cmd.copyBuffer(m_object_data_staging[frame]->getBuffer(),
+	               m_object_data_buffers[frame]->getBuffer(),
+	               m_obj_copy_scratch);
+	return true;
+}
+
+
+void GpuSceneManager::recordUploadBarrier(vk::raii::CommandBuffer& cmd, bool wrote_template) const {
+	auto dst_stage = wrote_template
+		? (vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eTransfer)
+		: vk::PipelineStageFlags2(vk::PipelineStageFlagBits2::eComputeShader);
+	auto dst_access = wrote_template
+		? (vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eTransferRead)
+		: vk::AccessFlags2(vk::AccessFlagBits2::eShaderStorageRead);
+	vk::MemoryBarrier2 barrier{
+		.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+		.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+		.dstStageMask = dst_stage,
+		.dstAccessMask = dst_access,
+	};
+	vk::DependencyInfo dep{.memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
+	cmd.pipelineBarrier2(dep);
 }
 
 void GpuSceneManager::registerAllObjects(Registry& registry, const PbrMegaBuffer& mega_buffer,
@@ -595,6 +657,8 @@ void GpuSceneManager::reset() {
 	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
 		m_dirty_ids[f].clear();
 		std::fill(m_id_in_dirty_set[f].begin(), m_id_in_dirty_set[f].end(), false);
+		m_obj_dirty_ids[f].clear();
+		std::fill(m_obj_id_in_dirty_set[f].begin(), m_obj_id_in_dirty_set[f].end(), false);
 	}
 	for (auto& arr : m_object_lod_group_ids)
 		arr.fill(0);

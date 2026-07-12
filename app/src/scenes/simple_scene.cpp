@@ -22,7 +22,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 		const float width = 14.0f, height = 7.0f;
 
 		// Area light
-		Entity al = m_registry.createAreaLight(25.0f, color, width, height);
+		Entity al = m_registry.createAreaLight(10.0f, color, width, height);
 		m_registry.setName(al, "Area Light");
 		m_registry.getComponent<TransformComponent>(al)->setTranslation({0.0f, -70.0f, 9.0f});
 		m_registry.getComponent<AreaLightComponent>(al)->setTwoSided(false);
@@ -53,7 +53,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 
 	// Create some point lights with ranging colors
 	constexpr uint32_t num_lights = 10;
-	constexpr float intensity = 300.0f;
+	constexpr float intensity = 70.0f;
 	constexpr float radius = 1.0f;
 	const glm::vec3 colors[10] = {
 		{0.0f, 1.0f, 1.0f}, //cyan
