@@ -500,12 +500,19 @@ void VeRenderer::beginWboitRender(vk::raii::CommandBuffer& command_buffer) {
 	beginDebugLabel(command_buffer, "WBOIT Geometry", {0.8f, 0.6f, 0.2f, 1.0f});
 	auto extent = getExtent();
 
-	// Transition resolved depth to read-only, WBOIT images to color attachment
+	// Transition resolved depth to read-only, WBOIT images to color attachment.
+	// The depth producer is the MSAA resolve (COLOR_ATTACHMENT_OUTPUT / write) only
+	// when MSAA is active; otherwise it is a depth-stencil write.
+	const bool msaa_depth = m_ve_swap_chain->hasResolvedDepth();
+	const vk::PipelineStageFlags2 resolve_stage = msaa_depth
+		? vk::PipelineStageFlagBits2::eColorAttachmentOutput : vk::PipelineStageFlags2{};
+	const vk::AccessFlags2 resolve_access = msaa_depth
+		? vk::AccessFlagBits2::eColorAttachmentWrite : vk::AccessFlags2{};
 	vk::ImageMemoryBarrier2 depth_barrier{
 		.srcStageMask = vk::PipelineStageFlagBits2::eLateFragmentTests
-			| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+			| resolve_stage,
 		.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
-			| vk::AccessFlagBits2::eColorAttachmentWrite,
+			| resolve_access,
 		.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests,
 		.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead,
 		.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,

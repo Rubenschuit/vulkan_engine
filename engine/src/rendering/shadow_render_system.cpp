@@ -1034,8 +1034,10 @@ void ShadowRenderSystem::renderShadowMaps(VeFrameInfo& frame_info, PbrMegaBuffer
 
 	// Point/spot light instance groups: all drawables combined, no frustum cull
 	m_shadow_instance_groups.clear();
-	populateInstanceGroups(m_static_shadow_drawables, m_shadow_instance_groups, nullptr);
-	populateInstanceGroups(m_dynamic_shadow_drawables, m_shadow_instance_groups, nullptr);
+	if (light_views.size() > csm_count) {
+		populateInstanceGroups(m_static_shadow_drawables, m_shadow_instance_groups, nullptr);
+		populateInstanceGroups(m_dynamic_shadow_drawables, m_shadow_instance_groups, nullptr);
+	}
 	}
 
 	// Skinned shadow casters: write one shadow instance slot per entity. Cull

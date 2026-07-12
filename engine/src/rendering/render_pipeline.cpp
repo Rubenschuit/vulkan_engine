@@ -790,13 +790,20 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 	}
 
 	if (any_depth_consumer) {
+		// The depth producer is the MSAA resolve (COLOR_ATTACHMENT_OUTPUT / write)
+		// only when MSAA is active; otherwise it is a depth-stencil write.
+		const bool msaa_depth = m_ve_renderer.hasResolvedDepth();
+		const vk::PipelineStageFlags2 resolve_stage = msaa_depth
+			? vk::PipelineStageFlagBits2::eColorAttachmentOutput : vk::PipelineStageFlags2{};
+		const vk::AccessFlags2 resolve_access = msaa_depth
+			? vk::AccessFlagBits2::eColorAttachmentWrite : vk::AccessFlags2{};
 		std::array<vk::ImageMemoryBarrier2, 2> to_read = {
 			vk::ImageMemoryBarrier2{
 				.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
 					| vk::PipelineStageFlagBits2::eLateFragmentTests
-					| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+					| resolve_stage,
 				.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite
-					| vk::AccessFlagBits2::eColorAttachmentWrite,
+					| resolve_access,
 				.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 				.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
 				.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal,
@@ -1071,16 +1078,23 @@ void RenderPipeline::recordSsrTrace(VeFrameInfo& fi, vk::raii::CommandBuffer& cm
 }
 
 void RenderPipeline::recordDepthConsumerToAttachBarriers(vk::raii::CommandBuffer& cmd) {
+	// The upcoming depth write is an MSAA resolve (COLOR_ATTACHMENT_OUTPUT / write)
+	// only when MSAA is active; otherwise it is a plain depth-stencil write.
+	const bool msaa_depth = m_ve_renderer.hasResolvedDepth();
+	const vk::PipelineStageFlags2 resolve_stage = msaa_depth
+		? vk::PipelineStageFlagBits2::eColorAttachmentOutput : vk::PipelineStageFlags2{};
+	const vk::AccessFlags2 resolve_access = msaa_depth
+		? vk::AccessFlagBits2::eColorAttachmentWrite : vk::AccessFlags2{};
 	std::array<vk::ImageMemoryBarrier2, 2> to_attach = {
 		vk::ImageMemoryBarrier2{
 			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 			.srcAccessMask = vk::AccessFlagBits2::eShaderRead,
 			.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests
 				| vk::PipelineStageFlagBits2::eLateFragmentTests
-				| vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+				| resolve_stage,
 			.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead
 				| vk::AccessFlagBits2::eDepthStencilAttachmentWrite
-				| vk::AccessFlagBits2::eColorAttachmentWrite,
+				| resolve_access,
 			.oldLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
 			.newLayout = vk::ImageLayout::eDepthAttachmentOptimal,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,

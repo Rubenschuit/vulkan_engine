@@ -193,12 +193,11 @@ void SsrHizPyramid::createDescriptorSet(VeDescriptorPool& pool) {
 }
 
 void SsrHizPyramid::generate(vk::raii::CommandBuffer& cmd) {
-	// All mips to eGeneral for storage writes. The sampled-read src access
-	// chains against the previous frame's trace reads of the single image.
+	// All mips to eGeneral for storage writes. This is a write-after-read
+	// against the previous frame's trace
 	vk::ImageMemoryBarrier2 to_general{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite
-			| vk::AccessFlagBits2::eShaderSampledRead,
+		.srcAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
 		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite
 			| vk::AccessFlagBits2::eShaderStorageRead,

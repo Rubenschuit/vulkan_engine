@@ -103,9 +103,10 @@ public:
 	vk::Image getResolveTargetImage() const { return m_ve_swap_chain->getResolveTargetImage(); }
 	const vk::raii::ImageView& getDepthImageView() const { return m_ve_swap_chain->getDepthImageView(); }
 	vk::Image getDepthImage() const { return m_ve_swap_chain->getDepthImage(); }
-	/// Single-sample depth: resolved from MSAA prepass when MSAA active, otherwise same as depth
+	// Single-sample depth: resolved from MSAA prepass when MSAA active, otherwise same as depth
 	const vk::raii::ImageView& getResolvedDepthImageView() const { return m_ve_swap_chain->getResolvedDepthImageView(); }
 	vk::Image getResolvedDepthImage() const { return m_ve_swap_chain->getResolvedDepthImage(); }
+	bool hasResolvedDepth() const { return m_ve_swap_chain->hasResolvedDepth(); }
 	const vk::raii::ImageView& getResolvedNormalRoughnessImageView() const { return m_ve_swap_chain->getResolvedNormalRoughnessImageView(); }
 	vk::Image getResolvedNormalRoughnessImage() const { return m_ve_swap_chain->getResolvedNormalRoughnessImage(); }
 	const vk::raii::ImageView& getWboitAccumImageView() const { return m_wboit_accum->getImageView(); }

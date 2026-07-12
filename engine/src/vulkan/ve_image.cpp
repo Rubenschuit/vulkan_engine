@@ -71,6 +71,9 @@ void VeImage::createImage() {
 		.usage = VMA_MEMORY_USAGE_AUTO,
 	};
 
+	if (m_usage & vk::ImageUsageFlagBits::eTransientAttachment)
+		alloc_info.preferredFlags = VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT;
+
 	VkImage vk_image;
 	if (vmaCreateImage(m_ve_device.getAllocator(), &image_info, &alloc_info,
 	                   &vk_image, &m_allocation, nullptr) != VK_SUCCESS)
