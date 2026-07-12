@@ -178,7 +178,7 @@ SamplerState shadow_sampler;  // Regular sampler for raw depth reads (PCSS block
 // ============================================================================
 
 [vk::binding(0, 3)]
-Texture2D<float> shadow_mask;
+Texture2D<float2> shadow_mask;   // .x = CSM visibility, .y = view-space depth (for bilateral upsample)
 [vk::binding(1, 3)]
 SamplerState shadow_mask_sampler;
 
@@ -238,6 +238,8 @@ SamplerState ssr_sampler;
 // identity (offset 0, scale 1, rot 0) is a no-op.
 float2 applyUvTransform(float2 uv, float4 off_scale, float rot) {
 	float2 t = uv * off_scale.zw;
+	if (rot == 0.0)
+		return t + off_scale.xy;
 	float s = sin(rot), c = cos(rot);
 	return float2(c * t.x - s * t.y, s * t.x + c * t.y) + off_scale.xy;
 }

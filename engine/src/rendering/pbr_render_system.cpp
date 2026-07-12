@@ -491,7 +491,6 @@ void PbrRenderSystem::renderOpaqueGpuCulled(
 
 	m_mega_buffer.bind(cmd);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
-	cmd.setDepthWriteEnable(VK_TRUE);
 
 	for (uint32_t bucket = 0; bucket < BUCKET_COUNT; bucket++) {
 		if (bucket_group_counts[bucket] == 0)
@@ -499,6 +498,7 @@ void PbrRenderSystem::renderOpaqueGpuCulled(
 		bool is_mask = (bucket >= 2);
 		bool is_double_sided = (bucket & 1);
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
+		cmd.setDepthWriteEnable((m_geometry_prepass_active && !is_mask) ? VK_FALSE : VK_TRUE);
 		cmd.setDepthCompareOp(
 			(m_geometry_prepass_active || is_mask) ? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
 		auto offset = static_cast<vk::DeviceSize>(bucket_group_offsets[bucket]) * sizeof(VkDrawIndexedIndirectCommand);
@@ -552,13 +552,13 @@ void PbrRenderSystem::renderOpaqueGpuCulledMeshlets(
 
 	m_mega_buffer.bindMeshletIbo(cmd);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
-	cmd.setDepthWriteEnable(VK_TRUE);
 
 	constexpr uint32_t OPAQUE_MASK_BUCKETS = 4; // buckets 0..3 only; transparent buckets 4-5 handled by WBOIT
 	for (uint32_t bucket = 0; bucket < OPAQUE_MASK_BUCKETS; bucket++) {
 		bool is_mask_bucket  = (bucket >= 2);
 		bool is_double_sided = (bucket & 1) != 0;
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
+		cmd.setDepthWriteEnable((m_geometry_prepass_active && !is_mask_bucket) ? VK_FALSE : VK_TRUE);
 		cmd.setDepthCompareOp(
 			(m_geometry_prepass_active || is_mask_bucket)
 				? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
@@ -611,13 +611,13 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info, const vk::raii::Desc
 
 	m_mega_buffer.bind(cmd);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
-	cmd.setDepthWriteEnable(VK_TRUE);
 
 	for (uint32_t bucket = 0; bucket < BUCKET_COUNT; bucket++) {
 		if (m_bucket_counts[bucket] == 0) continue;
 		bool is_mask = (bucket >= 2);
 		bool is_double_sided = (bucket & 1);
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
+		cmd.setDepthWriteEnable((m_geometry_prepass_active && !is_mask) ? VK_FALSE : VK_TRUE);
 		cmd.setDepthCompareOp(
 			(m_geometry_prepass_active || is_mask) ? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
 		cmd.drawIndexedIndirect(

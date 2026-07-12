@@ -47,7 +47,7 @@ struct VENGINE_API RenderSettings {
 	// passes
 	bool geometry_prepass_enabled = true;
 	bool shadow_mask_enabled = true;
-	bool shadow_mask_half_res = false;
+	bool shadow_mask_half_res = true;
 	bool gtao_enabled = true;
 	bool gtao_half_res = true;
 	float gtao_radius = 0.25f;

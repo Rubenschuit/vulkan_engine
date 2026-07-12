@@ -68,7 +68,7 @@ void ShadowMaskSystem::createShadowMaskImage(vk::Extent2D extent) {
 		extent.width,
 		extent.height,
 		vk::SampleCountFlagBits::e1,
-		vk::Format::eR8Unorm,
+		vk::Format::eR16G16Sfloat,  // .r = visibility, .g = view-space depth (bilateral upsample)
 		vk::ImageTiling::eOptimal,
 		vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,

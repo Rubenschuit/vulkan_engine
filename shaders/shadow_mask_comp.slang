@@ -9,7 +9,7 @@
 [vk::binding(0, 1)]
 Texture2D<float> depth_texture;      // depth buffer (single-sample resolved)
 [vk::binding(1, 1)]
-RWTexture2D<float> shadow_mask_out;  // R8 output
+RWTexture2D<float2> shadow_mask_out;  // .x = CSM visibility, .y = view-space depth (RG16F, for bilateral upsample)
 [vk::binding(2, 1)]
 Texture2D<float4> normal_roughness_texture;  // geometry prepass G-buffer
 
@@ -39,7 +39,7 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 
 	// Sky / far plane: fully lit
 	if (depth <= 0.0) {
-		shadow_mask_out[id.xy] = 1.0;
+		shadow_mask_out[id.xy] = float2(1.0, 60000.0); 
 		return;
 	}
 
@@ -55,5 +55,6 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	// Evaluate CSM shadow
 	uint cascade_unused;
 	float blend_unused;
-	shadow_mask_out[id.xy] = calculateCSMShadow(world_pos, view_z, world_normal, cascade_unused, blend_unused);
+	float visibility = calculateCSMShadow(world_pos, view_z, world_normal, cascade_unused, blend_unused);
+	shadow_mask_out[id.xy] = float2(visibility, view_z);
 }

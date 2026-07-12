@@ -136,6 +136,41 @@ float geometrySmith(float NdotV, float NdotL, float roughness) {
 	return ggx1 * ggx2;
 }
 
+// Depth-aware bilinear upsample of the (possibly half-res) screen-space shadow mask.
+// The mask stores (visibility, view-space depth); weighting the 4 nearest texels by both
+// bilinear position AND view-depth similarity stops lit background texels from bleeding
+// onto shadowed foreground pixels.
+float upsampleShadowMask(float2 uv, float frag_view_z) {
+	uint mw, mh;
+	shadow_mask.GetDimensions(mw, mh);
+	// Full-res mask maps 1:1 to pixels: a single tap is exact
+	if (float(mw) > ubo.screen_size.x * 0.75)
+		return shadow_mask.Load(int3(int2(uv * float2(mw, mh)), 0)).x;
+
+	float2 coord = uv * float2(mw, mh) - 0.5;
+	int2 ibase = int2(floor(coord));
+	float2 f = coord - float2(ibase);
+	int2 maxc = int2(mw - 1, mh - 1);
+
+	float sum = 0.0;
+	float wsum = 0.0;
+	[unroll]
+	for (int dy = 0; dy < 2; dy++) {
+		[unroll]
+		for (int dx = 0; dx < 2; dx++) {
+			int2 tc = clamp(ibase + int2(dx, dy), int2(0, 0), maxc);
+			float2 tap = shadow_mask.Load(int3(tc, 0));
+			float bw = (dx == 0 ? 1.0 - f.x : f.x) * (dy == 0 ? 1.0 - f.y : f.y);
+			float rel = abs(tap.y - frag_view_z) / max(frag_view_z, 1e-3);
+			float zw = 1.0 / (1.0 + rel * rel * 2000.0);
+			float w = bw * zw + 1e-4;
+			sum += tap.x * w;
+			wsum += w;
+		}
+	}
+	return sum / wsum;
+}
+
 // ============================================================================
 // PBR Lighting Computation
 // Returns the fully-lit fragment color (rgb = HDR color, a = alpha).
@@ -255,7 +290,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		bool use_mask = SHADOW_MASK_SPEC != 0 && alpha_mode != 1;
 		if (use_mask) {
 			float2 mask_uv = in_vert.pos.xy / ubo.screen_size;
-			csm_shadow = shadow_mask.SampleLevel(shadow_mask_sampler, mask_uv, 0);
+			csm_shadow = upsampleShadowMask(mask_uv, frag_view_z);
 			if (DEBUG_SHADING_SPEC != 0 && ubo.render_mode == RenderMode::CSM_CASCADE)
 				calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, N, csm_cascade_idx, csm_blend_t);
 		} else {
