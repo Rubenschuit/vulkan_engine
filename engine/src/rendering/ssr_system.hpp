@@ -76,7 +76,7 @@ private:
 	int m_max_steps = 48;
 	float m_thickness = 0.3f;
 	float m_max_roughness = 0.85f;
-	float m_max_distance = 25.0f;
+	float m_max_distance = 55.0f;
 
 	std::unique_ptr<VeImage> m_history_image;
 	std::unique_ptr<VeImage> m_output_image;

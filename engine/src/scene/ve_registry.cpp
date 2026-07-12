@@ -433,6 +433,9 @@ void Registry::invalidateWorldTransform(Entity e) {
 		return;
 	uint32_t idx = e.index();
 	auto& cache = m_world_cache[idx];
+	// Fully dirty means the whole subtree is already dirty 
+	if (cache.transform_dirty && cache.normal_dirty)
+		return;
 	cache.transform_dirty = true;
 	cache.normal_dirty = true;
 

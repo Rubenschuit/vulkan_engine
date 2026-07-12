@@ -91,8 +91,6 @@ void TransformComponent::updateTransform() const {
 	m_cached_normal_transform = R3 * S3;
 
 	m_transform_dirty = false;
-	if (m_registry)
-		m_registry->invalidateWorldTransform(m_entity);
 }
 
 

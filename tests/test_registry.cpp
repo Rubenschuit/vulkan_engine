@@ -487,11 +487,8 @@ TEST_CASE("Registry world transform invalidation cascades to children", "[ecs][r
 	const glm::mat4& initial = reg.getWorldTransform(child);
 	REQUIRE(std::abs(initial[3][0] - 1.0f) < 1e-5f);
 
-	// Move parent
+	// Move parent; the setter invalidates the world-transform cache through the registry
 	reg.getComponent<ve::TransformComponent>(parent)->setTranslation({5.0f, 0.0f, 0.0f});
-	// Since TransformComponent::updateTransform() doesn't call into Registry (m_owner is null),
-	// we must manually invalidate. In Phase 2, the callback will handle this automatically.
-	reg.invalidateWorldTransform(parent);
 
 	const glm::mat4& updated = reg.getWorldTransform(child);
 	REQUIRE(std::abs(updated[3][0] - 5.0f) < 1e-5f);

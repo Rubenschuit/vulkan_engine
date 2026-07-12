@@ -57,7 +57,7 @@ struct VENGINE_API RenderSettings {
 	int ssr_max_steps = 48;
 	float ssr_thickness = 0.3f;
 	float ssr_max_roughness = 0.85f;
-	float ssr_max_distance = 25.0f;
+	float ssr_max_distance = 55.0f;
 
 	// culling
 	bool enable_frustum_culling = true;

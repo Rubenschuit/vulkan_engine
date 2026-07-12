@@ -140,7 +140,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 
 			Entity quad_entity = m_registry.createEntity("tex_quad");
 			auto& tc = m_registry.addComponent<TransformComponent>(quad_entity);
-			tc.setTranslation({0.0f, 60.0f, 40.0f});
+			tc.setTranslation({0.0f, 70.0f, 20.0f});
 			tc.setScale({18.0f, 18.0f, 18.0f});
 			auto& mc = m_registry.addComponent<MeshComponent>(quad_entity, quad_mesh, mat_handle);
 			mc.has_texture = 1.0f;
@@ -151,8 +151,9 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 			Entity sl = m_registry.createSpotLight(2000.0f, 15.0f, glm::vec3(1.0f), light_dir, glm::radians(20.0f), glm::radians(30.0f));
 			m_registry.setName(sl, "Quad Spot Light");
 			auto* sl_tc = m_registry.getComponent<TransformComponent>(sl);
-			sl_tc->setTranslation(glm::vec3(0.0f, 38.0f, 12.0f));
+			sl_tc->setTranslation(glm::vec3(0.0f, -0.76f, -0.93f));
 			sl_tc->setScale(glm::vec3(1.0f));
+			m_registry.setParent(sl, quad_entity);
 		}
 
 	}
