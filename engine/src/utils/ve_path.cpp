@@ -31,7 +31,7 @@ std::filesystem::path getProjectRoot(char** argv) {
 	if (len > 0 && len < buf.size()) {
 		exe_path = std::filesystem::path(std::wstring(buf.data(), len));
 		path_found = true;
-		VE_LOGD("Found executable path (Windows): " << exe_path);
+		VE_LOGD("Found executable path (Windows): " << pathToUtf8(exe_path));
 	}
 	else if (len >= buf.size()) {
 		// Path too long, grow buffer and retry
@@ -40,7 +40,7 @@ std::filesystem::path getProjectRoot(char** argv) {
 		if (len > 0 && len < buf.size()) {
 			exe_path = std::filesystem::path(std::wstring(buf.data(), len));
 			path_found = true;
-			VE_LOGD("Found executable path (Windows, extended): " << exe_path);
+			VE_LOGD("Found executable path (Windows, extended): " << pathToUtf8(exe_path));
 		}
 		else {
 			VE_LOGW("GetModuleFileNameW failed or path too long");
@@ -57,7 +57,7 @@ std::filesystem::path getProjectRoot(char** argv) {
 		try {
 			exe_path = std::filesystem::canonical(buf.data());
 			path_found = true;
-			VE_LOGD("Found executable path (macOS): " << exe_path);
+			VE_LOGD("Found executable path (macOS): " << pathToUtf8(exe_path));
 		} catch (const std::filesystem::filesystem_error& e) {
 			VE_LOGW("Failed to canonicalize executable path on macOS: " << e.what());
 		}
@@ -69,7 +69,7 @@ std::filesystem::path getProjectRoot(char** argv) {
 			try {
 				exe_path = std::filesystem::canonical(buf.data());
 				path_found = true;
-				VE_LOGD("Found executable path (macOS, extended): " << exe_path);
+				VE_LOGD("Found executable path (macOS, extended): " << pathToUtf8(exe_path));
 			} catch (const std::filesystem::filesystem_error& e) {
 				VE_LOGW("Failed to canonicalize executable path on macOS: " << e.what());
 			}
@@ -87,7 +87,7 @@ std::filesystem::path getProjectRoot(char** argv) {
 		try {
 			exe_path = std::filesystem::canonical(buf);
 			path_found = true;
-			VE_LOGD("Found executable path (Linux): " << exe_path);
+			VE_LOGD("Found executable path (Linux): " << pathToUtf8(exe_path));
 		} catch (const std::filesystem::filesystem_error& e) {
 			VE_LOGW("Failed to canonicalize executable path on Linux: " << e.what());
 		}
@@ -109,7 +109,7 @@ std::filesystem::path getProjectRoot(char** argv) {
 			if (std::filesystem::exists(exe_path)) {
 				exe_path = std::filesystem::canonical(exe_path);
 				path_found = true;
-				VE_LOGD("Resolved executable path from argv[0]: " << exe_path);
+				VE_LOGD("Resolved executable path from argv[0]: " << pathToUtf8(exe_path));
 			}
 		} catch (const std::filesystem::filesystem_error& e) {
 			VE_LOGW("Failed to resolve argv[0] path: " << e.what());
@@ -122,7 +122,7 @@ std::filesystem::path getProjectRoot(char** argv) {
 	}
 
 	// Walk up from executable directory looking for models/textures
-	VE_LOGD("Searching for project root starting from: " << exe_path.parent_path());
+	VE_LOGD("Searching for project root starting from: " << pathToUtf8(exe_path.parent_path()));
 	std::filesystem::path search = exe_path.parent_path();
 	while (search.has_parent_path() && search != search.root_path()) {
 		if (std::filesystem::exists(search / "models") &&
@@ -135,18 +135,18 @@ std::filesystem::path getProjectRoot(char** argv) {
 
 	// Fallback: check current working directory
 	std::filesystem::path cwd = std::filesystem::current_path();
-	VE_LOGD("Project root not found in exe path tree, checking CWD: " << cwd);
+	VE_LOGD("Project root not found in exe path tree, checking CWD: " << pathToUtf8(cwd));
 	if (std::filesystem::exists(cwd / "models") && std::filesystem::exists(cwd / "textures")) {
-		VE_LOGI("Found project root (from CWD): " << cwd);
+		VE_LOGI("Found project root (from CWD): " << pathToUtf8(cwd));
 		return cwd;
 	}
 
 	// Failed to find project root
-	VE_LOGE("Failed to find project root directory. Could not locate 'models' and 'textures' folders from executable path: " << exe_path);
+	VE_LOGE("Failed to find project root directory. Could not locate 'models' and 'textures' folders from executable path: " << pathToUtf8(exe_path));
 	throw std::runtime_error(
 		"Failed to find project root directory. "
 		"Could not locate 'models' and 'textures' folders from executable path: " +
-		exe_path.string()
+		pathToUtf8(exe_path)
 	);
 }
 

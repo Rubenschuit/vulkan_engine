@@ -1,6 +1,9 @@
 #include "pch.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_debug_utils.hpp"
+#include "utils/ve_path.hpp"
+
+#include <atomic>
 
 #define VMA_STATIC_VULKAN_FUNCTIONS 1
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
@@ -9,6 +12,12 @@
 
 
 namespace ve {
+
+static std::atomic<uint32_t> s_validation_errors{0};
+static std::atomic<uint32_t> s_validation_warnings{0};
+
+uint32_t VeDevice::validationErrorCount() { return s_validation_errors.load(); }
+uint32_t VeDevice::validationWarningCount() { return s_validation_warnings.load(); }
 
 #if defined(__x86_64__) && defined(__APPLE__)
 // macOS Intel: C-style types required
@@ -27,8 +36,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 
 	const char* sev_color = gray;
 	const char* sev_label = "VERBOSE";
-	if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)   { sev_color = red;    sev_label = "ERROR"; }
-	else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT){ sev_color = yellow; sev_label = "WARNING"; }
+	if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)   { sev_color = red;    sev_label = "ERROR"; ++s_validation_errors; }
+	else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT){ sev_color = yellow; sev_label = "WARNING"; ++s_validation_warnings; }
 	else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)   { sev_color = blue;   sev_label = "INFO"; }
 	else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT){ sev_color = gray;   sev_label = "VERBOSE"; }
 
@@ -56,8 +65,8 @@ static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 
 	const char* sev_color = gray;
 	const char* sev_label = "VERBOSE";
-	if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eError)   { sev_color = red;    sev_label = "ERROR"; }
-	else if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning){ sev_color = yellow; sev_label = "WARNING"; }
+	if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eError)   { sev_color = red;    sev_label = "ERROR"; ++s_validation_errors; }
+	else if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning){ sev_color = yellow; sev_label = "WARNING"; ++s_validation_warnings; }
 	else if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo)   { sev_color = blue;   sev_label = "INFO"; }
 	else if (severity & vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose){ sev_color = gray;   sev_label = "VERBOSE"; }
 
@@ -142,7 +151,7 @@ void VeDevice::savePipelineCache() noexcept {
 		std::ofstream out(m_pipeline_cache_path, std::ios::binary | std::ios::trunc);
 		out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
 		if (!out.good())
-			VE_LOGW("Failed to write pipeline cache to " << m_pipeline_cache_path.string());
+			VE_LOGW("Failed to write pipeline cache to " << pathToUtf8(m_pipeline_cache_path));
 	} catch (const std::exception& e) {
 		VE_LOGW("Failed to save pipeline cache: " << e.what());
 	}

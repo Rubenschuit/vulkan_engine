@@ -3,6 +3,7 @@
 
 namespace ve {
 
+class EditorCameraController;
 class ShadowRenderSystem;
 class TextureInspector;
 
@@ -15,10 +16,12 @@ public:
 	const char* getName() const override { return "Debug"; }
 
 	void setShadowRenderSystem(ShadowRenderSystem* system) { m_shadow_render_system = system; }
+	void setEditorCamera(const EditorCameraController* camera) { m_editor_camera = camera; }
 
 private:
 	TextureInspector& m_texture_inspector;
 	ShadowRenderSystem* m_shadow_render_system = nullptr;
+	const EditorCameraController* m_editor_camera = nullptr;
 };
 
 } // namespace ve

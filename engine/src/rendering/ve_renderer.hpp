@@ -13,6 +13,7 @@ the async-compute path, and present. Also exposes display settings
 #include "vulkan/ve_thread_pool.hpp"
 #include "platform/ve_window.hpp"
 #include "vulkan/ve_swap_chain.hpp"
+#include <filesystem>
 #include <memory>
 #include <vector>
 
@@ -21,6 +22,7 @@ namespace ve {
 
 class VeResourceManager;
 class EventBus;
+class VeBuffer;
 
 enum class HDRColorMode : int {
 	SDR = 0,
@@ -153,6 +155,13 @@ public:
 	void recreateSwapChain();
 	void setSwapChainNeedsRecreation() { m_swap_chain_needs_recreation = true; }
 
+	// --- Screenshot ---
+
+	// Queues a swapchain readback: the copy is recorded in the next
+	// scene frame's endFrame, which then blocks on GPU completion and writes
+	// an 8-bit PNG.
+	void requestScreenshot(std::filesystem::path path) { m_screenshot_path = std::move(path); }
+
 	// --- Device and profiling ---
 
 	std::string getDeviceName() const { return m_ve_device.getDeviceProperties().deviceName.data(); }
@@ -172,6 +181,8 @@ private:
 	void createViewportResources();
 	void recreateWboitImages();
 	void transitionToPresent(vk::raii::CommandBuffer& command_buffer);
+	void recordScreenshotCopy(vk::raii::CommandBuffer& command_buffer);
+	void writeScreenshotPng();
 
 	VeDevice& m_ve_device;
 	CommandResourceManager m_command_manager;
@@ -212,6 +223,12 @@ private:
 	// Viewport image for editor mode (render-to-texture)
 	std::unique_ptr<VeImage> m_viewport_image;
 	vk::raii::Sampler m_viewport_sampler{nullptr};
+
+	// Screenshot
+	std::filesystem::path m_screenshot_path;
+	std::unique_ptr<VeBuffer> m_screenshot_buffer;
+	vk::Extent2D m_screenshot_extent{};
+	bool m_screenshot_bgra = false;
 };
 }
 

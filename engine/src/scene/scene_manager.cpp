@@ -11,6 +11,7 @@
 #include "scene/ve_registry.hpp"
 #include "scene/ve_scene.hpp"
 #include "utils/ve_log.hpp"
+#include "utils/ve_path.hpp"
 
 namespace ve {
 
@@ -177,7 +178,7 @@ void SceneManager::processPending() {
 	m_pending_add_models.pop_front();
 
 	// Cache hit: instantiate immediately
-	std::string cache_key = req.gltf_path.lexically_normal().generic_string();
+	std::string cache_key = pathToUtf8Generic(req.gltf_path.lexically_normal());
 	if (auto cached = m_resource_manager.tryGetHandle<VeModel>(cache_key); cached.isValid()) {
 		instantiateAndEmit(*cached, *target, req);
 		if (m_loading_scene) {
@@ -250,7 +251,7 @@ void SceneManager::finalizeAsyncLoad() {
 
 void SceneManager::instantiateAndEmit(const VeModel& model, VeScene& target,
                                       const AddModelRequestedEvent& req) {
-	std::string wrapper_name = req.gltf_path.stem().string();
+	std::string wrapper_name = pathToUtf8(req.gltf_path.stem());
 	Entity wrapper = ve::instantiateModel(model, target.getRegistry(),
 		wrapper_name, req.translation, req.rotation, req.scale);
 
@@ -258,7 +259,7 @@ void SceneManager::instantiateAndEmit(const VeModel& model, VeScene& target,
 		req.on_loaded(wrapper);
 
 	m_event_bus.emitImmediate(AssetLoadCompleteEvent{
-		req.gltf_path.filename().string(), req.gltf_path, wrapper});
+		pathToUtf8(req.gltf_path.filename()), req.gltf_path, wrapper});
 }
 
 } // namespace ve

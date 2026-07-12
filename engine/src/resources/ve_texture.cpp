@@ -6,9 +6,11 @@
 #include "vulkan/ve_device.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
+#include "utils/ve_path.hpp"
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <vector>
 #include <ktx.h>
 #include <ktxvulkan.h>
@@ -217,14 +219,14 @@ ResourceHandle<VeTexture> VeTexture::loadFromPath(VeResourceManager& resource_ma
 std::string VeTexture::makeResourceKey(const std::filesystem::path& path, TextureType type) {
 	// Format hint has only two buckets currently
 	const char* suffix = isSrgbColorTexture(type) ? "|srgb" : "|linear";
-	return path.lexically_normal().generic_string() + suffix;
+	return pathToUtf8Generic(path.lexically_normal()) + suffix;
 }
 
 DecodedTexture VeTexture::decode(const std::filesystem::path& path, TextureType type,
                                  const GpuCaps& gpu_caps,
                                  const EmbeddedImageData* embedded) {
 	DecodedTexture out;
-	out.resource_id = path.lexically_normal().generic_string();
+	out.resource_id = pathToUtf8Generic(path.lexically_normal());
 	out.file_path = path;
 	out.type = type;
 
@@ -275,14 +277,28 @@ DecodedTexture VeTexture::decode(const std::filesystem::path& path, TextureType 
 	if (!std::filesystem::exists(path))
 		return out;
 
-	auto ext = path.extension().string();
+	// Read via the path-native ifstream and decode from memory: KTX/stb take
+	// narrow filenames that Windows would interpret in the ANSI code page.
+	std::vector<uint8_t> bytes;
+	{
+		std::ifstream file(path, std::ios::ate | std::ios::binary);
+		if (!file.is_open()) {
+			VE_LOGE("Texture open failed: " << out.resource_id);
+			return out;
+		}
+		bytes.resize(static_cast<size_t>(file.tellg()));
+		file.seekg(0);
+		file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+	}
+
+	auto ext = pathToUtf8(path.extension());
 	if (ext == ".ktx" || ext == ".ktx2") {
 		ktxTexture* k = nullptr;
-		KTX_error_code res = ktxTexture_CreateFromNamedFile(
-			path.string().c_str(),
+		KTX_error_code res = ktxTexture_CreateFromMemory(
+			bytes.data(), bytes.size(),
 			KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &k);
 		if (res != KTX_SUCCESS) {
-			VE_LOGE("KTX load failed: " << path.string() << " (error " << static_cast<int>(res) << ")");
+			VE_LOGE("KTX load failed: " << out.resource_id << " (error " << static_cast<int>(res) << ")");
 			return out;
 		}
 		if (!populateDecodedFromKtx(k, format_hint, gpu_caps, type == TextureType::ALBEDO, out)) {
@@ -294,7 +310,8 @@ DecodedTexture VeTexture::decode(const std::filesystem::path& path, TextureType 
 	}
 
 	int w = 0, h = 0, channels = 0;
-	stbi_uc* pixels = stbi_load(path.string().c_str(), &w, &h, &channels, STBI_rgb_alpha);
+	stbi_uc* pixels = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()),
+	                                        &w, &h, &channels, STBI_rgb_alpha);
 	if (!pixels) {
 		const char* reason = stbi_failure_reason();
 		VE_LOGE("STB load failed: " << path << " (" << (reason ? reason : "unknown") << ")");
@@ -386,7 +403,7 @@ bool VeTexture::doLoad() {
 				type = TextureType::NORMAL;  // linear bucket
 		}
 		GpuCaps caps{m_ve_device.supportsBC(), m_ve_device.supportsASTC()};
-		decoded = decode(std::filesystem::path(path_str), type, caps, nullptr);
+		decoded = decode(utf8ToPath(path_str), type, caps, nullptr);
 		if (decoded.pixels.empty()) {
 			VE_LOGE("Failed to load texture: " << path_str);
 			return false;

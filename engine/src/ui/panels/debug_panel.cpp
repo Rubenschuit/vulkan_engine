@@ -1,10 +1,12 @@
 #include "pch.hpp"
 #include "ui/panels/debug_panel.hpp"
+#include "ui/editor_camera_controller.hpp"
 #include "ui/editor_state.hpp"
 #include "ui/imgui_layer.hpp"
 #include "ui/texture_inspector.hpp"
 #include "rendering/shadow_render_system.hpp"
 #include <imgui.h>
+#include <format>
 
 namespace ve {
 
@@ -74,6 +76,19 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 	ImGui::SameLine();
 	if (ImGui::RadioButton("Line List", &topology_int, static_cast<int>(Topology::LINE_LIST)))
 		ctx.settings.topology = Topology::LINE_LIST;
+
+	ImGui::SeparatorText("Benchmark Camera");
+	if (m_editor_camera) {
+		glm::vec3 pos = m_editor_camera->position();
+		glm::vec3 look = pos + m_editor_camera->forward() * 10.0f;
+		std::string pose = std::format("{:.2f},{:.2f},{:.2f}:{:.2f},{:.2f},{:.2f}",
+			pos.x, pos.y, pos.z, look.x, look.y, look.z);
+		ImGui::TextWrapped("%s", pose.c_str());
+		if (ImGui::Button("Copy --bench-camera"))
+			ImGui::SetClipboardText(std::format("--bench-camera \"{}\"", pose).c_str());
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Copy the current editor camera pose as a VeApp benchmark flag");
+	}
 
 	ImGui::SeparatorText("Textures");
 	if (m_shadow_render_system) {

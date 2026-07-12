@@ -10,6 +10,7 @@
 #include "rendering/culling/meshlet_data.hpp"
 #include "vulkan/ve_descriptors.hpp"
 #include "utils/ve_log.hpp"
+#include "utils/ve_path.hpp"
 #include "ve_config.hpp"
 
 #include <cassert>
@@ -220,7 +221,7 @@ ResourceHandle<VeMesh> VeResourceManager::loadMesh(const std::filesystem::path& 
 
 ResourceHandle<VeModel> VeResourceManager::loadModel(const std::filesystem::path& gltf_path,
                                                      bool extract_lights, bool flip_tex_coord_v) {
-	std::string key = gltf_path.lexically_normal().generic_string();
+	std::string key = pathToUtf8Generic(gltf_path.lexically_normal());
 	auto type_idx = typeid(VeModel).hash_code();
 	auto& type_resources = m_resources[type_idx];
 	auto it = type_resources.find(key);
@@ -233,7 +234,7 @@ ResourceHandle<VeModel> VeResourceManager::loadModel(const std::filesystem::path
 	GpuCaps caps{ m_device.supportsBC(), m_device.supportsASTC() };
 	LoadedAssetData data = ve::gltf::load(gltf_path, extract_lights, flip_tex_coord_v, progress, caps);
 	if (progress.cpu_failed.load()) {
-		VE_LOGE("loadModel: CPU load failed for " << gltf_path);
+		VE_LOGE("loadModel: CPU load failed for " << pathToUtf8(gltf_path));
 		return {};
 	}
 

@@ -1,9 +1,25 @@
 #pragma once
 
 #include <filesystem>
+#include <string>
+#include <string_view>
 #include "ve_export.hpp"
 
 namespace ve {
+
+inline std::string pathToUtf8(const std::filesystem::path& p) {
+	const std::u8string s = p.u8string();
+	return std::string(s.begin(), s.end());
+}
+
+inline std::string pathToUtf8Generic(const std::filesystem::path& p) {
+	const std::u8string s = p.generic_u8string();
+	return std::string(s.begin(), s.end());
+}
+
+inline std::filesystem::path utf8ToPath(std::string_view s) {
+	return std::filesystem::path(std::u8string(s.begin(), s.end()));
+}
 
 /**
  * Finds the project root directory by determining the executable location

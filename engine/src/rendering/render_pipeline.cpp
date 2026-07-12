@@ -49,6 +49,7 @@
 #include "ve_tracy.hpp"
 #include "vulkan/ve_debug_utils.hpp"
 #include "utils/ve_log.hpp"
+#include "utils/ve_path.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "vulkan/ve_descriptors.hpp"
 #include "vulkan/ve_device.hpp"
@@ -249,7 +250,7 @@ void RenderPipeline::initRenderSystems() {
 
 	auto light_billboard_texture = m_config.light_billboard_texture.empty()
 		? m_resources.defaultParticleTexture()
-		: m_resource_manager.load<VeTexture>(m_config.light_billboard_texture.lexically_normal().generic_string());
+		: m_resource_manager.load<VeTexture>(pathToUtf8Generic(m_config.light_billboard_texture.lexically_normal()));
 	m_light_system = std::make_unique<LightSystem>(
 		m_ve_device,
 		*m_resources.pool(),

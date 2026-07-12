@@ -2,10 +2,14 @@
 #include "rendering/ve_renderer.hpp"
 #include "rendering/ve_frame_info.hpp"
 #include "resources/ve_resource_manager.hpp"
+#include "vulkan/ve_buffer.hpp"
 #include "vulkan/ve_debug_utils.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
+#include "utils/ve_path.hpp"
 #include "ve_tracy.hpp"
+
+#include "stb_image_write.h"
 
 #include <stdexcept>
 #include <algorithm>
@@ -222,6 +226,8 @@ void VeRenderer::endFrame() {
 	}
 
 	auto& ui_cb = getCurrentUICommandBuffer();
+	if (!m_screenshot_path.empty() && m_scene_frame && m_image_acquired_this_frame)
+		recordScreenshotCopy(ui_cb);
 	transitionToPresent(ui_cb);
 	endDebugLabel(ui_cb);
 	ui_cb.end();
@@ -264,6 +270,8 @@ void VeRenderer::endFrame() {
 	}
 	if (result == vk::Result::eSuccess)
 		m_ve_swap_chain->advanceFrame();
+	if (m_screenshot_buffer)
+		writeScreenshotPng();
 	m_is_frame_started = false;
 	FrameMark;
 }
@@ -1016,6 +1024,78 @@ void VeRenderer::transitionToPresent(vk::raii::CommandBuffer& command_buffer) {
 		vk::PipelineStageFlagBits2::eColorAttachmentOutput,
 		vk::PipelineStageFlagBits2::eBottomOfPipe
 	);
+}
+
+void VeRenderer::recordScreenshotCopy(vk::raii::CommandBuffer& command_buffer) {
+	vk::Format format = getSwapChainImageFormat();
+	const bool rgba = format == vk::Format::eR8G8B8A8Unorm || format == vk::Format::eR8G8B8A8Srgb;
+	const bool bgra = format == vk::Format::eB8G8R8A8Unorm || format == vk::Format::eB8G8R8A8Srgb;
+	if (!rgba && !bgra) {
+		VE_LOGE("Screenshot skipped: unsupported swapchain format " << vk::to_string(format) << " (disable HDR)");
+		m_screenshot_path.clear();
+		return;
+	}
+	m_screenshot_bgra = bgra;
+	m_screenshot_extent = getSwapChainExtent();
+
+	m_screenshot_buffer = std::make_unique<VeBuffer>(
+		m_ve_device, 4, m_screenshot_extent.width * m_screenshot_extent.height,
+		vk::BufferUsageFlagBits::eTransferDst,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	m_screenshot_buffer->map();
+
+	m_ve_swap_chain->transitionImageLayout(
+		command_buffer, m_current_image_index,
+		vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eTransferSrcOptimal,
+		vk::AccessFlagBits2::eColorAttachmentWrite, vk::AccessFlagBits2::eTransferRead,
+		vk::PipelineStageFlagBits2::eColorAttachmentOutput, vk::PipelineStageFlagBits2::eCopy);
+
+	vk::BufferImageCopy region{
+		.bufferOffset = 0,
+		.bufferRowLength = 0,
+		.bufferImageHeight = 0,
+		.imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+		.imageOffset = {0, 0, 0},
+		.imageExtent = {m_screenshot_extent.width, m_screenshot_extent.height, 1},
+	};
+	command_buffer.copyImageToBuffer(
+		m_ve_swap_chain->getSwapChainImages()[m_current_image_index],
+		vk::ImageLayout::eTransferSrcOptimal, m_screenshot_buffer->getBuffer(), region);
+
+	m_ve_swap_chain->transitionImageLayout(
+		command_buffer, m_current_image_index,
+		vk::ImageLayout::eTransferSrcOptimal, vk::ImageLayout::eColorAttachmentOptimal,
+		vk::AccessFlagBits2::eTransferRead, vk::AccessFlagBits2::eColorAttachmentWrite,
+		vk::PipelineStageFlagBits2::eCopy, vk::PipelineStageFlagBits2::eColorAttachmentOutput);
+}
+
+void VeRenderer::writeScreenshotPng() {
+	m_ve_device.getDevice().waitIdle();
+
+	const uint32_t w = m_screenshot_extent.width;
+	const uint32_t h = m_screenshot_extent.height;
+	auto* pixels = static_cast<uint8_t*>(m_screenshot_buffer->getMappedMemory());
+	const size_t byte_count = static_cast<size_t>(w) * h * 4;
+	if (m_screenshot_bgra) {
+		for (size_t i = 0; i < byte_count; i += 4)
+			std::swap(pixels[i], pixels[i + 2]);
+	}
+	// Swapchain alpha is undefined under eOpaque composite; force it for PNG viewers.
+	for (size_t i = 3; i < byte_count; i += 4)
+		pixels[i] = 255;
+
+	std::error_code ec;
+	if (m_screenshot_path.has_parent_path())
+		std::filesystem::create_directories(m_screenshot_path.parent_path(), ec);
+	std::string screenshot_utf8 = pathToUtf8(m_screenshot_path);
+	if (stbi_write_png(screenshot_utf8.c_str(),
+			static_cast<int>(w), static_cast<int>(h), 4, pixels, static_cast<int>(w * 4)))
+		VE_LOGI("Screenshot written to " << screenshot_utf8);
+	else
+		VE_LOGE("Failed to write screenshot " << screenshot_utf8);
+
+	m_screenshot_buffer.reset();
+	m_screenshot_path.clear();
 }
 
 // Writes compute end timestamp, ends the command buffer, and submits to the compute queue.

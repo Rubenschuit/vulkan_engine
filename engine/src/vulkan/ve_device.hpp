@@ -58,6 +58,10 @@ public:
 		const bool enable_validation_layers = true;
 	#endif
 
+	// Validation messages counted process-wide by the debug callback
+	static uint32_t validationErrorCount();
+	static uint32_t validationWarningCount();
+
 	VeDevice(VeWindow &window);
 	~VeDevice();
 

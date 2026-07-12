@@ -74,3 +74,6 @@ external/*-subbuild/
 assets/*
 scripts/*
 tracy/*
+
+# Benchmark run output
+bench/

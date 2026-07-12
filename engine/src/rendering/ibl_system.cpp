@@ -6,6 +6,7 @@
 #include "vulkan/ve_image.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "utils/ve_log.hpp"
+#include "utils/ve_path.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
 
@@ -32,10 +33,10 @@ IblSystem::IblSystem(VeDevice& device, VeDescriptorPool& descriptor_pool,
 
 	// Load shared BRDF LUT if available
 	if (std::filesystem::exists(brdf_lut_path)) {
-		m_brdf_lut_handle = m_resource_manager.load<VeTexture>(brdf_lut_path.lexically_normal().generic_string());
-		VE_LOGI("IBL: loaded BRDF LUT from " << brdf_lut_path.generic_string());
+		m_brdf_lut_handle = m_resource_manager.load<VeTexture>(pathToUtf8Generic(brdf_lut_path.lexically_normal()));
+		VE_LOGI("IBL: loaded BRDF LUT from " << pathToUtf8Generic(brdf_lut_path));
 	} else {
-		VE_LOGW("IBL: BRDF LUT not found at " << brdf_lut_path.generic_string());
+		VE_LOGW("IBL: BRDF LUT not found at " << pathToUtf8Generic(brdf_lut_path));
 	}
 }
 
@@ -305,7 +306,7 @@ bool IblSystem::loadForSkybox(const std::filesystem::path& skybox_path) {
 	// cmgen structure: textures/skybox/<name>/<name>_skybox.ktx
 	// Companion files: <name>/<name>_ibl.ktx, <name>/sh.txt
 	auto parent = skybox_path.parent_path();
-	auto stem = skybox_path.stem().string();
+	auto stem = pathToUtf8(skybox_path.stem());
 
 	// Strip _skybox suffix if present to get the base name
 	std::string base_name = stem;
@@ -321,7 +322,7 @@ bool IblSystem::loadForSkybox(const std::filesystem::path& skybox_path) {
 		m_ibl_available = false;
 		m_sh_coefficients = {};
 		m_exposure_compensation = 1.0f;
-		VE_LOGD("IBL: no companion files for " << skybox_path.filename().generic_string());
+		VE_LOGD("IBL: no companion files for " << pathToUtf8(skybox_path.filename()));
 		return false;
 	}
 
@@ -337,7 +338,7 @@ bool IblSystem::loadForSkybox(const std::filesystem::path& skybox_path) {
 
 	// Load prefiltered specular cubemap
 	m_prefiltered_handle = m_resource_manager.load<VeTexture>(
-		ibl_path.lexically_normal().generic_string());
+		pathToUtf8Generic(ibl_path.lexically_normal()));
 
 	m_prefiltered_mip_levels = m_prefiltered_handle.get()->getMipLevels();
 	if (m_prefiltered_mip_levels == 0)

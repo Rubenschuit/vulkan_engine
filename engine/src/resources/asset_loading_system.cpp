@@ -8,6 +8,7 @@
 #include "resources/internal/staging_arena.hpp"
 #include "vulkan/ve_descriptors.hpp"
 #include "utils/ve_log.hpp"
+#include "utils/ve_path.hpp"
 
 namespace ve {
 
@@ -33,8 +34,8 @@ void AssetLoadingSystem::beginModelLoad(const std::filesystem::path& gltf_path,
 
 	m_progress.reset();
 	m_state = LoadState::CPU_LOADING;
-	m_model_name = gltf_path.filename().string();
-	m_cache_key = gltf_path.lexically_normal().generic_string();
+	m_model_name = pathToUtf8(gltf_path.filename());
+	m_cache_key = pathToUtf8Generic(gltf_path.lexically_normal());
 	m_upload_cursor = {};
 	m_uploaded = {};
 	m_completed_model.reset();

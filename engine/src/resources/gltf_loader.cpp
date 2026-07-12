@@ -8,6 +8,7 @@
 #include "scene/ve_component.hpp"
 #include "utils/ve_log.hpp"
 #include "utils/ve_parallel.hpp"
+#include "utils/ve_path.hpp"
 #include "utils/ve_string.hpp"
 
 #define TINYGLTF_IMPLEMENTATION
@@ -119,10 +120,10 @@ static std::filesystem::path resolveTexturePath(const tinygltf::Model& gltf, siz
 		return {};
 	const auto& image = gltf.images[static_cast<size_t>(img_idx)];
 	if (!image.uri.empty())
-		return model_dir / image.uri;
+		return model_dir / ve::utf8ToPath(image.uri);  // glTF URIs are UTF-8
 	std::string emb_key = makeEmbeddedKey(model_path_str, img_idx);
 	if (embedded.find(emb_key) != embedded.end())
-		return std::filesystem::path(emb_key);
+		return ve::utf8ToPath(emb_key);
 	return {};
 }
 
@@ -130,7 +131,7 @@ static std::filesystem::path resolveTexturePath(const tinygltf::Model& gltf, siz
 static std::filesystem::path tryDerivePath(const std::filesystem::path& base,
                                            const std::vector<std::string>& from_suffixes,
                                            const std::vector<std::string>& to_suffixes) {
-	std::string base_str = base.generic_string();
+	std::string base_str = ve::pathToUtf8Generic(base);
 	std::string base_lower = ve::toLower(base_str);
 	for (const std::string& from : from_suffixes) {
 		size_t pos = base_lower.rfind(from);
@@ -138,7 +139,7 @@ static std::filesystem::path tryDerivePath(const std::filesystem::path& base,
 		for (const std::string& to : to_suffixes) {
 			std::string candidate_str = base_str;
 			candidate_str.replace(pos, from.size(), to);
-			std::filesystem::path candidate(candidate_str);
+			std::filesystem::path candidate = ve::utf8ToPath(candidate_str);
 			if (std::filesystem::exists(candidate))
 				return candidate;
 		}
@@ -1654,7 +1655,7 @@ static void warnUnsupportedExtensions(const tinygltf::Model& gltf, const std::fi
 		if (s_supported_extensions.count(ext))
 			continue;
 		bool required = std::find(gltf.extensionsRequired.begin(), gltf.extensionsRequired.end(), ext) != gltf.extensionsRequired.end();
-		VE_LOGW("glTF '" << model_path.filename().string() << "' uses unsupported extension '"
+		VE_LOGW("glTF '" << ve::pathToUtf8(model_path.filename()) << "' uses unsupported extension '"
 			<< ext << "'" << (required ? " (required)" : "") << "; its data will be ignored and the model may render incorrectly");
 	}
 }
@@ -1673,13 +1674,14 @@ static bool loadGltfFile(const std::filesystem::path& model_path, tinygltf::Mode
 		loader.SetImageLoader(LoadImageDataVeModel, &load_opt);
 	std::string err, warn;
 	bool ret = false;
-	std::string path_ext = ve::toLower(model_path.extension().string());
+	// tinygltf expects UTF-8 filenames (it converts to wide paths on Windows itself)
+	std::string path_ext = ve::toLower(ve::pathToUtf8(model_path.extension()));
 	if (path_ext == ".glb")
-		ret = loader.LoadBinaryFromFile(&gltf, &err, &warn, model_path.string());
+		ret = loader.LoadBinaryFromFile(&gltf, &err, &warn, ve::pathToUtf8(model_path));
 	else if (path_ext == ".gltf")
-		ret = loader.LoadASCIIFromFile(&gltf, &err, &warn, model_path.string());
+		ret = loader.LoadASCIIFromFile(&gltf, &err, &warn, ve::pathToUtf8(model_path));
 	else {
-		VE_LOGE("Unsupported file extension for glTF model: " << model_path);
+		VE_LOGE("Unsupported file extension for glTF model: " << ve::pathToUtf8(model_path));
 		return false;
 	}
 	if (!ret) {
@@ -2159,7 +2161,7 @@ LoadedAssetData load(
 
 	decompressMeshopt(gltf);
 
-	std::string model_path_str = model_path.lexically_normal().generic_string();
+	std::string model_path_str = ve::pathToUtf8Generic(model_path.lexically_normal());
 	registerEmbeddedImages(gltf, model_path_str, result.embedded_images);
 
 	auto parsed_materials = parseAllMaterials(gltf, model_path.parent_path(), model_path_str, result.embedded_images);
@@ -2188,7 +2190,7 @@ LoadedAssetData load(
 	for (size_t i = 0; i < parsed_materials.size(); i++) {
 		const auto& pm = parsed_materials[i];
 		ProcessedMaterial pmat;
-		pmat.resource_id = model_path.generic_string() + "::material_" + std::to_string(i);
+		pmat.resource_id = ve::pathToUtf8Generic(model_path) + "::material_" + std::to_string(i);
 		pmat.alpha_props = pm.alpha_props;
 		pmat.factors = pm.factors;
 		pmat.uv_transforms = pm.uv_transforms;
@@ -2255,7 +2257,7 @@ LoadedAssetData load(
 			emb_shared.emplace(key, std::make_shared<EmbeddedImageData>(std::move(data)));
 		result.embedded_images = EmbeddedImageCache{};
 		for (size_t i = 0; i < tex_count; i++) {
-			std::string key = tex_refs[i].path.lexically_normal().generic_string();
+			std::string key = ve::pathToUtf8Generic(tex_refs[i].path.lexically_normal());
 			if (auto it = emb_shared.find(key); it != emb_shared.end())
 				tex_embedded[i] = it->second;
 		}
@@ -2359,7 +2361,7 @@ LoadedAssetData load(
 	}
 
 	progress.cpu_done = true;
-	VE_LOGI("CPU loading complete for " << model_path << ": "
+	VE_LOGI("CPU loading complete for " << ve::pathToUtf8(model_path) << ": "
 	        << result.textures.size() << " textures, "
 	        << result.meshes.size() << " meshes, "
 	        << result.nodes.size() << " nodes");
@@ -2382,7 +2384,7 @@ ResourceHandle<VeMesh> loadFirstMesh(VeResourceManager& rm,
 			auto pos_it = prim.attributes.find("POSITION");
 			if (pos_it == prim.attributes.end())
 				continue;
-			std::string mesh_id = model_path.generic_string() + "::first_mesh";
+			std::string mesh_id = ve::pathToUtf8Generic(model_path) + "::first_mesh";
 			::ve::ProcessedMesh processed = ::ve::processPrimitive(prim, gltf, mesh_id, nullptr);
 			if (processed.vertices.empty())
 				continue;
@@ -2402,7 +2404,7 @@ static bool probeNoOpImageLoader(tinygltf::Image*, const int, std::string*,
 GltfMetadata probeMetadata(const std::filesystem::path& model_path) {
 	GltfMetadata meta;
 
-	std::string ext = ve::toLower(model_path.extension().string());
+	std::string ext = ve::toLower(ve::pathToUtf8(model_path.extension()));
 	if (ext != ".glb" && ext != ".gltf") {
 		meta.error = "unsupported file extension";
 		return meta;
@@ -2413,7 +2415,7 @@ GltfMetadata probeMetadata(const std::filesystem::path& model_path) {
 
 	tinygltf::Model gltf;
 	std::string err, warn;
-	std::string path_str = model_path.generic_string();
+	std::string path_str = ve::pathToUtf8Generic(model_path);
 	// The no-op image loader skips pixel decode; external .bin buffers are still
 	// fully read but unused.
 	bool ok = (ext == ".glb")

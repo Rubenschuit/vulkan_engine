@@ -3,6 +3,7 @@
 #include "scene/scene_manager.hpp"
 #include "scene/ve_registry.hpp"
 #include "scene/ve_component.hpp"
+#include "utils/ve_path.hpp"
 #include "utils/ve_random.hpp"
 
 #include <imgui.h>
@@ -27,11 +28,11 @@ Fireworks::Fireworks(ParticleBackend& backend,
 	// Load and register atlas textures via the engine's bindless particle array.
 	// If a path is empty, the sub-emitter falls back to the procedural round mask.
 	if (!fire_atlas_path.empty()) {
-		m_fire_atlas = resources.load<VeTexture>(fire_atlas_path.lexically_normal().generic_string());
+		m_fire_atlas = resources.load<VeTexture>(ve::pathToUtf8Generic(fire_atlas_path.lexically_normal()));
 		m_fire_atlas_slot = m_backend.registerAtlas(m_fire_atlas);
 	}
 	if (!smoke_atlas_path.empty()) {
-		m_smoke_atlas = resources.load<VeTexture>(smoke_atlas_path.lexically_normal().generic_string());
+		m_smoke_atlas = resources.load<VeTexture>(ve::pathToUtf8Generic(smoke_atlas_path.lexically_normal()));
 		m_smoke_atlas_slot = m_backend.registerAtlas(m_smoke_atlas);
 	}
 

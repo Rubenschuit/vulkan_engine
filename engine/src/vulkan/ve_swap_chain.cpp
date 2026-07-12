@@ -207,6 +207,11 @@ void VeSwapChain::createSwapChain() {
 		image_count = m_swap_chain_support.capabilities.maxImageCount;
 	}
 
+	// Transfer-src (when the surface supports it) enables screenshot readback.
+	vk::ImageUsageFlags image_usage = vk::ImageUsageFlagBits::eColorAttachment;
+	if (m_swap_chain_support.capabilities.supportedUsageFlags & vk::ImageUsageFlagBits::eTransferSrc)
+		image_usage |= vk::ImageUsageFlagBits::eTransferSrc;
+
 	vk::SwapchainCreateInfoKHR create_info{
 		.sType = vk::StructureType::eSwapchainCreateInfoKHR,
 		.pNext = nullptr,
@@ -217,7 +222,7 @@ void VeSwapChain::createSwapChain() {
 		.imageColorSpace = m_surface_format.colorSpace,
 		.imageExtent = m_swap_chain_extent,
 		.imageArrayLayers = 1, // always 1 unless developing stereoscopic 3D app
-		.imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
+		.imageUsage = image_usage,
 		.imageSharingMode = vk::SharingMode::eExclusive,
 		.queueFamilyIndexCount = 0, // optional
 		.pQueueFamilyIndices = nullptr, // optional

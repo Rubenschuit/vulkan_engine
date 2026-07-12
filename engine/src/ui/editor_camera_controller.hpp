@@ -19,6 +19,7 @@ public:
 	void lookAt(const glm::vec3& target);
 
 	glm::vec3 position() const { return m_position; }
+	glm::vec3 forward() const;
 	float yaw() const { return m_yaw_rad; }
 	float pitch() const { return m_pitch_rad; }
 

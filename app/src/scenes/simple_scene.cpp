@@ -1,5 +1,6 @@
 #include "simple_scene.hpp"
 #include "scene/ve_component.hpp"
+#include "utils/ve_path.hpp"
 #include <string>
 #include <glm/gtc/constants.hpp>
 
@@ -168,7 +169,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 		if (!mesh.isValid())
 			return;
 
-		std::string name = model_path.stem().string();
+		std::string name = ve::pathToUtf8(model_path.stem());
 		for (int j = 0; j < rows; j++) {
 			for (int i = 0; i < cols; i++) {
 				float roughness = glm::max(1.0f - static_cast<float>(j) / static_cast<float>(rows - 1), 0.05f);

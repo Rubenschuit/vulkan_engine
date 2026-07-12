@@ -80,6 +80,13 @@ public:
 
 	VeScene* getActiveScene() { return m_active_scene.get(); }
 	Registry* getActiveRegistry();
+	// True when a scene is active and no scene swap or model load is pending
+	// or in flight.
+	bool isIdle() const {
+		return m_active_scene != nullptr && m_loading_scene == nullptr
+			&& m_pending_op == PendingOp::NONE && m_async_op == PendingOp::NONE
+			&& m_pending_add_models.empty();
+	}
 	SceneContext makeContext();
 	const std::vector<SceneEntry>& entries() const { return m_scene_entries; }
 	int loadedSceneIndex() const { return m_loaded_scene_index; }

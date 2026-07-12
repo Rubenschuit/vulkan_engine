@@ -77,6 +77,10 @@ void EditorCameraController::lookAt(const glm::vec3& target) {
 	clampPitch(m_pitch_rad);
 }
 
+glm::vec3 EditorCameraController::forward() const {
+	return forwardFromYawPitch(m_yaw_rad, m_pitch_rad);
+}
+
 void EditorCameraController::tick(const InputActions& actions, float dt) {
 	float yaw_delta   = actions.look_yaw   * m_look_speed * dt;
 	float pitch_delta = actions.look_pitch * m_look_speed * dt;

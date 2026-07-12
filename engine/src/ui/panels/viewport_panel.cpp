@@ -5,6 +5,7 @@
 #include "scene/camera_view.hpp"
 #include "scene/scene_manager.hpp"
 #include "events/event_bus.hpp"
+#include "utils/ve_path.hpp"
 #include "utils/ve_ray.hpp"
 #include "physics/physics_system.hpp"
 #include <imgui.h>
@@ -77,7 +78,7 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 				}
 
 				m_event_bus->emitImmediate(AddModelRequestedEvent{
-					.gltf_path = std::filesystem::path(static_cast<const char*>(payload->Data)),
+					.gltf_path = utf8ToPath(static_cast<const char*>(payload->Data)),
 					.translation = placement,
 					.flip_tex_coord_v = state.import_flip_v});
 			}

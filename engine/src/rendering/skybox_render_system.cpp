@@ -7,6 +7,7 @@
 #include "scene/ve_component.hpp"
 #include "resources/ve_mesh.hpp"
 #include "utils/ve_log.hpp"
+#include "utils/ve_path.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
 #include "events/render_events.hpp"
@@ -65,7 +66,7 @@ SkyboxRenderSystem::SkyboxRenderSystem(
 		m_current_index = default_index;
 		m_event_bus.emitImmediate(SkyboxChangedEvent{m_available_skyboxes[default_index].path});
 	} else {
-		VE_LOGW("No skybox textures found in " << m_skybox_base_path.generic_string());
+		VE_LOGW("No skybox textures found in " << pathToUtf8Generic(m_skybox_base_path));
 	}
 }
 
@@ -74,7 +75,7 @@ SkyboxRenderSystem::~SkyboxRenderSystem() {}
 void SkyboxRenderSystem::discoverSkyboxes() {
 	m_available_skyboxes.clear();
 	if (!std::filesystem::exists(m_skybox_base_path)) {
-		VE_LOGW("Skybox base path does not exist: " << m_skybox_base_path.generic_string());
+		VE_LOGW("Skybox base path does not exist: " << pathToUtf8Generic(m_skybox_base_path));
 		return;
 	}
 	for (auto it = std::filesystem::recursive_directory_iterator(m_skybox_base_path);
@@ -86,7 +87,7 @@ void SkyboxRenderSystem::discoverSkyboxes() {
 		if (ext != ".ktx" && ext != ".ktx2")
 			continue;
 		auto path = it->path().lexically_normal();
-		std::string stem = path.stem().generic_string();
+		std::string stem = pathToUtf8(path.stem());
 
 		// Only include skybox cubemap files (must end with _skybox)
 		if (stem.size() <= 7 || stem.compare(stem.size() - 7, 7, "_skybox") != 0)
@@ -111,7 +112,7 @@ void SkyboxRenderSystem::discoverSkyboxes() {
 }
 
 void SkyboxRenderSystem::loadSkyboxTexture(const std::filesystem::path& path) {
-	m_skybox_handle = m_resource_manager.load<VeTexture>(path.lexically_normal().generic_string());
+	m_skybox_handle = m_resource_manager.load<VeTexture>(pathToUtf8Generic(path.lexically_normal()));
 	auto cubemap_image_info = m_skybox_handle.get()->getDescriptorInfo();
 	auto writer = VeDescriptorWriter(m_material_set_layout, m_descriptor_pool).writeImage(0, &cubemap_image_info);
 	if (m_has_cubemap_descriptor)

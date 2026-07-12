@@ -1,4 +1,5 @@
 #include "sponza_scene.hpp"
+#include "utils/ve_path.hpp"
 #include <string>
 #include <cmath>
 #include <glm/gtc/constants.hpp>
@@ -57,9 +58,9 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 	ResourceHandle<VeTexture> fire_tex;
 	ResourceHandle<VeTexture> smoke_tex;
 	if (!paths.fire_texture.empty())
-		fire_tex = m_resource_manager.load<VeTexture>(paths.fire_texture.lexically_normal().generic_string());
+		fire_tex = m_resource_manager.load<VeTexture>(ve::pathToUtf8Generic(paths.fire_texture.lexically_normal()));
 	if (!paths.smoke_texture.empty())
-		smoke_tex = m_resource_manager.load<VeTexture>(paths.smoke_texture.lexically_normal().generic_string());
+		smoke_tex = m_resource_manager.load<VeTexture>(ve::pathToUtf8Generic(paths.smoke_texture.lexically_normal()));
 
 	auto attachFireEmitters = [&](Entity light) {
 		{

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "application/ve_engine_config.hpp"
+#include "application/benchmark_runner.hpp"
 #include "platform/ve_window.hpp"
 #include "vulkan/ve_device.hpp"
 #include "rendering/ve_renderer.hpp"
@@ -39,6 +40,11 @@ public:
 	// Called by main in entry point to start the application loop
 	void run();
 
+	// Benchmark mode is armed by main() before createApp(); the constructor
+	// consumes the pending config. See BenchmarkConfig::parseArgs for flags.
+	static void setPendingBenchmark(BenchmarkConfig config);
+	int exitCode() const { return m_exit_code; }
+
 protected:
 	// --- App overrides ---
 	virtual void update() {}
@@ -72,6 +78,8 @@ private:
 
 	void initSystems();
 	void initEditor();
+	void setupBenchmark();
+	void finishBenchmark();
 
 	void updateFrameTime();
 	void setWindowTitle();
@@ -81,6 +89,10 @@ private:
 	// --- App-owned state ---
 	SimulationSettings m_sim;
 	std::unique_ptr<Editor> m_editor;
+	std::unique_ptr<BenchmarkRunner> m_benchmark;
+	bool m_benchmark_scene_started = false;
+	bool m_benchmark_config_error = false;
+	int m_exit_code = 0;
 	EventSubscriptionId m_input_action_sub = 0;
 	EventSubscriptionId m_scene_loaded_sub = 0;
 

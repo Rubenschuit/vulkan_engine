@@ -25,6 +25,14 @@
 
 namespace ve {
 
+namespace {
+	std::optional<BenchmarkConfig> s_pending_benchmark;
+}
+
+void VeApplication::setPendingBenchmark(BenchmarkConfig config) {
+	s_pending_benchmark = std::move(config);
+}
+
 VeApplication::VeApplication(const EngineConfig& config)
 	: m_ve_window(static_cast<int>(config.window_width), static_cast<int>(config.window_height), config.app_name.c_str()),
 	  m_ve_device(m_ve_window),
@@ -41,6 +49,12 @@ VeApplication::VeApplication(const EngineConfig& config)
 	m_scene_manager = std::make_unique<SceneManager>(m_resource_manager, *m_render_resources, m_event_bus);
 	initSystems();
 	initEditor();
+
+	if (s_pending_benchmark) {
+		m_benchmark = std::make_unique<BenchmarkRunner>(std::move(*s_pending_benchmark));
+		s_pending_benchmark.reset();
+		setupBenchmark();
+	}
 }
 
 
@@ -54,6 +68,12 @@ VeApplication::~VeApplication() {
 
 void VeApplication::run() {
 	VE_LOGI("VeApplication::run starting. Window=" + std::to_string(m_ve_window.getWidth()) + "x" + std::to_string(m_ve_window.getHeight()));
+
+	if (m_benchmark_config_error) {
+		m_exit_code = 2;
+		return;
+	}
+	const bool benchmarking = m_benchmark != nullptr;
 
 	setWindowTitle();
 
@@ -79,11 +99,15 @@ void VeApplication::run() {
 		}
 
 		updateFrameTime();
+		if (benchmarking)
+			m_frame_time = m_benchmark->config().fixed_dt;
 		m_total_time += m_frame_time;
 
 		// Process input and tick the editor camera controller.
-		m_input_controller.processInput(m_frame_time);
-		m_editor->editorCamera().tick(m_input_controller.getActions(), m_frame_time);
+		if (!benchmarking) {
+			m_input_controller.processInput(m_frame_time);
+			m_editor->editorCamera().tick(m_input_controller.getActions(), m_frame_time);
+		}
 
 		{
 			ZoneScopedN("Scene Tick");
@@ -129,11 +153,20 @@ void VeApplication::run() {
 			continue;
 		}
 
+		if (benchmarking) {
+			m_editor->getState().editor_mode = false;
+			if (!m_benchmark_scene_started) {
+				m_ve_device.getDevice().waitIdle();
+				m_ve_renderer.resetSceneRenderExtent();
+				m_benchmark_scene_started = true;
+			}
+		}
+
 		{
 			ZoneScopedN("Prepare Frame");
 			m_render_pipeline->prepareFrame();
 		}
-		{
+		if (!benchmarking) {
 			ZoneScopedN("Editor BeginFrame");
 			m_editor->beginFrame();
 		}
@@ -145,17 +178,26 @@ void VeApplication::run() {
 		m_render_pipeline->renderFrame(*scene, view,
 			m_editor->getState(), m_frame_time, m_total_time);
 
-		bool editor_mode = m_editor->isEditorMode();
-		bool ui_ready = m_ve_renderer.ensureImageAcquired();
-		if (ui_ready) {
-			ZoneScopedN("UI");
-			m_ve_renderer.getProfiler().beginCpuTimer(ProfileTimer::UI);
-			m_ve_renderer.beginUIRecording(editor_mode);
-			{
-				ZoneScopedN("Render UI");
-				m_editor->renderUI(ui, &scene->getRegistry());
+		if (benchmarking) {
+			BenchmarkRunner::Action action =
+				m_benchmark->onFrame(m_scene_manager->isIdle(), m_render_pipeline->stats());
+			if (action == BenchmarkRunner::Action::TAKE_SCREENSHOT)
+				m_ve_renderer.requestScreenshot(m_benchmark->config().screenshot_path);
+			else if (action == BenchmarkRunner::Action::FINISH)
+				finishBenchmark();
+		} else {
+			bool editor_mode = m_editor->isEditorMode();
+			bool ui_ready = m_ve_renderer.ensureImageAcquired();
+			if (ui_ready) {
+				ZoneScopedN("UI");
+				m_ve_renderer.getProfiler().beginCpuTimer(ProfileTimer::UI);
+				m_ve_renderer.beginUIRecording(editor_mode);
+				{
+					ZoneScopedN("Render UI");
+					m_editor->renderUI(ui, &scene->getRegistry());
+				}
+				m_ve_renderer.getProfiler().endCpuTimer(ProfileTimer::UI);
 			}
-			m_ve_renderer.getProfiler().endCpuTimer(ProfileTimer::UI);
 		}
 
 		m_render_pipeline->finalizeFrameTimings();
@@ -185,7 +227,57 @@ void VeApplication::registerScene(std::string name,
 }
 
 void VeApplication::loadDefaultScene(int index) {
+	if (m_benchmark && !m_benchmark->config().scene.empty()) {
+		const auto& entries = m_scene_manager->entries();
+		for (size_t i = 0; i < entries.size(); ++i) {
+			if (entries[i].name == m_benchmark->config().scene) {
+				m_scene_manager->loadDefaultScene(static_cast<int>(i));
+				return;
+			}
+		}
+		VE_LOGE("Benchmark scene '" << m_benchmark->config().scene << "' is not registered");
+		m_benchmark_config_error = true;
+		return;
+	}
 	m_scene_manager->loadDefaultScene(index);
+}
+
+// ─── Benchmark Mode ──────────────────────────────────────────────────────────
+
+void VeApplication::setupBenchmark() {
+	const BenchmarkConfig& bc = m_benchmark->config();
+	auto& cam = m_editor->editorCamera();
+	if (bc.camera_pos)
+		cam.setPosition(*bc.camera_pos);
+	if (bc.camera_look)
+		cam.lookAt(*bc.camera_look);
+	m_render_pipeline->settings().gpu_profiling = true;
+	VE_LOGI("[bench] benchmark mode: scene='" << (bc.scene.empty() ? "<default>" : bc.scene)
+		<< "' warmup=" << bc.warmup_frames << " frames=" << bc.measure_frames);
+}
+
+void VeApplication::finishBenchmark() {
+	std::string scene_name = m_benchmark->config().scene;
+	if (scene_name.empty()) {
+		int idx = m_scene_manager->loadedSceneIndex();
+		const auto& entries = m_scene_manager->entries();
+		if (idx >= 0 && idx < static_cast<int>(entries.size()))
+			scene_name = entries[static_cast<size_t>(idx)].name;
+	}
+
+	auto extent = m_ve_renderer.getSwapChainExtent();
+	m_exit_code = m_benchmark->finish(BenchmarkRunInfo{
+		.scene_name = scene_name,
+		.device_name = m_ve_renderer.getDeviceName(),
+		.width = extent.width,
+		.height = extent.height,
+		.msaa_samples = m_ve_renderer.getCurrentSampleCountInt(),
+		.hdr = m_ve_renderer.isHdrEnabled(),
+		.validation_enabled = m_ve_device.enable_validation_layers,
+		.validation_errors = VeDevice::validationErrorCount(),
+		.validation_warnings = VeDevice::validationWarningCount(),
+	});
+	glfwSetWindowShouldClose(m_ve_window.getGLFWwindow(), GLFW_TRUE);
 }
 
 // ─── System Initialization ───────────────────────────────────────────────────

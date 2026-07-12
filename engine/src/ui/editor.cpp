@@ -209,8 +209,10 @@ void Editor::setContext(const EditorContext& ctx, const RenderServices& services
 	m_inspector_panel.setResourceManager(ctx.resource_manager);
 	if (m_environment_panel)
 		m_environment_panel->setSkyboxSystem(services.skybox);
-	if (m_debug_panel)
+	if (m_debug_panel) {
 		m_debug_panel->setShadowRenderSystem(services.shadow);
+		m_debug_panel->setEditorCamera(&m_camera_controller);
+	}
 	if (m_graphics_panel) {
 		m_graphics_panel->setParticleBackend(services.particles);
 		if (ctx.engine_config)

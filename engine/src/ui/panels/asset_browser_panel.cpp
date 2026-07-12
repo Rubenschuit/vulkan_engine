@@ -9,6 +9,7 @@
 #include "platform/ve_file_system.hpp"
 #include "ve_config.hpp"
 #include "utils/ve_log.hpp"
+#include "utils/ve_path.hpp"
 #include "utils/ve_string.hpp"
 
 #include <imgui.h>
@@ -50,7 +51,7 @@ void AssetBrowserPanel::invalidateThumbnails() {
 }
 
 AssetBrowserPanel::AssetKind AssetBrowserPanel::classify(const std::filesystem::path& p) {
-	std::string ext = toLower(p.extension().string());
+	std::string ext = toLower(pathToUtf8(p.extension()));
 	if (ext == ".gltf" || ext == ".glb")
 		return AssetKind::Model;
 	if (ext == ".ktx" || ext == ".ktx2" || ext == ".png" || ext == ".jpg"
@@ -86,7 +87,7 @@ void AssetBrowserPanel::navigateTo(const std::filesystem::path& dir) {
 		return;
 	// Stay within the asset root.
 	auto rel = std::filesystem::relative(dir, m_root, ec);
-	if (!ec && rel.generic_string().rfind("..", 0) == 0)
+	if (!ec && pathToUtf8Generic(rel).rfind("..", 0) == 0)
 		return;
 	m_current_dir = dir;
 	m_selected.clear();
@@ -107,7 +108,7 @@ void AssetBrowserPanel::refreshEntries() {
 		std::filesystem::recursive_directory_iterator it(m_current_dir, ec), end;
 		for (; it != end; it.increment(ec)) {
 			const std::filesystem::directory_entry& de = *it;
-			std::string fname = de.path().filename().string();
+			std::string fname = pathToUtf8(de.path().filename());
 			bool is_dir = de.is_directory(ec);
 			if (!fname.empty() && fname.front() == '.') {  // skip (and don't descend into) hidden
 				if (is_dir)
@@ -119,12 +120,12 @@ void AssetBrowserPanel::refreshEntries() {
 			AssetKind kind = classify(de.path());
 			if (kind == AssetKind::Other)
 				continue;
-			std::string rel = std::filesystem::relative(de.path(), m_current_dir, ec).generic_string();
+			std::string rel = pathToUtf8Generic(std::filesystem::relative(de.path(), m_current_dir, ec));
 			m_entries.push_back(Entry{de.path(), std::move(rel), kind});
 		}
 	} else {
 		for (const auto& de : std::filesystem::directory_iterator(m_current_dir, ec)) {
-			std::string name = de.path().filename().string();
+			std::string name = pathToUtf8(de.path().filename());
 			if (!name.empty() && name.front() == '.')  // skip hidden entries
 				continue;
 			bool is_dir = de.is_directory(ec);
@@ -146,7 +147,7 @@ VkDescriptorSet AssetBrowserPanel::getThumbnail(const std::filesystem::path& pat
 	if (!m_resource_manager)
 		return VK_NULL_HANDLE;
 
-	const std::string key = path.generic_string();
+	const std::string key = pathToUtf8Generic(path);
 	auto it = m_thumbnails.find(key);
 	if (it != m_thumbnails.end())
 		return it->second.descriptor;
@@ -161,7 +162,11 @@ VkDescriptorSet AssetBrowserPanel::getThumbnail(const std::filesystem::path& pat
 	m_thumb_loads_this_frame++;
 
 	Thumbnail t;
-	t.texture = VeTexture::loadFromPath(*m_resource_manager, path, TextureType::ALBEDO);
+	try {
+		t.texture = VeTexture::loadFromPath(*m_resource_manager, path, TextureType::ALBEDO);
+	} catch (const std::exception& e) {
+		VE_LOGW("Thumbnail load failed for '" << key << "': " << e.what());
+	}
 	if (!t.texture || !t.texture->getImage()) {
 		m_failed_thumbnails.insert(key);
 		return VK_NULL_HANDLE;
@@ -202,7 +207,7 @@ void AssetBrowserPanel::pollMetadata() {
 		constexpr size_t MAX_METADATA_CACHE = 256;
 		if (m_metadata_cache.size() >= MAX_METADATA_CACHE)
 			m_metadata_cache.clear();
-		m_metadata_cache[m_metadata_path.generic_string()] = m_metadata_future.get();
+		m_metadata_cache[pathToUtf8Generic(m_metadata_path)] = m_metadata_future.get();
 		m_metadata_future = {};
 	}
 }
@@ -255,7 +260,7 @@ void AssetBrowserPanel::renderToolbar(EditorState& state) {
 			pfd::opt::none).result();
 		if (!selection.empty()) {
 			m_event_bus->emitImmediate(AddModelRequestedEvent{
-				.gltf_path = selection[0],
+				.gltf_path = utf8ToPath(selection[0]),
 				.flip_tex_coord_v = state.import_flip_v});
 			VE_LOGI("Asset browser: import model '" << selection[0] << "'");
 		}
@@ -264,8 +269,8 @@ void AssetBrowserPanel::renderToolbar(EditorState& state) {
 	ImGui::SameLine();
 	std::error_code ec;
 	auto rel = std::filesystem::relative(m_current_dir, m_root, ec);
-	std::string crumb = (ec || rel.empty() || rel == ".") ? m_root.filename().string()
-	                                                       : rel.generic_string();
+	std::string crumb = (ec || rel.empty() || rel == ".") ? pathToUtf8(m_root.filename())
+	                                                       : pathToUtf8Generic(rel);
 	ImGui::TextDisabled("%s", crumb.c_str());
 
 	ImGui::SetNextItemWidth(FILTER_INPUT_WIDTH);
@@ -311,7 +316,7 @@ void AssetBrowserPanel::handleEntryClick(const Entry& e, bool clicked, bool doub
 
 void AssetBrowserPanel::beginModelDragSource(const Entry& e) {
 	if (e.kind == AssetKind::Model && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-		std::string p = e.path.generic_string();
+		std::string p = pathToUtf8Generic(e.path);
 		ImGui::SetDragDropPayload("ASSET_GLTF_PATH", p.c_str(), p.size() + 1);
 		ImGui::TextUnformatted(e.name.c_str());
 		ImGui::EndDragDropSource();
@@ -323,7 +328,7 @@ void AssetBrowserPanel::emitAddModel(const std::filesystem::path& path, const gl
 		return;
 	m_event_bus->emitImmediate(AddModelRequestedEvent{
 		.gltf_path = path, .translation = translation, .flip_tex_coord_v = state.import_flip_v});
-	VE_LOGI("Asset browser: add model '" << path.filename().string() << "'");
+	VE_LOGI("Asset browser: add model '" << pathToUtf8(path.filename()) << "'");
 }
 
 glm::vec3 AssetBrowserPanel::placeInFrontOfCamera() const {
@@ -336,11 +341,11 @@ void AssetBrowserPanel::inspectTexture(const std::filesystem::path& path) {
 	if (!m_texture_inspector)
 		return;
 	getThumbnail(path, /*bypass_limits=*/true);  // ensure the texture is loaded
-	auto it = m_thumbnails.find(path.generic_string());
+	auto it = m_thumbnails.find(pathToUtf8Generic(path));
 	if (it == m_thumbnails.end() || !it->second.texture)
 		return;
 	m_inspected_texture = it->second.texture;  // keep alive while the inspector references it
-	m_texture_inspector->open(m_inspected_texture.get(), path.filename().string().c_str());
+	m_texture_inspector->open(m_inspected_texture.get(), pathToUtf8(path.filename()).c_str());
 }
 
 void AssetBrowserPanel::renderContextMenu(const Entry& e, EditorState& state) {
@@ -373,7 +378,7 @@ void AssetBrowserPanel::renderContextMenu(const Entry& e, EditorState& state) {
 	if (ImGui::MenuItem("Reveal in file manager"))
 		VeFileSystem::revealInFileManager(e.path);
 	if (ImGui::MenuItem("Copy path"))
-		ImGui::SetClipboardText(e.path.string().c_str());
+		ImGui::SetClipboardText(pathToUtf8(e.path).c_str());
 
 	ImGui::EndPopup();
 }
@@ -468,7 +473,7 @@ void AssetBrowserPanel::renderGrid(EditorState& state) {
 			ImGui::SetTooltip("%s", e.name.c_str());
 
 		// Grid tiles are narrow: label with the filename
-		std::string display = e.path.filename().string();
+		std::string display = pathToUtf8(e.path.filename());
 		std::string label = (display.size() > static_cast<size_t>(max_chars))
 			? display.substr(0, static_cast<size_t>(max_chars) - 1) + "..."
 			: display;
@@ -494,7 +499,7 @@ void AssetBrowserPanel::renderMetadata(EditorState& state) {
 		return;
 	}
 
-	ImGui::TextWrapped("%s", m_selected.filename().string().c_str());
+	ImGui::TextWrapped("%s", pathToUtf8(m_selected.filename()).c_str());
 	ImGui::Separator();
 
 	std::error_code ec;
@@ -504,7 +509,7 @@ void AssetBrowserPanel::renderMetadata(EditorState& state) {
 
 	AssetKind kind = classify(m_selected);
 	if (kind == AssetKind::Model) {
-		const std::string key = m_selected.generic_string();
+		const std::string key = pathToUtf8Generic(m_selected);
 		auto it = m_metadata_cache.find(key);
 		if (it == m_metadata_cache.end()) {
 			if (!m_metadata_future.valid()) {
@@ -539,7 +544,7 @@ void AssetBrowserPanel::renderMetadata(EditorState& state) {
 		ImGui::TextDisabled("(or drag to viewport)");
 	} else if (kind == AssetKind::Texture) {
 		VkDescriptorSet preview = getThumbnail(m_selected, /*bypass_limits=*/true);
-		auto it = m_thumbnails.find(m_selected.generic_string());
+		auto it = m_thumbnails.find(pathToUtf8Generic(m_selected));
 		if (it != m_thumbnails.end() && it->second.texture) {
 			const VeTexture* tex = it->second.texture.get();
 			ImGui::Text("Dimensions: %u x %u", tex->getWidth(), tex->getHeight());

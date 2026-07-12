@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "platform/ve_file_system.hpp"
 #include "utils/ve_log.hpp"
+#include "utils/ve_path.hpp"
 #include <cstring>
 
 #if defined(_WIN32)
@@ -54,9 +55,8 @@ std::vector<char> VeFileSystem::readFile(const std::filesystem::path& file_path)
 
 	std::ifstream file(file_path, std::ios::ate | std::ios::binary);
 	if (!file.is_open()) {
-		throw std::runtime_error(std::string("failed to open file: ") + file_path.string());
+		throw std::runtime_error("failed to open file: " + pathToUtf8(file_path));
 	}
-	//VE_LOGI("Reading file: " << file_path.string());
 
 	std::streampos end = file.tellg();
 	file.seekg(0, std::ios::beg);
@@ -72,13 +72,13 @@ std::vector<char> VeFileSystem::readFile(const std::filesystem::path& file_path)
 void VeFileSystem::revealInFileManager(const std::filesystem::path& path) {
 	std::error_code ec;
 	if (!std::filesystem::exists(path, ec)) {
-		VE_LOGE("revealInFileManager: path does not exist: " << path.string());
+		VE_LOGE("revealInFileManager: path does not exist: " << pathToUtf8(path));
 		return;
 	}
 
 #if defined(__APPLE__)
 	// -R selects the item in Finder
-	launchProcess({"open", "-R", path.string()});
+	launchProcess({"open", "-R", pathToUtf8(path)});
 #elif defined(_WIN32)
 	std::wstring native = std::filesystem::path(path).make_preferred().wstring();
 	HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
@@ -93,7 +93,7 @@ void VeFileSystem::revealInFileManager(const std::filesystem::path& path) {
 #else
 	// No "select file" on Linux
 	std::filesystem::path dir = std::filesystem::is_directory(path, ec) ? path : path.parent_path();
-	launchProcess({"xdg-open", dir.string()});
+	launchProcess({"xdg-open", pathToUtf8(dir)});
 #endif
 }
 
