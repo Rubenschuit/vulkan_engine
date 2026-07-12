@@ -56,7 +56,7 @@ struct VENGINE_API RenderSettings {
 	bool ssr_half_res = true;
 	int ssr_max_steps = 48;
 	float ssr_thickness = 0.3f;
-	float ssr_max_roughness = 0.6f;
+	float ssr_max_roughness = 0.85f;
 	float ssr_max_distance = 25.0f;
 
 	// culling

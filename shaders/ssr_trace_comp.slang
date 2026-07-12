@@ -69,6 +69,10 @@ static const float CELL_EPS = 0.005;
 
 static const float MAX_REFLECTED_LUMA = 10.0;
 
+// Maps roughness to reflected-cone half-angle (tan) for the history mip LOD;
+// higher = blurrier glossy reflections. Mirrors (roughness 0) are unaffected.
+static const float ROUGH_CONE_SCALE = 6.0;
+
 // s at which the ray exits the mip-level cell containing p_xy
 float cellExitS(float3 s0, float3 inv_d, float3 d, float2 p_xy, int level) {
 	float cs = exp2(float(level));
@@ -187,8 +191,8 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 		// at/behind the closest surface (.y); .y == 0 marks sky/padding.
 		// z is linear in s, so the interval extrema are its endpoints.
 		bool may_hit = (zz.y > 0.0) && (min(p.z, z_exit) <= zz.y);
-		// Skip-behind via the .x (farthest) channel
-		//may_hit = may_hit && !(max(p.z, z_exit) < zz.x);
+		// Skip-behind (.x = farthest surface)
+		may_hit = may_hit && !((linearViewZ(zz.x) - linearViewZ(max(p.z, z_exit))) > push.thickness);
 
 		if (!may_hit) {
 			s = s_exit;
@@ -253,9 +257,13 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 		ssr_out[id.xy] = float4(0, 0, 0, 0);
 		return;
 	}
+	// History mip LOD from the reflected cone footprint: the pixel cone (grows
+	// with travel) plus the GGX lobe spread (grows with roughness and hit
+	// distance).
 	float hit_dist = distance(hit_world, world_pos);
 	float travel = distance(world_pos, ubo.camera_position.xyz) + hit_dist;
-	float footprint = travel / max(-linearViewZ(scene_d), 1e-3) * (push.depth_size.y / push.out_size.y);
+	float cone = travel + hit_dist * roughness * ROUGH_CONE_SCALE;
+	float footprint = cone / max(-linearViewZ(scene_d), 1e-3) * (push.depth_size.y / push.out_size.y);
 	float3 color = history_texture.SampleLevel(history_sampler, prev_uv, log2(max(footprint, 1.0))).rgb;
 
 	// Soft firefly clamp
@@ -267,7 +275,7 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	float2 prev_border = saturate((0.5 - abs(prev_uv - 0.5)) / 0.1);
 	float history_fade = prev_border.x * prev_border.y;
 	float dist_fade = 1.0 - saturate(hit_dist / push.max_distance);
-	float rough_fade = 1.0 - smoothstep(push.max_roughness * 0.7, max(push.max_roughness, 1e-4), roughness);
+	float rough_fade = 1.0 - smoothstep(push.max_roughness * 0.85, max(push.max_roughness, 1e-4), roughness);
 	float confidence = edge_fade * history_fade * dist_fade * rough_fade;
 
 	ssr_out[id.xy] = float4(color, confidence);
