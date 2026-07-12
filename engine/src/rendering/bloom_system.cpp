@@ -95,7 +95,7 @@ void BloomSystem::createMipChain(vk::Extent2D extent) {
 			current_extent.width,
 			current_extent.height,
 			vk::SampleCountFlagBits::e1,
-			vk::Format::eR16G16B16A16Sfloat, // HDR format
+			vk::Format::eB10G11R11UfloatPack32, // HDR bloom: positive-only, alpha unused
 			vk::ImageTiling::eOptimal,
 			vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled,
 			vk::MemoryPropertyFlagBits::eDeviceLocal,
@@ -164,7 +164,7 @@ void BloomSystem::createPipelines() {
 	PipelineConfigInfo config{};
 	VePipeline::defaultPipelineConfigInfo(config, m_ve_device);
 	config.multisample_info.rasterizationSamples = vk::SampleCountFlagBits::e1;
-	config.color_format = vk::Format::eR16G16B16A16Sfloat;
+	config.color_format = vk::Format::eB10G11R11UfloatPack32;
 	config.attribute_descriptions.clear();
 	config.binding_descriptions.clear();
 	config.rasterization_info.cullMode = vk::CullModeFlagBits::eNone;
