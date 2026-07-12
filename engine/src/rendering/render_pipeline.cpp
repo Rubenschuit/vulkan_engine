@@ -16,7 +16,7 @@
 #include "rendering/culling/meshlet_culling_backend.hpp"
 #include "rendering/culling/meshlet_culling_system.hpp"
 #include "rendering/frame_profiler.hpp"
-#include "rendering/depth_prepass_system.hpp"
+#include "rendering/geometry_prepass_system.hpp"
 #include "rendering/gtao_system.hpp"
 #include "rendering/hiz_system.hpp"
 #include "rendering/ibl_system.hpp"
@@ -163,11 +163,11 @@ void RenderPipeline::initRenderSystems() {
 	);
 	m_shadow_render_system->setTracyContext(m_ve_renderer.getTracyGraphicsCtx());
 
-	m_depth_prepass_system = std::make_unique<DepthPrePassSystem>(
+	m_geometry_prepass_system = std::make_unique<GeometryPrePassSystem>(
 		m_ve_device, m_resources.globalSetLayout().getDescriptorSetLayout(),
 		m_scene_resources->getBindlessRegistry().getSetLayout(),
 		m_ve_renderer.getSampleCount(), m_ve_renderer.getOffscreenImageFormat(),
-		shader("depth_prepass_shader.spv"),
+		shader("geometry_prepass_shader.spv"),
 		m_event_bus
 	);
 
@@ -178,6 +178,7 @@ void RenderPipeline::initRenderSystems() {
 		m_config.shaders_dir, halveExtent(m_ve_renderer.getExtent(), m_settings.shadow_mask_half_res),
 		m_ve_renderer.getExtent(),
 		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage(),
+		m_ve_renderer.getResolvedNormalRoughnessImageView(),
 		m_event_bus
 	);
 
@@ -378,7 +379,7 @@ void RenderPipeline::renderFrame(VeScene& scene,
 	bool has_objects = m_scene_resources->getGpuSceneManager().hasRegisteredObjects();
 	bool any_gpu_culling = has_objects
 		&& m_settings.culling_backend != CullingBackendMode::CPU;
-	bool hiz_on = m_settings.hiz_occlusion_enabled && m_settings.depth_prepass_enabled && any_gpu_culling;
+	bool hiz_on = m_settings.hiz_occlusion_enabled && m_settings.geometry_prepass_enabled && any_gpu_culling;
 	m_active_backend->setHizEnabled(hiz_on);
 
 	m_skybox_render_system->processPendingLoad();
@@ -653,7 +654,7 @@ void RenderPipeline::populateUBO(VeFrameInfo& fi) {
 	m_shadow_render_system->updateUniformBuffer(current_frame, ubo, fi.csm_data);
 
 	bool shadow_mask_active = m_settings.shadow_mask_enabled
-		&& m_settings.depth_prepass_enabled
+		&& m_settings.geometry_prepass_enabled
 		&& m_settings.shadow_mode != ShadowMode::DISABLED;
 	ubo.screen_size = glm::vec2(static_cast<float>(extent.width), static_cast<float>(extent.height));
 
@@ -751,27 +752,27 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 	bool editor_mode = editor_state.editor_mode;
 
 	bool hiz_active = fi.gpu_culling_active && m_active_backend->isHizEnabled()
-		&& m_settings.depth_prepass_enabled;
-	bool gtao_active = m_settings.gtao_enabled && m_settings.depth_prepass_enabled;
-	bool ssr_active = m_settings.ssr_enabled && m_settings.depth_prepass_enabled;
+		&& m_settings.geometry_prepass_enabled;
+	bool gtao_active = m_settings.gtao_enabled && m_settings.geometry_prepass_enabled;
+	bool ssr_active = m_settings.ssr_enabled && m_settings.geometry_prepass_enabled;
 	bool perspective_cam = fi.camera_view.proj[3][3] == 0.0f;
 	bool ssr_trace_active = ssr_active && perspective_cam && m_ssr_system->historyValid();
 
-	if (m_settings.depth_prepass_enabled) {
-		ZoneScopedN("Depth Prepass");
-		TracyVkZone(tracy_gfx, *command_buffer, "Depth Prepass");
-		profiler.beginCpuTimer(ProfileTimer::DEPTH_PREPASS);
-		profiler.beginGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
-		m_ve_renderer.beginDepthPrePass(command_buffer);
-		m_active_backend->renderDepthPrePass(fi, m_scene_resources->getMegaBuffer(),
-			*m_depth_prepass_system, bindless_set);
-		m_ve_renderer.endDepthPrePass(command_buffer);
-		profiler.endGpuTimer(command_buffer, ProfileTimer::DEPTH_PREPASS);
-		profiler.endCpuTimer(ProfileTimer::DEPTH_PREPASS);
+	if (m_settings.geometry_prepass_enabled) {
+		ZoneScopedN("Geometry Prepass");
+		TracyVkZone(tracy_gfx, *command_buffer, "Geometry Prepass");
+		profiler.beginCpuTimer(ProfileTimer::GEOMETRY_PREPASS);
+		profiler.beginGpuTimer(command_buffer, ProfileTimer::GEOMETRY_PREPASS);
+		m_ve_renderer.beginGeometryPrePass(command_buffer);
+		m_active_backend->renderGeometryPrePass(fi, m_scene_resources->getMegaBuffer(),
+			*m_geometry_prepass_system, bindless_set);
+		m_ve_renderer.endGeometryPrePass(command_buffer);
+		profiler.endGpuTimer(command_buffer, ProfileTimer::GEOMETRY_PREPASS);
+		profiler.endCpuTimer(ProfileTimer::GEOMETRY_PREPASS);
 	}
 
 	bool shadows_enabled = m_settings.shadow_mode != ShadowMode::DISABLED;
-	bool any_depth_consumer = m_settings.depth_prepass_enabled
+	bool any_depth_consumer = m_settings.geometry_prepass_enabled
 		&& (hiz_active || fi.shadow_mask_active || gtao_active || ssr_trace_active);
 	bool any_async_consumer = m_ve_device.hasDedicatedComputeQueue()
 		&& (gtao_active || hiz_active);
@@ -950,7 +951,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		TracyVkZone(tracy_gfx, *active_cb, "Scene Render");
 		profiler.beginCpuTimer(ProfileTimer::SCENE_RENDER);
 		profiler.beginGpuTimer(active_cb, ProfileTimer::SCENE_RENDER);
-		m_ve_renderer.beginSceneRender(active_cb, m_settings.depth_prepass_enabled);
+		m_ve_renderer.beginSceneRender(active_cb, m_settings.geometry_prepass_enabled);
 		{
 			ZoneScopedN("Opaque");
 			TracyVkZone(tracy_gfx, *active_cb, "Opaque");
@@ -1120,7 +1121,7 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	const auto& results = profiler.getResults();
 	m_stats.gpu_culling = results.gpu(ProfileTimer::CULLING);
 	m_stats.gpu_shadow_maps = results.gpu(ProfileTimer::SHADOW_MAPS);
-	m_stats.gpu_depth_prepass = results.gpu(ProfileTimer::DEPTH_PREPASS);
+	m_stats.gpu_geometry_prepass = results.gpu(ProfileTimer::GEOMETRY_PREPASS);
 	m_stats.gpu_gtao = results.gpu(ProfileTimer::GTAO);
 	m_stats.gpu_scene_render = results.gpu(ProfileTimer::SCENE_RENDER);
 	m_stats.gpu_ssr = results.gpu(ProfileTimer::SSR);
@@ -1135,7 +1136,7 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 
 	m_stats.cpu_culling = results.cpu(ProfileTimer::CULLING);
 	m_stats.cpu_shadow_maps = results.cpu(ProfileTimer::SHADOW_MAPS);
-	m_stats.cpu_depth_prepass = results.cpu(ProfileTimer::DEPTH_PREPASS);
+	m_stats.cpu_geometry_prepass = results.cpu(ProfileTimer::GEOMETRY_PREPASS);
 	m_stats.cpu_gtao = results.cpu(ProfileTimer::GTAO);
 	m_stats.cpu_scene_render = results.cpu(ProfileTimer::SCENE_RENDER);
 	m_stats.cpu_ssr = results.cpu(ProfileTimer::SSR);

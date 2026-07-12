@@ -4,7 +4,7 @@
 
 namespace ve {
 
-class DepthPrePassSystem;
+class GeometryPrePassSystem;
 class GpuSceneManager;
 class PbrMegaBuffer;
 class PbrRenderSystem;
@@ -20,8 +20,8 @@ public:
 
 	virtual void cull(VeFrameInfo& fi, GpuSceneManager& gpu_scene) = 0;
 
-	virtual void renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
-	                                DepthPrePassSystem& dps,
+	virtual void renderGeometryPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
+	                                GeometryPrePassSystem& dps,
 	                                const vk::raii::DescriptorSet& bindless_set) const = 0;
 
 	virtual void renderShadows(VeFrameInfo& fi, ShadowRenderSystem& srs,

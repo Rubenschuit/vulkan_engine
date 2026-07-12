@@ -1,7 +1,7 @@
 #include "pch.hpp"
 #include "rendering/culling/cpu_culling_backend.hpp"
 #include "rendering/culling/culling_system.hpp"
-#include "rendering/depth_prepass_system.hpp"
+#include "rendering/geometry_prepass_system.hpp"
 #include "rendering/pbr_render_system.hpp"
 #include "rendering/shadow_render_system.hpp"
 #include "rendering/managers/material_ssbo_manager.hpp"
@@ -31,13 +31,13 @@ void CpuCullingBackend::cull(VeFrameInfo& fi, GpuSceneManager&) {
 	m_pbr.prepareFrame(fi, m_mat_mgr);
 }
 
-void CpuCullingBackend::renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
-                                           DepthPrePassSystem& dps,
+void CpuCullingBackend::renderGeometryPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
+                                           GeometryPrePassSystem& dps,
                                            const vk::raii::DescriptorSet& bindless_set) const {
 	dps.render(fi, mega, bindless_set,
 		m_pbr.getIndirectBuffer(fi.current_frame),
 		m_pbr.getDepthBucketOffsets(),
-		m_pbr.getDepthBucketCounts(), 2);
+		m_pbr.getDepthBucketCounts(), 4);
 }
 
 void CpuCullingBackend::renderShadows(VeFrameInfo& fi, ShadowRenderSystem& srs,
@@ -53,7 +53,7 @@ void CpuCullingBackend::renderOpaque(VeFrameInfo& fi, PbrRenderSystem& pbr,
 void CpuCullingBackend::renderTransparency(VeFrameInfo&, PbrRenderSystem&,
                                            const vk::raii::DescriptorSet&,
                                            GpuSceneManager&, VeRenderer&) const {
-	// CPU transparent rendering happens inside the scene render pass 
+	// CPU transparent rendering happens inside the scene render pass
 }
 
 vk::raii::DescriptorSet& CpuCullingBackend::getGlobalDescriptorSet(uint32_t frame) {

@@ -29,6 +29,7 @@ ShadowMaskSystem::ShadowMaskSystem(
 	vk::Extent2D depth_extent,
 	const vk::raii::ImageView& depth_image_view,
 	vk::Image depth_image,
+	const vk::raii::ImageView& normal_roughness_image_view,
 	EventBus& event_bus)
 	: m_ve_device(device), m_shader_path(std::move(shader_path)),
 	  m_extent(mask_extent), m_depth_extent(depth_extent) {
@@ -41,12 +42,14 @@ ShadowMaskSystem::ShadowMaskSystem(
 	});
 	event_bus.subscribe<ResolutionChangedEvent>([this](const ResolutionChangedEvent& e) {
 		vk::Extent2D mask_extent = e.shadow_mask_half_res
-			? vk::Extent2D{e.extent.width / 2, e.extent.height / 2} : e.extent;
+			? vk::Extent2D{std::max(1u, e.extent.width / 2), std::max(1u, e.extent.height / 2)} : e.extent;
+		m_normal_image_view = *e.normal_roughness_image_view;
 		recreate(e.pool, mask_extent, e.extent, e.depth_image_view, e.depth_image);
 	});
 
 	m_depth_image = depth_image;
 	m_depth_image_view = *depth_image_view;
+	m_normal_image_view = *normal_roughness_image_view;
 	m_default_mask_texture = resource_manager.load<VeTexture>("default_albedo");
 	createShadowMaskImage(m_extent);
 	createComputeSetLayout();
@@ -54,7 +57,7 @@ ShadowMaskSystem::ShadowMaskSystem(
 	createSampler();
 	createPipelineLayout(global_set_layout, shadow_set_layout);
 	createPipelines();
-	createDescriptorSets(descriptor_pool, global_set_layout);
+	createDescriptorSets(descriptor_pool);
 }
 
 ShadowMaskSystem::~ShadowMaskSystem() = default;
@@ -91,6 +94,7 @@ void ShadowMaskSystem::createComputeSetLayout() {
 	m_compute_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // depth
 		.addBinding(1, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute) // shadow mask out
+		.addBinding(2, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // G-buffer normal
 		.build();
 }
 
@@ -186,8 +190,7 @@ void ShadowMaskSystem::createPipelines() {
 	}
 }
 
-void ShadowMaskSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool,
-	const vk::raii::DescriptorSetLayout& /*global_set_layout*/) {
+void ShadowMaskSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 	// Shadow mask image info (for both compute storage and fragment sampled reads)
 	vk::DescriptorImageInfo mask_storage_info{
 		.imageView = *m_shadow_mask_image->getImageView(),
@@ -208,12 +211,17 @@ void ShadowMaskSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool,
 		.imageView = m_depth_image_view,
 		.imageLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
 	};
+	vk::DescriptorImageInfo normal_info{
+		.imageView = m_normal_image_view,
+		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+	};
 
 	for (uint32_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
 		// Compute I/O set (Set 1): depth input + shadow mask storage
 		VeDescriptorWriter(*m_compute_set_layout, descriptor_pool)
 			.writeImage(0, &depth_info)         // binding 0: depth texture
 			.writeImage(1, &mask_storage_info)   // binding 1: shadow mask storage output
+			.writeImage(2, &normal_info)          // binding 2: G-buffer normal
 			.build(m_compute_descriptor_sets[frame]);
 
 		// Output set (Set 3): shadow mask sampled + sampler (for PBR/simple)
@@ -315,32 +323,7 @@ void ShadowMaskSystem::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D 
 	m_depth_image = depth_image;
 	m_depth_image_view = *depth_image_view;
 	createShadowMaskImage(mask_extent);
-	// Re-create compute I/O and output descriptor sets (they reference the new shadow mask image)
-	vk::DescriptorImageInfo mask_storage_info{
-		.imageView = *m_shadow_mask_image->getImageView(),
-		.imageLayout = vk::ImageLayout::eGeneral,
-	};
-	vk::DescriptorImageInfo mask_sampled_info{
-		.imageView = *m_shadow_mask_image->getImageView(),
-		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-	};
-	vk::DescriptorImageInfo sampler_info{
-		.sampler = *m_linear_clamp_sampler,
-	};
-	vk::DescriptorImageInfo depth_info{
-		.imageView = m_depth_image_view,
-		.imageLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
-	};
-	for (uint32_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
-		VeDescriptorWriter(*m_compute_set_layout, descriptor_pool)
-			.writeImage(0, &depth_info)
-			.writeImage(1, &mask_storage_info)
-			.build(m_compute_descriptor_sets[frame]);
-		VeDescriptorWriter(*m_output_set_layout, descriptor_pool)
-			.writeImage(0, &mask_sampled_info)
-			.writeImage(1, &sampler_info)
-			.build(m_output_descriptor_sets[frame]);
-	}
+	createDescriptorSets(descriptor_pool);
 }
 
 void ShadowMaskSystem::setShadowSamples(uint32_t pcf_samples, uint32_t pcss_filter_samples) {

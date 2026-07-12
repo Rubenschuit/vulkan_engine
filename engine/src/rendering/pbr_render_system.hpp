@@ -95,7 +95,7 @@ public:
 
 	uint32_t getOpaqueDrawCount() const { return m_total_indirect_count; }
 
-	// Depth prepass uses buckets 0-1 from the main indirect buffer
+	// Geometry prepass uses buckets 0-1 from the main indirect buffer
 	const uint32_t* getDepthBucketOffsets() const { return m_bucket_offsets; }
 	const uint32_t* getDepthBucketCounts() const { return m_bucket_counts; }
 	const VeBuffer& getIndirectBuffer(uint32_t frame) const { return *m_indirect_buffers[frame]; }
@@ -114,7 +114,7 @@ public:
 	};
 
 private:
-	bool m_depth_prepass_active = true;
+	bool m_geometry_prepass_active = true;
 	void createPipelineLayout(
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		const vk::raii::DescriptorSetLayout& bindless_set_layout,
@@ -174,7 +174,7 @@ private:
 	std::unique_ptr<VePipeline> m_wboit_composite_pipeline;
 
 	// Indirect draw (opaque): 4 buckets (non-MASK back, non-MASK double, MASK back, MASK double)
-	// Depth prepass uses buckets 0-1 (non-MASK only) from the same buffer.
+	// Geometry prepass uses buckets 0-1 (non-MASK only) from the same buffer.
 	static constexpr uint32_t BUCKET_COUNT = 4;
 	mutable std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_indirect_buffers;
 	mutable uint32_t m_bucket_offsets[BUCKET_COUNT]{};

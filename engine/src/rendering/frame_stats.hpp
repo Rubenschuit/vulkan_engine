@@ -18,7 +18,7 @@ struct VENGINE_API FrameStats {
 	// Per-system GPU breakdown (ms)
 	float gpu_culling = 0.0f;
 	float gpu_shadow_maps = 0.0f;
-	float gpu_depth_prepass = 0.0f;
+	float gpu_geometry_prepass = 0.0f;
 	float gpu_gtao = 0.0f;
 	float gpu_scene_render = 0.0f;
 	float gpu_ssr = 0.0f;
@@ -34,7 +34,7 @@ struct VENGINE_API FrameStats {
 	// Per-system CPU breakdown (ms)
 	float cpu_culling = 0.0f;
 	float cpu_shadow_maps = 0.0f;
-	float cpu_depth_prepass = 0.0f;
+	float cpu_geometry_prepass = 0.0f;
 	float cpu_gtao = 0.0f;
 	float cpu_scene_render = 0.0f;
 	float cpu_ssr = 0.0f;

@@ -15,7 +15,7 @@ enum class ProfileTimer : uint32_t {
 	FRAME_TOTAL = 0,
 	CULLING,
 	SHADOW_MAPS,
-	DEPTH_PREPASS,
+	GEOMETRY_PREPASS,
 	GTAO,
 	SCENE_RENDER,
 	BLOOM,
@@ -38,7 +38,7 @@ inline const char* profileTimerName(ProfileTimer timer) {
 		case ProfileTimer::FRAME_TOTAL:    return "Frame Total";
 		case ProfileTimer::CULLING:        return "Culling";
 		case ProfileTimer::SHADOW_MAPS:    return "Shadows";
-		case ProfileTimer::DEPTH_PREPASS:  return "Depth Pass";
+		case ProfileTimer::GEOMETRY_PREPASS:  return "Geometry Pass";
 		case ProfileTimer::GTAO:           return "GTAO";
 		case ProfileTimer::SCENE_RENDER:   return "Scene";
 		case ProfileTimer::BLOOM:          return "Bloom";

@@ -46,7 +46,7 @@ public:
 	GtaoSystem& operator=(const GtaoSystem&) = delete;
 
 	// Record GTAO compute + bilateral blur.
-	// Must be called AFTER depth pre-pass, BEFORE beginSceneRender.
+	// Must be called AFTER geometry pre-pass, BEFORE beginSceneRender.
 	// cmd: the command buffer to record on (may be graphics or compute queue).
 	void dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd);
 

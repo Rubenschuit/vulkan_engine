@@ -17,9 +17,9 @@ namespace ve {
 
 namespace ve {
 
-class VENGINE_API DepthPrePassSystem {
+class VENGINE_API GeometryPrePassSystem {
 public:
-	DepthPrePassSystem(
+	GeometryPrePassSystem(
 		VeDevice& device,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		const vk::raii::DescriptorSetLayout& bindless_set_layout,
@@ -27,10 +27,10 @@ public:
 		vk::Format normal_roughness_format,
 		std::filesystem::path shader_path,
 		EventBus& event_bus);
-	~DepthPrePassSystem();
+	~GeometryPrePassSystem();
 
-	DepthPrePassSystem(const DepthPrePassSystem&) = delete;
-	DepthPrePassSystem& operator=(const DepthPrePassSystem&) = delete;
+	GeometryPrePassSystem(const GeometryPrePassSystem&) = delete;
+	GeometryPrePassSystem& operator=(const GeometryPrePassSystem&) = delete;
 
 	// Render depth using indirect draw commands from PbrRenderSystem.
 	// Must be called AFTER PbrRenderSystem::prepareFrame().
@@ -72,6 +72,7 @@ private:
 
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_ve_pipeline;
+	std::unique_ptr<VePipeline> m_masked_pipeline; // ALPHA_MASK_SPEC=1, buckets 2-3
 };
 
 } // namespace ve

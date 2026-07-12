@@ -2,7 +2,7 @@
 #include "rendering/culling/gpu_culling_backend.hpp"
 #include "rendering/culling/gpu_culling_system.hpp"
 #include "rendering/managers/gpu_scene_manager.hpp"
-#include "rendering/depth_prepass_system.hpp"
+#include "rendering/geometry_prepass_system.hpp"
 #include "rendering/pbr_render_system.hpp"
 #include "rendering/shadow_render_system.hpp"
 #include "rendering/ve_renderer.hpp"
@@ -32,12 +32,12 @@ GpuCullingBackend::IndirectDrawSource GpuCullingBackend::getDrawSource(uint32_t 
 	};
 }
 
-void GpuCullingBackend::renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
-                                           DepthPrePassSystem& dps,
+void GpuCullingBackend::renderGeometryPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
+                                           GeometryPrePassSystem& dps,
                                            const vk::raii::DescriptorSet& bindless_set) const {
 	auto src = getDrawSource(fi.current_frame);
 	dps.renderGpuCulled(fi, mega, bindless_set, src.indirect,
-		src.bucket_offsets, src.bucket_counts, 2,
+		src.bucket_offsets, src.bucket_counts, 4,
 		src.compact_indirect, src.compact_counts);
 }
 

@@ -76,14 +76,8 @@ VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID)
 	output.frag_pos_world = world_pos.xyz;
 
 	// Transform normal and tangent to world space
-	float3x3 normal_matrix = float3x3(
-		float3(inst.normal_col0.x, inst.normal_col1.x, inst.normal_col2.x),
-		float3(inst.normal_col0.y, inst.normal_col1.y, inst.normal_col2.y),
-		float3(inst.normal_col0.z, inst.normal_col1.z, inst.normal_col2.z)
-	);
-	float3 tangent = mul(normal_matrix, input.in_tangent.xyz);
-	float3 normal = normalize(mul(normal_matrix, input.in_normal));
-	float3 bitangent = normalize(cross(normal, tangent) * input.in_tangent.w);
+	float3 normal, tangent, bitangent;
+	makeWorldTbn(inst, input.in_normal, input.in_tangent, normal, tangent, bitangent);
 
 	output.frag_normal_world = normal;
 	output.frag_tangent_world = tangent;
@@ -159,6 +153,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	float2 uv_emissive  = applyUvTransform(tex_coord, mat.uv_emissive,    mat.uv_rot_b.x);
 	float4 albedo = bindless_textures[NonUniformResourceIndex(mat.albedo_index)]
 		.Sample(bindless_sampler, uv_albedo);
+	float albedo_tex_alpha = albedo.a;
 
 	// glTF base color = baseColorTexture * baseColorFactor * COLOR_0
 	albedo *= mat.base_color_factor;
@@ -169,7 +164,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	if (alpha_mode == 0) {
 		albedo.a = 1.0;
 	} else if (alpha_mode == 1) {
-		if (albedo.a < mat.alpha_cutoff)
+		if (alphaMaskCutoff(mat, albedo_tex_alpha, in_vert.frag_color.a))
 			discard;
 		albedo.a = 1.0;
 	}
@@ -241,8 +236,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	float3 world_normal = N;
 	if (DEBUG_SHADING_SPEC == 0
 		|| ubo.render_mode == RenderMode::BRDF_MICROFACET || ubo.render_mode == RenderMode::NORMAL_MAP) {
-		float3 tangent_space_normal = normalize(normal_map.xyz * 2.0 - float3(1.0, 1.0, 1.0));
-		world_normal = normalize(tangent_space_normal.x * T + tangent_space_normal.y * B + tangent_space_normal.z * N);
+		world_normal = applyNormalMap(normal_map.xyz, T, B, N);
 	}
 
 	if (DEBUG_SHADING_SPEC != 0 && ubo.render_mode == RenderMode::NORMAL_MAP)
@@ -251,8 +245,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	float3 view_dir = normalize(ubo.camera_position.xyz - in_vert.frag_pos_world);
 	float frag_view_z = -(mul(ubo.view, float4(in_vert.frag_pos_world, 1.0))).z;
 
-	if ((mat.material_flags & MAT_FLAG_DOUBLE_SIDED) != 0u && dot(world_normal, view_dir) < 0.0)
-		world_normal = -world_normal;
+	world_normal = flipDoubleSided(world_normal, view_dir, mat.material_flags);
 
 	// CSM shadow for directional light
 	float csm_shadow = 1.0;

@@ -268,12 +268,12 @@ void VeRenderer::endFrame() {
 	FrameMark;
 }
 
-void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer,
+void VeRenderer::beginGeometryPrePass(vk::raii::CommandBuffer& command_buffer,
 	bool secondary_contents, bool clear) {
-	assert(m_is_frame_started && "Can't begin depth pre-pass while frame is not in progress");
-	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin depth pre-pass on command buffer from a different frame");
+	assert(m_is_frame_started && "Can't begin geometry pre-pass while frame is not in progress");
+	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't begin geometry pre-pass on command buffer from a different frame");
 
-	beginDebugLabel(command_buffer, "Depth Prepass", {0.3f, 0.3f, 1.0f, 1.0f});
+	beginDebugLabel(command_buffer, "Geometry Prepass", {0.3f, 0.3f, 1.0f, 1.0f});
 	auto extent = getExtent();
 
 	vk::RenderingAttachmentInfo depth_attachment_info = {
@@ -360,9 +360,9 @@ void VeRenderer::beginDepthPrePass(vk::raii::CommandBuffer& command_buffer,
 	}
 }
 
-void VeRenderer::endDepthPrePass(vk::raii::CommandBuffer& command_buffer) {
-	assert(m_is_frame_started && "Can't end depth pre-pass while frame is not in progress");
-	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end depth pre-pass on command buffer from a different frame");
+void VeRenderer::endGeometryPrePass(vk::raii::CommandBuffer& command_buffer) {
+	assert(m_is_frame_started && "Can't end geometry pre-pass while frame is not in progress");
+	assert(&command_buffer == &getCurrentCommandBuffer() && "Can't end geometry pre-pass on command buffer from a different frame");
 	command_buffer.endRendering();
 
 	// Barrier: depth writes from pre-pass must be visible before scene pass reads them.

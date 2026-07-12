@@ -98,7 +98,7 @@ struct SsrParametersChangedEvent {
 	float max_distance;
 };
 
-struct DepthPrePassChangedEvent {
+struct GeometryPrePassChangedEvent {
 	bool enabled;
 };
 

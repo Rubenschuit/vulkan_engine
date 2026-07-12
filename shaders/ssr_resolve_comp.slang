@@ -56,8 +56,11 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 
 			conf_sum += s.a * w;
 			conf_w += w;
-			color_sum += s.rgb * (w * s.a);
-			color_w += w * s.a;
+			// Karis-weighted color: bright outliers get proportionally less
+			// weight
+			float cw = w * s.a / (1.0 + dot(s.rgb, float3(0.2126, 0.7152, 0.0722)));
+			color_sum += s.rgb * cw;
+			color_w += cw;
 		}
 	}
 

@@ -31,6 +31,7 @@ public:
 		vk::Extent2D depth_extent,
 		const vk::raii::ImageView& depth_image_view,
 		vk::Image depth_image,
+		const vk::raii::ImageView& normal_roughness_image_view,
 		EventBus& event_bus);
 	~ShadowMaskSystem();
 
@@ -72,8 +73,7 @@ private:
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		const vk::raii::DescriptorSetLayout& shadow_set_layout);
 	void createPipelines();
-	void createDescriptorSets(VeDescriptorPool& descriptor_pool,
-		const vk::raii::DescriptorSetLayout& global_set_layout);
+	void createDescriptorSets(VeDescriptorPool& descriptor_pool);
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;
 	vk::Extent2D m_extent{};       // shadow mask resolution (may be half-res)
@@ -111,6 +111,7 @@ private:
 	// Cached depth image (single-sample resolved depth) for descriptor
 	vk::Image m_depth_image{};
 	vk::ImageView m_depth_image_view{};
+	vk::ImageView m_normal_image_view{};
 
 	// SPIR-V shader module
 	vk::raii::ShaderModule m_shader_module{nullptr};

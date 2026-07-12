@@ -34,7 +34,7 @@ struct VeFrameInfo;
 
 class CullingSystem;
 class ShadowRenderSystem;
-class DepthPrePassSystem;
+class GeometryPrePassSystem;
 class ShadowMaskSystem;
 class GtaoSystem;
 class SsrSystem;
@@ -134,7 +134,7 @@ private:
 
 	std::unique_ptr<CullingSystem> m_culling_system;
 	std::unique_ptr<ShadowRenderSystem> m_shadow_render_system;
-	std::unique_ptr<DepthPrePassSystem> m_depth_prepass_system;
+	std::unique_ptr<GeometryPrePassSystem> m_geometry_prepass_system;
 	std::unique_ptr<ShadowMaskSystem> m_shadow_mask_system;
 	std::unique_ptr<GtaoSystem> m_gtao_system;
 	std::unique_ptr<SsrSystem> m_ssr_system;

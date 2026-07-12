@@ -3,7 +3,7 @@
 #include "rendering/culling/meshlet_culling_system.hpp"
 #include "rendering/culling/gpu_culling_system.hpp"
 #include "rendering/managers/gpu_scene_manager.hpp"
-#include "rendering/depth_prepass_system.hpp"
+#include "rendering/geometry_prepass_system.hpp"
 #include "rendering/pbr_render_system.hpp"
 #include "rendering/shadow_render_system.hpp"
 #include "rendering/ve_renderer.hpp"
@@ -23,8 +23,8 @@ void MeshletCullingBackend::cull(VeFrameInfo& fi, GpuSceneManager& gpu_scene) {
 	m_meshlet_cull_system.dispatch(cmd, fi, gpu_scene);
 }
 
-void MeshletCullingBackend::renderDepthPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
-                                               DepthPrePassSystem& dps,
+void MeshletCullingBackend::renderGeometryPrePass(VeFrameInfo& fi, PbrMegaBuffer& mega,
+                                               GeometryPrePassSystem& dps,
                                                const vk::raii::DescriptorSet& bindless_set) const {
 	dps.renderGpuCulledMeshlets(fi, mega, bindless_set,
 		m_meshlet_cull_system.getMeshletIndirectBuffer(fi.current_frame),

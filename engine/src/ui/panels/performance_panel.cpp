@@ -54,7 +54,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 	// Per-system breakdown accumulation
 	const float gpu_src[] = {
-		context.stats.gpu_culling, context.stats.gpu_depth_prepass,
+		context.stats.gpu_culling, context.stats.gpu_geometry_prepass,
 		context.stats.gpu_hiz, context.stats.gpu_shadow_maps,
 		context.stats.gpu_shadow_mask, context.stats.gpu_gtao,
 		context.stats.gpu_scene_render, context.stats.gpu_ssr,
@@ -65,7 +65,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		context.stats.gpu_particles
 	};
 	const float cpu_src[] = {
-		context.stats.cpu_culling, context.stats.cpu_depth_prepass,
+		context.stats.cpu_culling, context.stats.cpu_geometry_prepass,
 		context.stats.cpu_hiz, context.stats.cpu_shadow_maps,
 		context.stats.cpu_shadow_mask, context.stats.cpu_gtao,
 		context.stats.cpu_scene_render, context.stats.cpu_ssr,
@@ -303,7 +303,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 	// --- Per-system breakdown table ---
 	static const char* breakdown_labels[] = {
-		"Culling", "Depth Pass", "Hi-Z", "Shadows", "Shadow Mask", "GTAO",
+		"Culling", "Geometry Pass", "Hi-Z", "Shadows", "Shadow Mask", "GTAO",
 		"Scene", "SSR", "Outline", "Bloom", "Post Process", "Physics",
 		"UI", "Skinning", "Cluster Lights", "Particles"
 	};

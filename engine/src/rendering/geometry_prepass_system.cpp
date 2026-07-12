@@ -1,5 +1,5 @@
 #include "pch.hpp"
-#include "rendering/depth_prepass_system.hpp"
+#include "rendering/geometry_prepass_system.hpp"
 #include "rendering/managers/pbr_mega_buffer.hpp"
 #include "rendering/deform_pre_pass.hpp"
 #include "vulkan/ve_device.hpp"
@@ -12,7 +12,7 @@
 
 namespace ve {
 
-DepthPrePassSystem::DepthPrePassSystem(
+GeometryPrePassSystem::GeometryPrePassSystem(
 	VeDevice& device,
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	const vk::raii::DescriptorSetLayout& bindless_set_layout,
@@ -32,9 +32,9 @@ DepthPrePassSystem::DepthPrePassSystem(
 	createPipeline(sample_count);
 }
 
-DepthPrePassSystem::~DepthPrePassSystem() = default;
+GeometryPrePassSystem::~GeometryPrePassSystem() = default;
 
-void DepthPrePassSystem::createPipelineLayout(
+void GeometryPrePassSystem::createPipelineLayout(
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	const vk::raii::DescriptorSetLayout& bindless_set_layout) {
 	// Set 1 (bindless) feeds the metallic-roughness texture sample in the G-buffer output
@@ -50,17 +50,15 @@ void DepthPrePassSystem::createPipelineLayout(
 	m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), pipeline_layout_info);
 }
 
-void DepthPrePassSystem::createPipeline(vk::SampleCountFlagBits sample_count) {
+void GeometryPrePassSystem::createPipeline(vk::SampleCountFlagBits sample_count) {
 	PipelineConfigInfo pipeline_config{};
 	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
 
 	pipeline_config.color_format = m_normal_roughness_format;
 	// True would use roughness as blend factor
 	pipeline_config.color_blend_attachment.blendEnable = VK_FALSE;
-	// Only position + normal + uv (locations 0-2) are required
-	auto attributes = VeMesh::Vertex::getAttributeDescriptions();
-	attributes.resize(3);
-	pipeline_config.attribute_descriptions = std::move(attributes);
+	// All five attributes: tangent feeds the TBN, COLOR_0 the mask cutoff
+	pipeline_config.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptions();
 	pipeline_config.binding_descriptions = VeMesh::Vertex::getBindingDescriptions();
 	pipeline_config.multisample_info.rasterizationSamples = sample_count;
 	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eBack;
@@ -74,9 +72,12 @@ void DepthPrePassSystem::createPipeline(vk::SampleCountFlagBits sample_count) {
 	pipeline_config.pipeline_layout = *m_pipeline_layout;
 
 	m_ve_pipeline = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
+
+	pipeline_config.specialization_constants[6] = 1;
+	m_masked_pipeline = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
 }
 
-void DepthPrePassSystem::render(
+void GeometryPrePassSystem::render(
 	VeFrameInfo& frame_info,
 	PbrMegaBuffer& mega_buffer,
 	const vk::raii::DescriptorSet& bindless_set,
@@ -97,9 +98,14 @@ void DepthPrePassSystem::render(
 
 	mega_buffer.bind(cmd);
 
+	bool masked_bound = false;
 	for (uint32_t bucket = 0; bucket < bucket_count; bucket++) {
 		if (bucket_counts[bucket] == 0)
 			continue;
+		if (bucket >= 2 && !masked_bound) {
+			cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_masked_pipeline->getPipeline());
+			masked_bound = true;
+		}
 		bool is_double_sided = (bucket & 1);
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
 		cmd.drawIndexedIndirect(
@@ -110,7 +116,7 @@ void DepthPrePassSystem::render(
 	}
 }
 
-void DepthPrePassSystem::renderGpuCulled(
+void GeometryPrePassSystem::renderGpuCulled(
 	VeFrameInfo& frame_info,
 	PbrMegaBuffer& mega_buffer,
 	const vk::raii::DescriptorSet& bindless_set,
@@ -135,9 +141,14 @@ void DepthPrePassSystem::renderGpuCulled(
 
 	mega_buffer.bind(cmd);
 
+	bool masked_bound = false;
 	for (uint32_t bucket = 0; bucket < bucket_count; bucket++) {
 		if (bucket_group_counts[bucket] == 0)
 			continue;
+		if (bucket >= 2 && !masked_bound) {
+			cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_masked_pipeline->getPipeline());
+			masked_bound = true;
+		}
 		bool is_double_sided = (bucket & 1);
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
 		auto offset = static_cast<vk::DeviceSize>(bucket_group_offsets[bucket]) * sizeof(VkDrawIndexedIndirectCommand);
@@ -154,7 +165,7 @@ void DepthPrePassSystem::renderGpuCulled(
 	}
 }
 
-void DepthPrePassSystem::renderGpuCulledMeshlets(
+void GeometryPrePassSystem::renderGpuCulledMeshlets(
 	VeFrameInfo& frame_info,
 	PbrMegaBuffer& mega_buffer,
 	const vk::raii::DescriptorSet& bindless_set,
@@ -175,8 +186,10 @@ void DepthPrePassSystem::renderGpuCulledMeshlets(
 
 	mega_buffer.bindMeshletIbo(cmd);
 
-	// Depth prepass only draws non-mask buckets (0 = opaque-back, 1 = opaque-double-sided)
-	for (uint32_t bucket = 0; bucket < 2; bucket++) {
+	// Opaque buckets 0-1, then alpha-mask buckets 2-3 with the discard variant
+	for (uint32_t bucket = 0; bucket < 4; bucket++) {
+		if (bucket == 2)
+			cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_masked_pipeline->getPipeline());
 		bool is_double_sided = (bucket & 1) != 0;
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
 
@@ -197,7 +210,7 @@ void DepthPrePassSystem::renderGpuCulledMeshlets(
 	}
 }
 
-void DepthPrePassSystem::recreatePipeline(vk::SampleCountFlagBits sample_count) {
+void GeometryPrePassSystem::recreatePipeline(vk::SampleCountFlagBits sample_count) {
 	m_ve_pipeline.reset();
 	createPipeline(sample_count);
 }

@@ -242,6 +242,38 @@ float2 applyUvTransform(float2 uv, float4 off_scale, float rot) {
 	return float2(c * t.x - s * t.y, s * t.x + c * t.y) + off_scale.xy;
 }
 
+// Surface math shared by the geometry prepass and forward shading.
+
+// World-space TBN from the instance normal matrix (tangent w = handedness)
+void makeWorldTbn(InstanceData inst, float3 in_normal, float4 in_tangent,
+                  out float3 normal, out float3 tangent, out float3 bitangent) {
+	float3x3 normal_matrix = float3x3(
+		float3(inst.normal_col0.x, inst.normal_col1.x, inst.normal_col2.x),
+		float3(inst.normal_col0.y, inst.normal_col1.y, inst.normal_col2.y),
+		float3(inst.normal_col0.z, inst.normal_col1.z, inst.normal_col2.z)
+	);
+	tangent = mul(normal_matrix, in_tangent.xyz);
+	normal = normalize(mul(normal_matrix, in_normal));
+	bitangent = normalize(cross(normal, tangent) * in_tangent.w);
+}
+
+// Tangent-space normal mapping
+float3 applyNormalMap(float3 normal_map_rgb, float3 T, float3 B, float3 N) {
+	float3 tsn = normalize(normal_map_rgb * 2.0 - float3(1.0, 1.0, 1.0));
+	return normalize(tsn.x * T + tsn.y * B + tsn.z * N);
+}
+
+// Flip toward the camera by view vector, after normal mapping.
+float3 flipDoubleSided(float3 normal, float3 view_dir, uint material_flags) {
+	if ((material_flags & MAT_FLAG_DOUBLE_SIDED) != 0u && dot(normal, view_dir) < 0.0)
+		return -normal;
+	return normal;
+}
+
+bool alphaMaskCutoff(MaterialGPU mat, float tex_alpha, float vertex_alpha) {
+	return tex_alpha * mat.base_color_factor.a * vertex_alpha < mat.alpha_cutoff;
+}
+
 float spatialNoise(uint2 coord) {
 	return frac(52.9829189 * frac(dot(float2(coord), float2(0.06711056, 0.00583715))));
 }

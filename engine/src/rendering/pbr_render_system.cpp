@@ -54,8 +54,8 @@ PbrRenderSystem::PbrRenderSystem(
 	event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
 		recreatePipeline(e.offscreen_format, e.sample_count);
 	});
-	event_bus.subscribe<DepthPrePassChangedEvent>([this](const DepthPrePassChangedEvent& e) {
-		m_depth_prepass_active = e.enabled;
+	event_bus.subscribe<GeometryPrePassChangedEvent>([this](const GeometryPrePassChangedEvent& e) {
+		m_geometry_prepass_active = e.enabled;
 	});
 	event_bus.subscribe<ResolutionChangedEvent>([this](const ResolutionChangedEvent& e) {
 		recreateWboit(e.wboit_accum_view, e.wboit_revealage_view, e.offscreen_format);
@@ -500,7 +500,7 @@ void PbrRenderSystem::renderOpaqueGpuCulled(
 		bool is_double_sided = (bucket & 1);
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
 		cmd.setDepthCompareOp(
-			(m_depth_prepass_active || is_mask) ? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
+			(m_geometry_prepass_active || is_mask) ? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
 		auto offset = static_cast<vk::DeviceSize>(bucket_group_offsets[bucket]) * sizeof(VkDrawIndexedIndirectCommand);
 		if (compacted_buffer && compact_count_buffer) {
 			cmd.drawIndexedIndirectCount(
@@ -560,7 +560,7 @@ void PbrRenderSystem::renderOpaqueGpuCulledMeshlets(
 		bool is_double_sided = (bucket & 1) != 0;
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
 		cmd.setDepthCompareOp(
-			(m_depth_prepass_active || is_mask_bucket)
+			(m_geometry_prepass_active || is_mask_bucket)
 				? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
 
 		auto buf_offset   = static_cast<vk::DeviceSize>(bucket) * MAX_MESHLET_DRAWS_PER_BUCKET
@@ -619,7 +619,7 @@ void PbrRenderSystem::renderOpaque(VeFrameInfo& frame_info, const vk::raii::Desc
 		bool is_double_sided = (bucket & 1);
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
 		cmd.setDepthCompareOp(
-			(m_depth_prepass_active || is_mask) ? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
+			(m_geometry_prepass_active || is_mask) ? vk::CompareOp::eGreaterOrEqual : vk::CompareOp::eGreater);
 		cmd.drawIndexedIndirect(
 			m_indirect_buffers[frame_info.current_frame]->getBuffer(),
 			m_bucket_offsets[bucket] * sizeof(VkDrawIndexedIndirectCommand),

@@ -9,6 +9,15 @@
 // Output: rgb radiance + confidence in alpha; confidence 0 falls back to the
 // IBL cubemap in the composite.
 
+// The traversal works in "pyr0 space": xy = continuous mip-0 pyramid texel
+// coordinates (full-res depth pixel (x,y) maps to texel (x/2, y/2); mip-L
+// cell boundaries are multiples of 2^L), z = reverse-Z NDC depth. The ray is
+//
+// p(s) = s0 + s * direction, with s in [0, s_max].
+//
+// The parameter s is linear in screen-xy and ndc_z, so the ray is a straight
+// line in pyr0 space.
+
 #include "ve_common.slangh"
 
 //#define SSR_DEBUG_HEATMAP
@@ -55,12 +64,10 @@ float3 worldFromUvDepth(float2 uv, float depth) {
 	return world.xyz / world.w;
 }
 
-// The traversal works in "pyr0 space": xy = continuous mip-0 pyramid texel
-// coordinates (full-res depth pixel (x,y) maps to texel (x/2, y/2); mip-L
-// cell boundaries are multiples of 2^L), z = reverse-Z NDC depth. The ray is
-// p(s) = s0 + s * d with s in [0, s_max].
-
+// nudge past the boundary so the next step lands in the next cell
 static const float CELL_EPS = 0.005;
+
+static const float MAX_REFLECTED_LUMA = 10.0;
 
 // s at which the ray exits the mip-level cell containing p_xy
 float cellExitS(float3 s0, float3 inv_d, float3 d, float2 p_xy, int level) {
@@ -73,6 +80,9 @@ float cellExitS(float3 s0, float3 inv_d, float3 d, float2 p_xy, int level) {
 	return min(s2.x, s2.y);
 }
 
+// True when the ray point p(s) = s0 + s * d is within 'thickness' behind the
+// cell's closest surface (slab). scene_d is set to the sharp per-pixel depth when
+// it agrees with cell_max, else falls back to cell_max.
 bool slabHit(float3 p, float cell_max, float2 uv_to_pyr, out float2 hit_uv, out float scene_d) {
 	hit_uv = p.xy / uv_to_pyr;
 	float texel_d = depth_texture.Load(int3(depthCoord(hit_uv), 0));
@@ -145,8 +155,6 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	if (abs(d.y) > 1e-6)
 		s_max = min(s_max, (rect_edge.y - s0.y) / d.y);
 
-	// Sign-clamped reciprocals: a near-zero axis yields a huge exit s that
-	// min() never selects; inv_d.z is only read when d.z < 0 strictly
 	float3 inv_d;
 	inv_d.x = 1.0 / ((abs(d.x) > 1e-8) ? d.x : (d.x >= 0.0 ? 1e-8 : -1e-8));
 	inv_d.y = 1.0 / ((abs(d.y) > 1e-8) ? d.y : (d.y >= 0.0 ? 1e-8 : -1e-8));
@@ -249,6 +257,10 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	float travel = distance(world_pos, ubo.camera_position.xyz) + hit_dist;
 	float footprint = travel / max(-linearViewZ(scene_d), 1e-3) * (push.depth_size.y / push.out_size.y);
 	float3 color = history_texture.SampleLevel(history_sampler, prev_uv, log2(max(footprint, 1.0))).rgb;
+
+	// Soft firefly clamp
+	float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
+	color *= MAX_REFLECTED_LUMA / max(MAX_REFLECTED_LUMA, luma);
 
 	float2 border = saturate((0.5 - abs(hit_uv - 0.5)) / 0.1);
 	float edge_fade = border.x * border.y;

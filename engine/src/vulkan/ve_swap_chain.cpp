@@ -378,7 +378,7 @@ void VeSwapChain::createDepthResources() {
 	);
 
 	// Create single-sample resolve target when MSAA is active.
-	// Resolved during depth prepass via VkRenderingAttachmentInfo::resolveMode.
+	// Resolved during geometry prepass via VkRenderingAttachmentInfo::resolveMode.
 	// Compute shaders can read from this instead of MSAA depth.
 	if (m_desired_num_samples != vk::SampleCountFlagBits::e1) {
 		m_resolved_depth_image = std::make_unique<VeImage>(

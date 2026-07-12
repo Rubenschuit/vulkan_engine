@@ -52,9 +52,9 @@ public:
 
 	// --- Render passes, in frame order ---
 
-	void beginDepthPrePass(vk::raii::CommandBuffer& command_buffer,
+	void beginGeometryPrePass(vk::raii::CommandBuffer& command_buffer,
 		bool secondary_contents = false, bool clear = true);
-	void endDepthPrePass(vk::raii::CommandBuffer& command_buffer);
+	void endGeometryPrePass(vk::raii::CommandBuffer& command_buffer);
 	void beginSceneRender(vk::raii::CommandBuffer& command_buffer,
 		bool load_depth = false, bool secondary_contents = false, bool resolve_msaa = true);
 	void endSceneRender(vk::raii::CommandBuffer& command_buffer);

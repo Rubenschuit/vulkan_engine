@@ -8,6 +8,9 @@
 #include "events/render_events.hpp"
 #include "utils/ve_log.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 namespace ve {
 
 struct SsrPushConstant {
@@ -21,6 +24,14 @@ struct SsrPushConstant {
 	int max_steps;         // traversal iteration cap
 	uint32_t hiz_mip_count;
 	float _pad;
+};
+
+struct SsrResolvePush {
+	glm::vec2 image_size;
+	glm::vec2 depth_size;
+	float proj_22;
+	float proj_32;
+	glm::vec2 _pad;
 };
 
 SsrSystem::SsrSystem(
@@ -47,12 +58,14 @@ SsrSystem::SsrSystem(
 		m_hiz_pyramid->recreate(e.pool, e.extent, e.depth_image_view);
 		createHistoryImage();
 		createOutputImage();
+		createResolvedImage();
 		createDescriptorSets(e.pool);
 		m_history_valid = false;
 	});
 	event_bus.subscribe<SsrResolutionChangedEvent>([this](const SsrResolutionChangedEvent& e) {
 		m_ssr_extent = e.ssr_extent;
 		createOutputImage();
+		createResolvedImage();
 		createDescriptorSets(e.pool);
 	});
 	event_bus.subscribe<SsrParametersChangedEvent>([this](const SsrParametersChangedEvent& e) {
@@ -68,6 +81,7 @@ SsrSystem::SsrSystem(
 		device, descriptor_pool, m_full_extent, depth_image_view, m_shader_path);
 	createHistoryImage();
 	createOutputImage();
+	createResolvedImage();
 	createDummyImage();
 	createSetLayouts();
 	createSampler();
@@ -78,6 +92,9 @@ SsrSystem::SsrSystem(
 SsrSystem::~SsrSystem() = default;
 
 void SsrSystem::createHistoryImage() {
+	// Full mip chain
+	uint32_t mips = static_cast<uint32_t>(std::floor(std::log2(
+		std::max(m_full_extent.width, m_full_extent.height)))) + 1u;
 	m_history_image = std::make_unique<VeImage>(
 		m_ve_device,
 		m_full_extent.width,
@@ -85,10 +102,11 @@ void SsrSystem::createHistoryImage() {
 		vk::SampleCountFlagBits::e1,
 		m_format,
 		vk::ImageTiling::eOptimal,
-		vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+		vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc
+			| vk::ImageUsageFlagBits::eSampled,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		vk::ImageAspectFlagBits::eColor,
-		false, 1);
+		false, 1, mips);
 	m_history_image->transitionImageLayout(
 		vk::ImageLayout::eUndefined,
 		vk::ImageLayout::eShaderReadOnlyOptimal,
@@ -119,6 +137,28 @@ void SsrSystem::createOutputImage() {
 		vk::PipelineStageFlagBits2::eTopOfPipe,
 		vk::PipelineStageFlagBits2::eFragmentShader);
 	m_output_image->setDebugName("SSR Output");
+}
+
+void SsrSystem::createResolvedImage() {
+	m_resolved_image = std::make_unique<VeImage>(
+		m_ve_device,
+		m_ssr_extent.width,
+		m_ssr_extent.height,
+		vk::SampleCountFlagBits::e1,
+		m_format,
+		vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled,
+		vk::MemoryPropertyFlagBits::eDeviceLocal,
+		vk::ImageAspectFlagBits::eColor,
+		false, 1);
+	m_resolved_image->transitionImageLayout(
+		vk::ImageLayout::eUndefined,
+		vk::ImageLayout::eShaderReadOnlyOptimal,
+		vk::AccessFlagBits2::eNone,
+		vk::AccessFlagBits2::eShaderRead,
+		vk::PipelineStageFlagBits2::eTopOfPipe,
+		vk::PipelineStageFlagBits2::eFragmentShader);
+	m_resolved_image->setDebugName("SSR Resolved");
 }
 
 void SsrSystem::createDummyImage() {
@@ -162,6 +202,11 @@ void SsrSystem::createSetLayouts() {
 		.addBinding(4, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute) // SSR out
 		.addBinding(5, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // min/max depth pyramid
 		.build();
+	m_resolve_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
+		.addBinding(0, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // raw trace output
+		.addBinding(1, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // depth
+		.addBinding(2, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute) // resolved out
+		.build();
 	m_output_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eFragment)
 		.addBinding(1, vk::DescriptorType::eSampler, vk::ShaderStageFlagBits::eFragment)
@@ -172,7 +217,7 @@ void SsrSystem::createSampler() {
 	vk::SamplerCreateInfo sampler_info{
 		.magFilter = vk::Filter::eLinear,
 		.minFilter = vk::Filter::eLinear,
-		.mipmapMode = vk::SamplerMipmapMode::eNearest,
+		.mipmapMode = vk::SamplerMipmapMode::eLinear,
 		.addressModeU = vk::SamplerAddressMode::eClampToEdge,
 		.addressModeV = vk::SamplerAddressMode::eClampToEdge,
 		.addressModeW = vk::SamplerAddressMode::eClampToEdge,
@@ -180,7 +225,7 @@ void SsrSystem::createSampler() {
 		.anisotropyEnable = VK_FALSE,
 		.compareEnable = VK_FALSE,
 		.minLod = 0.0f,
-		.maxLod = 0.0f,
+		.maxLod = VK_LOD_CLAMP_NONE,
 		.borderColor = vk::BorderColor::eFloatOpaqueWhite,
 		.unnormalizedCoordinates = VK_FALSE,
 	};
@@ -222,6 +267,38 @@ void SsrSystem::createPipeline(const vk::raii::DescriptorSetLayout& global_set_l
 		.layout = *m_pipeline_layout,
 	};
 	m_pipeline = vk::raii::Pipeline(m_ve_device.getDevice(), nullptr, pipeline_info);
+
+	vk::PushConstantRange resolve_push_range{
+		.stageFlags = vk::ShaderStageFlagBits::eCompute,
+		.offset = 0,
+		.size = sizeof(SsrResolvePush),
+	};
+	vk::DescriptorSetLayout resolve_set_layout = *m_resolve_set_layout->getDescriptorSetLayout();
+	vk::PipelineLayoutCreateInfo resolve_layout_info{
+		.setLayoutCount = 1,
+		.pSetLayouts = &resolve_set_layout,
+		.pushConstantRangeCount = 1,
+		.pPushConstantRanges = &resolve_push_range,
+	};
+	m_resolve_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), resolve_layout_info);
+
+	auto resolve_code = VeFileSystem::readFile(m_shader_path / "ssr_resolve_comp.spv");
+	vk::ShaderModuleCreateInfo resolve_module_info{
+		.codeSize = resolve_code.size(),
+		.pCode = reinterpret_cast<const uint32_t*>(resolve_code.data()),
+	};
+	m_resolve_shader_module = vk::raii::ShaderModule(m_ve_device.getDevice(), resolve_module_info);
+
+	vk::PipelineShaderStageCreateInfo resolve_stage_info{
+		.stage = vk::ShaderStageFlagBits::eCompute,
+		.module = *m_resolve_shader_module,
+		.pName = "compMain",
+	};
+	vk::ComputePipelineCreateInfo resolve_pipeline_info{
+		.stage = resolve_stage_info,
+		.layout = *m_resolve_pipeline_layout,
+	};
+	m_resolve_pipeline = vk::raii::Pipeline(m_ve_device.getDevice(), nullptr, resolve_pipeline_info);
 }
 
 void SsrSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
@@ -244,8 +321,18 @@ void SsrSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 		.imageView = *m_output_image->getImageView(),
 		.imageLayout = vk::ImageLayout::eGeneral,
 	};
-	vk::DescriptorImageInfo output_sampled_info{
+	vk::DescriptorImageInfo raw_sampled_info{
 		.imageView = *m_output_image->getImageView(),
+		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+	};
+	vk::DescriptorImageInfo resolved_storage_info{
+		.imageView = *m_resolved_image->getImageView(),
+		.imageLayout = vk::ImageLayout::eGeneral,
+	};
+	bool resolve_active = m_ssr_extent.width != m_full_extent.width
+		|| m_ssr_extent.height != m_full_extent.height;
+	vk::DescriptorImageInfo output_sampled_info{
+		.imageView = resolve_active ? *m_resolved_image->getImageView() : *m_output_image->getImageView(),
 		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 	};
 	vk::DescriptorImageInfo dummy_info{
@@ -266,6 +353,12 @@ void SsrSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 		.writeImage(5, &pyramid_info)
 		.build(m_io_descriptor_set);
 
+	VeDescriptorWriter(*m_resolve_set_layout, descriptor_pool)
+		.writeImage(0, &raw_sampled_info)
+		.writeImage(1, &depth_info)
+		.writeImage(2, &resolved_storage_info)
+		.build(m_resolve_descriptor_set);
+
 	VeDescriptorWriter(*m_output_set_layout, descriptor_pool)
 		.writeImage(0, &output_sampled_info)
 		.writeImage(1, &sampler_info)
@@ -280,20 +373,44 @@ void SsrSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd) {
 	m_hiz_pyramid->generate(cmd);
 
-	// Output: eShaderReadOnlyOptimal -> eGeneral for storage write
-	vk::ImageMemoryBarrier2 to_general{
-		.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
-		.srcAccessMask = vk::AccessFlagBits2::eNone,
-		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
-		.dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-		.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-		.newLayout = vk::ImageLayout::eGeneral,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_output_image->getImage(),
-		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+	// The resolve only runs below full resolution, where it doubles as the
+	// upsample prefilter; at full res the raw trace is sharper and we
+	// sample it directly
+	bool resolve_active = m_ssr_extent.width != m_full_extent.width
+		|| m_ssr_extent.height != m_full_extent.height;
+
+	// Raw output -> eGeneral for the trace, resolved -> eGeneral for the
+	// resolve. Src stages cover both possible last readers (resolve compute
+	// or PBR fragment) so half-res toggles stay correct.
+	std::array<vk::ImageMemoryBarrier2, 2> to_general = {
+		vk::ImageMemoryBarrier2{
+			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader,
+			.srcAccessMask = vk::AccessFlagBits2::eNone,
+			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+			.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+			.newLayout = vk::ImageLayout::eGeneral,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_output_image->getImage(),
+			.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+		},
+		vk::ImageMemoryBarrier2{
+			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader,
+			.srcAccessMask = vk::AccessFlagBits2::eNone,
+			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+			.dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+			.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+			.newLayout = vk::ImageLayout::eGeneral,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_resolved_image->getImage(),
+			.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+		}
 	};
-	vk::DependencyInfo dep_pre{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &to_general};
+	vk::DependencyInfo dep_pre{
+		.imageMemoryBarrierCount = resolve_active ? 2u : 1u,
+		.pImageMemoryBarriers = to_general.data()};
 	cmd.pipelineBarrier2(dep_pre);
 
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, *m_pipeline);
@@ -326,11 +443,14 @@ void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd) 
 	uint32_t groups_y = (m_ssr_extent.height + 15) / 16;
 	cmd.dispatch(groups_x, groups_y, 1);
 
-	// Output: eGeneral -> eShaderReadOnlyOptimal for the PBR fragment stage
-	vk::ImageMemoryBarrier2 to_read{
+	// Raw output: eGeneral -> eShaderReadOnlyOptimal for its next reader
+	vk::PipelineStageFlags2 raw_dst_stage = vk::PipelineStageFlagBits2::eFragmentShader;
+	if (resolve_active)
+		raw_dst_stage = vk::PipelineStageFlagBits2::eComputeShader;
+	vk::ImageMemoryBarrier2 raw_to_read{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-		.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+		.dstStageMask = raw_dst_stage,
 		.dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
 		.oldLayout = vk::ImageLayout::eGeneral,
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
@@ -339,14 +459,53 @@ void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd) 
 		.image = m_output_image->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
-	vk::DependencyInfo dep_post{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &to_read};
+	vk::DependencyInfo dep_mid{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &raw_to_read};
+	cmd.pipelineBarrier2(dep_mid);
+
+	if (!resolve_active)
+		return;
+
+	// Resolve: confidence-weighted bilateral over the trace output
+	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, *m_resolve_pipeline);
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_resolve_pipeline_layout,
+		0, {*m_resolve_descriptor_set}, {});
+	SsrResolvePush resolve_push{
+		.image_size = glm::vec2(static_cast<float>(m_ssr_extent.width), static_cast<float>(m_ssr_extent.height)),
+		.depth_size = glm::vec2(static_cast<float>(m_full_extent.width), static_cast<float>(m_full_extent.height)),
+		.proj_22 = proj[2][2],
+		.proj_32 = proj[3][2],
+		._pad = glm::vec2(0.0f),
+	};
+	cmd.pushConstants(
+		*m_resolve_pipeline_layout,
+		vk::ShaderStageFlagBits::eCompute,
+		0,
+		vk::ArrayProxy<const uint8_t>(sizeof(resolve_push), reinterpret_cast<const uint8_t*>(&resolve_push)));
+	cmd.dispatch(groups_x, groups_y, 1);
+
+	// Resolved: eGeneral -> eShaderReadOnlyOptimal for the PBR fragment stage
+	vk::ImageMemoryBarrier2 resolved_to_read{
+		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
+		.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+		.dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
+		.oldLayout = vk::ImageLayout::eGeneral,
+		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = m_resolved_image->getImage(),
+		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+	};
+	vk::DependencyInfo dep_post{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &resolved_to_read};
 	cmd.pipelineBarrier2(dep_post);
 }
 
 void SsrSystem::recordHistoryCopy(vk::raii::CommandBuffer& command_buffer, vk::Image resolve_target) {
 	constexpr vk::ImageSubresourceRange color_range{vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+	uint32_t mips = m_history_image->getMipLevels();
+	vk::ImageSubresourceRange history_all_mips{vk::ImageAspectFlagBits::eColor, 0, mips, 0, 1};
 
-	// Transition resolve_target and m_history_image for copying
+	// Transition resolve_target and all history mips for copy + mip blits
 	std::array<vk::ImageMemoryBarrier2, 2> to_transfer = {
 		vk::ImageMemoryBarrier2{
 			.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
@@ -370,7 +529,7 @@ void SsrSystem::recordHistoryCopy(vk::raii::CommandBuffer& command_buffer, vk::I
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.image = m_history_image->getImage(),
-			.subresourceRange = color_range
+			.subresourceRange = history_all_mips
 		}
 	};
 	vk::DependencyInfo to_transfer_dep = {
@@ -391,8 +550,44 @@ void SsrSystem::recordHistoryCopy(vk::raii::CommandBuffer& command_buffer, vk::I
 		m_history_image->getImage(), vk::ImageLayout::eTransferDstOptimal,
 		region);
 
-	// Transition back to shader read
-	std::array<vk::ImageMemoryBarrier2, 2> from_transfer = {
+	// Build the mip chain: blit each level from the previous
+	int32_t src_w = static_cast<int32_t>(m_full_extent.width);
+	int32_t src_h = static_cast<int32_t>(m_full_extent.height);
+	for (uint32_t i = 1; i < mips; i++) {
+		vk::ImageMemoryBarrier2 to_src{
+			.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+			.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+			.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+			.dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+			.oldLayout = vk::ImageLayout::eTransferDstOptimal,
+			.newLayout = vk::ImageLayout::eTransferSrcOptimal,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_history_image->getImage(),
+			.subresourceRange = {vk::ImageAspectFlagBits::eColor, i - 1, 1, 0, 1},
+		};
+		vk::DependencyInfo to_src_dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &to_src};
+		command_buffer.pipelineBarrier2(to_src_dep);
+
+		int32_t dst_w = std::max(src_w / 2, 1);
+		int32_t dst_h = std::max(src_h / 2, 1);
+		vk::ImageBlit blit{
+			.srcSubresource = {vk::ImageAspectFlagBits::eColor, i - 1, 0, 1},
+			.srcOffsets = std::array<vk::Offset3D, 2>{vk::Offset3D{0, 0, 0}, vk::Offset3D{src_w, src_h, 1}},
+			.dstSubresource = {vk::ImageAspectFlagBits::eColor, i, 0, 1},
+			.dstOffsets = std::array<vk::Offset3D, 2>{vk::Offset3D{0, 0, 0}, vk::Offset3D{dst_w, dst_h, 1}},
+		};
+		command_buffer.blitImage(
+			m_history_image->getImage(), vk::ImageLayout::eTransferSrcOptimal,
+			m_history_image->getImage(), vk::ImageLayout::eTransferDstOptimal,
+			blit, vk::Filter::eLinear);
+		src_w = dst_w;
+		src_h = dst_h;
+	}
+
+	// Back to shader read: after the blit loop mips [0, mips-1) sit in
+	// TransferSrc and the last mip in TransferDst
+	std::array<vk::ImageMemoryBarrier2, 3> from_transfer = {
 		vk::ImageMemoryBarrier2{
 			.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
 			.srcAccessMask = vk::AccessFlagBits2::eNone,
@@ -415,11 +610,23 @@ void SsrSystem::recordHistoryCopy(vk::raii::CommandBuffer& command_buffer, vk::I
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.image = m_history_image->getImage(),
-			.subresourceRange = color_range
+			.subresourceRange = {vk::ImageAspectFlagBits::eColor, mips - 1, 1, 0, 1}
+		},
+		vk::ImageMemoryBarrier2{
+			.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+			.srcAccessMask = vk::AccessFlagBits2::eNone,
+			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader,
+			.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+			.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
+			.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = m_history_image->getImage(),
+			.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, mips - 1, 0, 1}
 		}
 	};
 	vk::DependencyInfo from_transfer_dep = {
-		.imageMemoryBarrierCount = static_cast<uint32_t>(from_transfer.size()),
+		.imageMemoryBarrierCount = (mips > 1) ? 3u : 2u,
 		.pImageMemoryBarriers = from_transfer.data()
 	};
 	command_buffer.pipelineBarrier2(from_transfer_dep);

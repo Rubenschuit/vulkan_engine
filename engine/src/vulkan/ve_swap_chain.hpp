@@ -17,7 +17,7 @@ synchronization objects. Also sets the number of samples for MSAA.
  *     pre_swap_graphics on the single graphics+compute queue.
  *
  *   Graphics CBs:
- *   - pre_swap_graphics: work that doesn't touch the swap image (culling, depth prepass,
+ *   - pre_swap_graphics: work that doesn't touch the swap image (culling, geometry prepass,
  *     and without a dedicated compute queue also shadows / shadow mask / GTAO / Hi-Z).
  *     Submitted early so the GPU can start before the CPU blocks on acquireNextImage.
  *   - swap_graphics: final composition (scene render, bloom, post-process). Waits on the

@@ -1,6 +1,6 @@
 // Ground Truth Ambient Occlusion (GTAO) compute shader.
 // Jimenez 2016 — horizon-based AO with analytical integration.
-// Runs after the depth prepass, on the graphics or async compute queue.
+// Runs after the geometry prepass, on the graphics or async compute queue.
 // Reads single-sample resolved depth plus the prepass G-buffer normal+roughness texture.
 
 #include "ve_common.slangh"

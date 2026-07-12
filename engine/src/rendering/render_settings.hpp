@@ -45,7 +45,7 @@ struct VENGINE_API RenderSettings {
 	bool ibl_auto_exposure = true;
 
 	// passes
-	bool depth_prepass_enabled = true;
+	bool geometry_prepass_enabled = true;
 	bool shadow_mask_enabled = true;
 	bool shadow_mask_half_res = false;
 	bool gtao_enabled = true;

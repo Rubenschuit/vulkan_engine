@@ -130,10 +130,10 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 
 	// --- Culling ---
 	if (ImGui::CollapsingHeader("Culling", ImGuiTreeNodeFlags_DefaultOpen)) {
-		if (ImGui::Checkbox("Depth Pre-pass", &ctx.settings.depth_prepass_enabled))
-			m_event_bus.emitImmediate(DepthPrePassChangedEvent{ctx.settings.depth_prepass_enabled});
+		if (ImGui::Checkbox("Geometry Pre-pass", &ctx.settings.geometry_prepass_enabled))
+			m_event_bus.emitImmediate(GeometryPrePassChangedEvent{ctx.settings.geometry_prepass_enabled});
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Early depth pass. Required by GTAO, shadow mask, SSR, and Hi-Z occlusion culling.");
+			ImGui::SetTooltip("Early depth + normal/roughness G-buffer pass.\nRequired by GTAO, shadow mask, SSR, and Hi-Z occlusion culling.");
 		ImGui::Checkbox("Frustum Culling", &ctx.settings.enable_frustum_culling);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Skip drawing objects outside the camera view");
@@ -153,7 +153,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		ImGui::BeginDisabled(ctx.settings.culling_backend == CullingBackendMode::CPU);
 		ImGui::Checkbox("Hi-Z Occlusion Culling", &ctx.settings.hiz_occlusion_enabled);
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Skips objects occluded by the depth buffer.\nRequires depth pre-pass and a GPU/Meshlet backend.");
+			ImGui::SetTooltip("Skips objects occluded by the depth buffer.\nRequires geometry pre-pass and a GPU/Meshlet backend.");
 		ImGui::EndDisabled();
 
 		if (ctx.settings.culling_backend == CullingBackendMode::MESHLET) {
@@ -307,7 +307,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			ImGui::RadioButton("Dithered", &ctx.settings.csm_blend_mode, 2);
 			ImGui::Checkbox("Shadow Mask (async compute)", &ctx.settings.shadow_mask_enabled);
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Screen-space shadow mask: evaluates CSM shadows\nonce per pixel via async compute (1-frame latency).\nRequires depth pre-pass enabled.");
+				ImGui::SetTooltip("Screen-space shadow mask: evaluates CSM shadows\nonce per pixel via async compute (1-frame latency).\nRequires geometry pre-pass enabled.");
 			if (ctx.settings.shadow_mask_enabled) {
 				ImGui::Indent();
 				ImGui::Checkbox("Half Resolution", &ctx.settings.shadow_mask_half_res);
@@ -322,7 +322,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 	if (ImGui::CollapsingHeader("Ambient Occlusion")) {
 		ImGui::Checkbox("GTAO", &ctx.settings.gtao_enabled);
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Ground Truth Ambient Occlusion:\ndarkens corners, crevices, and contact areas.\nRequires depth pre-pass enabled.");
+			ImGui::SetTooltip("Ground Truth Ambient Occlusion:\ndarkens corners, crevices, and contact areas.\nRequires geometry pre-pass enabled.");
 		if (ctx.settings.gtao_enabled) {
 			ImGui::Indent();
 			ImGui::Checkbox("Half Resolution##gtao", &ctx.settings.gtao_half_res);
@@ -344,7 +344,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 	if (ImGui::CollapsingHeader("Reflections")) {
 		ImGui::Checkbox("SSR", &ctx.settings.ssr_enabled);
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Screen-space reflections: traces the depth buffer\nand reflects last frame's image; falls back to IBL.\nRequires depth pre-pass enabled.");
+			ImGui::SetTooltip("Screen-space reflections: traces the depth buffer\nand reflects last frame's image; falls back to IBL.\nRequires geometry pre-pass enabled.");
 		if (ctx.settings.ssr_enabled) {
 			ImGui::Indent();
 			ImGui::Checkbox("Half Resolution##ssr", &ctx.settings.ssr_half_res);
