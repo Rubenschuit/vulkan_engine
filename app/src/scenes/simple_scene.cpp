@@ -226,6 +226,31 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 	createPbrGrid(paths.smooth_vase_model, 5, 5,
 	              {0, -4.0f, 0}, {glm::radians(-180.0f), 0.0f, 0.0f}, {6.0f, 6.0f, 3.0f}, 4.0f, -4.0f, 0,
 	              PhysicsShapeType::ConvexHull);
+
+	// Animated fox: Survey/Walk/Run blend space
+	placeModel({
+		.gltf_path = paths.fox_model.lexically_normal(),
+		.translation = {22.0f, 22.0f, 0.0f},
+		.rotation = {0.0f, 0.0f, glm::radians(-135.0f)},
+		.scale = glm::vec3(0.03f),
+		.on_loaded = [this](Entity wrapper) {
+			m_registry.setName(wrapper, "Fox");
+			auto* anim = m_registry.getComponent<AnimatorComponent>(wrapper);
+			if (!anim)
+				return;
+			int survey = anim->findClip("Survey");
+			int walk = anim->findClip("Walk");
+			int run = anim->findClip("Run");
+			if (survey < 0 || walk < 0 || run < 0)
+				return;
+			anim->setBlendSpace1D({
+				{.position = 0.0f, .clip_index = static_cast<uint32_t>(survey)},
+				{.position = 0.5f, .clip_index = static_cast<uint32_t>(walk)},
+				{.position = 1.0f, .clip_index = static_cast<uint32_t>(run)},
+			});
+			anim->setBlendParameter(0.0f);
+		},
+	});
 }
 
 } // namespace ve

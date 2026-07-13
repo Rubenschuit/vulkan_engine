@@ -35,3 +35,7 @@
 #define ICON_LC_ROTATE_CW       "\xEE\x85\x89"  // rotate-cw U+E149
 #define ICON_LC_SCALING         "\xEE\x8B\xAC"  // scaling U+E2EC
 #define ICON_LC_MAGNET          "\xEE\x8A\xB5"  // magnet U+E2B5
+#define ICON_LC_PLAY            "\xEE\x84\xBC"  // play U+E13C
+#define ICON_LC_PAUSE           "\xEE\x84\xAE"  // pause U+E12E
+#define ICON_LC_SQUARE          "\xEE\x85\xA7"  // square U+E167
+#define ICON_LC_ROUTE           "\xEE\x94\xBE"  // route U+E53E

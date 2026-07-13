@@ -606,6 +606,9 @@ static void sampleScalarArray(const AnimationSampler& sampler, float t,
 // AnimatorComponent
 // ---------------------------------------------------------------------------
 
+// Below this a clip contributes nothing to the blended pose.
+static constexpr float BLEND_WEIGHT_EPSILON = 1e-4f;
+
 bool AnimatorComponent::hasPlayingClips() const {
 	for (const auto& b : m_clip_bindings)
 		if (b.playing && b.clip)
@@ -746,6 +749,154 @@ void AnimatorComponent::stopAll() {
 	}
 }
 
+int AnimatorComponent::findClip(std::string_view name) const {
+	for (size_t i = 0; i < m_clip_bindings.size(); i++) {
+		const auto& b = m_clip_bindings[i];
+		if (b.clip && b.clip->name == name)
+			return static_cast<int>(i);
+	}
+	return -1;
+}
+
+void AnimatorComponent::setClipWeight(uint32_t clip_index, float weight) {
+	if (clip_index >= m_clip_bindings.size())
+		return;
+	auto& b = m_clip_bindings[clip_index];
+	b.weight = b.target_weight = std::max(weight, 0.0f);
+	b.fade_rate = 0.0f;
+}
+
+float AnimatorComponent::getClipWeight(uint32_t clip_index) const {
+	return clip_index < m_clip_bindings.size() ? m_clip_bindings[clip_index].weight : 0.0f;
+}
+
+void AnimatorComponent::crossFadeTo(uint32_t clip_index, float fade_seconds) {
+	if (clip_index >= m_clip_bindings.size() || !m_clip_bindings[clip_index].clip)
+		return;
+
+	// Manual fades own the weights until the next setBlendParameter.
+	m_blend_space_active = false;
+
+	bool changed = false;
+	const bool snap = fade_seconds <= 0.0f;
+	for (size_t i = 0; i < m_clip_bindings.size(); i++) {
+		auto& b = m_clip_bindings[i];
+		if (!b.clip)
+			continue;
+		b.target_weight = (i == clip_index) ? 1.0f : 0.0f;
+		if (snap) {
+			b.weight = b.target_weight;
+			b.fade_rate = 0.0f;
+			if (b.weight == 0.0f && b.playing) {
+				b.playing = false;
+				changed = true;
+			}
+		} else {
+			b.fade_rate = 1.0f / fade_seconds;
+		}
+	}
+
+	auto& target = m_clip_bindings[clip_index];
+	if (!target.playing) {
+		target.playing = true;
+		// Bring an inactive clip in from the start
+		target.current_time = target.speed < 0.0f ? target.clip->duration : 0.0f;
+		if (!snap)
+			target.weight = 0.0f;
+		changed = true;
+	}
+
+	if (changed && m_registry) {
+		updateAnimatedFlags();
+		m_registry->events().emit(AnimationStateChangedEvent{m_entity});
+	}
+}
+
+bool AnimatorComponent::isPhaseSyncedMember(uint32_t clip_index) const {
+	for (const auto& s : m_blend_samples)
+		if (s.clip_index == clip_index)
+			return true;
+	return false;
+}
+
+void AnimatorComponent::setBlendSpace1D(std::vector<BlendSample1D> samples, bool phase_sync) {
+	std::erase_if(samples, [this](const BlendSample1D& s) {
+		return s.clip_index >= m_clip_bindings.size() || !m_clip_bindings[s.clip_index].clip;
+	});
+	std::sort(samples.begin(), samples.end(),
+	          [](const BlendSample1D& a, const BlendSample1D& b) { return a.position < b.position; });
+	m_blend_samples = std::move(samples);
+	m_phase_sync = phase_sync;
+	m_blend_space_active = !m_blend_samples.empty();
+	if (!m_blend_space_active)
+		return;
+
+	// Seed the shared phase from the dominant member so enabling sync doesn't snap gaits.
+	if (m_phase_sync) {
+		float best_weight = -1.0f;
+		m_phase = 0.0f;
+		for (const auto& s : m_blend_samples) {
+			const auto& b = m_clip_bindings[s.clip_index];
+			if (b.playing && b.weight > best_weight && b.clip->duration > 0.0f) {
+				best_weight = b.weight;
+				m_phase = b.current_time / b.clip->duration;
+				m_phase -= std::floor(m_phase);
+			}
+		}
+	}
+
+	applyBlendParameter();
+}
+
+void AnimatorComponent::setBlendParameter(float value) {
+	m_blend_param = value;
+	if (!hasBlendSpace())
+		return;
+	m_blend_space_active = true;  // resumes after a crossFadeTo
+	applyBlendParameter();
+}
+
+void AnimatorComponent::applyBlendParameter() {
+	if (m_blend_samples.empty())
+		return;
+
+	const float v = std::clamp(m_blend_param,
+	                           m_blend_samples.front().position, m_blend_samples.back().position);
+	size_t upper = m_blend_samples.size() - 1;
+	for (size_t i = 0; i < m_blend_samples.size(); i++) {
+		if (m_blend_samples[i].position >= v) {
+			upper = i;
+			break;
+		}
+	}
+	const size_t lower = upper > 0 ? upper - 1 : 0;
+	const float p0 = m_blend_samples[lower].position;
+	const float p1 = m_blend_samples[upper].position;
+	const float alpha = (p1 > p0) ? (v - p0) / (p1 - p0) : 0.0f;
+
+	bool changed = false;
+	for (size_t i = 0; i < m_blend_samples.size(); i++) {
+		auto& b = m_clip_bindings[m_blend_samples[i].clip_index];
+		float w = 0.0f;
+		if (i == lower)
+			w += 1.0f - alpha;
+		if (i == upper)
+			w += alpha;
+		b.weight = b.target_weight = w;
+		b.fade_rate = 0.0f;
+		if (w > 0.0f && !b.playing) {
+			b.playing = true;
+			changed = true;
+		}
+	}
+	// Zero-weight members are auto-stopped by update().
+
+	if (changed && m_registry) {
+		updateAnimatedFlags();
+		m_registry->events().emit(AnimationStateChangedEvent{m_entity});
+	}
+}
+
 void AnimatorComponent::remapEntities(const std::unordered_map<uint32_t, Entity>& old_to_new) {
 	for (auto& entity : m_node_to_entity) {
 		auto it = old_to_new.find(entity.index());
@@ -771,29 +922,99 @@ void AnimatorComponent::update(float delta_time) {
 	if (!m_registry)
 		return;
 
+	bool state_changed = false;
+
+	// Step fade weights; a clip faded out to a zero target stops.
+	for (auto& b : m_clip_bindings) {
+		if (!b.clip)
+			continue;
+		if (b.fade_rate > 0.0f && b.weight != b.target_weight) {
+			float step = b.fade_rate * delta_time;
+			if (b.weight < b.target_weight)
+				b.weight = std::min(b.weight + step, b.target_weight);
+			else
+				b.weight = std::max(b.weight - step, b.target_weight);
+			if (b.weight == b.target_weight)
+				b.fade_rate = 0.0f;
+		}
+		if (b.playing && b.target_weight <= 0.0f && b.weight <= BLEND_WEIGHT_EPSILON) {
+			b.weight = 0.0f;
+			b.playing = false;
+			state_changed = true;
+		}
+	}
+
+	// Phase-synced blend space: one shared normalized phase drives member time,
+	// advanced by the weighted cycle duration so gaits stay aligned.
+	if (m_blend_space_active && m_phase_sync) {
+		float duration_sum = 0.0f;
+		float weight_sum = 0.0f;
+		for (const auto& s : m_blend_samples) {
+			const auto& b = m_clip_bindings[s.clip_index];
+			if (b.clip && b.playing && b.weight > BLEND_WEIGHT_EPSILON) {
+				duration_sum += b.weight * b.clip->duration;
+				weight_sum += b.weight;
+			}
+		}
+		if (weight_sum > 0.0f && duration_sum > 0.0f) {
+			m_phase += delta_time * weight_sum / duration_sum;
+			m_phase -= std::floor(m_phase);
+		}
+		for (const auto& s : m_blend_samples) {
+			auto& b = m_clip_bindings[s.clip_index];
+			if (b.clip && b.playing)
+				b.current_time = m_phase * b.clip->duration;
+		}
+	}
+
+	if (m_pose_scratch.size() < m_node_to_entity.size())
+		m_pose_scratch.resize(m_node_to_entity.size());
+	m_touched_nodes.clear();
+
+	auto touch = [this](uint32_t node_idx) -> BlendPose& {
+		BlendPose& pose = m_pose_scratch[node_idx];
+		if (!pose.touched) {
+			pose.t = glm::vec3(0.0f);
+			pose.r = glm::quat(0.0f, 0.0f, 0.0f, 0.0f);
+			pose.s = glm::vec3(0.0f);
+			pose.t_weight = pose.r_weight = pose.s_weight = pose.morph_weight = 0.0f;
+			pose.touched = true;
+			m_touched_nodes.push_back(node_idx);
+		}
+		return pose;
+	};
+
 	bool clip_finished = false;
-	for (auto& binding : m_clip_bindings) {
+	for (uint32_t ci = 0; ci < static_cast<uint32_t>(m_clip_bindings.size()); ci++) {
+		auto& binding = m_clip_bindings[ci];
 		if (!binding.playing || !binding.clip)
 			continue;
 
-		binding.current_time += delta_time * binding.speed;
-		if (binding.clip->duration > 0.0f) {
-			if (binding.loop) {
-				binding.current_time = std::fmod(binding.current_time, binding.clip->duration);
-				if (binding.current_time < 0.0f)
-					binding.current_time += binding.clip->duration;
-			} else {
-				if (binding.current_time >= binding.clip->duration) {
-					binding.current_time = binding.clip->duration;
-					binding.playing = false;
-					clip_finished = true;
-				} else if (binding.current_time < 0.0f) {
-					binding.current_time = 0.0f;
-					binding.playing = false;
-					clip_finished = true;
+		const bool phase_synced = m_blend_space_active && m_phase_sync && isPhaseSyncedMember(ci);
+		if (!phase_synced) {
+			binding.current_time += delta_time * binding.speed;
+			if (binding.clip->duration > 0.0f) {
+				if (binding.loop) {
+					binding.current_time = std::fmod(binding.current_time, binding.clip->duration);
+					if (binding.current_time < 0.0f)
+						binding.current_time += binding.clip->duration;
+				} else {
+					if (binding.current_time >= binding.clip->duration) {
+						binding.current_time = binding.clip->duration;
+						binding.playing = false;
+						clip_finished = true;
+					} else if (binding.current_time < 0.0f) {
+						binding.current_time = 0.0f;
+						binding.playing = false;
+						clip_finished = true;
+					}
 				}
 			}
 		}
+
+		const float w = binding.weight;
+		if (w <= BLEND_WEIGHT_EPSILON)
+			continue;
 
 		for (const auto& channel : binding.clip->channels) {
 			if (channel.target_slot >= binding.clip->target_node_indices.size())
@@ -801,39 +1022,84 @@ void AnimatorComponent::update(float delta_time) {
 			uint32_t loaded_node_idx = binding.clip->target_node_indices[channel.target_slot];
 			if (loaded_node_idx >= m_node_to_entity.size())
 				continue;
-
-			Entity target = m_node_to_entity[loaded_node_idx];
-			auto* tc = m_registry->getComponent<TransformComponent>(target);
-			if (!tc)
-				continue;
-
 			if (channel.sampler_index >= binding.clip->samplers.size())
 				continue;
 			const auto& sampler = binding.clip->samplers[channel.sampler_index];
 			float t = binding.current_time;
 
 			switch (channel.path) {
-				case AnimationPath::Translation:
-					tc->setTranslation(sampleVec3(sampler, t, channel.interpolation));
+				case AnimationPath::Translation: {
+					BlendPose& pose = touch(loaded_node_idx);
+					pose.t += w * sampleVec3(sampler, t, channel.interpolation);
+					pose.t_weight += w;
 					break;
-				case AnimationPath::Rotation:
-					tc->setRotation(sampleQuat(sampler, t, channel.interpolation));
+				}
+				case AnimationPath::Rotation: {
+					BlendPose& pose = touch(loaded_node_idx);
+					glm::quat q = sampleQuat(sampler, t, channel.interpolation);
+					// Short-arc: align against the accumulated sum before adding.
+					if (pose.r_weight > 0.0f && glm::dot(pose.r, q) < 0.0f)
+						q = -q;
+					pose.r += q * w;
+					pose.r_weight += w;
 					break;
-				case AnimationPath::Scale:
-					tc->setScale(sampleVec3(sampler, t, channel.interpolation));
+				}
+				case AnimationPath::Scale: {
+					BlendPose& pose = touch(loaded_node_idx);
+					pose.s += w * sampleVec3(sampler, t, channel.interpolation);
+					pose.s_weight += w;
 					break;
+				}
 				case AnimationPath::Weights: {
+					Entity target = m_node_to_entity[loaded_node_idx];
 					auto* morph = m_registry->getComponent<MorphComponent>(target);
-					if (morph && morph->targetCount() > 0)
-						sampleScalarArray(sampler, t, channel.interpolation,
-						                  static_cast<uint32_t>(morph->targetCount()), morph->weights());
+					if (!morph || morph->targetCount() == 0)
+						break;
+					const uint32_t n = static_cast<uint32_t>(morph->targetCount());
+					sampleScalarArray(sampler, t, channel.interpolation, n, m_morph_sample_scratch);
+					BlendPose& pose = touch(loaded_node_idx);
+					if (pose.morph_weight == 0.0f)
+						pose.morph.assign(n, 0.0f);
+					else if (pose.morph.size() < n)
+						pose.morph.resize(n, 0.0f);
+					for (uint32_t c = 0; c < n; c++)
+						pose.morph[c] += w * m_morph_sample_scratch[c];
+					pose.morph_weight += w;
 					break;
 				}
 			}
 		}
 	}
 
-	if (clip_finished) {
+	// Write each touched node once, normalized by its accumulated weight; nodes
+	// a clip doesn't animate keep that clip's share out of the normalization.
+	for (uint32_t node_idx : m_touched_nodes) {
+		BlendPose& pose = m_pose_scratch[node_idx];
+		Entity target = m_node_to_entity[node_idx];
+		if (auto* tc = m_registry->getComponent<TransformComponent>(target)) {
+			if (pose.t_weight > BLEND_WEIGHT_EPSILON)
+				tc->setTranslation(pose.t / pose.t_weight);
+			if (pose.r_weight > BLEND_WEIGHT_EPSILON) {
+				float len2 = glm::dot(pose.r, pose.r);
+				// Opposite quats can cancel; keep the previous rotation then.
+				if (len2 > 1e-8f)
+					tc->setRotation(pose.r / std::sqrt(len2));
+			}
+			if (pose.s_weight > BLEND_WEIGHT_EPSILON)
+				tc->setScale(pose.s / pose.s_weight);
+		}
+		if (pose.morph_weight > BLEND_WEIGHT_EPSILON) {
+			if (auto* morph = m_registry->getComponent<MorphComponent>(target)) {
+				auto& out = morph->weights();
+				const size_t n = std::min(out.size(), pose.morph.size());
+				for (size_t c = 0; c < n; c++)
+					out[c] = pose.morph[c] / pose.morph_weight;
+			}
+		}
+		pose.touched = false;
+	}
+
+	if (clip_finished || state_changed) {
 		updateAnimatedFlags();
 		m_registry->events().emit(AnimationStateChangedEvent{m_entity});
 	}

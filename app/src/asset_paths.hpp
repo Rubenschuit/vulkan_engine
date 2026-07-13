@@ -15,6 +15,7 @@ struct AssetPaths {
 	std::filesystem::path smooth_vase_model;
 	std::filesystem::path birds_model;
 	std::filesystem::path pigeon_model;
+	std::filesystem::path fox_model;
 	// textures
 	std::filesystem::path mots_texture;
 	std::filesystem::path grid_texture;
@@ -33,6 +34,7 @@ struct AssetPaths {
 		  smooth_vase_model(root / "models" / "smooth_vase.gltf"),
 		  birds_model(root / "models" / "birds.glb"),
 		  pigeon_model(root / "models" / "pigeon.glb"),
+		  fox_model(root / "models" / "Fox" / "glTF" / "Fox.gltf"),
 		  mots_texture(root / "textures" / "mots.png"),
 		  grid_texture(root / "textures" / "grid.ktx"),
 		  fire_texture(root / "textures" / "fire_ball.ktx"),

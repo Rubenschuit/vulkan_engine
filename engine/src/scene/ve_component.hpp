@@ -15,6 +15,7 @@
 #include <glm/glm.hpp>
 #include <functional>
 #include <memory>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -379,6 +380,9 @@ struct ClipBinding {
 	float speed = 1.0f;
 	bool playing = true;
 	bool loop = true;
+	float weight = 1.0f;
+	float target_weight = 1.0f;
+	float fade_rate = 0.0f;  // weight units/sec toward target_weight; 0 = snap
 };
 
 class VENGINE_API AnimatorComponent : public Component {
@@ -397,6 +401,33 @@ public:
 	void pauseAll();
 	void stopAll();
 
+	// Returns the first clip whose name matches, or -1.
+	int findClip(std::string_view name) const;
+
+	void setClipWeight(uint32_t clip_index, float weight);
+	float getClipWeight(uint32_t clip_index) const;
+
+	// Ramps the target clip's weight to 1 and all others to 0 over fade_seconds.
+	// Fully faded-out clips auto-stop. Suspends an active blend space until the
+	// next setBlendParameter call.
+	void crossFadeTo(uint32_t clip_index, float fade_seconds);
+
+	// 1D blend space: a scalar parameter picks the two bracketing samples and
+	// weights their clips; phase_sync drives member time from one shared gait
+	// phase (per-clip speed and loop are ignored for synced members: they always
+	// cycle on the shared phase). Clips left playing that are not blend-space
+	// members keep their own weight and blend into the same pose.
+	struct BlendSample1D {
+		float position;
+		uint32_t clip_index;
+	};
+	void setBlendSpace1D(std::vector<BlendSample1D> samples, bool phase_sync = true);
+	void setBlendParameter(float value);
+	float getBlendParameter() const { return m_blend_param; }
+	bool hasBlendSpace() const { return !m_blend_samples.empty(); }
+	bool isBlendSpaceActive() const { return m_blend_space_active; }
+	const std::vector<BlendSample1D>& getBlendSamples() const { return m_blend_samples; }
+
 	void setNodeToEntityMap(std::vector<Entity> map) { m_node_to_entity = std::move(map); }
 	void remapEntities(const std::unordered_map<uint32_t, Entity>& old_to_new);
 
@@ -407,10 +438,34 @@ public:
 	const std::vector<Entity>& getNodeToEntityMap() const { return m_node_to_entity; }
 
 private:
+	// Weighted accumulation slot for one node
+	struct BlendPose {
+		glm::vec3 t{0.0f};
+		glm::quat r{0.0f, 0.0f, 0.0f, 0.0f};  // unnormalized weighted sum
+		glm::vec3 s{0.0f};
+		std::vector<float> morph;
+		float t_weight = 0.0f;
+		float r_weight = 0.0f;
+		float s_weight = 0.0f;
+		float morph_weight = 0.0f;
+		bool touched = false;
+	};
+
 	void updateAnimatedFlags();
+	void applyBlendParameter();
+	bool isPhaseSyncedMember(uint32_t clip_index) const;
 
 	std::vector<ClipBinding> m_clip_bindings;
 	std::vector<Entity> m_node_to_entity;
+
+	std::vector<BlendPose> m_pose_scratch;      // sized to node count, reset in place per tick
+	std::vector<uint32_t> m_touched_nodes;
+	std::vector<float> m_morph_sample_scratch;
+	std::vector<BlendSample1D> m_blend_samples; // sorted by position
+	float m_blend_param = 0.0f;
+	float m_phase = 0.0f;                       // in [0,1)
+	bool m_blend_space_active = false;
+	bool m_phase_sync = true;
 };
 
 // ---------------------------------------------------------------------------

@@ -1054,30 +1054,87 @@ void InspectorPanel::renderAnimator(AnimatorComponent& animator) {
 	const size_t total = clips.size();
 
 	size_t playing_count = 0;
+	float playing_weight_sum = 0.0f;
 	for (const auto& b : clips)
-		if (b.clip && b.playing)
+		if (b.clip && b.playing) {
 			playing_count++;
+			playing_weight_sum += b.weight;
+		}
 
-	ImGui::Text("Clips: %zu  Playing: %zu", total, playing_count);
+	const bool blend_active = animator.hasBlendSpace() && animator.isBlendSpaceActive();
+	std::vector<bool> is_member(clips.size(), false);
+	if (animator.hasBlendSpace())
+		for (const auto& s : animator.getBlendSamples())
+			if (s.clip_index < is_member.size())
+				is_member[s.clip_index] = true;
 
-	if (ImGui::Button("Play All"))
-		animator.playAll();
+	// A clip's per-frame share of the pose (0 when stopped); only meaningful while
+	// more than one clip drives the same nodes.
+	auto contribution_of = [&](const ClipBinding& b) {
+		return (b.playing && playing_weight_sum > 0.0f) ? b.weight / playing_weight_sum : 0.0f;
+	};
+	const bool blending = blend_active || playing_count > 1;
+
+	ImGui::TextDisabled("%zu clips, %zu playing", total, playing_count);
+
+	// Global transport: one Play/Pause toggle (reflects the aggregate) plus Stop.
+	const bool any_playing = playing_count > 0;
+	if (ImGui::Button(any_playing ? ICON_PAUSE : ICON_PLAY))
+		any_playing ? animator.pauseAll() : animator.playAll();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip(any_playing ? "Pause" : "Play");
 	ImGui::SameLine();
-	if (ImGui::Button("Pause All"))
-		animator.pauseAll();
-	ImGui::SameLine();
-	if (ImGui::Button("Stop All"))
+	if (ImGui::Button(ICON_STOP))
 		animator.stopAll();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Stop and rewind all");
 
-	char filter_buf[128];
-	std::snprintf(filter_buf, sizeof(filter_buf), "%s", m_animation_filter.c_str());
-	ImGui::SetNextItemWidth(-FLT_MIN);
-	if (ImGui::InputTextWithHint("##anim_filter", "Filter by name...", filter_buf, sizeof(filter_buf)))
-		m_animation_filter = filter_buf;
+	if (animator.hasBlendSpace()) {
+		const auto& samples = animator.getBlendSamples();
+		ImGui::SeparatorText(ICON_BLEND_SPACE "  Blend Space");
 
-	ImGui::Checkbox("Playing only", &m_animation_playing_only);
+		float param = animator.getBlendParameter();
+		if (!blend_active) {
+			if (ImGui::SmallButton("Resume"))
+				animator.setBlendParameter(param);
+			ImGui::SameLine();
+			ImGui::TextDisabled("suspended");
+		}
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		if (ImGui::SliderFloat("##locomotion", &param,
+		                       samples.front().position, samples.back().position, "Locomotion %.2f"))
+			animator.setBlendParameter(param);
 
-	std::string filter_lower = ve::toLower(m_animation_filter);
+		// Live mix: which members currently drive the pose and by how much.
+		if (blend_active) {
+			std::string mix;
+			for (const auto& s : samples) {
+				const auto& b = clips[s.clip_index];
+				float c = b.clip ? contribution_of(b) : 0.0f;
+				if (c < 0.005f)
+					continue;
+				char part[80];
+				std::snprintf(part, sizeof(part), "%s %.0f%%", b.clip->name.c_str(), c * 100.0f);
+				if (!mix.empty())
+					mix += ",  ";
+				mix += part;
+			}
+			if (!mix.empty())
+				ImGui::TextDisabled("%s", mix.c_str());
+		}
+	}
+
+	std::string filter_lower;
+	// Filter controls only earn their space once the list is long.
+	if (total > 8) {
+		char filter_buf[128];
+		std::snprintf(filter_buf, sizeof(filter_buf), "%s", m_animation_filter.c_str());
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		if (ImGui::InputTextWithHint("##anim_filter", "Filter by name...", filter_buf, sizeof(filter_buf)))
+			m_animation_filter = filter_buf;
+		ImGui::Checkbox("Playing only", &m_animation_playing_only);
+		filter_lower = ve::toLower(m_animation_filter);
+	}
 
 	auto matches_filter = [&](const VeAnimationClip& clip) {
 		if (filter_lower.empty())
@@ -1093,7 +1150,7 @@ void InspectorPanel::renderAnimator(AnimatorComponent& animator) {
 			const auto& binding = clips[i];
 			if (!binding.clip)
 				continue;
-			if (m_animation_playing_only && !binding.playing)
+			if (total > 8 && m_animation_playing_only && !binding.playing)
 				continue;
 			if (!matches_filter(*binding.clip))
 				continue;
@@ -1101,39 +1158,73 @@ void InspectorPanel::renderAnimator(AnimatorComponent& animator) {
 			visible_count++;
 			ImGui::PushID(static_cast<int>(i));
 
-			bool playing = binding.playing;
-			if (ImGui::Checkbox("##playing", &playing)) {
-				if (playing)
-					animator.play(i);
-				else
+			// One control per row. Play shows only this clip: crossFade isolates it
+			// (fades others out) and suspends any blend space. crossFade also ramps
+			// this clip's weight back to 1, so Play always works even after a prior
+			// isolate left this clip stopped at weight 0.
+			if (binding.playing) {
+				if (ImGui::SmallButton(ICON_PAUSE))
 					animator.pause(i);
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Pause");
+			} else {
+				if (ImGui::SmallButton(ICON_PLAY))
+					animator.crossFadeTo(i, 0.3f);
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Play (show only this clip)");
 			}
 			ImGui::SameLine();
 
 			const char* clip_name = binding.clip->name.empty() ? "(unnamed)" : binding.clip->name.c_str();
-			char header_label[160];
-			std::snprintf(header_label, sizeof(header_label), "[%u] %s", i, clip_name);
-			bool open = ImGui::TreeNodeEx(header_label, ImGuiTreeNodeFlags_SpanAvailWidth);
+			bool open = ImGui::TreeNodeEx(clip_name, ImGuiTreeNodeFlags_SpanAvailWidth);
+
+			// Right-aligned metadata
+			char meta[48];
+			if (blending && binding.playing)
+				std::snprintf(meta, sizeof(meta), "%.0f%%   %.2fs",
+				              contribution_of(binding) * 100.0f, binding.clip->duration);
+			else
+				std::snprintf(meta, sizeof(meta), "%.2fs", binding.clip->duration);
 			ImGui::SameLine();
-			ImGui::TextDisabled("%.2fs", binding.clip->duration);
+			float meta_w = ImGui::CalcTextSize(meta).x;
+			float avail = ImGui::GetContentRegionAvail().x;
+			if (avail > meta_w)
+				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + avail - meta_w);
+			ImGui::TextDisabled("%s", meta);
+
+			// Thin playhead so progress is visible without expanding the clip.
+			if (binding.playing && binding.clip->duration > 0.0f) {
+				float progress = binding.current_time / binding.clip->duration;
+				ImGui::ProgressBar(progress, ImVec2(-FLT_MIN, 3.0f), "");
+			}
 
 			if (open) {
-				ImGui::TextDisabled("Channels: %zu", binding.clip->channels.size());
-
-				float time = binding.current_time;
-				if (ImGui::SliderFloat("Time", &time, 0.0f, binding.clip->duration, "%.2fs"))
-					animator.setTime(i, time);
+				// Scrubbing only while paused
+				if (binding.playing) {
+					ImGui::Text("Time  %.2fs / %.2fs", binding.current_time, binding.clip->duration);
+				} else {
+					float time = binding.current_time;
+					if (ImGui::SliderFloat("Time", &time, 0.0f, binding.clip->duration, "%.2fs"))
+						animator.setTime(i, time);
+				}
 
 				float speed = binding.speed;
 				if (ImGui::DragFloat("Speed", &speed, 0.01f, -10.0f, 10.0f, "%.2f"))
 					animator.setSpeed(i, speed);
 
+				// Weight is only user-controllable when the blend space isn't driving
+				// this clip; otherwise the Locomotion slider owns it.
+				if (!(blend_active && is_member[i])) {
+					float weight = binding.weight;
+					if (ImGui::SliderFloat("Weight", &weight, 0.0f, 1.0f, "%.2f"))
+						animator.setClipWeight(i, weight);
+				}
+
 				bool loop = binding.loop;
 				if (ImGui::Checkbox("Loop", &loop))
 					animator.setLoop(i, loop);
-
 				ImGui::SameLine();
-				if (ImGui::Button("Reset"))
+				if (ImGui::SmallButton("Stop"))
 					animator.stop(i);
 
 				ImGui::TreePop();

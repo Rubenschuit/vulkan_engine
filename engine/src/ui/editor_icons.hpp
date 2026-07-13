@@ -33,3 +33,9 @@
 #define ICON_GIZMO_ROTATE     ICON_LC_ROTATE_CW
 #define ICON_GIZMO_SCALE      ICON_LC_SCALING
 #define ICON_SNAP             ICON_LC_MAGNET
+
+// Animator / transport
+#define ICON_PLAY         ICON_LC_PLAY
+#define ICON_PAUSE        ICON_LC_PAUSE
+#define ICON_STOP         ICON_LC_SQUARE
+#define ICON_BLEND_SPACE  ICON_LC_ROUTE
