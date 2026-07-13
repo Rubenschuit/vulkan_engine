@@ -27,6 +27,13 @@ namespace ve {
 
 namespace {
 	std::optional<BenchmarkConfig> s_pending_benchmark;
+
+	uint32_t benchWindowWidth(uint32_t fallback) {
+		return (s_pending_benchmark && s_pending_benchmark->width) ? s_pending_benchmark->width : fallback;
+	}
+	uint32_t benchWindowHeight(uint32_t fallback) {
+		return (s_pending_benchmark && s_pending_benchmark->height) ? s_pending_benchmark->height : fallback;
+	}
 }
 
 void VeApplication::setPendingBenchmark(BenchmarkConfig config) {
@@ -34,7 +41,7 @@ void VeApplication::setPendingBenchmark(BenchmarkConfig config) {
 }
 
 VeApplication::VeApplication(const EngineConfig& config)
-	: m_ve_window(static_cast<int>(config.window_width), static_cast<int>(config.window_height), config.app_name.c_str()),
+	: m_ve_window(static_cast<int>(benchWindowWidth(config.window_width)), static_cast<int>(benchWindowHeight(config.window_height)), config.app_name.c_str()),
 	  m_ve_device(m_ve_window),
 	  m_resource_manager(m_ve_device, m_event_bus),
 	  m_ve_renderer(m_ve_device, m_ve_window, m_resource_manager, m_event_bus),
@@ -99,8 +106,10 @@ void VeApplication::run() {
 		}
 
 		updateFrameTime();
-		if (benchmarking)
-			m_frame_time = m_benchmark->config().fixed_dt;
+		if (benchmarking) {
+			// Freeze the sim until the scene is idle
+			m_frame_time = m_scene_manager->isIdle() ? m_benchmark->config().fixed_dt : 0.0f;
+		}
 		m_total_time += m_frame_time;
 
 		// Process input and tick the editor camera controller.
@@ -159,6 +168,12 @@ void VeApplication::run() {
 				m_ve_device.getDevice().waitIdle();
 				m_ve_renderer.resetSceneRenderExtent();
 				m_benchmark_scene_started = true;
+			}
+			// Apply the scripted pose before the camera view is built below.
+			if (auto pose = m_benchmark->cameraPose()) {
+				auto& cam = m_editor->editorCamera();
+				cam.setPosition(pose->pos);
+				cam.lookAt(pose->look);
 			}
 		}
 
@@ -246,14 +261,41 @@ void VeApplication::loadDefaultScene(int index) {
 
 void VeApplication::setupBenchmark() {
 	const BenchmarkConfig& bc = m_benchmark->config();
-	auto& cam = m_editor->editorCamera();
-	if (bc.camera_pos)
-		cam.setPosition(*bc.camera_pos);
-	if (bc.camera_look)
-		cam.lookAt(*bc.camera_look);
-	m_render_pipeline->settings().gpu_profiling = true;
+	if (auto pose = m_benchmark->cameraPose()) {
+		auto& cam = m_editor->editorCamera();
+		cam.setPosition(pose->pos);
+		cam.lookAt(pose->look);
+	}
+
+	auto& settings = m_render_pipeline->settings();
+	switch (bc.culling) {
+	case BenchCulling::CPU:
+		settings.culling_backend = CullingBackendMode::CPU;
+		break;
+	case BenchCulling::GPU:
+		settings.culling_backend = CullingBackendMode::GPU;
+		settings.hiz_occlusion_enabled = true;
+		break;
+	case BenchCulling::MESHLET:
+		settings.culling_backend = CullingBackendMode::MESHLET;
+		settings.hiz_occlusion_enabled = true;
+		break;
+	case BenchCulling::DEFAULT:
+		break;
+	}
+	settings.gpu_profiling = true;
 	VE_LOGI("[bench] benchmark mode: scene='" << (bc.scene.empty() ? "<default>" : bc.scene)
-		<< "' warmup=" << bc.warmup_frames << " frames=" << bc.measure_frames);
+		<< "' warmup=" << bc.warmup_frames << " frames=" << bc.measure_frames
+		<< " camera_keypoints=" << bc.keypoints.size());
+}
+
+static const char* cullingBackendName(CullingBackendMode mode) {
+	switch (mode) {
+	case CullingBackendMode::GPU:     return "gpu";
+	case CullingBackendMode::MESHLET: return "meshlet";
+	case CullingBackendMode::CPU:     return "cpu";
+	}
+	return "cpu";
 }
 
 void VeApplication::finishBenchmark() {
@@ -266,9 +308,11 @@ void VeApplication::finishBenchmark() {
 	}
 
 	auto extent = m_ve_renderer.getSwapChainExtent();
+	const auto& settings = m_render_pipeline->settings();
 	m_exit_code = m_benchmark->finish(BenchmarkRunInfo{
 		.scene_name = scene_name,
 		.device_name = m_ve_renderer.getDeviceName(),
+		.driver_name = m_ve_device.getDriverName(),
 		.width = extent.width,
 		.height = extent.height,
 		.msaa_samples = m_ve_renderer.getCurrentSampleCountInt(),
@@ -276,6 +320,9 @@ void VeApplication::finishBenchmark() {
 		.validation_enabled = m_ve_device.enable_validation_layers,
 		.validation_errors = VeDevice::validationErrorCount(),
 		.validation_warnings = VeDevice::validationWarningCount(),
+		.culling_backend = cullingBackendName(settings.culling_backend),
+		.hiz_occlusion = settings.hiz_occlusion_enabled,
+		.draw_indirect_count = m_ve_device.supportsDrawIndirectCount(),
 	});
 	glfwSetWindowShouldClose(m_ve_window.getGLFWwindow(), GLFW_TRUE);
 }

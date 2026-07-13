@@ -122,6 +122,7 @@ public:
 #endif
 
 	const vk::PhysicalDeviceProperties getDeviceProperties() const { return m_physical_device.getProperties(); }
+	std::string getDriverName() const;
 	bool hasDedicatedComputeQueue() const { return m_has_dedicated_compute; }
 	vk::SampleCountFlagBits getSampleCount() const { return m_max_msaa_samples; };
 	bool hasHdrColorSpaceExtension() const { return m_has_hdr_instance_extension; }

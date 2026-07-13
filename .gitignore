@@ -76,4 +76,4 @@ scripts/*
 tracy/*
 
 # Benchmark run output
-bench/
+bench/*

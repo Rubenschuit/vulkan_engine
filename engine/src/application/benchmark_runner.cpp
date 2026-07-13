@@ -1,8 +1,10 @@
 #include "pch.hpp"
 #include "application/benchmark_runner.hpp"
 #include "utils/ve_log.hpp"
+#include "utils/ve_path.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <ctime>
 #include <format>
@@ -109,11 +111,60 @@ std::string utcTimestamp() {
 	return buf;
 }
 
+bool parseKeypoint(const char* s, CameraKeypoint& kp) {
+	return std::sscanf(s, "%f,%f,%f:%f,%f,%f",
+		&kp.pos.x, &kp.pos.y, &kp.pos.z, &kp.look.x, &kp.look.y, &kp.look.z) == 6;
+}
+
+// One keypoint per line in --bench-camera syntax; blank lines and # comments ok.
+std::vector<CameraKeypoint> loadCameraPath(const std::filesystem::path& file) {
+	std::ifstream in(file);
+	if (!in)
+		throw std::runtime_error("--bench-path cannot open " + pathToUtf8(file));
+	std::vector<CameraKeypoint> keypoints;
+	std::string line;
+	uint32_t lineno = 0;
+	while (std::getline(in, line)) {
+		++lineno;
+		size_t start = line.find_first_not_of(" \t\r\n");
+		if (start == std::string::npos || line[start] == '#')
+			continue;
+		CameraKeypoint kp;
+		if (!parseKeypoint(line.c_str() + start, kp))
+			throw std::runtime_error("--bench-path malformed line " + std::to_string(lineno)
+				+ " (expects px,py,pz:lx,ly,lz)");
+		keypoints.push_back(kp);
+	}
+	if (keypoints.empty())
+		throw std::runtime_error("--bench-path has no keypoints: " + pathToUtf8(file));
+	return keypoints;
+}
+
+// FNV-1a over the per-frame counter stream. Under frame-indexed camera motion
+// the sequence is deterministic across runs, so this is the exact-match gate
+// that replaces min==max once counters are no longer per-frame constant.
+// (GPU-readback backends may lag counts a frame; gate their checksum with care.)
+std::string counterChecksum(const std::vector<FrameStats>& samples) {
+	uint64_t h = 1469598103934665603ull;
+	auto mix = [&](uint32_t v) {
+		for (int b = 0; b < 4; ++b) {
+			h ^= static_cast<uint8_t>(v >> (b * 8));
+			h *= 1099511628211ull;
+		}
+	};
+	for (const FrameStats& s : samples)
+		for (const auto& metric : COUNTER_METRICS)
+			mix(s.*metric.member);
+	return std::format("{:#018x}", h);
+}
+
 } // namespace
 
 std::optional<BenchmarkConfig> BenchmarkConfig::parseArgs(int argc, char** argv) {
 	BenchmarkConfig config;
 	bool enabled = false;
+	std::optional<CameraKeypoint> single_pose;
+	std::filesystem::path path_file;
 
 	auto value = [&](int& i, const char* flag) -> const char* {
 		if (i + 1 >= argc)
@@ -144,12 +195,31 @@ std::optional<BenchmarkConfig> BenchmarkConfig::parseArgs(int argc, char** argv)
 			config.screenshot_path = value(i, "--bench-screenshot");
 			enabled = true;
 		} else if (arg == "--bench-camera") {
-			glm::vec3 pos, look;
-			if (std::sscanf(value(i, "--bench-camera"), "%f,%f,%f:%f,%f,%f",
-					&pos.x, &pos.y, &pos.z, &look.x, &look.y, &look.z) != 6)
+			CameraKeypoint kp;
+			if (!parseKeypoint(value(i, "--bench-camera"), kp))
 				throw std::runtime_error("--bench-camera expects px,py,pz:lx,ly,lz");
-			config.camera_pos = pos;
-			config.camera_look = look;
+			single_pose = kp;
+			enabled = true;
+		} else if (arg == "--bench-path") {
+			path_file = value(i, "--bench-path");
+			enabled = true;
+		} else if (arg == "--bench-culling") {
+			std::string_view v = value(i, "--bench-culling");
+			if (v == "cpu")
+				config.culling = BenchCulling::CPU;
+			else if (v == "gpu")
+				config.culling = BenchCulling::GPU;
+			else if (v == "meshlet")
+				config.culling = BenchCulling::MESHLET;
+			else
+				throw std::runtime_error("--bench-culling expects cpu|gpu|meshlet");
+			enabled = true;
+		} else if (arg == "--bench-res") {
+			unsigned w = 0, h = 0;
+			if (std::sscanf(value(i, "--bench-res"), "%ux%u", &w, &h) != 2 || w == 0 || h == 0)
+				throw std::runtime_error("--bench-res expects WxH (e.g. 1920x1080)");
+			config.width = w;
+			config.height = h;
 			enabled = true;
 		} else if (arg.starts_with("--bench")) {
 			throw std::runtime_error("unknown benchmark flag: " + std::string(arg));
@@ -162,7 +232,41 @@ std::optional<BenchmarkConfig> BenchmarkConfig::parseArgs(int argc, char** argv)
 		throw std::runtime_error("--bench-frames must be > 0");
 	if (config.fixed_dt <= 0.0f)
 		throw std::runtime_error("--bench-dt must be > 0");
+
+	// A path (>= 2 keypoints) wins over a single --bench-camera pose.
+	if (!path_file.empty())
+		config.keypoints = loadCameraPath(path_file);
+	else if (single_pose)
+		config.keypoints = {*single_pose};
 	return config;
+}
+
+std::optional<CameraKeypoint> BenchmarkRunner::cameraPose() const {
+	if (m_config.keypoints.empty())
+		return std::nullopt;
+	// Static pose, or holding at the start during wait/warmup.
+	if (m_config.keypoints.size() == 1 || m_phase != Phase::MEASURE)
+		return m_config.keypoints.front();
+	return poseAtFrame(static_cast<uint32_t>(m_samples.size()));
+}
+
+// Interpolate the keypoint path linearly by measured-frame index. Keypoints are
+// evenly spaced across the measure window; frame 0 is keypoint 0, the final
+// measured frame is the last keypoint.
+CameraKeypoint BenchmarkRunner::poseAtFrame(uint32_t measure_index) const {
+	const std::vector<CameraKeypoint>& kps = m_config.keypoints;
+	const uint32_t n = static_cast<uint32_t>(kps.size());
+	const float span = static_cast<float>(m_config.measure_frames > 1 ? m_config.measure_frames - 1 : 1);
+	float t = (static_cast<float>(measure_index) / span) * static_cast<float>(n - 1);
+	t = std::clamp(t, 0.0f, static_cast<float>(n - 1));
+	uint32_t k = static_cast<uint32_t>(t);
+	if (k > n - 2)
+		k = n - 2;
+	const float f = t - static_cast<float>(k);
+	CameraKeypoint out;
+	out.pos = kps[k].pos + (kps[k + 1].pos - kps[k].pos) * f;
+	out.look = kps[k].look + (kps[k + 1].look - kps[k].look) * f;
+	return out;
 }
 
 BenchmarkRunner::Action BenchmarkRunner::onFrame(bool scene_idle, const FrameStats& stats) {
@@ -216,6 +320,7 @@ int BenchmarkRunner::finish(const BenchmarkRunInfo& info) {
 	json += std::format("  \"timestamp\": \"{}\",\n", utcTimestamp());
 	json += std::format("  \"scene\": \"{}\",\n", jsonEscape(info.scene_name));
 	json += std::format("  \"device\": \"{}\",\n", jsonEscape(info.device_name));
+	json += std::format("  \"driver\": \"{}\",\n", jsonEscape(info.driver_name));
 	json += std::format("  \"resolution\": {{\"width\": {}, \"height\": {}}},\n", info.width, info.height);
 	json += std::format("  \"msaa_samples\": {},\n", info.msaa_samples);
 	json += std::format("  \"hdr\": {},\n", info.hdr);
@@ -224,9 +329,15 @@ int BenchmarkRunner::finish(const BenchmarkRunInfo& info) {
 	json += std::format("  \"measured_frames\": {},\n", m_samples.size());
 	json += std::format("  \"validation\": {{\"enabled\": {}, \"errors\": {}, \"warnings\": {}}},\n",
 		info.validation_enabled, info.validation_errors, info.validation_warnings);
+	json += std::format("  \"culling\": {{\"backend\": \"{}\", \"hiz_occlusion\": {}, \"draw_indirect_count\": {}}},\n",
+		info.culling_backend, info.hiz_occlusion, info.draw_indirect_count);
+	json += std::format("  \"camera\": {{\"keypoints\": {}, \"moving\": {}}},\n",
+		m_config.keypoints.size(), m_config.keypoints.size() > 1);
 
-	// Counters are deterministic under a fixed workload; min != max means the
-	// run was not stable frame to frame and should not be trusted as a baseline.
+	// Counters are a deterministic per-frame sequence under a fixed workload +
+	// frame-indexed camera. counter_checksum is the exact-match gate; min/max
+	// are for human reading (min==max only when the camera is static).
+	json += std::format("  \"counter_checksum\": \"{}\",\n", counterChecksum(m_samples));
 	json += "  \"counters\": {\n";
 	bool first = true;
 	for (const auto& metric : COUNTER_METRICS) {

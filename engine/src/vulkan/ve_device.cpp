@@ -397,6 +397,11 @@ void VeDevice::pickPhysicalDevice() {
 	VE_LOGI("Texture compression: BC=" << m_supports_bc << " ASTC=" << m_supports_astc << " ETC2=" << m_supports_etc2);
 }
 
+std::string VeDevice::getDriverName() const {
+	auto chain = m_physical_device.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceDriverProperties>();
+	return chain.get<vk::PhysicalDeviceDriverProperties>().driverName.data();
+}
+
 void VeDevice::createLogicalDevice() {
 	assert(*m_physical_device != VK_NULL_HANDLE && "Physical device must be selected before creating logical device");
 
