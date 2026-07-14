@@ -98,18 +98,38 @@ def main():
 
     status = 0
 
-    # Counter gate: deterministic per-frame sequence; divergence = workload changed.
+    # Counter gate. counter_checksum is the exact-match workload gate, EXCEPT for
+    # the meshlet backend without DrawIndirectCount (MoltenVK): there
+    # cull_visible_objects is a GPU readback that races frame to frame
+    RACY_COUNTERS = {"cull_visible_objects"}
     bc, cc = b0.get("counter_checksum"), c0.get("counter_checksum")
-    if bc != cc:
-        status = 1
-        print(f"WORKLOAD DIVERGED: counter_checksum {bc} -> {cc}")
-        bram, cram = counter_ranges(b0), counter_ranges(c0)
-        for k in bram:
-            if bram[k] != cram.get(k):
-                print(f"    {k}: {bram[k]} -> {cram.get(k)}")
-        print("  A code change altered visibility/LOD. Investigate; rebaseline if intended.\n")
-    else:
+    racy = (c0["culling"]["backend"] == "meshlet"
+            and not c0["culling"].get("draw_indirect_count", True))
+    workload_diverged = False
+    if bc == cc:
         print(f"counters match ({bc})\n")
+    elif racy:
+        br, cr = counter_ranges(b0), counter_ranges(c0)
+        diff = {k for k in br if k not in RACY_COUNTERS and br[k] != cr.get(k)}
+        if diff:
+            workload_diverged = True
+            print("WORKLOAD DIVERGED (meshlet stable counters):")
+            for k in sorted(diff):
+                print(f"    {k}: {br[k]} -> {cr.get(k)}")
+            print("  Investigate; rebaseline if intended.\n")
+        else:
+            print(f"counter_checksum differs ({bc} -> {cc}) but stable counters match: "
+                  "the known meshlet/MoltenVK readback race, not a divergence.\n")
+    else:
+        workload_diverged = True
+        print(f"WORKLOAD DIVERGED: counter_checksum {bc} -> {cc}")
+        br, cr = counter_ranges(b0), counter_ranges(c0)
+        for k in br:
+            if br[k] != cr.get(k):
+                print(f"    {k}: {br[k]} -> {cr.get(k)}")
+        print("  A code change altered visibility/LOD. Investigate; rebaseline if intended.\n")
+    if workload_diverged:
+        status = 1
 
     # Timing gate.
     rows = []
@@ -136,8 +156,8 @@ def main():
         if verdict or abs(pct) >= 1.0:
             print(f"{m:<24}{bm:>8.3f}{cm:>8.3f}{delta:>+8.3f}{pct:>+7.1f}%{tol:>7.3f}  {verdict}")
 
-    print("\n" + ("REGRESSIONS FOUND" if status == 1 and bc == cc else
-                  "WORKLOAD DIVERGED, rebaseline needed" if bc != cc else "clean"))
+    print("\n" + ("WORKLOAD DIVERGED, rebaseline needed" if workload_diverged else
+                  "REGRESSIONS FOUND" if status == 1 else "clean"))
     sys.exit(status)
 
 

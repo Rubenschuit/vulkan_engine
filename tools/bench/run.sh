@@ -4,10 +4,10 @@
 #
 #   tools/bench/run.sh <out-prefix> <repeats> <cooldown-sec> -- <VeApp bench args...>
 #
-# Example (5 cooled runs of the Bistro CPU path):
+# Example (5 cooled runs of a Bistro path):
 #   tools/bench/run.sh bench/bistro_cpu 5 30 -- \
-#       --bench-scene Bistro --bench-path bench/bistro.path \
-#       --bench-warmup 200 --bench-frames 500
+#       --bench-scene Bistro --bench-path tools/bench/paths/bistro/street.path \
+#       --bench-warmup 200 --bench-frames 900
 #
 # Set VEAPP if the binary isn't at build/Release/VeApp[.exe]
 set -euo pipefail
@@ -30,7 +30,6 @@ failures=0
 for n in $(seq 1 "$repeats"); do
     out="${prefix}_${n}.json"
     echo "[run.sh] run $n/$repeats -> $out"
-    # Read VeApp's exit status.
     set +e
     "$APP" "$@" --bench-stats "$out" 2>&1 | grep -E "\[bench\]"
     status=${PIPESTATUS[0]}

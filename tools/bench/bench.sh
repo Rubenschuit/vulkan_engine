@@ -3,7 +3,7 @@
 # tools/bench/paths/<scene>/ x every culling backend, N repeats each.
 #
 #   tools/bench/bench.sh <scene> [options]
-#     --backends "cpu gpu meshlet"   (default; meshlet is slow on MoltenVK)
+#     --backends "cpu gpu meshlet"   (default)
 #     --repeats N                    (default 3; feeds compare.py best-of-N)
 #     --cooldown S                   (default 30; sleep between runs)
 #     --res WxH                      (default 1920x1080)
