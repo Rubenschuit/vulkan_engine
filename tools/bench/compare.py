@@ -3,7 +3,7 @@
 
     python3 tools/bench/compare.py --baseline base.json [base2.json ...] \
                                    --candidate cand.json [cand2.json ...] \
-                                   [--noise noise.json] [--rel 2.0] [--abs 0.05]
+                                   [--noise noise.json] [--rel 1.0] [--abs 0.05]
 
 Pass MULTIPLE runs per side to defend against thermal throttling: the tool
 compares the BEST median per metric on each side, i.e. the run closest to the
@@ -37,6 +37,8 @@ GUARD_FIELDS = [
     ("hdr", lambda d: d.get("hdr")),
     ("warmup_frames", lambda d: d.get("warmup_frames")),
     ("measured_frames", lambda d: d.get("measured_frames")),
+    ("schema", lambda d: d.get("schema")),
+    ("fixed_dt", lambda d: d.get("fixed_dt")),
 ]
 
 
@@ -78,7 +80,7 @@ def main():
     ap.add_argument("--baseline", nargs="+", required=True)
     ap.add_argument("--candidate", nargs="+", required=True)
     ap.add_argument("--noise", help="noise.json from noise_floor.py for per-metric sigma")
-    ap.add_argument("--rel", type=float, default=2.0, help="relative tolerance %% when no sigma")
+    ap.add_argument("--rel", type=float, default=1.0, help="relative tolerance %% floor")
     ap.add_argument("--abs", type=float, default=0.05, help="absolute tolerance floor (ms)")
     args = ap.parse_args()
 
@@ -102,12 +104,18 @@ def main():
     # the meshlet backend without DrawIndirectCount (MoltenVK): there
     # cull_visible_objects is a GPU readback that races frame to frame
     RACY_COUNTERS = {"cull_visible_objects"}
-    bc, cc = b0.get("counter_checksum"), c0.get("counter_checksum")
     racy = (c0["culling"]["backend"] == "meshlet"
             and not c0["culling"].get("draw_indirect_count", True))
+    bcs = {r.get("counter_checksum") for r in base}
+    ccs = {r.get("counter_checksum") for r in cand}
     workload_diverged = False
-    if bc == cc:
-        print(f"counters match ({bc})\n")
+    if not racy and (len(bcs) > 1 or len(ccs) > 1):
+        workload_diverged = True
+        print(f"WORKLOAD UNSTABLE: counter_checksum varies within a side "
+              f"(baseline {sorted(bcs)} candidate {sorted(ccs)}); "
+              "repeats of a fixed workload should be deterministic.\n")
+    elif bcs == ccs:
+        print(f"counters match ({next(iter(bcs))})\n")
     elif racy:
         br, cr = counter_ranges(b0), counter_ranges(c0)
         diff = {k for k in br if k not in RACY_COUNTERS and br[k] != cr.get(k)}
@@ -118,11 +126,11 @@ def main():
                 print(f"    {k}: {br[k]} -> {cr.get(k)}")
             print("  Investigate; rebaseline if intended.\n")
         else:
-            print(f"counter_checksum differs ({bc} -> {cc}) but stable counters match: "
-                  "the known meshlet/MoltenVK readback race, not a divergence.\n")
+            print(f"counter_checksum differs ({sorted(bcs)} -> {sorted(ccs)}) but stable counters "
+                  "match: the known meshlet/MoltenVK readback race, not a divergence.\n")
     else:
         workload_diverged = True
-        print(f"WORKLOAD DIVERGED: counter_checksum {bc} -> {cc}")
+        print(f"WORKLOAD DIVERGED: counter_checksum {next(iter(bcs))} -> {next(iter(ccs))}")
         br, cr = counter_ranges(b0), counter_ranges(c0)
         for k in br:
             if br[k] != cr.get(k):
@@ -142,7 +150,7 @@ def main():
         pct = (delta / bm * 100.0) if bm > 1e-6 else 0.0
         sigma = noise.get(m, {}).get("sigma")
         if sigma is not None:
-            tol = max(nf["k"] * sigma, args.abs)
+            tol = max(nf["k"] * sigma, bm * args.rel / 100.0, args.abs)
         else:
             tol = max(bm * args.rel / 100.0, args.abs)
         verdict = "REGRESSION" if worse > tol else ("improved" if worse < -tol else "")

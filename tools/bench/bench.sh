@@ -14,7 +14,14 @@
 # with compare.py, or characterize spread with noise_floor.py.
 set -euo pipefail
 
-APP="${VEAPP:-build/Release/VeApp}"
+# Locate VeApp: first $VEAPP, else try the usual Unix and Visual Studio (.exe)
+# build layouts.
+APP="${VEAPP:-}"
+if [ -z "$APP" ]; then
+    for cand in build/Release/VeApp build/Release/VeApp.exe build/release/VeApp.exe; do
+        [ -x "$cand" ] && { APP="$cand"; break; }
+    done
+fi
 [ $# -ge 1 ] || { echo "usage: bench.sh <scene> [options]"; exit 1; }
 scene="$1"; shift
 
@@ -35,14 +42,18 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-paths_dir="${paths_dir:-tools/bench/paths/${scene}}"
+scene_lc=$(printf '%s' "$scene" | tr '[:upper:]' '[:lower:]')
+paths_dir="${paths_dir:-tools/bench/paths/${scene_lc}}"
 out="${out:-bench/${scene}}"
-[ -x "$APP" ] || { echo "error: $APP not found (set VEAPP or build Release)"; exit 1; }
+[ -n "$APP" ] && [ -x "$APP" ] || { echo "error: VeApp not found (set VEAPP or build Release)"; exit 1; }
 [ -d "$paths_dir" ] || { echo "error: no pose dir $paths_dir"; exit 1; }
+shopt -s nullglob
+path_files=("$paths_dir"/*.path)
+[ ${#path_files[@]} -gt 0 ] || { echo "error: no .path files in $paths_dir"; exit 1; }
 mkdir -p "$out"
 
 first=1
-for path_file in "$paths_dir"/*.path; do
+for path_file in "${path_files[@]}"; do
     pose=$(basename "$path_file" .path)
     for backend in $backends; do
         for n in $(seq 1 "$repeats"); do
@@ -50,10 +61,17 @@ for path_file in "$paths_dir"/*.path; do
             first=0
             json="${out}/${pose}_${backend}_${n}.json"
             echo "[bench] ${scene}/${pose} ${backend} run ${n}/${repeats} -> ${json}"
+            set +e
             "$APP" --bench-scene "$scene" --bench-path "$path_file" \
                 --bench-culling "$backend" --bench-res "$res" \
                 --bench-warmup "$warmup" --bench-frames "$frames" \
-                --bench-stats "$json" 2>&1 | grep -E "\[bench\]" || true
+                --bench-stats "$json" 2>&1 | grep -E "\[bench\]"
+            app_status=${PIPESTATUS[0]}
+            set -e
+            if [ "$app_status" -ne 0 ]; then
+                echo "error: VeApp exited $app_status on ${scene}/${pose} ${backend} run ${n}; aborting capture" >&2
+                exit "$app_status"
+            fi
         done
     done
 done
