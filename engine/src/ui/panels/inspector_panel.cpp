@@ -288,6 +288,17 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 					pl->setRotates(cpl.rotates);
 					pl->setCastsShadow(cpl.casts_shadow);
 				}
+			if (ImGui::MenuItem("Convert to Spot")) {
+				auto* pl = registry->getComponent<PointLightComponent>(entity);
+				const glm::vec3 color = pl->getColor();
+				const float intensity = pl->getIntensity();
+				const float range = pl->getRange();
+				registry->removeComponent<PointLightComponent>(entity);
+				auto& sl = registry->addComponent<SpotLightComponent>(entity);
+				sl.setColor(color);
+				sl.setIntensity(intensity);
+				sl.setRange(range);
+			}
 			ImGui::EndPopup();
 		}
 		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
@@ -327,6 +338,17 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 					sl->setOuterConeAngle(csl.outer_cone_angle);
 					sl->setCastsShadow(csl.casts_shadow);
 				}
+			if (ImGui::MenuItem("Convert to Point")) {
+				auto* sl = registry->getComponent<SpotLightComponent>(entity);
+				const glm::vec3 color = sl->getColor();
+				const float intensity = sl->getIntensity();
+				const float range = sl->getRange();
+				registry->removeComponent<SpotLightComponent>(entity);
+				auto& pl = registry->addComponent<PointLightComponent>(entity);
+				pl.setColor(color);
+				pl.setIntensity(intensity);
+				pl.setRange(range);
+			}
 			ImGui::EndPopup();
 		}
 		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);

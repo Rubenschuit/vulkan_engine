@@ -9,6 +9,10 @@ public:
 	BistroScene(const SceneContext& ctx, const AssetPaths& paths);
 
 	glm::vec4 getDefaultAmbient() const override { return {1.0f, 1.0f, 1.0f, 0.05f}; }
+	std::filesystem::path sceneOverlayPath() const override { return m_overlay_path; }
+
+private:
+	std::filesystem::path m_overlay_path;
 };
 
 } // namespace ve

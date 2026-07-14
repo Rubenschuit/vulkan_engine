@@ -34,6 +34,7 @@ private:
 	void renderFilters(Registry& registry);
 	void renderFlatList(Registry& registry, EditorState& state);
 	void renderLightGroups(Registry& registry, EditorState& state);
+	void renderSaveLightsButton(Registry& registry);
 	void renderLightNameGroups(Registry& registry, const std::string& source_key, const std::vector<Entity>& group_lights, EditorState& state);
 	void renderVisibilityToggle(Registry& registry, Entity entity, bool row_hovered);
 	template <typename LightT>
@@ -87,6 +88,8 @@ private:
 	// Search
 	char m_search_buf[256]{};
 	bool m_search_active = false;
+
+	std::string m_save_lights_status;
 };
 
 } // namespace ve

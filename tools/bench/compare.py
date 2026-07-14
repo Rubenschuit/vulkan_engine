@@ -35,6 +35,8 @@ GUARD_FIELDS = [
     ("draw_indirect_count", lambda d: d["culling"].get("draw_indirect_count")),
     ("msaa", lambda d: d.get("msaa_samples")),
     ("hdr", lambda d: d.get("hdr")),
+    ("warmup_frames", lambda d: d.get("warmup_frames")),
+    ("measured_frames", lambda d: d.get("measured_frames")),
 ]
 
 

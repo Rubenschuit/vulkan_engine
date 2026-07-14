@@ -5,7 +5,7 @@
 namespace ve {
 
 BistroScene::BistroScene(const SceneContext& ctx, const AssetPaths& paths)
-	: VeScene(ctx, "Bistro Scene") {
+	: VeScene(ctx, "Bistro Scene"), m_overlay_path(paths.bistro_scene_overlay()) {
 
 	// Directional light
 	Entity dl = m_registry.createDirectionalLight(5.0f, glm::vec3(1.0f),
@@ -18,8 +18,10 @@ BistroScene::BistroScene(const SceneContext& ctx, const AssetPaths& paths)
 		.scale = {2.0f, 2.0f, 2.0f},
 		.flip_tex_coord_v = true,
 		.on_loaded = [this](Entity wrapper) {
-			// Example callback
 			m_registry.setName(wrapper, "Bistro Model");
+			// Curated lighting setup
+			if (auto ov = SceneOverlay::loadFromFile(m_overlay_path))
+				ov->apply(m_registry);
 		}
 	});
 

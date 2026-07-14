@@ -6,8 +6,10 @@
 #include "events/engine_events.hpp"
 #include "resources/asset_loading_system.hpp"
 #include "scene/scene_manager.hpp"
+#include "scene/scene_overlay.hpp"
 #include "scene/ve_registry.hpp"
 #include "scene/ve_scene.hpp"
+#include "utils/ve_path.hpp"
 #include "utils/ve_string.hpp"
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -147,6 +149,7 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 
 	if (m_filter == TreeFilter::Lights) {
 		// Grouped light management view
+		renderSaveLightsButton(*registry);
 		renderLightGroups(*registry, state);
 	} else if (m_filter != TreeFilter::All || m_search_active) {
 		// Flat list of matches (Meshes/Cameras, or a search within All)
@@ -591,6 +594,32 @@ void HierarchyPanel::renderFlatList(Registry& registry, EditorState& state) {
 
 // Lights filter: grouped management view, each group collapsible with its own
 // bulk controls
+void HierarchyPanel::renderSaveLightsButton(Registry& registry) {
+	VeScene* scene = m_scene_manager ? m_scene_manager->getActiveScene() : nullptr;
+	const std::filesystem::path path = scene ? scene->sceneOverlayPath() : std::filesystem::path{};
+
+	ImGui::BeginDisabled(path.empty());
+	if (ImGui::Button("Save Lights")) {
+		if (SceneOverlay::saveEmissiveState(registry, path))
+			m_save_lights_status = "Saved " + pathToUtf8(path.filename());
+		else
+			m_save_lights_status = "Save failed (see log)";
+	}
+	ImGui::EndDisabled();
+
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+		if (path.empty())
+			ImGui::SetTooltip("This scene has no overlay file to save to.");
+		else
+			ImGui::SetTooltip("Write all enabled lights (color/intensity/spot)\nto %s", pathToUtf8(path).c_str());
+	}
+	if (!m_save_lights_status.empty()) {
+		ImGui::SameLine();
+		ImGui::TextDisabled("%s", m_save_lights_status.c_str());
+	}
+	ImGui::Separator();
+}
+
 void HierarchyPanel::renderLightGroups(Registry& registry, EditorState& state) {
 	std::vector<Entity> dir, spot, point, area;
 	uint32_t scan = registry.maxEntityIndex();

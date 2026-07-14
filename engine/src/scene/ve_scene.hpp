@@ -5,6 +5,7 @@
 #include "scene/ve_registry.hpp"
 #include "resources/ve_material_properties.hpp"
 #include "resources/ve_resource_manager.hpp"
+#include <filesystem>
 #include <string>
 
 namespace ve {
@@ -39,6 +40,8 @@ public:
     // Particle pool capacity required by this scene. 0 = use the engine
     // default.
     virtual uint32_t getParticleCapacity() const { return 0; }
+
+    virtual std::filesystem::path sceneOverlayPath() const { return {}; }
 
 protected:
     // Async load a gltf and instantiate it into this scene's registry.

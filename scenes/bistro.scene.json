@@ -1,0 +1,1865 @@
+{
+	"overrides": [
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					-0.14282283186912537,
+					0.922381579875946,
+					-0.35890650749206543
+				],
+				"inner_deg": 0.4000000059604645,
+				"outer_deg": 36.099998474121094
+			},
+			"color": [
+				1.0,
+				0.8199999928474426,
+				0.550000011920929
+			],
+			"intensity": 32.099998474121094,
+			"select": {
+				"name": "LMBR_000006b_bulb_light: subset_8 [0]"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					-0.14282283186912537,
+					0.922381579875946,
+					-0.35890650749206543
+				],
+				"inner_deg": 0.4000000059604645,
+				"outer_deg": 36.099998474121094
+			},
+			"color": [
+				1.0,
+				0.8199999928474426,
+				0.550000011920929
+			],
+			"intensity": 32.099998474121094,
+			"select": {
+				"name": "LMBR_000006b_bulb_light: subset_8 [1]"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					-0.14282283186912537,
+					0.922381579875946,
+					-0.35890650749206543
+				],
+				"inner_deg": 0.4000000059604645,
+				"outer_deg": 36.099998474121094
+			},
+			"color": [
+				1.0,
+				0.8199999928474426,
+				0.550000011920929
+			],
+			"intensity": 32.099998474121094,
+			"select": {
+				"name": "LMBR_000006b_bulb_light: subset_8 [2]"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					-0.14282283186912537,
+					0.922381579875946,
+					-0.35890650749206543
+				],
+				"inner_deg": 0.4000000059604645,
+				"outer_deg": 36.099998474121094
+			},
+			"color": [
+				1.0,
+				0.8199999928474426,
+				0.550000011920929
+			],
+			"intensity": 32.099998474121094,
+			"select": {
+				"name": "LMBR_000006b_bulb_light: subset_8 [3]"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					-0.15256591141223907,
+					0.985304057598114,
+					-0.07681000977754593
+				],
+				"inner_deg": 0.4000000059604645,
+				"outer_deg": 36.099998474121094
+			},
+			"color": [
+				1.0,
+				0.8199999928474426,
+				0.550000011920929
+			],
+			"intensity": 55.0,
+			"select": {
+				"name": "LMBR_000006b_bulb_light: subset_8 [4]"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					-0.15256591141223907,
+					0.985304057598114,
+					-0.07681000977754593
+				],
+				"inner_deg": 0.4000000059604645,
+				"outer_deg": 36.099998474121094
+			},
+			"color": [
+				1.0,
+				0.8199999928474426,
+				0.550000011920929
+			],
+			"intensity": 55.0,
+			"select": {
+				"name": "LMBR_000006b_bulb_light: subset_8 [5]"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					-0.6938636898994446,
+					0.6718018651008606,
+					0.2592979371547699
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 35.0
+			},
+			"color": [
+				1.0,
+				0.8199999928474426,
+				0.550000011920929
+			],
+			"intensity": 55.0,
+			"select": {
+				"name": "LMBR_000006b_bulb_light: subset_8 [6]"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					-0.6938636898994446,
+					0.6718018651008606,
+					0.2592979371547699
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 35.0
+			},
+			"color": [
+				1.0,
+				0.8199999928474426,
+				0.550000011920929
+			],
+			"intensity": 55.0,
+			"select": {
+				"name": "LMBR_000006b_bulb_light: subset_8 [7]"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					-0.6938636898994446,
+					0.6718018651008606,
+					0.2592979371547699
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 35.0
+			},
+			"color": [
+				1.0,
+				0.8199999928474426,
+				0.550000011920929
+			],
+			"intensity": 55.0,
+			"select": {
+				"name": "LMBR_000006b_bulb_light: subset_8 [8]"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					-0.6938636898994446,
+					0.6718018651008606,
+					0.2592979371547699
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 35.0
+			},
+			"color": [
+				1.0,
+				0.8199999928474426,
+				0.550000011920929
+			],
+			"intensity": 55.0,
+			"select": {
+				"name": "LMBR_000006b_bulb_light: subset_8 [9]"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					0.0,
+					-0.9122321009635925,
+					0.40967386960983276
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 35.0
+			},
+			"color": [
+				0.5773502588272095,
+				0.5773502588272095,
+				0.5773502588272095
+			],
+			"intensity": 144.74400329589844,
+			"select": {
+				"index": 0,
+				"name": "LMBR_00000e2_emissive: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					0.0,
+					-0.9122321009635925,
+					0.40967386960983276
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 35.0
+			},
+			"color": [
+				0.5773502588272095,
+				0.5773502588272095,
+				0.5773502588272095
+			],
+			"intensity": 144.74400329589844,
+			"select": {
+				"index": 1,
+				"name": "LMBR_00000e2_emissive: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					0.0,
+					-0.9122321009635925,
+					0.40967386960983276
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 35.0
+			},
+			"color": [
+				0.5773502588272095,
+				0.5773502588272095,
+				0.5773502588272095
+			],
+			"intensity": 144.74400329589844,
+			"select": {
+				"index": 2,
+				"name": "LMBR_00000e2_emissive: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					0.0,
+					-0.9122321009635925,
+					0.40967386960983276
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 35.0
+			},
+			"color": [
+				0.5773502588272095,
+				0.5773502588272095,
+				0.5773502588272095
+			],
+			"intensity": 144.74400329589844,
+			"select": {
+				"index": 3,
+				"name": "LMBR_00000e2_emissive: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					0.0,
+					-0.9122321009635925,
+					0.40967386960983276
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 35.0
+			},
+			"color": [
+				0.5773502588272095,
+				0.5773502588272095,
+				0.5773502588272095
+			],
+			"intensity": 144.74400329589844,
+			"select": {
+				"index": 4,
+				"name": "LMBR_00000e2_emissive: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					0.0,
+					1.0,
+					0.0
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 35.0
+			},
+			"color": [
+				0.5773502588272095,
+				0.5773502588272095,
+				0.5773502588272095
+			],
+			"intensity": 144.74400329589844,
+			"select": {
+				"index": 0,
+				"name": "LMBR_00000e2_emissive: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					0.0,
+					1.0,
+					0.0
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 35.0
+			},
+			"color": [
+				0.5773502588272095,
+				0.5773502588272095,
+				0.5773502588272095
+			],
+			"intensity": 144.74400329589844,
+			"select": {
+				"index": 1,
+				"name": "LMBR_00000e2_emissive: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					0.0,
+					1.0,
+					0.0
+				],
+				"inner_deg": 14.600000381469727,
+				"outer_deg": 52.900001525878906
+			},
+			"color": [
+				1.0,
+				0.8199999928474426,
+				0.550000011920929
+			],
+			"intensity": 7.0,
+			"select": {
+				"name": "LMBR_0000159_Light_Bulb: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8500000238418579,
+				0.6000000238418579
+			],
+			"intensity": 0.45954999327659607,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000185_Paris_Wall_Bulb_Light: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8500000238418579,
+				0.6000000238418579
+			],
+			"intensity": 0.45954999327659607,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000185_Paris_Wall_Bulb_Light: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8500000238418579,
+				0.6000000238418579
+			],
+			"intensity": 0.45954999327659607,
+			"select": {
+				"index": 2,
+				"name": "LMBR_0000185_Paris_Wall_Bulb_Light: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8500000238418579,
+				0.6000000238418579
+			],
+			"intensity": 0.45954999327659607,
+			"select": {
+				"index": 3,
+				"name": "LMBR_0000185_Paris_Wall_Bulb_Light: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8500000238418579,
+				0.6000000238418579
+			],
+			"intensity": 0.45954999327659607,
+			"select": {
+				"index": 4,
+				"name": "LMBR_0000185_Paris_Wall_Bulb_Light: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8500000238418579,
+				0.6000000238418579
+			],
+			"intensity": 0.45954999327659607,
+			"select": {
+				"index": 5,
+				"name": "LMBR_0000185_Paris_Wall_Bulb_Light: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 2,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 3,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 4,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 5,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 6,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 7,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 8,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 9,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 10,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 11,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 12,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 13,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 14,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 15,
+				"name": "LMBR_000018b_bulb: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000018b_bulb: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000018b_bulb: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 2,
+				"name": "LMBR_000018b_bulb: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 3,
+				"name": "LMBR_000018b_bulb: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 4,
+				"name": "LMBR_000018b_bulb: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 5,
+				"name": "LMBR_000018b_bulb: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 6,
+				"name": "LMBR_000018b_bulb: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 7,
+				"name": "LMBR_000018b_bulb: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 8,
+				"name": "LMBR_000018b_bulb: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 9,
+				"name": "LMBR_000018b_bulb: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 10,
+				"name": "LMBR_000018b_bulb: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9578059315681458,
+				0.3637237250804901,
+				0.0
+			],
+			"intensity": 14.964920043945313,
+			"select": {
+				"index": 11,
+				"name": "LMBR_000018b_bulb: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.30000001192092896,
+				1.0,
+				0.44999998807907104
+			],
+			"intensity": 16.399999618530273,
+			"select": {
+				"name": "LMBR_000018f_pharmacy_cross: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.0,
+				0.025316715240478516
+			],
+			"intensity": 0.8999999761581421,
+			"select": {
+				"name": "LMBR_0000191_book_store: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_3 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_3 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 2,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_3 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 3,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_3 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 4,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_3 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 5,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_3 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_3 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_3 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 2,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_3 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 3,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_3 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 4,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_3 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 5,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_3 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_3 [2]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_3 [2]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_4 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_4 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_4 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.15000000596046448,
+				0.10000000149011612
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000197_Paris_StringLights_01_Red_Color: subset_4 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.15000000596046448,
+				0.30000001192092896,
+				1.0
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000198_Paris_StringLights_01_Blue_Color: subset_2 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.15000000596046448,
+				0.30000001192092896,
+				1.0
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000198_Paris_StringLights_01_Blue_Color: subset_2 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.15000000596046448,
+				0.30000001192092896,
+				1.0
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000198_Paris_StringLights_01_Blue_Color: subset_2 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.15000000596046448,
+				0.30000001192092896,
+				1.0
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000198_Paris_StringLights_01_Blue_Color: subset_2 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.15000000596046448,
+				0.30000001192092896,
+				1.0
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000198_Paris_StringLights_01_Blue_Color: subset_4"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.15000000596046448,
+				0.30000001192092896,
+				1.0
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000198_Paris_StringLights_01_Blue_Color: subset_4"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.15000000596046448,
+				0.30000001192092896,
+				1.0
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000198_Paris_StringLights_01_Blue_Color: subset_5"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.15000000596046448,
+				0.30000001192092896,
+				1.0
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000198_Paris_StringLights_01_Blue_Color: subset_5"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.15000000596046448,
+				0.30000001192092896,
+				1.0
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000198_Paris_StringLights_01_Blue_Color: subset_6"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.15000000596046448,
+				0.30000001192092896,
+				1.0
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000198_Paris_StringLights_01_Blue_Color: subset_6"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.20000000298023224,
+				1.0,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000199_Paris_StringLights_01_Green_Color: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.20000000298023224,
+				1.0,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000199_Paris_StringLights_01_Green_Color: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.20000000298023224,
+				1.0,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000199_Paris_StringLights_01_Green_Color: subset_1 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.20000000298023224,
+				1.0,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000199_Paris_StringLights_01_Green_Color: subset_1 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.20000000298023224,
+				1.0,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000199_Paris_StringLights_01_Green_Color: subset_1 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.20000000298023224,
+				1.0,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000199_Paris_StringLights_01_Green_Color: subset_1 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.20000000298023224,
+				1.0,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_0000199_Paris_StringLights_01_Green_Color: subset_4"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.20000000298023224,
+				1.0,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_0000199_Paris_StringLights_01_Green_Color: subset_4"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.20000000298023224,
+				1.0,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 2,
+				"name": "LMBR_0000199_Paris_StringLights_01_Green_Color: subset_4"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.20000000298023224,
+				1.0,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 3,
+				"name": "LMBR_0000199_Paris_StringLights_01_Green_Color: subset_4"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.3499999940395355,
+				0.699999988079071
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000019a_Paris_StringLights_01_Pink_Color: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.3499999940395355,
+				0.699999988079071
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000019a_Paris_StringLights_01_Pink_Color: subset_2"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.3499999940395355,
+				0.699999988079071
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000019a_Paris_StringLights_01_Pink_Color: subset_2 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.3499999940395355,
+				0.699999988079071
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000019a_Paris_StringLights_01_Pink_Color: subset_2 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.3499999940395355,
+				0.699999988079071
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000019a_Paris_StringLights_01_Pink_Color: subset_2 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.3499999940395355,
+				0.699999988079071
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000019a_Paris_StringLights_01_Pink_Color: subset_2 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.3499999940395355,
+				0.699999988079071
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000019a_Paris_StringLights_01_Pink_Color: subset_5"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.3499999940395355,
+				0.699999988079071
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000019a_Paris_StringLights_01_Pink_Color: subset_5"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.5,
+				0.11999999731779099
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000019b_Paris_StringLights_01_Orange_Color: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.5,
+				0.11999999731779099
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000019b_Paris_StringLights_01_Orange_Color: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.5,
+				0.11999999731779099
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000019b_Paris_StringLights_01_Orange_Color: subset_3 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.5,
+				0.11999999731779099
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000019b_Paris_StringLights_01_Orange_Color: subset_3 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.5,
+				0.11999999731779099
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000019b_Paris_StringLights_01_Orange_Color: subset_3 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.5,
+				0.11999999731779099
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000019b_Paris_StringLights_01_Orange_Color: subset_3 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.5,
+				0.11999999731779099
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000019b_Paris_StringLights_01_Orange_Color: subset_5"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.5,
+				0.11999999731779099
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000019b_Paris_StringLights_01_Orange_Color: subset_5"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8999999761581421,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000019c_Paris_StringLights_01_Yellow_Color: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8999999761581421,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000019c_Paris_StringLights_01_Yellow_Color: subset_1"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8999999761581421,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000019c_Paris_StringLights_01_Yellow_Color: subset_2 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8999999761581421,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000019c_Paris_StringLights_01_Yellow_Color: subset_2 [0]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8999999761581421,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000019c_Paris_StringLights_01_Yellow_Color: subset_2 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8999999761581421,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000019c_Paris_StringLights_01_Yellow_Color: subset_2 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8999999761581421,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000019c_Paris_StringLights_01_Yellow_Color: subset_5"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8999999761581421,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000019c_Paris_StringLights_01_Yellow_Color: subset_5"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8999999761581421,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000019c_Paris_StringLights_01_Yellow_Color: subset_6"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.8999999761581421,
+				0.25
+			],
+			"intensity": 0.5,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000019c_Paris_StringLights_01_Yellow_Color: subset_6"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9240506291389465,
+				0.4854189157485962,
+				0.046787358820438385
+			],
+			"intensity": 11.0,
+			"select": {
+				"index": 0,
+				"name": "LMBR_000019f_Mesh: subset_0"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9240506291389465,
+				0.4854189157485962,
+				0.046787358820438385
+			],
+			"intensity": 11.0,
+			"select": {
+				"index": 1,
+				"name": "LMBR_000019f_Mesh: subset_0"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9240506291389465,
+				0.4854189157485962,
+				0.046787358820438385
+			],
+			"intensity": 11.0,
+			"select": {
+				"index": 2,
+				"name": "LMBR_000019f_Mesh: subset_0"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9240506291389465,
+				0.4854189157485962,
+				0.046787358820438385
+			],
+			"intensity": 11.0,
+			"select": {
+				"index": 3,
+				"name": "LMBR_000019f_Mesh: subset_0"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				0.9240506291389465,
+				0.4854189157485962,
+				0.046787358820438385
+			],
+			"intensity": 11.0,
+			"select": {
+				"index": 4,
+				"name": "LMBR_000019f_Mesh: subset_0"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					0.0,
+					0.9953949451446533,
+					-0.09585892409086227
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 45.0
+			},
+			"color": [
+				1.0,
+				0.8500000238418579,
+				0.6000000238418579
+			],
+			"intensity": 66.0,
+			"select": {
+				"index": 0,
+				"name": "LMBR_00001a5_Paris_Ceiling_Lamp: subset_0"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					0.0,
+					0.9953949451446533,
+					-0.09585892409086227
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 45.0
+			},
+			"color": [
+				1.0,
+				0.8500000238418579,
+				0.6000000238418579
+			],
+			"intensity": 66.0,
+			"select": {
+				"index": 1,
+				"name": "LMBR_00001a5_Paris_Ceiling_Lamp: subset_0"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					0.0,
+					0.9953949451446533,
+					-0.09585892409086227
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 45.0
+			},
+			"color": [
+				1.0,
+				0.8500000238418579,
+				0.6000000238418579
+			],
+			"intensity": 66.0,
+			"select": {
+				"index": 2,
+				"name": "LMBR_00001a5_Paris_Ceiling_Lamp: subset_0"
+			}
+		},
+		{
+			"active": true,
+			"as_spot": {
+				"dir": [
+					0.0,
+					0.9953949451446533,
+					-0.09585892409086227
+				],
+				"inner_deg": 25.0,
+				"outer_deg": 45.0
+			},
+			"color": [
+				1.0,
+				0.8500000238418579,
+				0.6000000238418579
+			],
+			"intensity": 66.0,
+			"select": {
+				"index": 3,
+				"name": "LMBR_00001a5_Paris_Ceiling_Lamp: subset_0"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.7799999713897705,
+				0.5
+			],
+			"intensity": 0.75,
+			"select": {
+				"name": "LMBR_00001bb_Paris_Lantern_01: subset_16 [1]"
+			}
+		},
+		{
+			"active": true,
+			"color": [
+				1.0,
+				0.7799999713897705,
+				0.5
+			],
+			"intensity": 0.75,
+			"select": {
+				"name": "LMBR_00001bb_Paris_Lantern_01: subset_16 [2]"
+			}
+		}
+	],
+	"version": 1
+}

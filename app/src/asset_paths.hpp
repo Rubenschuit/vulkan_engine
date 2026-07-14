@@ -25,6 +25,8 @@ struct AssetPaths {
 	std::filesystem::path sponza_model() const { return project_root / "models" / "sponza" / "glTF" / "Sponza.gltf"; }
 	std::filesystem::path bistro_model() const { return project_root / "models" / "bistro-master" / "bistro.gltf"; }
 
+	std::filesystem::path bistro_scene_overlay() const { return project_root / "scenes" / "bistro.scene.json"; }
+
 	explicit AssetPaths(const std::filesystem::path& root)
 		: project_root(root),
 		  cube_model(root / "models" / "cube.gltf"),

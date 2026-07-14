@@ -24,6 +24,7 @@
 #include "scene/camera_view.hpp"
 #include "scene/ve_scene.hpp"
 #include "scene/gltf_scene.hpp"
+#include "scene/scene_overlay.hpp"
 
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
