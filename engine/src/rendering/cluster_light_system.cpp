@@ -85,6 +85,14 @@ void ClusterLightSystem::createBuffers(vk::Extent2D screen_extent) {
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
 			m_ve_device.getDeviceProperties().limits.minUniformBufferOffsetAlignment);
 		m_cluster_param_ubos[i]->map();
+
+		m_spot_cone_ssbos[i] = std::make_unique<VeBuffer>(
+			m_ve_device,
+			sizeof(glm::vec4),
+			MAX_SPOT_LIGHTS,
+			vk::BufferUsageFlagBits::eStorageBuffer,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		m_spot_cone_ssbos[i]->map();
 	}
 }
 
@@ -94,6 +102,7 @@ void ClusterLightSystem::createComputeSetLayout() {
 		.addBinding(1, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // cluster counts
 		.addBinding(2, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // light index list
 		.addBinding(3, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eCompute)  // cluster params
+		.addBinding(4, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // spot cones
 		.build();
 }
 
@@ -132,12 +141,14 @@ void ClusterLightSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool)
 		auto count_info = m_cluster_count_ssbos[i]->getDescriptorInfo();
 		auto index_info = m_light_index_ssbos[i]->getDescriptorInfo();
 		auto param_info = m_cluster_param_ubos[i]->getDescriptorInfo();
+		auto spot_cone_info = m_spot_cone_ssbos[i]->getDescriptorInfo();
 
 		VeDescriptorWriter(*m_compute_set_layout, descriptor_pool)
 			.writeBuffer(0, &light_info)
 			.writeBuffer(1, &count_info)
 			.writeBuffer(2, &index_info)
 			.writeBuffer(3, &param_info)
+			.writeBuffer(4, &spot_cone_info)
 			.build(m_compute_descriptor_sets[i]);
 
 		VeDescriptorWriter(*m_output_set_layout, descriptor_pool)
@@ -179,13 +190,24 @@ uint32_t ClusterLightSystem::uploadLightData(VeFrameInfo& frame_info) {
 
 	m_last_point_light_count = count;
 
+	auto* spot_cones = static_cast<glm::vec4*>(m_spot_cone_ssbos[frame]->getMappedMemory());
 	uint32_t spot_count = 0;
 	for (auto [entity, sl, tc] : registry.view<SpotLightComponent, TransformComponent>()) {
 		if (count >= MAX_CLUSTER_LIGHTS || spot_count >= MAX_SPOT_LIGHTS)
 			break;
 		glm::vec3 color = sl.getColor();
 		float intensity = sl.getIntensity();
-		glm::vec3 world_pos = glm::vec3(registry.getWorldTransform(entity)[3]);
+		const glm::mat4& world = registry.getWorldTransform(entity);
+		glm::vec3 world_pos = glm::vec3(world[3]);
+
+		// Same direction computation as LightSystem::updateUniformBuffer()
+		glm::vec3 raw_dir = glm::mat3(world) * sl.getDirection();
+		float dir_len_sq = glm::dot(raw_dir, raw_dir);
+		glm::vec3 world_dir = (dir_len_sq > 1e-12f)
+			? raw_dir * (1.0f / std::sqrt(dir_len_sq))
+			: glm::normalize(sl.getDirection());
+		spot_cones[spot_count] = glm::vec4{world_dir, std::cos(sl.getOuterConeAngle())};
+
 		buffer[count].position = glm::vec4{world_pos, sl.getEffectiveRange()};
 		buffer[count].color.x = color.x * intensity;
 		buffer[count].color.y = color.y * intensity;

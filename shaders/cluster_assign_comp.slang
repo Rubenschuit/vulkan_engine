@@ -1,5 +1,7 @@
 // Cluster light assignment compute shader.
-// Assigns point lights to 3D clusters for clustered forward rendering.
+// Assigns lights (point + spot + area, concatenated) to 3D clusters for
+// clustered forward rendering. All lights are range-sphere tested; spot
+// lights are additionally cone-tested against the cluster's bounding sphere.
 //
 // Dispatch: (ceil(tiles_x * tiles_y / CLUSTER_ASSIGN_WORKGROUP_SIZE), 1, z_slices)
 // Each thread handles one cluster in the XY plane for its Z-slice.
@@ -28,8 +30,10 @@ struct UniformBuffer {
 [[vk::binding(1, 1)]] RWStructuredBuffer<uint2>          cluster_counts;     // (offset, count) per cluster
 [[vk::binding(2, 1)]] RWStructuredBuffer<uint>           light_index_list;
 [[vk::binding(3, 1)]] ConstantBuffer<ClusterParams>      cluster_params;
+[[vk::binding(4, 1)]] StructuredBuffer<float4>           spot_cones;         // xyz = world axis, w = cos(outer); indexed by spot slot
 
 groupshared float4 s_view_pos_range[CLUSTER_ASSIGN_WORKGROUP_SIZE];
+groupshared float4 s_spot_cone[CLUSTER_ASSIGN_WORKGROUP_SIZE];  // xyz = view-space axis, w = cos(outer); valid for spot indices only
 
 [numthreads(CLUSTER_ASSIGN_WORKGROUP_SIZE, 1, 1)]
 void compMain(uint3 dispatch_id : SV_DispatchThreadID,
@@ -58,7 +62,13 @@ void compMain(uint3 dispatch_id : SV_DispatchThreadID,
 	uint cluster_base = cluster_index * MAX_LIGHTS_PER_CLUSTER;
 	uint local_count = 0;
 
+	// Cluster bounding sphere for the spot cone test (conservative superset of the AABB)
+	float3 cluster_center = 0.5 * (aabb_min + aabb_max);
+	float cluster_radius = length(aabb_max - cluster_center);
+
 	uint num_lights = cluster_params.num_lights;
+	uint spot_begin = cluster_params.num_point_lights;
+	uint spot_end = spot_begin + cluster_params.num_spot_lights;
 	uint num_batches = (num_lights + CLUSTER_ASSIGN_WORKGROUP_SIZE - 1) / CLUSTER_ASSIGN_WORKGROUP_SIZE;
 
 	for (uint batch = 0; batch < num_batches; batch++) {
@@ -68,6 +78,11 @@ void compMain(uint3 dispatch_id : SV_DispatchThreadID,
 			float4 wp = light_data[load_idx].position;
 			float3 vp = mul(cluster_params.view, float4(wp.xyz, 1.0)).xyz;
 			s_view_pos_range[local_id] = float4(vp, wp.w);
+			if (load_idx >= spot_begin && load_idx < spot_end) {
+				float4 cone = spot_cones[load_idx - spot_begin];
+				float3 view_axis = mul(cluster_params.view, float4(cone.xyz, 0.0)).xyz;
+				s_spot_cone[local_id] = float4(view_axis, cone.w);
+			}
 		}
 		GroupMemoryBarrierWithGroupSync();
 
@@ -82,10 +97,18 @@ void compMain(uint3 dispatch_id : SV_DispatchThreadID,
 				if (range <= 0.0)
 					continue;
 
-				if (sphereAABBIntersect(vpr.xyz, range, aabb_min, aabb_max)) {
-					light_index_list[cluster_base + local_count] = base + i;
-					local_count++;
+				if (!sphereAABBIntersect(vpr.xyz, range, aabb_min, aabb_max))
+					continue;
+
+				uint light_idx = base + i;
+				if (light_idx >= spot_begin && light_idx < spot_end) {
+					float4 cone = s_spot_cone[i];
+					if (!coneSphereIntersect(vpr.xyz, cone.xyz, cone.w, cluster_center, cluster_radius))
+						continue;
 				}
+
+				light_index_list[cluster_base + local_count] = light_idx;
+				local_count++;
 			}
 		}
 

@@ -7,7 +7,7 @@
 #     --repeats N                    (default 3; feeds compare.py best-of-N)
 #     --cooldown S                   (default 30; sleep between runs)
 #     --res WxH                      (default 1920x1080)
-#     --warmup N / --frames N        (default 200 / 500)
+#     --warmup N / --frames N        (default 200 / 900)
 #     --out DIR                      (default bench/<scene>)
 #
 # Writes DIR/<pose>_<backend>_<n>.json. Compare a candidate build against these

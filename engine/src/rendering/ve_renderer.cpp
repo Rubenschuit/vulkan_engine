@@ -221,6 +221,7 @@ void VeRenderer::endFrame() {
 	if (m_frame_aborted) {
 		m_ve_device.getDevice().waitIdle();
 		m_is_frame_started = false;
+		m_ui_label_open = false;
 		FrameMark;
 		return;
 	}
@@ -229,7 +230,11 @@ void VeRenderer::endFrame() {
 	if (!m_screenshot_path.empty() && m_scene_frame && m_image_acquired_this_frame)
 		recordScreenshotCopy(ui_cb);
 	transitionToPresent(ui_cb);
-	endDebugLabel(ui_cb);
+	// Benchmark mode records the UI CB without beginUIRecording
+	if (m_ui_label_open) {
+		endDebugLabel(ui_cb);
+		m_ui_label_open = false;
+	}
 	ui_cb.end();
 
 	vk::Result result;
@@ -826,6 +831,7 @@ void VeRenderer::beginUIRecording(bool editor_mode) {
 
 	auto& ui_cb = getCurrentUICommandBuffer();
 	beginDebugLabel(ui_cb, "UI", {0.9f, 0.9f, 0.2f, 1.0f});
+	m_ui_label_open = true;
 
 	if (editor_mode) {
 		// Scene was rendered to viewport image; swapchain has not been touched yet.

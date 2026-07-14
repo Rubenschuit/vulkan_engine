@@ -97,6 +97,7 @@ private:
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_cluster_count_ssbos;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_light_index_ssbos;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_cluster_param_ubos;
+	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_spot_cone_ssbos;
 
 	// Descriptor set layouts
 	std::unique_ptr<VeDescriptorSetLayout> m_compute_set_layout;

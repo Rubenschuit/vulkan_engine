@@ -108,11 +108,22 @@ float3 clusterHeatmapColor(float2 screen_pos, float linear_depth, uint count, Cl
 	return heat * checker;
 }
 
-// Sphere-AABB overlap test
 bool sphereAABBIntersect(float3 center, float radius, float3 aabb_min, float3 aabb_max) {
 	float3 closest = clamp(center, aabb_min, aabb_max);
 	float3 diff = closest - center;
 	return dot(diff, diff) <= radius * radius;
+}
+
+bool coneSphereIntersect(float3 apex, float3 axis, float cos_angle,
+                         float3 sphere_center, float sphere_radius) {
+	float sin_angle = sqrt(max(1.0 - cos_angle * cos_angle, 0.0));
+	float3 v = sphere_center - apex;
+	float v_len_sq = dot(v, v);
+	float axial = dot(v, axis);
+	float dist_to_surface = cos_angle * sqrt(max(v_len_sq - axial * axial, 0.0)) - axial * sin_angle;
+	bool angle_cull = dist_to_surface > sphere_radius;
+	bool back_cull = axial < -sphere_radius;
+	return !(angle_cull || back_cull);
 }
 
 #endif

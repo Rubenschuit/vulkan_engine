@@ -199,6 +199,7 @@ private:
 	bool m_frame_aborted = false;
 	bool m_pre_swap_submitted_this_frame = false;
 	bool m_scene_frame = false;
+	bool m_ui_label_open = false;
 
 	bool m_msaa_enabled = false;
 	bool m_hdr_enabled = false;
