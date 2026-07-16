@@ -26,6 +26,8 @@ public:
 	                        GpuSceneManager& gpu_scene,
 	                        VeRenderer& renderer) const override;
 	vk::raii::DescriptorSet& getGlobalDescriptorSet(uint32_t frame) override;
+	void snapshotStats(uint32_t frame) override;
+
 	void collectStats(uint32_t frame, FrameStats& stats,
 	                  Registry& registry) const override;
 	void setHizEnabled(bool enabled) override;

@@ -37,6 +37,11 @@ public:
 
 	virtual vk::raii::DescriptorSet& getGlobalDescriptorSet(uint32_t frame) = 0;
 
+	// Latch any GPU-readback stats for this frame's slot. Called after the fence
+	// wait and before the frame records its own readback copy; backends that
+	// read nothing back need no override.
+	virtual void snapshotStats(uint32_t frame) { (void)frame; }
+
 	virtual void collectStats(uint32_t frame, FrameStats& stats,
 	                          Registry& registry) const = 0;
 

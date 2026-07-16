@@ -111,12 +111,15 @@ public:
 	// [2*NUM_CSM_CASCADES..) shadow lights.
 	static constexpr uint32_t SHADOW_BUFFER_COUNT = 2 * NUM_CSM_CASCADES + MAX_SHADOW_LIGHTS;
 
-	// Read back draw counts from a previous frame's staging buffer
-	uint32_t readbackDrawCounts(uint32_t frame) const;
+	// Copy out the counts of the frame that last used this slot. Must be called
+	// after the frame's fence wait and before it records its own copy
+	void snapshotReadback(uint32_t frame);
+	// Draw counts from the last snapshot
+	uint32_t readbackDrawCounts() const;
 	// Exact triangle count accumulated by cull shader (index_count / 3)
-	uint32_t readbackTriangleCount(uint32_t frame) const;
-	// Raw per-bucket counts from readback
-	const uint32_t* getReadbackCounts(uint32_t frame) const;
+	uint32_t readbackTriangleCount() const;
+	// Raw per-bucket counts from the last snapshot
+	const uint32_t* getReadbackCounts() const;
 	// Zero readback buffers (call on scene change to avoid stale data).
 	void clearReadback();
 
@@ -170,6 +173,7 @@ private:
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_indirect_buffers;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_draw_count_buffers;  // stats only
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_readback_buffers;
+	std::array<uint32_t, BUCKET_COUNT + 1> m_readback_snapshot{};
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_instance_buffers;
 
 	// Per-frame UBO for cull params

@@ -386,6 +386,9 @@ void RenderPipeline::renderFrame(VeScene& scene,
 	m_skybox_render_system->processPendingLoad();
 
 	VeFrameInfo fi = buildFrameInfo(scene, camera_view, editor_state, frame_time, total_time);
+
+	m_active_backend->snapshotStats(fi.current_frame);
+
 	{
 		ZoneScopedN("Populate UBO");
 		populateUBO(fi);

@@ -81,10 +81,14 @@ vk::raii::DescriptorSet& GpuCullingBackend::getGlobalDescriptorSet(uint32_t fram
 	return m_cull.getGlobalDescriptorSet(frame);
 }
 
-void GpuCullingBackend::collectStats(uint32_t frame, FrameStats& stats, Registry&) const {
+void GpuCullingBackend::snapshotStats(uint32_t frame) {
+	m_cull.snapshotReadback(frame);
+}
+
+void GpuCullingBackend::collectStats(uint32_t, FrameStats& stats, Registry&) const {
 	stats.cull_total_objects = m_gpu_scene.getTotalRegisteredCount();
-	stats.cull_visible_objects = m_cull.readbackDrawCounts(frame);
-	stats.visible_triangles = m_cull.readbackTriangleCount(frame);
+	stats.cull_visible_objects = m_cull.readbackDrawCounts();
+	stats.visible_triangles = m_cull.readbackTriangleCount();
 	stats.visible_meshlets = 0;
 }
 

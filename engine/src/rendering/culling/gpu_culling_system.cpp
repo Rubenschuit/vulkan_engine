@@ -732,27 +732,31 @@ void GpuCullingSystem::flushShadowCullBarrier(vk::raii::CommandBuffer& cmd, GpuS
 	cmd.pipelineBarrier2(draw_dep);
 }
 
-uint32_t GpuCullingSystem::readbackDrawCounts(uint32_t frame) const {
-	const auto* counts = static_cast<const uint32_t*>(m_readback_buffers[frame]->getMappedMemory());
+void GpuCullingSystem::snapshotReadback(uint32_t frame) {
+	std::memcpy(m_readback_snapshot.data(), m_readback_buffers[frame]->getMappedMemory(),
+		m_readback_snapshot.size() * sizeof(uint32_t));
+}
+
+uint32_t GpuCullingSystem::readbackDrawCounts() const {
 	uint32_t total = 0;
 	for (uint32_t b = 0; b < BUCKET_COUNT; b++)
-		total += counts[b];
+		total += m_readback_snapshot[b];
 	return total;
 }
 
-uint32_t GpuCullingSystem::readbackTriangleCount(uint32_t frame) const {
-	const auto* counts = static_cast<const uint32_t*>(m_readback_buffers[frame]->getMappedMemory());
-	return counts[BUCKET_COUNT] / 3;
+uint32_t GpuCullingSystem::readbackTriangleCount() const {
+	return m_readback_snapshot[BUCKET_COUNT] / 3;
 }
 
-const uint32_t* GpuCullingSystem::getReadbackCounts(uint32_t frame) const {
-	return static_cast<const uint32_t*>(m_readback_buffers[frame]->getMappedMemory());
+const uint32_t* GpuCullingSystem::getReadbackCounts() const {
+	return m_readback_snapshot.data();
 }
 
 void GpuCullingSystem::clearReadback() {
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		std::memset(m_readback_buffers[i]->getMappedMemory(), 0,
 			(BUCKET_COUNT + 1) * sizeof(uint32_t));
+	m_readback_snapshot.fill(0);
 }
 
 void GpuCullingSystem::subscribeToEvents(EventBus& event_bus, HizSystem& hiz, GpuSceneManager& scene_mgr,
