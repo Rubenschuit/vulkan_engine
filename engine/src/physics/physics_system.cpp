@@ -30,6 +30,7 @@
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Collision/ContactListener.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Core/IssueReporting.h>
 
 JPH_SUPPRESS_WARNINGS
@@ -173,6 +174,13 @@ struct BodyData {
 	JPH::EMotionType pre_freeze_motion_type = JPH::EMotionType::Dynamic;
 };
 
+struct CharacterData {
+	JPH::Ref<JPH::CharacterVirtual> character;
+	// Detects external moves (gizmo/teleport)
+	glm::vec3 last_synced_world_pos{0.0f};
+	bool frozen = false;
+};
+
 // ── implementation ────────────────────────────────────────────────────
 //
 // All Jolt types live here so that Jolt headers stay out of the public header.
@@ -196,11 +204,18 @@ struct PhysicsSystem::Impl {
 	std::vector<std::optional<BodyData>> body_map;
 	std::vector<uint32_t> active_body_indices; // dense list for iteration
 
+	// Entity index -> Jolt CharacterVirtual mapping
+	std::vector<std::optional<CharacterData>> character_map;
+	std::vector<uint32_t> active_character_indices;
+
 	std::vector<Entity> scratch_entities; // reusable buffer for collectDescendantMeshes
 
 	SubscriptionId sub_rb_added = 0;
 	SubscriptionId sub_rb_removed = 0;
 	SubscriptionId sub_rb_changed = 0;
+	SubscriptionId sub_cc_added = 0;
+	SubscriptionId sub_cc_removed = 0;
+	SubscriptionId sub_cc_changed = 0;
 	Registry* active_registry = nullptr;
 
 	EventBus& event_bus;
@@ -210,6 +225,7 @@ struct PhysicsSystem::Impl {
 
 	// Event-driven dirty tracking (replaces per-frame scan in rebuildDirtyBodies)
 	std::vector<uint32_t> m_dirty_rb_indices;
+	std::vector<uint32_t> m_dirty_cc_indices;
 
 	float accumulator = 0.0f;
 	uint32_t dynamic_body_count = 0; // non-static bodies (dynamic + kinematic)
@@ -251,6 +267,38 @@ struct PhysicsSystem::Impl {
 		dynamic_body_count = 0;
 	}
 
+	// ── Character map helpers ──────────────────────────────────────────────
+
+	bool hasCharacter(uint32_t idx) const {
+		return idx < character_map.size() && character_map[idx].has_value();
+	}
+
+	CharacterData& getCharacter(uint32_t idx) {
+		return *character_map[idx];
+	}
+
+	void insertCharacter(uint32_t idx, CharacterData data) {
+		if (idx >= character_map.size())
+			character_map.resize(idx + 1);
+		character_map[idx] = std::move(data);
+		active_character_indices.push_back(idx);
+	}
+
+	void eraseCharacter(uint32_t idx) {
+		character_map[idx].reset();
+		auto it = std::find(active_character_indices.begin(), active_character_indices.end(), idx);
+		if (it != active_character_indices.end()) {
+			*it = active_character_indices.back();
+			active_character_indices.pop_back();
+		}
+	}
+
+	// Characters hold a PhysicsSystem*; must run before physics_system.reset()
+	void removeAllCharacters() {
+		character_map.clear();
+		active_character_indices.clear();
+	}
+
 	// ── Lifecycle ───────────────────────────────────────────────────────────
 
 	Impl(EventBus& bus, const PhysicsConfig& cfg)
@@ -283,6 +331,7 @@ struct PhysicsSystem::Impl {
 		event_bus.unsubscribe<AssetLoadCompleteEvent>(asset_load_complete_sub);
 
 		removeAllBodies();
+		removeAllCharacters();
 
 		physics_system.reset();
 		job_system.reset();
@@ -314,8 +363,33 @@ struct PhysicsSystem::Impl {
 		sub_rb_changed = registry.events().subscribe<RigidbodyChangedEvent>(
 			[this](const RigidbodyChangedEvent& event) {
 				uint32_t idx = event.entity.index();
-				if (hasBody(idx))
+				if (hasBody(idx)) {
 					m_dirty_rb_indices.push_back(idx);
+				} else if (active_registry) {
+					// Creation may have failed at add time
+					auto* rb = active_registry->getComponent<RigidbodyComponent>(event.entity);
+					if (rb)
+						onRigidbodyAdded(event.entity, *rb);
+				}
+			});
+
+		sub_cc_added = registry.events().subscribe<ComponentAddedEvent<CharacterControllerComponent>>(
+			[this](const ComponentAddedEvent<CharacterControllerComponent>& event) {
+				onCharacterAdded(event.entity, event.component);
+			});
+
+		sub_cc_removed = registry.events().subscribe<ComponentRemovedEvent<CharacterControllerComponent>>(
+			[this](const ComponentRemovedEvent<CharacterControllerComponent>& event) {
+				uint32_t idx = event.entity.index();
+				if (hasCharacter(idx))
+					eraseCharacter(idx);
+			});
+
+		sub_cc_changed = registry.events().subscribe<CharacterControllerChangedEvent>(
+			[this](const CharacterControllerChangedEvent& event) {
+				uint32_t idx = event.entity.index();
+				if (hasCharacter(idx))
+					m_dirty_cc_indices.push_back(idx);
 			});
 
 		// Copy entity indices before iterating: onRigidbodyAdded calls
@@ -334,6 +408,16 @@ struct PhysicsSystem::Impl {
 			if (rb && !hasBody(idx))
 				onRigidbodyAdded(e, *rb);
 		}
+
+		auto& cc_pool = registry.characterControllers();
+		for (uint32_t i = 0; i < cc_pool.size(); ++i) {
+			Entity e = registry.entityFromIndex(cc_pool.entityAt(i));
+			if (!registry.isAlive(e))
+				continue;
+			auto* cc = registry.getComponent<CharacterControllerComponent>(e);
+			if (cc && !hasCharacter(e.index()))
+				onCharacterAdded(e, *cc);
+		}
 	}
 
 	void onSceneUnloaded() {
@@ -341,9 +425,14 @@ struct PhysicsSystem::Impl {
 			active_registry->events().unsubscribe<ComponentAddedEvent<RigidbodyComponent>>(sub_rb_added);
 			active_registry->events().unsubscribe<ComponentRemovedEvent<RigidbodyComponent>>(sub_rb_removed);
 			active_registry->events().unsubscribe<RigidbodyChangedEvent>(sub_rb_changed);
+			active_registry->events().unsubscribe<ComponentAddedEvent<CharacterControllerComponent>>(sub_cc_added);
+			active_registry->events().unsubscribe<ComponentRemovedEvent<CharacterControllerComponent>>(sub_cc_removed);
+			active_registry->events().unsubscribe<CharacterControllerChangedEvent>(sub_cc_changed);
 		}
 		removeAllBodies();
+		removeAllCharacters();
 		m_dirty_rb_indices.clear();
+		m_dirty_cc_indices.clear();
 		active_registry = nullptr;
 		accumulator = 0.0f;
 	}
@@ -351,18 +440,24 @@ struct PhysicsSystem::Impl {
 	// ── Body creation / removal ─────────────────────────────────────────────
 
 	void onRigidbodyAdded(Entity entity, RigidbodyComponent& rb) {
-		if (!active_registry)
+		if (!active_registry || hasBody(entity.index()))
 			return;
+
+		if (active_registry->hasComponent<CharacterControllerComponent>(entity)) {
+			VE_LOGW("PhysicsSystem: entity " << entity.index()
+				<< " already has a CharacterController; ignoring its Rigidbody");
+			return;
+		}
 
 		auto* tc = active_registry->getComponent<TransformComponent>(entity);
 		if (!tc)
 			return;
 
 		// Only remove descendant rigidbodies when this entity will create a compound
-		// shape (no mesh of its own). Entities with their own mesh only cover
-		// themselves, so descendants keep their own colliders.
+		// shape (no mesh of its own, no explicit dims). Entities with their own
+		// shape only cover themselves, so descendants keep their own colliders.
 		auto* mc = active_registry->getComponent<MeshComponent>(entity);
-		if (!mc || !mc->hasMesh())
+		if ((!mc || !mc->hasMesh()) && !hasExplicitDims(rb.getShapeDesc()))
 			removeDescendantRigidbodies(entity);
 
 		JPH::ShapeRefC shape = createShape(entity, rb, *tc);
@@ -429,6 +524,187 @@ struct PhysicsSystem::Impl {
 			body_interface.DestroyBody(data.body_id);
 		}
 		clearAllBodies();
+	}
+
+	// ── Character controllers (Jolt CharacterVirtual) ──────────────────────
+
+	JPH::Ref<JPH::CharacterVirtual> createCharacter(Entity entity, const CharacterControllerComponent& cc) {
+		float radius = std::max(cc.getRadius(), 0.01f);
+		float half_height = std::max(cc.getHalfHeight(), 0.0f);
+
+		auto capsule = JPH::CapsuleShapeSettings(half_height, radius).Create();
+		if (capsule.HasError()) {
+			VE_LOGW("PhysicsSystem: character capsule error: " << capsule.GetError().c_str());
+			return nullptr;
+		}
+
+		// Jolt capsules are Y-aligned; rotate to +Z and lift so the bottom sits
+		// at the shape origin (CharacterVirtual convention: position = feet).
+		auto shape = JPH::RotatedTranslatedShapeSettings(
+			JPH::Vec3(0.0f, 0.0f, radius + half_height),
+			JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::JPH_PI * 0.5f),
+			capsule.Get().GetPtr()).Create();
+		if (shape.HasError()) {
+			VE_LOGW("PhysicsSystem: character shape error: " << shape.GetError().c_str());
+			return nullptr;
+		}
+
+		JPH::CharacterVirtualSettings settings;
+		settings.mShape = shape.Get();
+		settings.mUp = JPH::Vec3(0.0f, 0.0f, 1.0f);
+		settings.mSupportingVolume = JPH::Plane(JPH::Vec3(0.0f, 0.0f, 1.0f), -radius);
+		settings.mMaxSlopeAngle = glm::radians(cc.getMaxSlopeDeg());
+		settings.mMass = cc.getMass();
+		settings.mMaxStrength = cc.getMaxStrength();
+
+		glm::vec3 pos;
+		glm::quat rot;
+		getWorldPosRot(entity, pos, rot);
+
+		// Rotation stays identity: the capsule is symmetric and entity yaw is visual-only
+		return new JPH::CharacterVirtual(&settings,
+			JPH::RVec3(pos.x, pos.y, pos.z), JPH::Quat::sIdentity(),
+			static_cast<uint64_t>(entity.id()), physics_system.get());
+	}
+
+	void onCharacterAdded(Entity entity, CharacterControllerComponent& cc) {
+		if (!active_registry || hasCharacter(entity.index()))
+			return;
+		if (active_registry->hasComponent<RigidbodyComponent>(entity)) {
+			VE_LOGW("PhysicsSystem: entity " << entity.index()
+				<< " already has a Rigidbody; ignoring its CharacterController");
+			return;
+		}
+		if (!active_registry->getComponent<TransformComponent>(entity))
+			return;
+
+		auto character = createCharacter(entity, cc);
+		if (!character)
+			return;
+
+		glm::vec3 pos;
+		glm::quat rot;
+		getWorldPosRot(entity, pos, rot);
+		insertCharacter(entity.index(), {std::move(character), pos});
+	}
+
+	void rebuildDirtyCharacters(Registry& registry) {
+		if (m_dirty_cc_indices.empty())
+			return;
+
+		std::vector<uint32_t> to_process;
+		to_process.swap(m_dirty_cc_indices);
+		std::sort(to_process.begin(), to_process.end());
+		to_process.erase(std::unique(to_process.begin(), to_process.end()), to_process.end());
+
+		for (uint32_t idx : to_process) {
+			if (!hasCharacter(idx))
+				continue;
+			Entity entity = registry.entityFromIndex(idx);
+			if (!registry.isAlive(entity))
+				continue;
+			auto* cc = registry.getComponent<CharacterControllerComponent>(entity);
+			if (!cc)
+				continue;
+
+			JPH::RVec3 old_pos = getCharacter(idx).character->GetPosition();
+			auto replacement = createCharacter(entity, *cc);
+			if (!replacement) {
+				VE_LOGW("PhysicsSystem: failed to recreate character for entity " << idx);
+				eraseCharacter(idx);
+				continue;
+			}
+			replacement->SetPosition(old_pos);
+			getCharacter(idx).character = std::move(replacement);
+		}
+	}
+
+	void stepCharacters(Registry& registry, int steps) {
+		if (active_character_indices.empty())
+			return;
+
+		const JPH::Vec3 gravity = physics_system->GetGravity();
+		const JPH::DefaultBroadPhaseLayerFilter bp_filter(obj_vs_bp_filter, Layers::MOVING);
+		const JPH::DefaultObjectLayerFilter obj_filter(obj_pair_filter, Layers::MOVING);
+		const JPH::BodyFilter body_filter;
+		const JPH::ShapeFilter shape_filter;
+
+		for (uint32_t idx : active_character_indices) {
+			Entity entity = registry.entityFromIndex(idx);
+			if (!registry.isAlive(entity))
+				continue;
+			auto* cc = registry.getComponent<CharacterControllerComponent>(entity);
+			auto* tc = registry.getComponent<TransformComponent>(entity);
+			if (!cc || !tc)
+				continue;
+
+			auto& data = getCharacter(idx);
+			if (data.frozen)
+				continue;
+			JPH::CharacterVirtual& character = *data.character;
+
+			// External move (gizmo/teleport): re-sync the character
+			glm::vec3 cur_pos;
+			glm::quat cur_rot;
+			getWorldPosRot(entity, cur_pos, cur_rot);
+			if (glm::length(cur_pos - data.last_synced_world_pos) > 1e-4f) {
+				character.SetPosition(JPH::RVec3(cur_pos.x, cur_pos.y, cur_pos.z));
+				character.RefreshContacts(bp_filter, obj_filter, body_filter, shape_filter, *temp_allocator);
+			}
+
+			JPH::CharacterVirtual::ExtendedUpdateSettings ext;
+			ext.mStickToFloorStepDown = JPH::Vec3(0.0f, 0.0f, -cc->getStickToFloor());
+			ext.mWalkStairsStepUp = JPH::Vec3(0.0f, 0.0f, cc->getStepHeight());
+			
+			bool jump = cc->jump_requested;
+			cc->jump_requested = false;
+
+			const JPH::RVec3 pos_before = character.GetPosition();
+
+			for (int s = 0; s < steps; s++) {
+				character.UpdateGroundVelocity(); // the ground body may have changed velocity
+				float vz = character.GetLinearVelocity().GetZ();
+				JPH::Vec3 ground_vel = character.GetGroundVelocity();
+				bool grounded = character.GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
+				bool moving_towards_ground = (vz - ground_vel.GetZ()) < 0.1f;
+
+				JPH::Vec3 vel;
+				if (grounded && moving_towards_ground) {
+					vel = ground_vel; // inherit the ground's motion 
+					if (jump) {
+						vel.SetZ(vel.GetZ() + cc->jump_speed);
+						jump = false;
+					}
+				} else {
+					vel = JPH::Vec3(0.0f, 0.0f, vz); // airborne / rising: keep vertical only
+				}
+				vel += gravity * config.fixed_timestep;                                
+				vel += JPH::Vec3(cc->desired_velocity.x, cc->desired_velocity.y, 0.0f); // input
+				character.SetLinearVelocity(vel);
+
+				s_in_physics_update = true;
+				character.ExtendedUpdate(config.fixed_timestep, gravity, ext,
+					bp_filter, obj_filter, body_filter, shape_filter, *temp_allocator);
+				s_in_physics_update = false;
+			}
+
+			// Write feet position back (translation only; rotation is gameplay-owned)
+			JPH::RVec3 p = character.GetPosition();
+			glm::vec3 world_pos(p.GetX(), p.GetY(), p.GetZ());
+			if (glm::length(world_pos - data.last_synced_world_pos) > 1e-4f) {
+				glm::vec3 local_pos;
+				glm::quat local_rot_unused;
+				worldToLocal(entity, world_pos, glm::quat(1.0f, 0.0f, 0.0f, 0.0f), local_pos, local_rot_unused);
+				tc->setTranslation(local_pos);
+				data.last_synced_world_pos = world_pos;
+			}
+
+			JPH::Vec3 moved = JPH::Vec3(p - pos_before) / (static_cast<float>(steps) * config.fixed_timestep);
+			cc->velocity = {moved.GetX(), moved.GetY(), moved.GetZ()};
+			cc->grounded = character.GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
+			JPH::Vec3 gn = character.GetGroundNormal();
+			cc->ground_normal = {gn.GetX(), gn.GetY(), gn.GetZ()};
+		}
 	}
 
 	// ── World transform helpers ─────────────────────────────────────────────
@@ -534,25 +810,48 @@ struct PhysicsSystem::Impl {
 		return CapsuleResult{result.Get(), axis_rot};
 	}
 
-	// Create a shape from a mesh without applying the AABB center offset
+	static bool hasExplicitDims(const PhysicsShapeDesc& desc) {
+		return desc.half_extents.x > 0.0f || desc.half_extents.y > 0.0f || desc.half_extents.z > 0.0f;
+	}
+
+	// Create a shape from a mesh without applying the AABB center offset.
+	// Explicit desc.half_extents (world units) skip the mesh entirely for
+	// primitive shapes; hull/mesh shapes always need CPU geometry.
 	JPH::ShapeRefC createShapeForMeshRaw(Entity mesh_entity, const PhysicsShapeDesc& desc,
 		PhysicsMotionType motion_type, float hull_tolerance = 0.05f) {
 
 		if (!active_registry)
 			return nullptr;
 
+		const bool explicit_dims = hasExplicitDims(desc);
 		auto* mc = active_registry->getComponent<MeshComponent>(mesh_entity);
-		if (!mc || !mc->hasMesh())
+		if (!explicit_dims && (!mc || !mc->hasMesh()))
 			return nullptr;
 
-		glm::vec3 scale = getWorldScale(mesh_entity);
+		glm::vec3 he;
+		if (explicit_dims) {
+			he = glm::max(desc.half_extents, glm::vec3(0.01f));
+		} else {
+			glm::vec3 scale = getWorldScale(mesh_entity);
+			VeMesh::AABB aabb = mc->getMesh()->getLocalAABB();
+			glm::vec3 mesh_he = glm::max((aabb.max - aabb.min) * 0.5f, glm::vec3(0.01f));
+			he = glm::max(mesh_he * scale, glm::vec3(0.01f));
+		}
 
-		VeMesh::AABB aabb = mc->getMesh()->getLocalAABB();
-		glm::vec3 mesh_he = glm::max((aabb.max - aabb.min) * 0.5f, glm::vec3(0.01f));
+		// Hull/mesh shapes are built from CPU geometry, so with explicit dims and no
+		// mesh to build from, honour the dims as a box rather than dropping the collider.
+		if (explicit_dims && (!mc || !mc->hasMesh())
+			&& (desc.type == PhysicsShapeType::ConvexHull || desc.type == PhysicsShapeType::MeshStatic)) {
+			auto result = JPH::BoxShapeSettings(JPH::Vec3(he.x, he.y, he.z)).Create();
+			if (result.HasError()) {
+				VE_LOGW("PhysicsSystem: explicit-dims box shape error: " << result.GetError().c_str());
+				return nullptr;
+			}
+			return result.Get();
+		}
 
 		// MeshStatic is only valid for static bodies, derive a box from the AABB
 		if (desc.type == PhysicsShapeType::MeshStatic && motion_type != PhysicsMotionType::Static) {
-			glm::vec3 he = glm::max(mesh_he * scale, glm::vec3(0.01f));
 			auto result = JPH::BoxShapeSettings(JPH::Vec3(he.x, he.y, he.z)).Create();
 			if (!result.HasError())
 				return result.Get();
@@ -562,8 +861,6 @@ struct PhysicsSystem::Impl {
 			return result.HasError() ? nullptr : result.Get();
 		}
 
-		// For all primitive shapes, derive dimensions from the mesh AABB
-		glm::vec3 he = glm::max(mesh_he * scale, glm::vec3(0.01f));
 		float max_he = std::max({he.x, he.y, he.z});
 
 		JPH::ShapeRefC shape;
@@ -601,9 +898,9 @@ struct PhysicsSystem::Impl {
 				break;
 			}
 			case PhysicsShapeType::ConvexHull:
-				return createConvexHullShape(mesh_entity, scale, hull_tolerance);
+				return createConvexHullShape(mesh_entity, getWorldScale(mesh_entity), hull_tolerance);
 			case PhysicsShapeType::MeshStatic:
-				return createMeshShape(mesh_entity, scale);
+				return createMeshShape(mesh_entity, getWorldScale(mesh_entity));
 		}
 		return shape;
 	}
@@ -800,7 +1097,7 @@ struct PhysicsSystem::Impl {
 
 	JPH::ShapeRefC createShape(Entity entity, const RigidbodyComponent& rb, const TransformComponent& /*tc*/) {
 		auto* mc = active_registry->getComponent<MeshComponent>(entity);
-		if (mc && mc->hasMesh())
+		if ((mc && mc->hasMesh()) || hasExplicitDims(rb.getShapeDesc()))
 			return createShapeForMesh(entity, rb.getShapeDesc(), rb.getMotionType(), rb.getHullTolerance());
 
 		// No mesh on this entity so we build compound from descendant meshes
@@ -1002,13 +1299,14 @@ struct PhysicsSystem::Impl {
 	// ── Update ────────────────────────────────────────────────────────────
 
 	void update(float dt, Registry& registry) {
-		if (active_body_indices.empty())
+		if (active_body_indices.empty() && active_character_indices.empty())
 			return;
 
 		rebuildDirtyBodies(registry);
+		rebuildDirtyCharacters(registry);
 
-		// Early return when no dynamic/kinematic bodies exist
-		if (dynamic_body_count == 0) {
+		// Early return when nothing can move
+		if (dynamic_body_count == 0 && active_character_indices.empty()) {
 			accumulator = 0.0f;
 			return;
 		}
@@ -1025,18 +1323,20 @@ struct PhysicsSystem::Impl {
 			return;
 		accumulator -= static_cast<float>(steps) * config.fixed_timestep;
 
-		// Skip Jolt simulation if no bodies are awake
-		if (physics_system->GetNumActiveBodies(JPH::EBodyType::RigidBody) == 0)
-			return;
+		// Skip Jolt body simulation when nothing is awake; characters step regardless
+		if (dynamic_body_count > 0
+			&& physics_system->GetNumActiveBodies(JPH::EBodyType::RigidBody) > 0) {
+			float total_time = static_cast<float>(steps) * config.fixed_timestep;
+			s_in_physics_update = true;
+			JPH::EPhysicsUpdateError err =
+				physics_system->Update(total_time, steps, temp_allocator.get(), job_system.get());
+			s_in_physics_update = false;
+			reportUpdateErrors(err);
 
-		float total_time = static_cast<float>(steps) * config.fixed_timestep;
-		s_in_physics_update = true;
-		JPH::EPhysicsUpdateError err =
-			physics_system->Update(total_time, steps, temp_allocator.get(), job_system.get());
-		s_in_physics_update = false;
-		reportUpdateErrors(err);
+			pullJoltResults(registry);
+		}
 
-		pullJoltResults(registry);
+		stepCharacters(registry, steps);
 	}
 
 	void reportUpdateErrors(JPH::EPhysicsUpdateError err) {
@@ -1241,6 +1541,18 @@ struct PhysicsSystem::Impl {
 		}
 	}
 
+	void freezeEntity(Entity entity) {
+		if (hasCharacter(entity.index()))
+			getCharacter(entity.index()).frozen = true;
+		freezeBody(entity);
+	}
+
+	void unfreezeEntity(Entity entity) {
+		if (hasCharacter(entity.index()))
+			getCharacter(entity.index()).frozen = false;
+		unfreezeBody(entity);
+	}
+
 	void freezeBody(Entity entity) {
 		uint32_t idx = entity.index();
 		if (!hasBody(idx) || getBody(idx).frozen)
@@ -1298,6 +1610,18 @@ struct PhysicsSystem::Impl {
 		return false;
 	}
 
+	// A character's own visual meshes belong to a moving character, not the
+	// static world
+	static bool isUnderCharacterController(Entity e, Registry& registry) {
+		Entity node = e;
+		while (!node.isNull()) {
+			if (registry.hasComponent<CharacterControllerComponent>(node))
+				return true;
+			node = registry.getParent(node);
+		}
+		return false;
+	}
+
 	void addStaticCollidersForAllMeshes(Registry& registry) {
 		registry.events().beginBatch();
 		std::vector<Entity> entities_to_init;
@@ -1307,6 +1631,8 @@ struct PhysicsSystem::Impl {
 			if (registry.hasComponent<RigidbodyComponent>(e))
 				continue;
 			if (hasAncestorCompoundRigidbody(e, registry))
+				continue;
+			if (isUnderCharacterController(e, registry))
 				continue;
 			if (!mc.hasMesh() || !mc.getMesh()->hasCpuGeometry())
 				continue;
@@ -1363,12 +1689,12 @@ void PhysicsSystem::update(float dt, Registry& registry) {
 	m_impl->update(dt, registry);
 }
 
-void PhysicsSystem::freezeBody(Entity entity) {
-	m_impl->freezeBody(entity);
+void PhysicsSystem::freezeEntity(Entity entity) {
+	m_impl->freezeEntity(entity);
 }
 
-void PhysicsSystem::unfreezeBody(Entity entity) {
-	m_impl->unfreezeBody(entity);
+void PhysicsSystem::unfreezeEntity(Entity entity) {
+	m_impl->unfreezeEntity(entity);
 }
 
 void PhysicsSystem::setPreserveVelocity(Entity entity, bool preserve) {

@@ -219,7 +219,7 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 	auto unfreezeIfNeeded = [&]() {
 		if (m_was_gizmo_active && !state.gizmo_active && !m_frozen_entities.empty() && m_physics_system) {
 			for (Entity e : m_frozen_entities)
-				m_physics_system->unfreezeBody(e);
+				m_physics_system->unfreezeEntity(e);
 			m_frozen_entities.clear();
 		}
 		m_was_gizmo_active = state.gizmo_active;
@@ -343,10 +343,10 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 
 	state.gizmo_active = ImGuizmo::IsUsing();
 
-	// Freeze physics bodies when gizmo drag starts, unfreeze when it ends
+	// Freeze physics when gizmo drag starts, unfreeze when it ends
 	if (state.gizmo_active && !m_was_gizmo_active && m_physics_system) {
 		for (Entity r : roots) {
-			m_physics_system->freezeBody(r);
+			m_physics_system->freezeEntity(r);
 			m_frozen_entities.push_back(r);
 		}
 	}

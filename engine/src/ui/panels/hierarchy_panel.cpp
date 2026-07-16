@@ -367,6 +367,8 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 	bool has_skin = registry.hasComponent<SkinComponent>(entity);
 	bool has_cam = registry.hasComponent<CameraComponent>(entity);
 	bool has_emitter = registry.hasComponent<ParticleEmitterComponent>(entity);
+	bool has_cc = registry.hasComponent<CharacterControllerComponent>(entity);
+	bool has_rb = registry.hasComponent<RigidbodyComponent>(entity);
 	bool is_joint = m_joint_entity_ids.count(entity.id()) != 0;
 	EntityKind pk = primaryKind(registry, entity, is_joint);
 
@@ -482,6 +484,8 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 			{has_al && pk != EntityKind::AreaLight,     ICON_AREA_LIGHT,  "Area light"},
 			{has_cam && pk != EntityKind::Camera,       ICON_CAMERA,      "Camera"},
 			{has_emitter && pk != EntityKind::Particle, ICON_PARTICLE,    "Emitter"},
+			{has_rb,                                    ICON_RIGIDBODY,   "Rigidbody"},
+			{has_cc,                                    ICON_CHARACTER,   "Character controller"},
 		};
 		if (!eff_active)
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));

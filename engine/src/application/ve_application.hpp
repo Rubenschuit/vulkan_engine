@@ -9,7 +9,9 @@
 #include "vulkan/ve_buffer.hpp"
 #include "vulkan/ve_descriptors.hpp"
 #include "input/input_controller.hpp"
+#include "input/character_input_driver.hpp"
 #include "scene/camera_view.hpp"
+#include "scene/camera_manager.hpp"
 #include "scene/scene_manager.hpp"
 #include "resources/ve_resource_manager.hpp"
 #include "physics/physics_system.hpp"
@@ -88,6 +90,8 @@ private:
 
 	// --- App-owned state ---
 	SimulationSettings m_sim;
+	CameraManager m_cameras;
+	CharacterInputDriver m_character_input;
 	std::unique_ptr<Editor> m_editor;
 	std::unique_ptr<BenchmarkRunner> m_benchmark;
 	bool m_benchmark_scene_started = false;

@@ -275,7 +275,7 @@ private:
 };
 
 struct AreaLightBasis {
-	glm::vec3 right_half; // 0.5 * world X column 
+	glm::vec3 right_half; // 0.5 * world X column
 	glm::vec3 up_half;    // 0.5 * world Z column
 };
 
@@ -305,6 +305,7 @@ enum class PhysicsMotionType : uint8_t {
 
 struct PhysicsShapeDesc {
 	PhysicsShapeType type = PhysicsShapeType::Box;
+	glm::vec3 half_extents{0.0f};  // zero = derive from mesh AABB
 };
 
 class VENGINE_API RigidbodyComponent : public Component {
@@ -372,6 +373,66 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// CharacterControllerComponent
+// ---------------------------------------------------------------------------
+// Jolt CharacterVirtual-backed character. The Jolt object lives in
+// PhysicsSystem; this component carries capsule/movement params, the per-frame
+// desired velocity, and post-step state.
+class VENGINE_API CharacterControllerComponent : public Component {
+public:
+	float getRadius() const { return m_radius; }
+	void setRadius(float r);
+
+	// Cylinder half-height (total height = 2*(half_height+radius))
+	float getHalfHeight() const { return m_half_height; }
+	void setHalfHeight(float h);
+
+	float getMaxSlopeDeg() const { return m_max_slope_deg; }
+	void setMaxSlopeDeg(float deg);
+
+	float getStepHeight() const { return m_step_height; }
+	void setStepHeight(float h);
+
+	float getStickToFloor() const { return m_stick_to_floor; }
+	void setStickToFloor(float d);
+
+	float getMass() const { return m_mass; }
+	void setMass(float m);
+
+	float getMaxStrength() const { return m_max_strength; }
+	void setMaxStrength(float s);
+
+	// Movement params
+	float walk_speed = 2.0f;
+	float run_speed = 4.0f;
+	float acceleration = 20.0f;
+	float turn_rate_deg = 540.0f;
+	float jump_speed = 7.0f; // initial upward velocity
+	// Yaw offset (deg) from the engine forward (+Y) to the mesh's visual front.
+	// 0 for a model authored facing +Y; 180 for one facing -Y.
+	float facing_offset_deg = 0.0f;
+
+	glm::vec3 desired_velocity{0.0f};
+	bool jump_requested = false;
+
+	// Post-step state, written by PhysicsSystem
+	glm::vec3 velocity{0.0f};
+	glm::vec3 ground_normal{0.0f, 0.0f, 1.0f};
+	bool grounded = false;
+
+private:
+	void markChanged();
+
+	float m_radius = 0.3f;
+	float m_half_height = 0.3f;
+	float m_max_slope_deg = 50.0f;
+	float m_step_height = 0.4f;
+	float m_stick_to_floor = 0.5f;
+	float m_mass = 70.0f;
+	float m_max_strength = 100.0f;
+};
+
+// ---------------------------------------------------------------------------
 // AnimatorComponent
 // ---------------------------------------------------------------------------
 struct ClipBinding {
@@ -414,9 +475,11 @@ public:
 
 	// 1D blend space: a scalar parameter picks the two bracketing samples and
 	// weights their clips; phase_sync drives member time from one shared gait
-	// phase (per-clip speed and loop are ignored for synced members: they always
-	// cycle on the shared phase). Clips left playing that are not blend-space
-	// members keep their own weight and blend into the same pose.
+	// phase. Synced members ignore their own loop flag (they always cycle on the
+	// shared phase), but per-clip speed biases the shared cadence (duration/speed).
+	// A member with speed <= 0 does not drive the phase.
+	// Clips left playing that are not blend-space members keep their own weight and
+	// blend into the same pose.
 	struct BlendSample1D {
 		float position;
 		uint32_t clip_index;
@@ -427,6 +490,10 @@ public:
 	bool hasBlendSpace() const { return !m_blend_samples.empty(); }
 	bool isBlendSpaceActive() const { return m_blend_space_active; }
 	const std::vector<BlendSample1D>& getBlendSamples() const { return m_blend_samples; }
+
+	// Playback-rate multiplier for the phase-synced gait
+	void setLocomotionCadence(float rate) { m_locomotion_cadence = std::max(rate, 0.0f); }
+	float getLocomotionCadence() const { return m_locomotion_cadence; }
 
 	void setNodeToEntityMap(std::vector<Entity> map) { m_node_to_entity = std::move(map); }
 	void remapEntities(const std::unordered_map<uint32_t, Entity>& old_to_new);
@@ -463,6 +530,7 @@ private:
 	std::vector<float> m_morph_sample_scratch;
 	std::vector<BlendSample1D> m_blend_samples; // sorted by position
 	float m_blend_param = 0.0f;
+	float m_locomotion_cadence = 1.0f;
 	float m_phase = 0.0f;                       // in [0,1)
 	bool m_blend_space_active = false;
 	bool m_phase_sync = true;
@@ -616,5 +684,6 @@ extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SkinComponen
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<CameraComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<ParticleEmitterComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MorphComponent>();
+extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<CharacterControllerComponent>();
 
 } // namespace ve

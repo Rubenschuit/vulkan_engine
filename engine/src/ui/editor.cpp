@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "ui/editor.hpp"
+#include "scene/camera_manager.hpp"
 #include "ui/imgui_layer.hpp"
 #include "input/input_controller.hpp"
 #include "input/input_action.hpp"
@@ -16,8 +17,8 @@
 namespace ve {
 
 Editor::Editor(VeWindow& window, VeDevice& device, VeRenderer& renderer,
-               EventBus& event_bus, const EngineConfig& config)
-	: m_renderer(renderer), m_event_bus(event_bus) {
+               EventBus& event_bus, const EngineConfig& config, CameraManager& cameras)
+	: m_renderer(renderer), m_cameras(cameras), m_event_bus(event_bus) {
 	m_imgui_layer = std::make_unique<ImGuiLayer>(window, device, renderer, event_bus);
 	m_imgui_layer->setAppSettingsWindowName(config.app_name);
 	m_performance_panel = std::make_unique<PerformancePanel>(renderer);
@@ -77,17 +78,6 @@ void Editor::registerViewportImage() {
 		m_imgui_layer->registerViewportImage(vp_sampler, vp_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		m_viewport_panel.setTextureID(m_imgui_layer->getViewportTextureId());
 	}
-}
-
-const CameraView& Editor::resolveCameraView(Registry* registry, float aspect, float fov_y_radians) {
-	if (aspect > 0.0f)
-		m_last_aspect = aspect;
-
-	m_camera_controller.setFov(fov_y_radians);
-
-	auto scene_cam = tryGetSceneCamera(registry, m_state.viewport_camera, m_last_aspect);
-	m_current_camera_view = scene_cam ? *scene_cam : m_camera_controller.buildView(m_last_aspect);
-	return m_current_camera_view;
 }
 
 void Editor::renderUI(UIContext& context, Registry* registry) {
@@ -197,12 +187,12 @@ void Editor::setContext(const EditorContext& ctx, const RenderServices& services
 	m_context = ctx;
 	m_hierarchy_panel.setSceneManager(ctx.scene_manager);
 	m_hierarchy_panel.setEventBus(ctx.event_bus);
-	m_viewport_panel.setCameraView(&m_current_camera_view);
+	m_viewport_panel.setCameraView(&m_cameras.currentView());
 	m_viewport_panel.setPhysicsSystem(ctx.physics);
 	m_viewport_panel.setEventBus(ctx.event_bus);
 	m_asset_browser_panel.setEventBus(ctx.event_bus);
 	m_asset_browser_panel.setResourceManager(ctx.resource_manager);
-	m_asset_browser_panel.setCameraView(&m_current_camera_view);
+	m_asset_browser_panel.setCameraView(&m_cameras.currentView());
 	m_asset_browser_panel.setTextureInspector(&m_texture_inspector);
 	if (ctx.engine_config)
 		m_asset_browser_panel.setAssetRoot(ctx.engine_config->working_dir);
@@ -211,7 +201,7 @@ void Editor::setContext(const EditorContext& ctx, const RenderServices& services
 		m_environment_panel->setSkyboxSystem(services.skybox);
 	if (m_debug_panel) {
 		m_debug_panel->setShadowRenderSystem(services.shadow);
-		m_debug_panel->setEditorCamera(&m_camera_controller);
+		m_debug_panel->setFlyCamera(&m_cameras.flyCamera());
 	}
 	if (m_graphics_panel) {
 		m_graphics_panel->setParticleBackend(services.particles);

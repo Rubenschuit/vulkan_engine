@@ -143,6 +143,7 @@ void InputController::processInput(float /*delta_time*/) {
 	}
 
 	actions.sprint = (glfwGetKey(m_window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
+	actions.jump = (glfwGetKey(m_window, GLFW_KEY_SPACE) == GLFW_PRESS);
 
 	if (glfwGetKey(m_window, m_key_mappings.move_forward) == GLFW_PRESS)
 		actions.move_forward += 1.0f;

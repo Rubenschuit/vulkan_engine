@@ -428,6 +428,14 @@ const glm::mat3& Registry::getWorldNormal(Entity e) const {
 	return cache.world_normal;
 }
 
+glm::quat Registry::getWorldRotation(Entity e) const {
+	const glm::mat4& world = getWorldTransform(e);
+	glm::mat3 basis(glm::normalize(glm::vec3(world[0])),
+	                glm::normalize(glm::vec3(world[1])),
+	                glm::normalize(glm::vec3(world[2])));
+	return glm::normalize(glm::quat_cast(basis));
+}
+
 void Registry::invalidateWorldTransform(Entity e) {
 	if (e.isNull() || e.index() >= m_world_cache.size())
 		return;

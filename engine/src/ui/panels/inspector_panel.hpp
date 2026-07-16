@@ -14,6 +14,7 @@ class DirectionalLightComponent;
 class SpotLightComponent;
 class AreaLightComponent;
 class RigidbodyComponent;
+class CharacterControllerComponent;
 class AnimatorComponent;
 class SkinComponent;
 class CameraComponent;
@@ -41,6 +42,7 @@ private:
 	void renderSpotLight(SpotLightComponent& light);
 	void renderAreaLight(AreaLightComponent& light, TransformComponent& transform);
 	void renderRigidbody(RigidbodyComponent& rb, EditorState& state);
+	void renderCharacterController(Entity entity, CharacterControllerComponent& cc, EditorState& state);
 	void renderAnimator(AnimatorComponent& animator);
 	void renderSkin(Registry& registry, SkinComponent& skin, EditorState& state);
 	void renderCamera(CameraComponent& camera);

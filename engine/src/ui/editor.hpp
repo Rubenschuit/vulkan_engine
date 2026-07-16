@@ -12,7 +12,6 @@
 #include "scene/camera_view.hpp"
 #include "ui/editor_context.hpp"
 #include "ui/editor_state.hpp"
-#include "ui/editor_camera_controller.hpp"
 #include "ui/panels/viewport_panel.hpp"
 #include "ui/panels/hierarchy_panel.hpp"
 #include "ui/panels/inspector_panel.hpp"
@@ -37,6 +36,7 @@ class VeDevice;
 class VeRenderer;
 class Registry;
 class VeScene;
+class CameraManager;
 struct UIContext;
 struct RenderServices;
 struct EngineConfig;
@@ -44,7 +44,7 @@ struct EngineConfig;
 class VENGINE_API Editor {
 public:
 	Editor(VeWindow& window, VeDevice& device, VeRenderer& renderer,
-	       EventBus& event_bus, const EngineConfig& config);
+	       EventBus& event_bus, const EngineConfig& config, CameraManager& cameras);
 	~Editor();
 
 	Editor(const Editor&) = delete;
@@ -52,11 +52,6 @@ public:
 
 	void beginFrame();
 	void renderUI(UIContext& context, Registry* registry);
-
-	// Picks between the entity-bound viewport camera and the editor camera, updates
-	// the editor camera's FOV, and caches the resolved view.
-	const CameraView& resolveCameraView(Registry* registry, float aspect, float fov_y_radians);
-	const CameraView& cameraView() const { return m_current_camera_view; }
 
 	// State
 	EditorState& getState() { return m_state; }
@@ -76,9 +71,6 @@ public:
 	InspectorPanel& getInspectorPanel() { return m_inspector_panel; }
 	PerformancePanel& getPerformancePanel() { return *m_performance_panel; }
 
-	EditorCameraController& editorCamera() { return m_camera_controller; }
-	const EditorCameraController& editorCamera() const { return m_camera_controller; }
-
 private:
 	void handleModeTransition();
 	void handleViewportResize();
@@ -92,7 +84,7 @@ private:
 	EditorState m_state;
 	bool m_was_editor_mode = false;
 
-	EditorCameraController m_camera_controller;
+	CameraManager& m_cameras;
 
 	ViewportPanel m_viewport_panel;
 	HierarchyPanel m_hierarchy_panel;
@@ -106,9 +98,6 @@ private:
 
 	EditorContext m_context{};
 	LoadingPanel m_loading_overlay;
-
-	CameraView m_current_camera_view{};
-	float m_last_aspect{0.0f};
 
 	std::function<void()> m_app_ui_callback;
 

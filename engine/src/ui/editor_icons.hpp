@@ -18,6 +18,7 @@
 #define ICON_ANIMATOR     ICON_LC_FILM
 #define ICON_SKIN         ICON_LC_USER
 #define ICON_RIGIDBODY    ICON_LC_WEIGHT
+#define ICON_CHARACTER    ICON_LC_PERSON_STANDING
 
 // Material / rendering
 #define ICON_MATERIAL     ICON_LC_PALETTE

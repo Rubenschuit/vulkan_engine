@@ -9,7 +9,7 @@ namespace ve {
 
 struct InputActions;
 
-class VENGINE_API EditorCameraController {
+class VENGINE_API FlyCameraController {
 public:
 	void tick(const InputActions& actions, float dt);
 	CameraView buildView(float aspect) const;

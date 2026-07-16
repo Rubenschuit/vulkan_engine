@@ -438,6 +438,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 				CopiedRigidbody crb;
 				crb.motion_type = static_cast<uint8_t>(rb->getMotionType());
 				crb.shape_type = static_cast<uint8_t>(rb->getShapeDesc().type);
+				crb.half_extents = rb->getShapeDesc().half_extents;
 				crb.mass = rb->getMass();
 				crb.friction = rb->getFriction();
 				crb.restitution = rb->getRestitution();
@@ -451,6 +452,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 					rb->setMotionType(static_cast<PhysicsMotionType>(crb.motion_type));
 					PhysicsShapeDesc desc;
 					desc.type = static_cast<PhysicsShapeType>(crb.shape_type);
+					desc.half_extents = crb.half_extents;
 					rb->setShapeDesc(desc);
 					rb->setMass(crb.mass);
 					rb->setFriction(crb.friction);
@@ -466,6 +468,21 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		ImGui::PopID();
 		if (open && registry->hasComponent<RigidbodyComponent>(entity))
 			renderRigidbody(*registry->getComponent<RigidbodyComponent>(entity), state);
+	}
+
+	// Character Controller
+	if (registry->hasComponent<CharacterControllerComponent>(entity)) {
+		bool open = ImGui::CollapsingHeader(ICON_CHARACTER "  Character Controller", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
+		ImGui::PushID("remove_cc");
+		if (ImGui::SmallButton("X")) {
+			if (state.possessed_entity == entity)
+				state.possessed_entity = Entity::null();
+			registry->queueComponentRemoval<CharacterControllerComponent>(entity);
+		}
+		ImGui::PopID();
+		if (open && registry->hasComponent<CharacterControllerComponent>(entity))
+			renderCharacterController(entity, *registry->getComponent<CharacterControllerComponent>(entity), state);
 	}
 
 	// Animator
@@ -571,6 +588,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		bool no_cam = !registry->hasComponent<CameraComponent>(entity);
 		bool no_emitter = !registry->hasComponent<ParticleEmitterComponent>(entity);
 		bool no_rb = !registry->hasComponent<RigidbodyComponent>(entity);
+		bool no_cc = !registry->hasComponent<CharacterControllerComponent>(entity);
 
 		if (no_pl || no_sl || no_dl || no_al) {
 			ImGui::SeparatorText("Lights");
@@ -592,13 +610,16 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 				registry->addComponent<ParticleEmitterComponent>(entity);
 		}
 
-		if (no_rb) {
+		bool show_physics = no_rb && no_cc;
+		if (show_physics) {
 			ImGui::SeparatorText("Physics");
 			if (ImGui::MenuItem(ICON_RIGIDBODY "  Rigidbody"))
 				registry->addComponent<RigidbodyComponent>(entity);
+			if (ImGui::MenuItem(ICON_CHARACTER "  Character Controller"))
+				registry->addComponent<CharacterControllerComponent>(entity);
 		}
 
-		if (!no_pl && !no_sl && !no_dl && !no_al && !no_cam && !no_emitter && !no_rb)
+		if (!no_pl && !no_sl && !no_dl && !no_al && !no_cam && !no_emitter && !show_physics)
 			ImGui::TextDisabled("No components to add");
 
 		ImGui::EndPopup();
@@ -1071,6 +1092,67 @@ void InspectorPanel::renderRigidbody(RigidbodyComponent& rb, EditorState& state)
 	}
 }
 
+void InspectorPanel::renderCharacterController(Entity entity, CharacterControllerComponent& cc, EditorState& state) {
+	constexpr float label_w = 110.0f;
+
+	float radius = cc.getRadius();
+	labeledWidget(label_w, "Radius", [&]() {
+		if (ImGui::DragFloat("##CcRadius", &radius, 0.01f, 0.01f, 10.0f, "%.2f"))
+			cc.setRadius(std::max(radius, 0.01f));
+	});
+
+	float half_height = cc.getHalfHeight();
+	labeledWidget(label_w, "Half Height", [&]() {
+		if (ImGui::DragFloat("##CcHalfHeight", &half_height, 0.01f, 0.0f, 10.0f, "%.2f"))
+			cc.setHalfHeight(std::max(half_height, 0.0f));
+	});
+
+	float max_slope = cc.getMaxSlopeDeg();
+	labeledWidget(label_w, "Max Slope", [&]() {
+		if (ImGui::SliderFloat("##CcMaxSlope", &max_slope, 0.0f, 89.0f, "%.0f deg"))
+			cc.setMaxSlopeDeg(max_slope);
+	});
+
+	float step_height = cc.getStepHeight();
+	labeledWidget(label_w, "Step Height", [&]() {
+		if (ImGui::DragFloat("##CcStepHeight", &step_height, 0.01f, 0.0f, 2.0f, "%.2f"))
+			cc.setStepHeight(std::max(step_height, 0.0f));
+	});
+
+	labeledWidget(label_w, "Walk Speed", [&]() {
+		ImGui::DragFloat("##CcWalkSpeed", &cc.walk_speed, 0.05f, 0.0f, 50.0f, "%.2f");
+	});
+	labeledWidget(label_w, "Run Speed", [&]() {
+		ImGui::DragFloat("##CcRunSpeed", &cc.run_speed, 0.05f, 0.0f, 50.0f, "%.2f");
+	});
+	labeledWidget(label_w, "Acceleration", [&]() {
+		ImGui::DragFloat("##CcAccel", &cc.acceleration, 0.1f, 0.1f, 200.0f, "%.1f");
+	});
+	labeledWidget(label_w, "Turn Rate", [&]() {
+		ImGui::DragFloat("##CcTurnRate", &cc.turn_rate_deg, 1.0f, 10.0f, 1440.0f, "%.0f deg/s");
+	});
+	labeledWidget(label_w, "Jump Speed", [&]() {
+		ImGui::DragFloat("##CcJumpSpeed", &cc.jump_speed, 0.1f, 0.0f, 50.0f, "%.2f m/s");
+	});
+	labeledWidget(label_w, "Facing Offset", [&]() {
+		ImGui::DragFloat("##CcFacing", &cc.facing_offset_deg, 1.0f, -180.0f, 180.0f, "%.0f deg");
+	});
+
+	ImGui::TextDisabled("%s  speed %.2f m/s", cc.grounded ? "Grounded" : "Airborne",
+	                    glm::length(glm::vec2(cc.velocity.x, cc.velocity.y)));
+
+	const bool possessed = state.possessed_entity == entity;
+	float button_width = ImGui::GetContentRegionAvail().x;
+	if (possessed) {
+		if (ImGui::Button("Unpossess", ImVec2(button_width, 0)))
+			state.possessed_entity = Entity::null();
+		ImGui::TextDisabled("WASD moves this character (camera-relative), Shift runs");
+	} else {
+		if (ImGui::Button("Possess", ImVec2(button_width, 0)))
+			state.possessed_entity = entity;
+	}
+}
+
 void InspectorPanel::renderAnimator(AnimatorComponent& animator) {
 	const auto& clips = animator.getClipBindings();
 	const size_t total = clips.size();
@@ -1126,6 +1208,10 @@ void InspectorPanel::renderAnimator(AnimatorComponent& animator) {
 		if (ImGui::SliderFloat("##locomotion", &param,
 		                       samples.front().position, samples.back().position, "Locomotion %.2f"))
 			animator.setBlendParameter(param);
+
+		float cadence = animator.getLocomotionCadence();
+		if (ImGui::DragFloat("Cadence", &cadence, 0.02f, 0.0f, 5.0f, "%.2fx"))
+			animator.setLocomotionCadence(cadence);
 
 		// Live mix: which members currently drive the pose and by how much.
 		if (blend_active) {

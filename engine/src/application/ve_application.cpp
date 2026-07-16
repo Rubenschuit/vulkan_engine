@@ -112,10 +112,19 @@ void VeApplication::run() {
 		}
 		m_total_time += m_frame_time;
 
-		// Process input and tick the editor camera controller.
+		// Process input
 		if (!benchmarking) {
 			m_input_controller.processInput(m_frame_time);
-			m_editor->editorCamera().tick(m_input_controller.getActions(), m_frame_time);
+			InputActions cam_actions = m_input_controller.getActions();
+			if (Registry* reg = m_scene_manager->getActiveRegistry()) {
+				if (m_character_input.tick(*reg, cam_actions, m_cameras.flyCamera().forward(),
+				                           m_editor->getState().possessed_entity, m_frame_time)) {
+					cam_actions.move_forward = 0.0f;
+					cam_actions.move_right = 0.0f;
+					cam_actions.move_up = 0.0f;
+				}
+			}
+			m_cameras.flyCamera().tick(cam_actions, m_frame_time);
 		}
 
 		{
@@ -171,7 +180,7 @@ void VeApplication::run() {
 			}
 			// Apply the scripted pose before the camera view is built below.
 			if (auto pose = m_benchmark->cameraPose()) {
-				auto& cam = m_editor->editorCamera();
+				auto& cam = m_cameras.flyCamera();
 				cam.setPosition(pose->pos);
 				cam.lookAt(pose->look);
 			}
@@ -186,8 +195,9 @@ void VeApplication::run() {
 			m_editor->beginFrame();
 		}
 		Registry* reg = m_scene_manager->getActiveRegistry();
-		const CameraView& view = m_editor->resolveCameraView(
-			reg, m_ve_renderer.getExtentAspectRatio(),
+		const CameraView& view = m_cameras.resolveView(
+			reg, m_editor->getState().viewport_camera,
+			m_ve_renderer.getExtentAspectRatio(),
 			glm::radians(m_render_pipeline->settings().fov));
 
 		m_render_pipeline->renderFrame(*scene, view,
@@ -231,7 +241,7 @@ const RenderServices& VeApplication::renderServices() const {
 }
 
 const CameraView& VeApplication::cameraView() const {
-	return m_editor->cameraView();
+	return m_cameras.currentView();
 }
 
 // ─── Scene Management (proxies to SceneManager) ──────────────────────────────
@@ -262,7 +272,7 @@ void VeApplication::loadDefaultScene(int index) {
 void VeApplication::setupBenchmark() {
 	const BenchmarkConfig& bc = m_benchmark->config();
 	if (auto pose = m_benchmark->cameraPose()) {
-		auto& cam = m_editor->editorCamera();
+		auto& cam = m_cameras.flyCamera();
 		cam.setPosition(pose->pos);
 		cam.lookAt(pose->look);
 	}
@@ -375,7 +385,7 @@ void VeApplication::initSystems() {
 
 void VeApplication::initEditor() {
 	VE_LOGD("Initialising UI");
-	m_editor = std::make_unique<Editor>(m_ve_window, m_ve_device, m_ve_renderer, m_event_bus, m_config);
+	m_editor = std::make_unique<Editor>(m_ve_window, m_ve_device, m_ve_renderer, m_event_bus, m_config, m_cameras);
 	m_editor->setAppUICallback([this]() { renderUI(); });
 	m_editor->setContext(EditorContext{
 		.scene_manager    = m_scene_manager.get(),
@@ -386,7 +396,7 @@ void VeApplication::initEditor() {
 		.resource_manager = &m_resource_manager,
 	}, m_render_pipeline->services());
 
-	auto& editor_cam = m_editor->editorCamera();
+	auto& editor_cam = m_cameras.flyCamera();
 	editor_cam.setPosition(glm::vec3{20.0f, 20.0f, 20.0f});
 	editor_cam.lookAt(glm::vec3{0.0f, 0.0f, 5.0f});
 

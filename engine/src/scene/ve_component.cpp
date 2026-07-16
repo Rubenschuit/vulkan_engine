@@ -30,6 +30,7 @@ template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<SkinComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<CameraComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<ParticleEmitterComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MorphComponent>();
+template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<CharacterControllerComponent>();
 
 
 // ---------------------------------------------------------------------------
@@ -404,6 +405,50 @@ void RigidbodyComponent::setHullTolerance(float t) {
 	m_dirty = true;
 	if (m_registry)
 		m_registry->events().emit(RigidbodyChangedEvent{m_entity});
+}
+
+// ---------------------------------------------------------------------------
+// CharacterControllerComponent
+// ---------------------------------------------------------------------------
+
+void CharacterControllerComponent::markChanged() {
+	if (m_registry)
+		m_registry->events().emit(CharacterControllerChangedEvent{m_entity});
+}
+
+void CharacterControllerComponent::setRadius(float r) {
+	m_radius = r;
+	markChanged();
+}
+
+void CharacterControllerComponent::setHalfHeight(float h) {
+	m_half_height = h;
+	markChanged();
+}
+
+void CharacterControllerComponent::setMaxSlopeDeg(float deg) {
+	m_max_slope_deg = deg;
+	markChanged();
+}
+
+void CharacterControllerComponent::setStepHeight(float h) {
+	m_step_height = h;
+	markChanged();
+}
+
+void CharacterControllerComponent::setStickToFloor(float d) {
+	m_stick_to_floor = d;
+	markChanged();
+}
+
+void CharacterControllerComponent::setMass(float m) {
+	m_mass = m;
+	markChanged();
+}
+
+void CharacterControllerComponent::setMaxStrength(float s) {
+	m_max_strength = s;
+	markChanged();
 }
 
 // ---------------------------------------------------------------------------
@@ -944,22 +989,25 @@ void AnimatorComponent::update(float delta_time) {
 		}
 	}
 
-	// Phase-synced blend space: one shared normalized phase drives member time,
-	// advanced by the weighted cycle duration so gaits stay aligned.
+	// Phase-synced blend space: one shared normalized phase drives member time so
+	// gaits stay aligned. Cadence is the weighted mean clip rate scaled by the global
+	// multiplier; per-clip speed biases a member's effective duration (duration/speed)
+	// so it leans the shared phase faster/slower without breaking sync.
 	if (m_blend_space_active && m_phase_sync) {
 		float duration_sum = 0.0f;
 		float weight_sum = 0.0f;
 		for (const auto& s : m_blend_samples) {
 			const auto& b = m_clip_bindings[s.clip_index];
-			if (b.clip && b.playing && b.weight > BLEND_WEIGHT_EPSILON) {
-				duration_sum += b.weight * b.clip->duration;
+			if (b.clip && b.playing && b.weight > BLEND_WEIGHT_EPSILON && b.speed > 1e-3f) {
+				duration_sum += b.weight * b.clip->duration / b.speed;
 				weight_sum += b.weight;
 			}
 		}
-		if (weight_sum > 0.0f && duration_sum > 0.0f) {
-			m_phase += delta_time * weight_sum / duration_sum;
-			m_phase -= std::floor(m_phase);
-		}
+		float phase_rate = (weight_sum > 0.0f && duration_sum > 0.0f)
+			? m_locomotion_cadence * weight_sum / duration_sum
+			: 0.0f;
+		m_phase += delta_time * phase_rate;
+		m_phase -= std::floor(m_phase);
 		for (const auto& s : m_blend_samples) {
 			auto& b = m_clip_bindings[s.clip_index];
 			if (b.clip && b.playing)

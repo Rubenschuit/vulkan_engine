@@ -68,7 +68,8 @@ using ComponentPools = std::tuple<
 	ComponentPool<SkinComponent>,
 	ComponentPool<CameraComponent>,
 	ComponentPool<ParticleEmitterComponent>,
-	ComponentPool<MorphComponent>
+	ComponentPool<MorphComponent>,
+	ComponentPool<CharacterControllerComponent>
 >;
 
 class VENGINE_API Registry {
@@ -148,6 +149,9 @@ public:
 	ComponentPool<RigidbodyComponent>& rigidbodies() { return pool<RigidbodyComponent>(); }
 	const ComponentPool<RigidbodyComponent>& rigidbodies() const { return pool<RigidbodyComponent>(); }
 
+	ComponentPool<CharacterControllerComponent>& characterControllers() { return pool<CharacterControllerComponent>(); }
+	const ComponentPool<CharacterControllerComponent>& characterControllers() const { return pool<CharacterControllerComponent>(); }
+
 	ComponentPool<AnimatorComponent>& animators() { return pool<AnimatorComponent>(); }
 	const ComponentPool<AnimatorComponent>& animators() const { return pool<AnimatorComponent>(); }
 
@@ -183,6 +187,7 @@ public:
 	// World transforms
 	const glm::mat4& getWorldTransform(Entity e) const;
 	const glm::mat3& getWorldNormal(Entity e) const;
+	glm::quat getWorldRotation(Entity e) const;
 	void invalidateWorldTransform(Entity e);
 	// Ensures the world-transform cache entry for e is populated
 	void primeWorldTransform(Entity e) const { (void)getWorldTransform(e); }

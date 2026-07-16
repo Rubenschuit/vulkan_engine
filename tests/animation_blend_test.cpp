@@ -101,7 +101,7 @@ TEST_CASE("Two clips at 0.5/0.5 blend to the midpoint", "[animator][blend]") {
 	glm::vec3 t = f.translation();
 	REQUIRE(t.x == Approx(5.0f));
 
-	// nlerp midpoint of unit quats equals the slerp midpoint: 45 degrees about Z
+	// nlerp midpoint of unit quats equals the slerp midpoint
 	glm::quat r = f.rotation();
 	REQUIRE(glm::length(r) == Approx(1.0f));
 	REQUIRE(std::abs(r.w) == Approx(std::cos(glm::radians(22.5f))).margin(1e-4));
@@ -161,6 +161,64 @@ TEST_CASE("Node animated by only one of two blended clips gets that clip's full 
 
 	REQUIRE(f.translation(0).x == Approx(4.0f));  // (2*0.5 + 6*0.5) / 1.0
 	REQUIRE(f.translation(1).x == Approx(4.0f));  // (4*0.5) / 0.5 -> full pose of P
+}
+
+TEST_CASE("Locomotion cadence multiplier scales phase rate", "[animator][blend]") {
+	BlendFixture f;
+	// Clip b has duration 0.5 -> authored rate 2 cycles/s at cadence 1.
+	uint32_t a = f.animator->addClip(makeClip("a", 1.0f, vec3Sampler({0.0f}, {0.0f, 0.0f, 0.0f})));
+	uint32_t b = f.animator->addClip(makeClip("b", 0.5f, vec3Sampler({0.0f}, {0.0f, 0.0f, 0.0f})), false);
+	f.animator->setBlendSpace1D({{.position = 0.0f, .clip_index = a},
+	                             {.position = 1.0f, .clip_index = b}}, true);
+	f.animator->setBlendParameter(1.0f); // full weight on b
+
+	// Cadence 1: phase_rate = weight/duration = 1/0.5 = 2 cycles/s -> phase 0.2 over 0.1s
+	f.animator->setLocomotionCadence(1.0f);
+	f.animator->update(0.1f);
+	REQUIRE(f.animator->getClipBindings()[b].current_time == Approx(0.2f * 0.5f).margin(1e-3));
+
+	// Doubling the multiplier doubles the cadence -> twice the phase advance
+	f.animator->setLocomotionCadence(2.0f);
+	float p0 = f.animator->getClipBindings()[b].current_time;
+	f.animator->update(0.05f);
+	float advanced = f.animator->getClipBindings()[b].current_time - p0;
+	REQUIRE(advanced == Approx(0.05f * 2.0f * 2.0f * 0.5f).margin(1e-3)); // dt*cadence*rate*duration
+}
+
+TEST_CASE("Per-clip speed biases a synced member's shared cadence", "[animator][blend]") {
+	BlendFixture f;
+	uint32_t a = f.animator->addClip(makeClip("a", 1.0f, vec3Sampler({0.0f}, {0.0f, 0.0f, 0.0f})));
+	uint32_t b = f.animator->addClip(makeClip("b", 0.5f, vec3Sampler({0.0f}, {0.0f, 0.0f, 0.0f})), false);
+	f.animator->setBlendSpace1D({{.position = 0.0f, .clip_index = a},
+	                             {.position = 1.0f, .clip_index = b}}, true);
+	f.animator->setBlendParameter(1.0f); // full weight on b
+
+	// speed 2 halves b's effective duration -> doubles the phase rate vs speed 1.
+	f.animator->setSpeed(b, 2.0f);
+	f.animator->update(0.1f);
+	// phase_rate = 1 / (0.5/2) = 4 cycles/s -> phase 0.4 -> t = 0.4 * 0.5
+	REQUIRE(f.animator->getClipBindings()[b].current_time == Approx(0.4f * 0.5f).margin(1e-3));
+}
+
+// The phase is shared, so a member with no rate to contribute must drop out of the
+// cadence rather than dragging every other member toward a standstill with it.
+TEST_CASE("A non-positive speed member does not stall the shared phase", "[animator][blend]") {
+	BlendFixture f;
+	uint32_t a = f.animator->addClip(makeClip("a", 1.0f, vec3Sampler({0.0f}, {0.0f, 0.0f, 0.0f})));
+	uint32_t b = f.animator->addClip(makeClip("b", 1.0f, vec3Sampler({0.0f}, {0.0f, 0.0f, 0.0f})), false);
+	f.animator->setBlendSpace1D({{.position = 0.0f, .clip_index = a},
+	                             {.position = 1.0f, .clip_index = b}}, true);
+	f.animator->setBlendParameter(0.5f); // both members at weight 0.5
+
+	// a alone drives the cadence: phase_rate = 0.5 / (0.5 * 1.0) = 1 cycle/s
+	f.animator->setSpeed(b, 0.0f);
+	f.animator->update(0.1f);
+	REQUIRE(f.animator->getClipBindings()[a].current_time == Approx(0.1f).margin(1e-3));
+
+	float t0 = f.animator->getClipBindings()[a].current_time;
+	f.animator->setSpeed(b, -2.0f);
+	f.animator->update(0.1f);
+	REQUIRE(f.animator->getClipBindings()[a].current_time - t0 == Approx(0.1f).margin(1e-3));
 }
 
 TEST_CASE("1D blend space brackets the parameter and drives member weights", "[animator][blend]") {

@@ -51,6 +51,10 @@ struct RigidbodyChangedEvent {
 	Entity entity;
 };
 
+struct CharacterControllerChangedEvent {
+	Entity entity;
+};
+
 struct LightDataChangedEvent {
 	Entity entity;
 };

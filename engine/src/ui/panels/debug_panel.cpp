@@ -1,6 +1,6 @@
 #include "pch.hpp"
 #include "ui/panels/debug_panel.hpp"
-#include "ui/editor_camera_controller.hpp"
+#include "scene/fly_camera_controller.hpp"
 #include "ui/editor_state.hpp"
 #include "ui/imgui_layer.hpp"
 #include "ui/texture_inspector.hpp"
@@ -78,9 +78,9 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 		ctx.settings.topology = Topology::LINE_LIST;
 
 	ImGui::SeparatorText("Benchmark Camera");
-	if (m_editor_camera) {
-		glm::vec3 pos = m_editor_camera->position();
-		glm::vec3 look = pos + m_editor_camera->forward() * 10.0f;
+	if (m_fly_camera) {
+		glm::vec3 pos = m_fly_camera->position();
+		glm::vec3 look = pos + m_fly_camera->forward() * 10.0f;
 		std::string pose = std::format("{:.2f},{:.2f},{:.2f}:{:.2f},{:.2f},{:.2f}",
 			pos.x, pos.y, pos.z, look.x, look.y, look.z);
 		ImGui::TextWrapped("%s", pose.c_str());

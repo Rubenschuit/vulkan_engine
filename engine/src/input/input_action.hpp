@@ -37,6 +37,7 @@ struct InputActions {
 	float mouse_dx = 0.0f;
 	float mouse_dy = 0.0f;
 	bool  sprint = false;
+	bool  jump = false;
 	bool  mouse_look_enabled = true;
 };
 

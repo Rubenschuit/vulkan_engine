@@ -52,8 +52,9 @@ public:
 
 	void addStaticCollidersForAllMeshes(Registry& registry);
 
-	void freezeBody(Entity entity);
-	void unfreezeBody(Entity entity);
+	// Suspends simulation of the entity's rigidbody or character 
+	void freezeEntity(Entity entity);
+	void unfreezeEntity(Entity entity);
 	void setPreserveVelocity(Entity entity, bool preserve);
 
 	uint32_t getActiveBodyCount() const;

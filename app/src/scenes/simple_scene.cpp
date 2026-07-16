@@ -159,6 +159,8 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 
 	}
 
+	constexpr float GRID_BODY_MASS = 30.0f;
+
 	// PBR showcase grid: rows vary roughness (bottom=rough, top=smooth), columns vary metallic (left=dielectric, right=metal)
 	auto createPbrGrid = [&](const std::filesystem::path& model_path,
 	                         int rows, int cols,
@@ -203,6 +205,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 
 				auto& rb = m_registry.addComponent<RigidbodyComponent>(e);
 				rb.setMotionType(PhysicsMotionType::Dynamic);
+				rb.setMass(GRID_BODY_MASS);
 				rb.setShapeDesc({.type = shape_type});
 			}
 		}
@@ -243,11 +246,21 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 			int run = anim->findClip("Run");
 			if (survey < 0 || walk < 0 || run < 0)
 				return;
+
+			// Playable via the editor's Possess button
+			auto& cc = m_registry.addComponent<CharacterControllerComponent>(wrapper);
+			cc.setRadius(0.3f);
+			cc.setHalfHeight(0.2f);
+			cc.walk_speed = 4.0f;
+			cc.run_speed = 12.0f;
+			cc.facing_offset_deg = 180.0f; // Fox mesh's visual front is -Y
+
 			anim->setBlendSpace1D({
 				{.position = 0.0f, .clip_index = static_cast<uint32_t>(survey)},
 				{.position = 0.5f, .clip_index = static_cast<uint32_t>(walk)},
 				{.position = 1.0f, .clip_index = static_cast<uint32_t>(run)},
 			});
+			anim->setLocomotionCadence(1.0f);
 			anim->setBlendParameter(0.0f);
 		},
 	});

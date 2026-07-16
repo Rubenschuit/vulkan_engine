@@ -1,5 +1,5 @@
 #include "pch.hpp"
-#include "ui/editor_camera_controller.hpp"
+#include "scene/fly_camera_controller.hpp"
 #include "input/input_action.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -31,7 +31,7 @@ static void wrapYaw(float& y) {
 		y += glm::two_pi<float>();
 }
 
-void EditorCameraController::setYawPitch(float yaw_rad, float pitch_rad) {
+void FlyCameraController::setYawPitch(float yaw_rad, float pitch_rad) {
 	m_yaw_rad = yaw_rad;
 	m_pitch_rad = pitch_rad;
 	wrapYaw(m_yaw_rad);
@@ -58,7 +58,7 @@ void EditorCameraController::setYawPitch(float yaw_rad, float pitch_rad) {
 //
 // Somewhat expensive, but only called when the camera is re-oriented
 // to look at a specific point.
-void EditorCameraController::lookAt(const glm::vec3& target) {
+void FlyCameraController::lookAt(const glm::vec3& target) {
 	glm::vec3 dir = target - m_position;
 	float len = glm::length(dir);
 	if (len < 1e-6f)
@@ -77,11 +77,11 @@ void EditorCameraController::lookAt(const glm::vec3& target) {
 	clampPitch(m_pitch_rad);
 }
 
-glm::vec3 EditorCameraController::forward() const {
+glm::vec3 FlyCameraController::forward() const {
 	return forwardFromYawPitch(m_yaw_rad, m_pitch_rad);
 }
 
-void EditorCameraController::tick(const InputActions& actions, float dt) {
+void FlyCameraController::tick(const InputActions& actions, float dt) {
 	float yaw_delta   = actions.look_yaw   * m_look_speed * dt;
 	float pitch_delta = actions.look_pitch * m_look_speed * dt;
 	if (actions.mouse_look_enabled) {
@@ -102,7 +102,7 @@ void EditorCameraController::tick(const InputActions& actions, float dt) {
 	m_position += WORLD_UP * (actions.move_up      * speed);
 }
 
-CameraView EditorCameraController::buildView(float aspect) const {
+CameraView FlyCameraController::buildView(float aspect) const {
 	CameraView v;
 	v.position = m_position;
 	v.forward  = forwardFromYawPitch(m_yaw_rad, m_pitch_rad);
@@ -126,4 +126,4 @@ CameraView EditorCameraController::buildView(float aspect) const {
 	return v;
 }
 
-} // namespace ve
+}

@@ -55,6 +55,7 @@ struct CopiedAreaLight {
 struct CopiedRigidbody {
 	uint8_t motion_type{0};
 	uint8_t shape_type{0};
+	glm::vec3 half_extents{0.0f};
 	float mass{1.0f};
 	float friction{0.5f};
 	float restitution{0.3f};
@@ -133,6 +134,9 @@ struct VENGINE_API EditorState {
 	// CameraComponent. The application falls back to the editor camera if the entity becomes
 	// invalid.
 	Entity viewport_camera = Entity::null();
+
+	// Entity driven by WASD instead of the editor camera. Null = none.
+	Entity possessed_entity = Entity::null();
 
 	// Panel visibility
 	bool show_hierarchy = true;
