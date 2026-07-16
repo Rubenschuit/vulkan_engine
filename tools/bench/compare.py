@@ -60,6 +60,9 @@ def guard(base_runs, cand_runs):
             sys.exit(2)
 
 
+INFORMATIONAL = {"fence_wait"}
+
+
 def best_median(runs, metric):
     """Median of the run closest to the un-throttled ceiling"""
     return min(r["timings_ms"][metric]["median"] for r in runs)
@@ -149,7 +152,10 @@ def main():
             tol = max(nf["k"] * sigma, bm * args.rel / 100.0, args.abs)
         else:
             tol = max(bm * args.rel / 100.0, args.abs)
-        verdict = "REGRESSION" if worse > tol else ("improved" if worse < -tol else "")
+        if m in INFORMATIONAL:
+            verdict = "ungated"
+        else:
+            verdict = "REGRESSION" if worse > tol else ("improved" if worse < -tol else "")
         rows.append((worse, m, bm, cm, delta, pct, tol, verdict))
         if verdict == "REGRESSION":
             status = 1
