@@ -95,7 +95,7 @@ public:
 
 	uint32_t getOpaqueDrawCount() const { return m_total_indirect_count; }
 
-	// Geometry prepass uses buckets 0-1 from the main indirect buffer
+	// Geometry prepass renders buckets 0-3 (opaque + masked) from the main indirect buffer
 	const uint32_t* getDepthBucketOffsets() const { return m_bucket_offsets; }
 	const uint32_t* getDepthBucketCounts() const { return m_bucket_counts; }
 	const VeBuffer& getIndirectBuffer(uint32_t frame) const { return *m_indirect_buffers[frame]; }
@@ -133,11 +133,13 @@ private:
 	                        vk::SampleCountFlagBits sample_count) const;
 	void buildWboitConfig(PipelineConfigInfo& config) const;
 	std::unordered_map<uint32_t, uint32_t> specConstants(uint32_t shadow_mode, uint32_t shadow_mask,
-	                                                     uint32_t area_lights, uint32_t debug_shading) const;
+	                                                     uint32_t area_lights, uint32_t debug_shading,
+	                                                     uint32_t alpha_mask) const;
 
 	void ensureDebugPipelines() const;
 	void recreateAllPipelines();
 	VePipeline& forwardPipeline(const VeFrameInfo& frame_info) const;
+	VePipeline& maskedPipeline(const VeFrameInfo& frame_info) const;
 	VePipeline& wboitPipeline(const VeFrameInfo& frame_info) const;
 
 	VeDevice& m_ve_device;
@@ -155,6 +157,7 @@ private:
 	// Indexed [area_lights][shadow_mode], DEBUG_SHADING_SPEC = 0
 	std::array<ShadowModeSet, AREA_VARIANTS> m_pipelines;
 	std::array<ShadowModeSet, AREA_VARIANTS> m_pipelines_mask;
+	std::array<ShadowModeSet, AREA_VARIANTS> m_masked_pipelines;
 
 	mutable ShadowModeSet m_pipelines_dbg;
 	mutable ShadowModeSet m_pipelines_mask_dbg;
