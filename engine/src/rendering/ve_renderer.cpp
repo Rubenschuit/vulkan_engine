@@ -1047,7 +1047,8 @@ void VeRenderer::recordScreenshotCopy(vk::raii::CommandBuffer& command_buffer) {
 	m_screenshot_buffer = std::make_unique<VeBuffer>(
 		m_ve_device, 4, m_screenshot_extent.width * m_screenshot_extent.height,
 		vk::BufferUsageFlagBits::eTransferDst,
-		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+		1, HostAccess::Random);
 	m_screenshot_buffer->map();
 
 	m_ve_swap_chain->transitionImageLayout(

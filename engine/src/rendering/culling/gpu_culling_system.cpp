@@ -36,7 +36,8 @@ GpuCullingSystem::GpuCullingSystem(VeDevice& device, const std::filesystem::path
 		m_readback_buffers[i] = std::make_unique<VeBuffer>(m_ve_device,
 			sizeof(uint32_t), BUCKET_COUNT + 1,
 			vk::BufferUsageFlagBits::eTransferDst,
-			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+			1, HostAccess::Random);
 		m_readback_buffers[i]->map();
 		std::memset(m_readback_buffers[i]->getMappedMemory(), 0,
 			(BUCKET_COUNT + 1) * sizeof(uint32_t));

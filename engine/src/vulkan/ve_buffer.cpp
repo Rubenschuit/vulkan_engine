@@ -18,7 +18,8 @@ VeBuffer::VeBuffer(VeDevice& ve_device,
 					uint32_t instance_count,
 					vk::BufferUsageFlags usage_flags,
 					vk::MemoryPropertyFlags memory_property_flags,
-					vk::DeviceSize min_offset_alignment)
+					vk::DeviceSize min_offset_alignment,
+					HostAccess host_access)
 	: m_ve_device(ve_device),
 		m_instance_size(instance_size),
 		m_instance_count(instance_count),
@@ -44,9 +45,15 @@ VeBuffer::VeBuffer(VeDevice& ve_device,
 	alloc_info.requiredFlags = static_cast<VkMemoryPropertyFlags>(memory_property_flags);
 
 	if (memory_property_flags & vk::MemoryPropertyFlagBits::eHostVisible) {
-		alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-		alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
-		                 | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+		if (host_access == HostAccess::Random) {
+			alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+			alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT
+			                 | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+		} else {
+			alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+			alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+			                 | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+		}
 	} else {
 		alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
 	}

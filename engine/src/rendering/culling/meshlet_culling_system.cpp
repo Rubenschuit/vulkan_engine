@@ -90,7 +90,8 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 		m_readback_staging[i] = std::make_unique<VeBuffer>(m_ve_device,
 			sizeof(uint32_t), BUCKET_COUNT + 2,
 			vk::BufferUsageFlagBits::eTransferDst,
-			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+			1, HostAccess::Random);
 		m_readback_staging[i]->map();
 
 		// Shadow culling buffers: one set per shadow layer

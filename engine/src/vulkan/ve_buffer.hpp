@@ -9,6 +9,8 @@ using VmaAllocation = VmaAllocation_T*;
 
 namespace ve {
 
+enum class HostAccess { SequentialWrite, Random };
+
 class VENGINE_API VeBuffer {
 public:
 	static vk::DeviceSize getAlignment(vk::DeviceSize instance_size, vk::DeviceSize min_offset_alignment);
@@ -18,7 +20,8 @@ public:
 		uint32_t instance_count,
 		vk::BufferUsageFlags usage_flags,
 		vk::MemoryPropertyFlags memory_property_flags,
-		vk::DeviceSize min_offset_alignment = 1);
+		vk::DeviceSize min_offset_alignment = 1,
+		HostAccess host_access = HostAccess::SequentialWrite);
 	~VeBuffer();
 
 	VeBuffer(const VeBuffer&) = delete;
