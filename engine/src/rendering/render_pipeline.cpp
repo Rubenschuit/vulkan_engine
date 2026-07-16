@@ -776,7 +776,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 	bool any_depth_consumer = m_settings.geometry_prepass_enabled
 		&& (hiz_active || fi.shadow_mask_active || gtao_active || ssr_trace_active);
 	bool any_async_consumer = m_ve_device.hasDedicatedComputeQueue()
-		&& (gtao_active || hiz_active);
+		&& (gtao_active || hiz_active || ssr_trace_active);
 
 	if (shadows_enabled && !any_async_consumer) {
 		ScopedDebugLabel label(command_buffer, "Shadow Maps", {0.5f, 0.2f, 0.2f, 1.0f});
@@ -861,6 +861,9 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 				profiler.endCpuTimer(ProfileTimer::HIZ);
 			}
 
+			if (ssr_trace_active)
+				recordSsrTrace(fi, depth_compute_cb, /*async=*/true);
+
 			auto& shadow_cb = m_ve_renderer.getShadowGraphicsCommandBuffer();
 			fi.command_buffer = &shadow_cb;
 
@@ -887,9 +890,6 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 				profiler.endCpuTimer(ProfileTimer::SHADOW_MASK);
 				fi.shadow_mask_descriptor_set = &m_shadow_mask_system->getOutputDescriptorSet(fi.current_frame);
 			}
-
-			if (ssr_trace_active)
-				recordSsrTrace(fi, shadow_cb);
 
 			m_ve_renderer.submitShadowGraphics(shadow_cb);
 			m_ve_renderer.submitDepthCompute(depth_compute_cb);
@@ -935,7 +935,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 			}
 
 			if (ssr_trace_active)
-				recordSsrTrace(fi, command_buffer);
+				recordSsrTrace(fi, command_buffer, /*async=*/false);
 		}
 	}
 
@@ -953,6 +953,9 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 	if (gtao_active)
 		m_gtao_system->acquireForRead(active_cb, fi.current_frame);
+
+	if (ssr_trace_active)
+		m_ssr_system->acquireForRead(active_cb);
 
 	{
 		ZoneScopedN("Scene Render");
@@ -1064,15 +1067,21 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 	}
 }
 
-void RenderPipeline::recordSsrTrace(VeFrameInfo& fi, vk::raii::CommandBuffer& cmd) {
+void RenderPipeline::recordSsrTrace(VeFrameInfo& fi, vk::raii::CommandBuffer& cmd, bool async) {
 	[[maybe_unused]] auto tracy_gfx = m_ve_renderer.getTracyGraphicsCtx();
+	[[maybe_unused]] auto tracy_compute = m_ve_renderer.getTracyComputeCtx();
 	auto& profiler = m_ve_renderer.getProfiler();
 	ScopedDebugLabel label(cmd, "SSR Trace", {0.3f, 0.6f, 1.0f, 1.0f});
 	ZoneScopedN("SSR Trace");
-	TracyVkZone(tracy_gfx, *cmd, "SSR Trace");
 	profiler.beginCpuTimer(ProfileTimer::SSR);
 	profiler.beginGpuTimer(cmd, ProfileTimer::SSR);
-	m_ssr_system->dispatch(fi, cmd);
+	if (async) {
+		TracyVkZone(tracy_compute, *cmd, "SSR Trace (async)");
+		m_ssr_system->dispatch(fi, cmd, async);
+	} else {
+		TracyVkZone(tracy_gfx, *cmd, "SSR Trace");
+		m_ssr_system->dispatch(fi, cmd, async);
+	}
 	profiler.endGpuTimer(cmd, ProfileTimer::SSR);
 	profiler.endCpuTimer(ProfileTimer::SSR);
 	fi.ssr_descriptor_set = &m_ssr_system->getOutputDescriptorSet();
@@ -1177,7 +1186,6 @@ void RenderPipeline::finalizeFrameTimings() {
 	m_stats.cpu_time = results.cpu(ProfileTimer::FRAME_TOTAL) - results.fence_wait_ms - results.acquire_wait_ms;
 	m_stats.gpu_time = results.gpu(ProfileTimer::FRAME_TOTAL);
 	m_stats.compute_gpu_time = results.gpu(ProfileTimer::COMPUTE_TOTAL);
-	m_stats.gpu_overlap = results.gpu_overlap;
 }
 
 void RenderPipeline::writeUniformBuffer(uint32_t current_frame, const CameraView& view, UniformBufferObject& ubo) {

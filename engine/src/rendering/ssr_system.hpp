@@ -36,10 +36,11 @@ public:
 	SsrSystem(const SsrSystem&) = delete;
 	SsrSystem& operator=(const SsrSystem&) = delete;
 
-	// Record the trace dispatch. Must run on the graphics timeline (history
-	// copy ordering) while depth and the normal target are in their
-	// compute-read layouts, before scene render.
-	void dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd);
+	void dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, bool async);
+
+	// Hands the consumed image to the PBR fragment stage. Record on the
+	// graphics command buffer before scene render.
+	void acquireForRead(vk::raii::CommandBuffer& cmd);
 
 	// Copies the resolve target into the history image and rebuilds its mip
 	// chain.
@@ -84,6 +85,7 @@ private:
 	std::unique_ptr<VeImage> m_dummy_image;
 	std::unique_ptr<SsrHizPyramid> m_hiz_pyramid;
 	bool m_history_valid = false;
+	bool m_resolve_active = false;
 
 	vk::raii::Sampler m_linear_clamp_sampler{nullptr};
 

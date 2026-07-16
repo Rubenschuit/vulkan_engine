@@ -13,7 +13,6 @@ struct VENGINE_API FrameStats {
 	float acquire_wait = 0.0f;
 	float gpu_time = 0.0f;
 	float compute_gpu_time = 0.0f;
-	float gpu_overlap = 0.0f;
 
 	// Per-system GPU breakdown (ms)
 	float gpu_culling = 0.0f;

@@ -98,7 +98,7 @@ private:
 	void pushPerFrameSettings();
 	void selectBackend();
 	void recordDepthConsumerToAttachBarriers(vk::raii::CommandBuffer& cmd);
-	void recordSsrTrace(VeFrameInfo& fi, vk::raii::CommandBuffer& cmd);
+	void recordSsrTrace(VeFrameInfo& fi, vk::raii::CommandBuffer& cmd, bool async);
 	void ensureHizInfrastructure();
 	void ensureGpuCullingInfrastructure();
 	void ensureMeshletCullingInfrastructure();

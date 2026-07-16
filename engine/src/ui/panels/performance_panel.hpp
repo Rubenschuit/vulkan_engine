@@ -33,13 +33,11 @@ private:
 	float m_acquire_wait_ms = 0.0f;
 	float m_gpu_time_ms = 0.0f;
 	float m_compute_gpu_time_ms = 0.0f;
-	float m_gpu_overlap_ms = 0.0f;
 	float m_cpu_time_sum = 0.0f;
 	float m_fence_wait_sum = 0.0f;
 	float m_acquire_wait_sum = 0.0f;
 	float m_gpu_time_sum = 0.0f;
 	float m_compute_gpu_time_sum = 0.0f;
-	float m_gpu_overlap_sum = 0.0f;
 	float m_accumulated_dt = 0.0f;
 	float m_frametime_history[120] = {};
 	int m_history_offset = 0;

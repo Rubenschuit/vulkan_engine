@@ -48,7 +48,6 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	m_acquire_wait_sum += context.stats.acquire_wait;
 	m_gpu_time_sum += context.stats.gpu_time;
 	m_compute_gpu_time_sum += context.stats.compute_gpu_time;
-	m_gpu_overlap_sum += context.stats.gpu_overlap;
 	m_accumulated_dt += dt;
 	m_frame_count++;
 
@@ -88,7 +87,6 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		m_acquire_wait_ms = m_acquire_wait_sum / 60.0f;
 		m_gpu_time_ms = m_gpu_time_sum / 60.0f;
 		m_compute_gpu_time_ms = m_compute_gpu_time_sum / 60.0f;
-		m_gpu_overlap_ms = m_gpu_overlap_sum / 60.0f;
 
 		for (int i = 0; i < BREAKDOWN_COUNT; i++) {
 			m_gpu_breakdown_ms[i] = m_gpu_breakdown_sum[i] / 60.0f;
@@ -103,7 +101,6 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		m_acquire_wait_sum = 0.0f;
 		m_gpu_time_sum = 0.0f;
 		m_compute_gpu_time_sum = 0.0f;
-		m_gpu_overlap_sum = 0.0f;
 		m_accumulated_dt = 0.0f;
 	}
 
@@ -186,10 +183,6 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	if (m_compute_gpu_time_ms > 0.01f) {
 		snprintf(val, sizeof(val), "%.2f ms", m_compute_gpu_time_ms);
 		row("GPU Compute", val);
-		if (m_gpu_overlap_ms > 0.001f) {
-			snprintf(val, sizeof(val), "%.2f ms", m_gpu_overlap_ms);
-			row("Overlap", val);
-		}
 	}
 
 	ImGui::Spacing();

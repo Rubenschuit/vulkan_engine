@@ -175,7 +175,6 @@ public:
 	const ProfileResults& getProfileResults() const { return m_profiler.getResults(); }
 	float getGpuTime() const { return m_profiler.getResults().gpu(ProfileTimer::FRAME_TOTAL); }
 	float getComputeGpuTime() const { return m_profiler.getResults().gpu(ProfileTimer::COMPUTE_TOTAL); }
-	float getGpuOverlap() const { return m_profiler.getResults().gpu_overlap; }
 
 private:
 	void createViewportResources();

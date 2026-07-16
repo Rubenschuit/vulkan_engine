@@ -608,7 +608,7 @@ void VeSwapChain::submitShadowGraphics(vk::CommandBuffer cb) {
 
 void VeSwapChain::submitDepthCompute(vk::CommandBuffer cb) {
 	// Waits on pre_swap (for depth output), signals depth_compute.
-	vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eComputeShader;
+	vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eAllCommands;
 
 	vk::TimelineSemaphoreSubmitInfo timeline_info{
 		.waitSemaphoreValueCount = 1,

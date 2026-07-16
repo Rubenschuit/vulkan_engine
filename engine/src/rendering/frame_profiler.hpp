@@ -62,7 +62,6 @@ struct ProfileResults {
 
 	std::array<float, COUNT> gpu_ms{};
 	std::array<float, COUNT> cpu_ms{};
-	float gpu_overlap = 0.0f;
 	float fence_wait_ms = 0.0f;
 	float acquire_wait_ms = 0.0f;
 
@@ -111,7 +110,6 @@ private:
 	VeDevice& m_device;
 	vk::raii::QueryPool m_query_pool{nullptr};
 	float m_ticks_to_ms = 0.0f;
-	bool m_timestamp_cross_queue = false;
 	bool m_gpu_enabled = false;
 	bool m_timestamps_supported = false;
 

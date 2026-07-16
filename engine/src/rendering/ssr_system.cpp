@@ -370,21 +370,23 @@ void SsrSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 		.build(m_dummy_output_descriptor_set);
 }
 
-void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd) {
+void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, bool async) {
 	m_hiz_pyramid->generate(cmd);
 
 	// The resolve only runs below full resolution, where it doubles as the
 	// upsample prefilter; at full res the raw trace is sharper and we
 	// sample it directly
-	bool resolve_active = m_ssr_extent.width != m_full_extent.width
+	m_resolve_active = m_ssr_extent.width != m_full_extent.width
 		|| m_ssr_extent.height != m_full_extent.height;
 
 	// Raw output -> eGeneral for the trace, resolved -> eGeneral for the
-	// resolve. Src stages cover both possible last readers (resolve compute
-	// or PBR fragment) so half-res toggles stay correct.
+	// resolve
+	vk::PipelineStageFlags2 last_readers = async
+		? vk::PipelineStageFlagBits2::eNone
+		: vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader;
 	std::array<vk::ImageMemoryBarrier2, 2> to_general = {
 		vk::ImageMemoryBarrier2{
-			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader,
+			.srcStageMask = last_readers,
 			.srcAccessMask = vk::AccessFlagBits2::eNone,
 			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 			.dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
@@ -396,7 +398,7 @@ void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd) 
 			.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 		},
 		vk::ImageMemoryBarrier2{
-			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader,
+			.srcStageMask = last_readers,
 			.srcAccessMask = vk::AccessFlagBits2::eNone,
 			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 			.dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
@@ -409,7 +411,7 @@ void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd) 
 		}
 	};
 	vk::DependencyInfo dep_pre{
-		.imageMemoryBarrierCount = resolve_active ? 2u : 1u,
+		.imageMemoryBarrierCount = m_resolve_active ? 2u : 1u,
 		.pImageMemoryBarriers = to_general.data()};
 	cmd.pipelineBarrier2(dep_pre);
 
@@ -443,14 +445,17 @@ void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd) 
 	uint32_t groups_y = (m_ssr_extent.height + 15) / 16;
 	cmd.dispatch(groups_x, groups_y, 1);
 
-	// Raw output: eGeneral -> eShaderReadOnlyOptimal for its next reader
-	vk::PipelineStageFlags2 raw_dst_stage = vk::PipelineStageFlagBits2::eFragmentShader;
-	if (resolve_active)
-		raw_dst_stage = vk::PipelineStageFlagBits2::eComputeShader;
+	// At full res the raw output is the consumed image: it stays in eGeneral
+	// and acquireForRead hands it to the PBR fragment stage on the graphics
+	// queue
+	if (!m_resolve_active)
+		return;
+
+	// Raw output: eGeneral -> eShaderReadOnlyOptimal for the resolve
 	vk::ImageMemoryBarrier2 raw_to_read{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
-		.dstStageMask = raw_dst_stage,
+		.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
 		.oldLayout = vk::ImageLayout::eGeneral,
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
@@ -461,9 +466,6 @@ void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd) 
 	};
 	vk::DependencyInfo dep_mid{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &raw_to_read};
 	cmd.pipelineBarrier2(dep_mid);
-
-	if (!resolve_active)
-		return;
 
 	// Resolve: confidence-weighted bilateral over the trace output
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, *m_resolve_pipeline);
@@ -483,8 +485,11 @@ void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd) 
 		vk::ArrayProxy<const uint8_t>(sizeof(resolve_push), reinterpret_cast<const uint8_t*>(&resolve_push)));
 	cmd.dispatch(groups_x, groups_y, 1);
 
-	// Resolved: eGeneral -> eShaderReadOnlyOptimal for the PBR fragment stage
-	vk::ImageMemoryBarrier2 resolved_to_read{
+	// The resolved image stays in eGeneral for acquireForRead
+}
+
+void SsrSystem::acquireForRead(vk::raii::CommandBuffer& cmd) {
+	vk::ImageMemoryBarrier2 acquire{
 		.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
 		.srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
 		.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
@@ -493,11 +498,11 @@ void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd) 
 		.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = m_resolved_image->getImage(),
+		.image = m_resolve_active ? m_resolved_image->getImage() : m_output_image->getImage(),
 		.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
 	};
-	vk::DependencyInfo dep_post{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &resolved_to_read};
-	cmd.pipelineBarrier2(dep_post);
+	vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &acquire};
+	cmd.pipelineBarrier2(dep);
 }
 
 void SsrSystem::recordHistoryCopy(vk::raii::CommandBuffer& command_buffer, vk::Image resolve_target) {

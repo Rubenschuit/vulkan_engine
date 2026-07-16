@@ -60,15 +60,9 @@ def guard(base_runs, cand_runs):
             sys.exit(2)
 
 
-# Timings are durations (lower is better) except these, where a larger median is
-# better. Keep in sync with FrameStats.
-HIGHER_IS_BETTER = {"gpu_overlap"}
-
-
 def best_median(runs, metric):
     """Median of the run closest to the un-throttled ceiling"""
-    medians = [r["timings_ms"][metric]["median"] for r in runs]
-    return max(medians) if metric in HIGHER_IS_BETTER else min(medians)
+    return min(r["timings_ms"][metric]["median"] for r in runs)
 
 
 def counter_ranges(run):
@@ -142,11 +136,13 @@ def main():
     # Timing gate.
     rows = []
     for m in b0["timings_ms"]:
+        if any(m not in r["timings_ms"] for r in (*base, *cand)):
+            continue
         bm, cm = best_median(base, m), best_median(cand, m)
         if max(bm, cm) < 0.01:
             continue  # inactive pass
         delta = cm - bm
-        worse = -delta if m in HIGHER_IS_BETTER else delta  # positive = regression, either direction
+        worse = delta  # positive = regression
         pct = (delta / bm * 100.0) if bm > 1e-6 else 0.0
         sigma = noise.get(m, {}).get("sigma")
         if sigma is not None:

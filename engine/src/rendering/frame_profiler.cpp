@@ -17,7 +17,6 @@ FrameProfiler::FrameProfiler(VeDevice& device) : m_device(device) {
 		};
 		m_query_pool = vk::raii::QueryPool(m_device.getDevice(), pool_info);
 		m_ticks_to_ms = props.limits.timestampPeriod / 1000000.0f;
-		m_timestamp_cross_queue = props.limits.timestampComputeAndGraphics;
 	} else {
 		VE_LOGW("GPU timestamps not supported (timestampValidBits == 0), GPU profiling disabled.");
 	}
@@ -58,37 +57,8 @@ void FrameProfiler::beginFrame(uint32_t frame_index) {
 					m_results.gpu_ms[t] = 0.0f;
 			}
 
-			// Compute overlap between FRAME_TOTAL (graphics) and COMPUTE_TOTAL (compute).
-			// Only valid when timestamps share the same domain across queues.
-			if (m_timestamp_cross_queue) {
-				auto timerIdx = [](ProfileTimer t) { return static_cast<uint32_t>(t); };
-				uint32_t gfx_s = timerIdx(ProfileTimer::FRAME_TOTAL) * 2;
-				uint32_t gfx_e = gfx_s + 1;
-				uint32_t comp_s = timerIdx(ProfileTimer::COMPUTE_TOTAL) * 2;
-				uint32_t comp_e = comp_s + 1;
-
-				bool gfx_ok = raw[gfx_s * 2 + 1] && raw[gfx_e * 2 + 1];
-				bool comp_ok = raw[comp_s * 2 + 1] && raw[comp_e * 2 + 1];
-
-				if (gfx_ok && comp_ok) {
-					uint64_t gfx_start = raw[gfx_s * 2];
-					uint64_t gfx_end = raw[gfx_e * 2];
-					uint64_t c_start = raw[comp_s * 2];
-					uint64_t c_end = raw[comp_e * 2];
-					uint64_t overlap_start = std::max(c_start, gfx_start);
-					uint64_t overlap_end = std::min(c_end, gfx_end);
-					m_results.gpu_overlap = (overlap_end > overlap_start)
-						? static_cast<float>(overlap_end - overlap_start) * m_ticks_to_ms
-						: 0.0f;
-				} else {
-					m_results.gpu_overlap = 0.0f;
-				}
-			} else {
-				m_results.gpu_overlap = 0.0f;
-			}
 		} else {
 			m_results.gpu_ms.fill(0.0f);
-			m_results.gpu_overlap = 0.0f;
 		}
 	}
 

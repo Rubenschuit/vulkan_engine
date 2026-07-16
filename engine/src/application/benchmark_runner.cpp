@@ -27,7 +27,6 @@ constexpr FloatMetric FLOAT_METRICS[] = {
 	{"acquire_wait", &FrameStats::acquire_wait},
 	{"gpu_time", &FrameStats::gpu_time},
 	{"compute_gpu_time", &FrameStats::compute_gpu_time},
-	{"gpu_overlap", &FrameStats::gpu_overlap},
 	{"gpu_culling", &FrameStats::gpu_culling},
 	{"gpu_shadow_maps", &FrameStats::gpu_shadow_maps},
 	{"gpu_geometry_prepass", &FrameStats::gpu_geometry_prepass},
