@@ -30,17 +30,17 @@ struct CameraView {
 	Entity source = Entity::null();
 };
 
-CameraView buildCameraView(const Registry& registry, Entity entity, float aspect);
+VENGINE_API CameraView buildCameraView(const Registry& registry, Entity entity, float aspect);
 
 // True when `camera` is alive in `registry` and carries a CameraComponent
-bool isSceneCamera(const Registry* registry, Entity camera);
+VENGINE_API bool isSceneCamera(const Registry* registry, Entity camera);
 
 // Basis of an entity camera: columns are {right, forward, up}. Identity rotation
 // looks +Y, right +X, up +Z. Scale is stripped.
-glm::mat3 sceneCameraBasis(const Registry& registry, Entity entity);
+VENGINE_API glm::mat3 sceneCameraBasis(const Registry& registry, Entity entity);
 
 // Returns a CameraView built from `camera` if isSceneCamera(registry, camera);
 // otherwise nullopt
-std::optional<CameraView> tryGetSceneCamera(const Registry* registry, Entity camera, float aspect);
+VENGINE_API std::optional<CameraView> tryGetSceneCamera(const Registry* registry, Entity camera, float aspect);
 
 }
