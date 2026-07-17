@@ -81,6 +81,7 @@ private:
 	void initSystems();
 	void initEditor();
 	void setupBenchmark();
+	void applyBenchmarkSkybox();
 	void finishBenchmark();
 
 	void updateFrameTime();

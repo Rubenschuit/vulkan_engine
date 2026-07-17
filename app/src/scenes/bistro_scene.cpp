@@ -1,17 +1,25 @@
 #include "bistro_scene.hpp"
 #include "fox.hpp"
+#include "events/engine_events.hpp"
 
+#include <cmath>
 #include <string>
+#include <glm/gtc/constants.hpp>
 
 namespace ve {
 
 BistroScene::BistroScene(const SceneContext& ctx, const AssetPaths& paths)
 	: VeScene(ctx, "Bistro Scene"), m_overlay_path(paths.bistro_scene_overlay()) {
 
-	// Directional light
-	Entity dl = m_registry.createDirectionalLight(5.0f, glm::vec3(1.0f),
-		glm::normalize(glm::vec3(-1.0f, -0.5f, -2.5f)));
-	m_registry.setName(dl, "Directional Light");
+	m_event_bus.enqueue(SkyboxRequestEvent{
+		.name = "the_sky_is_on_fire_4k", .exposure = 0.5f});
+	m_event_bus.enqueue(RenderSettingsRequestEvent{
+		.exposure = 1.15f, .ibl_diffuse_intensity = 0.5f, .ibl_specular_intensity = 0.35f,
+		.ambient_light_intensity = 0.02f, .bloom_strength = 0.02f});
+
+	Entity dl = m_registry.createDirectionalLight(8.0f, glm::vec3(1.0f, 0.62f, 0.4f),
+		glm::normalize(glm::vec3(0.709f, -0.410f, -0.574f)));
+	m_registry.setName(dl, "Sun");
 	m_registry.getComponent<DirectionalLightComponent>(dl)->setCastsShadow(true);
 
 	placeModel({
@@ -67,6 +75,39 @@ BistroScene::BistroScene(const SceneContext& ctx, const AssetPaths& paths)
 	}
 
 	placeModel(foxModelRequest(m_registry, paths.fox_model, {9.0f, -46.0f, 39.0f}));
+
+	m_birds_orbit_center = {-19.0f, -30.0f, 54.0f};
+	placeModel({
+		.gltf_path = paths.birds_model.lexically_normal(),
+		.translation = m_birds_orbit_center,
+		.scale = glm::vec3(2.5f),
+		.on_loaded = [this](Entity birds) {
+			m_registry.setName(birds, "birds");
+			m_birds = birds;
+		}
+	});
+}
+
+void BistroScene::update(float dt) {
+	VeScene::update(dt);
+
+	if (m_birds.isNull())
+		return;
+	auto* tc = m_registry.getComponent<TransformComponent>(m_birds);
+	if (!tc)
+		return;
+
+	m_birds_t += dt;
+	const float lobe_aspect = 0.4f;
+	const float t = m_birds_t * m_birds_orbit_speed;
+	const float c = std::cos(t);
+	const float s = std::sin(t);
+	const float px = c;
+	const float py = lobe_aspect * s * c;
+	const float vx = -s;
+	const float vy = lobe_aspect * (c * c - s * s);
+	tc->setTranslation(m_birds_orbit_center + glm::vec3{px * m_birds_orbit_radius, py * m_birds_orbit_radius, 0.0f});
+	tc->setRotationEuler({0.0f, 0.0f, std::atan2(vy, vx) - glm::half_pi<float>()});
 }
 
 }

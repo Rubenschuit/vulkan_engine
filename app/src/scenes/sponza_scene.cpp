@@ -1,4 +1,5 @@
 #include "sponza_scene.hpp"
+#include "events/engine_events.hpp"
 #include "utils/ve_path.hpp"
 #include <string>
 #include <cmath>
@@ -6,8 +7,18 @@
 
 namespace ve {
 
+namespace {
+constexpr float FIRE_INTENSITY = 9.0f;
+}
+
 SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
     : VeScene(ctx, "Sponza Scene") {
+
+	m_event_bus.enqueue(SkyboxRequestEvent{
+		.name = "qwantani_moon_noon_puresky_4k", .exposure = 0.15f, .is_day = false});
+	m_event_bus.enqueue(RenderSettingsRequestEvent{
+		.exposure = 1.05f, .ibl_diffuse_intensity = 0.1f, .ibl_specular_intensity = 0.18f,
+		.bloom_strength = 0.015f});
 
 	const float sponza_scale = 2.0f;
 	const glm::vec3 root_translation = glm::vec3{0.0f, 0.0f, -50.0f};
@@ -47,11 +58,11 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 		return e;
 	};
 
-    // Directional light
+    // Moonlight
 	{
-		Entity dl = m_registry.createDirectionalLight(3.0f, glm::vec3(1.0f),
-			glm::normalize(glm::vec3(0.5f, -1.0f, -3.0f)));
-		m_registry.setName(dl, "Directional Light");
+		Entity dl = m_registry.createDirectionalLight(3.5f, glm::vec3(0.65f, 0.75f, 1.0f),
+			glm::normalize(glm::vec3(0.23f, -0.25f, -0.94f)));
+		m_registry.setName(dl, "Moonlight");
 		m_registry.getComponent<DirectionalLightComponent>(dl)->setCastsShadow(true);
 	}
 
@@ -105,8 +116,9 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 		sponzaPos({ 3.912f, -1.16f, 1.12f}),
 	};
 	for (int i = 0; i < 4; ++i) {
-		Entity e = makeLight(10.0f, 1.0f, glm::vec3(1.0f, .1f, .02f),
+		Entity e = makeLight(FIRE_INTENSITY, 1.0f, glm::vec3(1.0f, .45f, .15f),
 			"Fire " + std::to_string(i + 1), fire_positions[i], false, false, glm::vec3(0.1f));
+		m_fire_lights.push_back(e);
 		attachFireEmitters(e);
 	}
 
@@ -121,6 +133,19 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 
 void SponzaScene::update(float dt) {
 	VeScene::update(dt);
+
+	// Flickering fire lights
+	m_fire_t += dt;
+	for (size_t i = 0; i < m_fire_lights.size(); ++i) {
+		auto* pl = m_registry.getComponent<PointLightComponent>(m_fire_lights[i]);
+		if (!pl)
+			continue;
+		float phase = 2.1f * static_cast<float>(i);
+		float f = 0.14f * std::sin(m_fire_t * 7.3f + phase)
+		        + 0.07f * std::sin(m_fire_t * 13.1f + 1.7f * phase)
+		        + 0.05f * std::sin(m_fire_t * 23.7f + 2.9f * phase);
+		pl->setIntensity(FIRE_INTENSITY * (1.0f + f));
+	}
 
 	if (m_birds.isNull())
 		return;

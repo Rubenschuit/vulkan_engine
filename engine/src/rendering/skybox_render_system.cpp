@@ -54,6 +54,22 @@ SkyboxRenderSystem::SkyboxRenderSystem(
 		recreatePipeline(e.offscreen_format, e.sample_count);
 	});
 
+	m_event_bus.subscribe<SkyboxRequestEvent>([this](const SkyboxRequestEvent& e) {
+		if (e.exposure)
+			m_settings.exposure = *e.exposure;
+		if (e.is_day)
+			m_settings.is_day = *e.is_day;
+		if (e.name.empty())
+			return;
+		for (size_t i = 0; i < m_available_skyboxes.size(); ++i) {
+			if (m_available_skyboxes[i].display_name == e.name) {
+				setSkybox(i);
+				return;
+			}
+		}
+		VE_LOGW("SkyboxRequestEvent: no skybox named '" << e.name << "'");
+	});
+
 	if (!m_available_skyboxes.empty()) {
 		size_t default_index = 0;
 		for (size_t i = 0; i < m_available_skyboxes.size(); ++i) {

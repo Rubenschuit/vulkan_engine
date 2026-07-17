@@ -9,14 +9,14 @@
 					-0.35890650749206543
 				],
 				"inner_deg": 0.4000000059604645,
-				"outer_deg": 36.099998474121094
+				"outer_deg": 55.0
 			},
 			"color": [
 				1.0,
 				0.8199999928474426,
 				0.550000011920929
 			],
-			"intensity": 32.099998474121094,
+			"intensity": 80.0,
 			"select": {
 				"name": "LMBR_000006b_bulb_light: subset_8 [0]"
 			}
@@ -30,14 +30,14 @@
 					-0.35890650749206543
 				],
 				"inner_deg": 0.4000000059604645,
-				"outer_deg": 36.099998474121094
+				"outer_deg": 55.0
 			},
 			"color": [
 				1.0,
 				0.8199999928474426,
 				0.550000011920929
 			],
-			"intensity": 32.099998474121094,
+			"intensity": 80.0,
 			"select": {
 				"name": "LMBR_000006b_bulb_light: subset_8 [1]"
 			}
@@ -51,14 +51,14 @@
 					-0.35890650749206543
 				],
 				"inner_deg": 0.4000000059604645,
-				"outer_deg": 36.099998474121094
+				"outer_deg": 55.0
 			},
 			"color": [
 				1.0,
 				0.8199999928474426,
 				0.550000011920929
 			],
-			"intensity": 32.099998474121094,
+			"intensity": 80.0,
 			"select": {
 				"name": "LMBR_000006b_bulb_light: subset_8 [2]"
 			}
@@ -72,14 +72,14 @@
 					-0.35890650749206543
 				],
 				"inner_deg": 0.4000000059604645,
-				"outer_deg": 36.099998474121094
+				"outer_deg": 55.0
 			},
 			"color": [
 				1.0,
 				0.8199999928474426,
 				0.550000011920929
 			],
-			"intensity": 32.099998474121094,
+			"intensity": 80.0,
 			"select": {
 				"name": "LMBR_000006b_bulb_light: subset_8 [3]"
 			}
@@ -93,14 +93,14 @@
 					-0.07681000977754593
 				],
 				"inner_deg": 0.4000000059604645,
-				"outer_deg": 36.099998474121094
+				"outer_deg": 55.0
 			},
 			"color": [
 				1.0,
 				0.8199999928474426,
 				0.550000011920929
 			],
-			"intensity": 55.0,
+			"intensity": 80.0,
 			"select": {
 				"name": "LMBR_000006b_bulb_light: subset_8 [4]"
 			}
@@ -114,14 +114,14 @@
 					-0.07681000977754593
 				],
 				"inner_deg": 0.4000000059604645,
-				"outer_deg": 36.099998474121094
+				"outer_deg": 55.0
 			},
 			"color": [
 				1.0,
 				0.8199999928474426,
 				0.550000011920929
 			],
-			"intensity": 55.0,
+			"intensity": 80.0,
 			"select": {
 				"name": "LMBR_000006b_bulb_light: subset_8 [5]"
 			}
@@ -135,14 +135,14 @@
 					0.2592979371547699
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 35.0
+				"outer_deg": 55.0
 			},
 			"color": [
 				1.0,
 				0.8199999928474426,
 				0.550000011920929
 			],
-			"intensity": 55.0,
+			"intensity": 80.0,
 			"select": {
 				"name": "LMBR_000006b_bulb_light: subset_8 [6]"
 			}
@@ -156,14 +156,14 @@
 					0.2592979371547699
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 35.0
+				"outer_deg": 55.0
 			},
 			"color": [
 				1.0,
 				0.8199999928474426,
 				0.550000011920929
 			],
-			"intensity": 55.0,
+			"intensity": 80.0,
 			"select": {
 				"name": "LMBR_000006b_bulb_light: subset_8 [7]"
 			}
@@ -177,14 +177,14 @@
 					0.2592979371547699
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 35.0
+				"outer_deg": 55.0
 			},
 			"color": [
 				1.0,
 				0.8199999928474426,
 				0.550000011920929
 			],
-			"intensity": 55.0,
+			"intensity": 80.0,
 			"select": {
 				"name": "LMBR_000006b_bulb_light: subset_8 [8]"
 			}
@@ -198,14 +198,14 @@
 					0.2592979371547699
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 35.0
+				"outer_deg": 55.0
 			},
 			"color": [
 				1.0,
 				0.8199999928474426,
 				0.550000011920929
 			],
-			"intensity": 55.0,
+			"intensity": 80.0,
 			"select": {
 				"name": "LMBR_000006b_bulb_light: subset_8 [9]"
 			}
@@ -219,14 +219,14 @@
 					0.40967386960983276
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 35.0
+				"outer_deg": 50.0
 			},
 			"color": [
 				0.5773502588272095,
 				0.5773502588272095,
 				0.5773502588272095
 			],
-			"intensity": 144.74400329589844,
+			"intensity": 340.0,
 			"select": {
 				"index": 0,
 				"name": "LMBR_00000e2_emissive: subset_1"
@@ -241,14 +241,14 @@
 					0.40967386960983276
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 35.0
+				"outer_deg": 50.0
 			},
 			"color": [
 				0.5773502588272095,
 				0.5773502588272095,
 				0.5773502588272095
 			],
-			"intensity": 144.74400329589844,
+			"intensity": 340.0,
 			"select": {
 				"index": 1,
 				"name": "LMBR_00000e2_emissive: subset_1"
@@ -263,14 +263,14 @@
 					0.40967386960983276
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 35.0
+				"outer_deg": 50.0
 			},
 			"color": [
 				0.5773502588272095,
 				0.5773502588272095,
 				0.5773502588272095
 			],
-			"intensity": 144.74400329589844,
+			"intensity": 340.0,
 			"select": {
 				"index": 2,
 				"name": "LMBR_00000e2_emissive: subset_1"
@@ -285,14 +285,14 @@
 					0.40967386960983276
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 35.0
+				"outer_deg": 50.0
 			},
 			"color": [
 				0.5773502588272095,
 				0.5773502588272095,
 				0.5773502588272095
 			],
-			"intensity": 144.74400329589844,
+			"intensity": 340.0,
 			"select": {
 				"index": 3,
 				"name": "LMBR_00000e2_emissive: subset_1"
@@ -307,14 +307,14 @@
 					0.40967386960983276
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 35.0
+				"outer_deg": 50.0
 			},
 			"color": [
 				0.5773502588272095,
 				0.5773502588272095,
 				0.5773502588272095
 			],
-			"intensity": 144.74400329589844,
+			"intensity": 340.0,
 			"select": {
 				"index": 4,
 				"name": "LMBR_00000e2_emissive: subset_1"
@@ -329,14 +329,14 @@
 					0.0
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 35.0
+				"outer_deg": 50.0
 			},
 			"color": [
 				0.5773502588272095,
 				0.5773502588272095,
 				0.5773502588272095
 			],
-			"intensity": 144.74400329589844,
+			"intensity": 340.0,
 			"select": {
 				"index": 0,
 				"name": "LMBR_00000e2_emissive: subset_2"
@@ -351,14 +351,14 @@
 					0.0
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 35.0
+				"outer_deg": 50.0
 			},
 			"color": [
 				0.5773502588272095,
 				0.5773502588272095,
 				0.5773502588272095
 			],
-			"intensity": 144.74400329589844,
+			"intensity": 340.0,
 			"select": {
 				"index": 1,
 				"name": "LMBR_00000e2_emissive: subset_2"
@@ -392,7 +392,7 @@
 				0.8500000238418579,
 				0.6000000238418579
 			],
-			"intensity": 0.45954999327659607,
+			"intensity": 4.5,
 			"select": {
 				"index": 0,
 				"name": "LMBR_0000185_Paris_Wall_Bulb_Light: subset_1"
@@ -405,7 +405,7 @@
 				0.8500000238418579,
 				0.6000000238418579
 			],
-			"intensity": 0.45954999327659607,
+			"intensity": 4.5,
 			"select": {
 				"index": 1,
 				"name": "LMBR_0000185_Paris_Wall_Bulb_Light: subset_1"
@@ -418,7 +418,7 @@
 				0.8500000238418579,
 				0.6000000238418579
 			],
-			"intensity": 0.45954999327659607,
+			"intensity": 4.5,
 			"select": {
 				"index": 2,
 				"name": "LMBR_0000185_Paris_Wall_Bulb_Light: subset_1"
@@ -431,7 +431,7 @@
 				0.8500000238418579,
 				0.6000000238418579
 			],
-			"intensity": 0.45954999327659607,
+			"intensity": 4.5,
 			"select": {
 				"index": 3,
 				"name": "LMBR_0000185_Paris_Wall_Bulb_Light: subset_1"
@@ -444,7 +444,7 @@
 				0.8500000238418579,
 				0.6000000238418579
 			],
-			"intensity": 0.45954999327659607,
+			"intensity": 4.5,
 			"select": {
 				"index": 4,
 				"name": "LMBR_0000185_Paris_Wall_Bulb_Light: subset_1"
@@ -457,7 +457,7 @@
 				0.8500000238418579,
 				0.6000000238418579
 			],
-			"intensity": 0.45954999327659607,
+			"intensity": 4.5,
 			"select": {
 				"index": 5,
 				"name": "LMBR_0000185_Paris_Wall_Bulb_Light: subset_1"
@@ -470,7 +470,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 0,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -483,7 +483,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 1,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -496,7 +496,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 2,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -509,7 +509,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 3,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -522,7 +522,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 4,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -535,7 +535,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 5,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -548,7 +548,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 6,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -561,7 +561,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 7,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -574,7 +574,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 8,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -587,7 +587,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 9,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -600,7 +600,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 10,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -613,7 +613,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 11,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -626,7 +626,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 12,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -639,7 +639,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 13,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -652,7 +652,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 14,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -665,7 +665,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 15,
 				"name": "LMBR_000018b_bulb: subset_1"
@@ -678,7 +678,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 0,
 				"name": "LMBR_000018b_bulb: subset_2"
@@ -691,7 +691,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 1,
 				"name": "LMBR_000018b_bulb: subset_2"
@@ -704,7 +704,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 2,
 				"name": "LMBR_000018b_bulb: subset_2"
@@ -717,7 +717,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 3,
 				"name": "LMBR_000018b_bulb: subset_2"
@@ -730,7 +730,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 4,
 				"name": "LMBR_000018b_bulb: subset_2"
@@ -743,7 +743,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 5,
 				"name": "LMBR_000018b_bulb: subset_2"
@@ -756,7 +756,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 6,
 				"name": "LMBR_000018b_bulb: subset_2"
@@ -769,7 +769,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 7,
 				"name": "LMBR_000018b_bulb: subset_2"
@@ -782,7 +782,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 8,
 				"name": "LMBR_000018b_bulb: subset_2"
@@ -795,7 +795,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 9,
 				"name": "LMBR_000018b_bulb: subset_2"
@@ -808,7 +808,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 10,
 				"name": "LMBR_000018b_bulb: subset_2"
@@ -821,7 +821,7 @@
 				0.3637237250804901,
 				0.0
 			],
-			"intensity": 14.964920043945313,
+			"intensity": 14.964920043945312,
 			"select": {
 				"index": 11,
 				"name": "LMBR_000018b_bulb: subset_2"
@@ -1757,14 +1757,14 @@
 					-0.09585892409086227
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 45.0
+				"outer_deg": 55.0
 			},
 			"color": [
 				1.0,
 				0.8500000238418579,
 				0.6000000238418579
 			],
-			"intensity": 66.0,
+			"intensity": 130.0,
 			"select": {
 				"index": 0,
 				"name": "LMBR_00001a5_Paris_Ceiling_Lamp: subset_0"
@@ -1779,14 +1779,14 @@
 					-0.09585892409086227
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 45.0
+				"outer_deg": 55.0
 			},
 			"color": [
 				1.0,
 				0.8500000238418579,
 				0.6000000238418579
 			],
-			"intensity": 66.0,
+			"intensity": 130.0,
 			"select": {
 				"index": 1,
 				"name": "LMBR_00001a5_Paris_Ceiling_Lamp: subset_0"
@@ -1801,14 +1801,14 @@
 					-0.09585892409086227
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 45.0
+				"outer_deg": 55.0
 			},
 			"color": [
 				1.0,
 				0.8500000238418579,
 				0.6000000238418579
 			],
-			"intensity": 66.0,
+			"intensity": 130.0,
 			"select": {
 				"index": 2,
 				"name": "LMBR_00001a5_Paris_Ceiling_Lamp: subset_0"
@@ -1823,14 +1823,14 @@
 					-0.09585892409086227
 				],
 				"inner_deg": 25.0,
-				"outer_deg": 45.0
+				"outer_deg": 55.0
 			},
 			"color": [
 				1.0,
 				0.8500000238418579,
 				0.6000000238418579
 			],
-			"intensity": 66.0,
+			"intensity": 130.0,
 			"select": {
 				"index": 3,
 				"name": "LMBR_00001a5_Paris_Ceiling_Lamp: subset_0"

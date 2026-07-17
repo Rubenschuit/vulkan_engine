@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <glm/vec3.hpp>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -114,6 +115,22 @@ struct ViewportResizedEvent {};
 
 struct SkyboxChangedEvent {
 	std::filesystem::path skybox_path;
+};
+
+// Select a skybox by display name (folder name without the _skybox suffix).
+// The prefiltered cubemap + SH load with it.
+struct SkyboxRequestEvent {
+	std::string name;                // empty = keep current skybox
+	std::optional<float> exposure;
+	std::optional<bool> is_day;
+};
+
+struct RenderSettingsRequestEvent {
+	std::optional<float> exposure;
+	std::optional<float> ibl_diffuse_intensity;
+	std::optional<float> ibl_specular_intensity;
+	std::optional<float> ambient_light_intensity;
+	std::optional<float> bloom_strength;
 };
 
 } // namespace ve

@@ -172,6 +172,7 @@ private:
 	EventSubscriptionId m_scene_loaded_sub = 0;
 	EventSubscriptionId m_swap_chain_recreated_sub = 0;
 	EventSubscriptionId m_viewport_resized_sub = 0;
+	EventSubscriptionId m_settings_request_sub = 0;
 };
 
 } // namespace ve

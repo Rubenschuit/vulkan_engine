@@ -47,6 +47,9 @@ struct VENGINE_API BenchmarkConfig {
 	std::vector<CameraKeypoint> keypoints;
 	BenchCulling culling = BenchCulling::DEFAULT;
 
+	// Skybox display-name override; empty = scene/app default.
+	std::string skybox;
+
 	// Window size override
 	uint32_t width = 0;
 	uint32_t height = 0;
@@ -55,7 +58,7 @@ struct VENGINE_API BenchmarkConfig {
 	// --bench-warmup <n>, --bench-dt <seconds>, --bench-stats <path>,
 	// --bench-screenshot <path>, --bench-camera px,py,pz:lx,ly,lz,
 	// --bench-path <file> (one keypoint per line, same syntax; # comments ok),
-	// --bench-culling cpu|gpu|meshlet, --bench-res WxH.
+	// --bench-culling cpu|gpu|meshlet, --bench-res WxH, --bench-skybox <name>.
 	// Any of them enables benchmark mode; returns nullopt when none are present.
 	// Throws std::runtime_error on a malformed flag or unreadable path file.
 	static std::optional<BenchmarkConfig> parseArgs(int argc, char** argv);
@@ -106,7 +109,6 @@ public:
 private:
 	enum class Phase { WAIT_SCENE, WARMUP, MEASURE };
 
-	// Frames to wait for scene load before giving up (safety net for CI hangs).
 	static constexpr uint32_t MAX_WAIT_SCENE_FRAMES = 18000;
 
 	CameraKeypoint poseAtFrame(uint32_t measure_index) const;

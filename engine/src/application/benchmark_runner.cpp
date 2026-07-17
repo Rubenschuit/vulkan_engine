@@ -213,6 +213,9 @@ std::optional<BenchmarkConfig> BenchmarkConfig::parseArgs(int argc, char** argv)
 			else
 				throw std::runtime_error("--bench-culling expects cpu|gpu|meshlet");
 			enabled = true;
+		} else if (arg == "--bench-skybox") {
+			config.skybox = value(i, "--bench-skybox");
+			enabled = true;
 		} else if (arg == "--bench-res") {
 			unsigned w = 0, h = 0;
 			if (std::sscanf(value(i, "--bench-res"), "%ux%u", &w, &h) != 2 || w == 0 || h == 0)

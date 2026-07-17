@@ -18,6 +18,9 @@ private:
 	float m_birds_orbit_radius = 80.0f;
 	float m_birds_orbit_speed = 0.1f;
 	float m_birds_t = 0.0f;
+
+	std::vector<Entity> m_fire_lights;
+	float m_fire_t = 0.0f;
 };
 
 }

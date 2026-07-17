@@ -103,12 +103,25 @@ RenderPipeline::RenderPipeline(VeDevice& device,
 	m_viewport_resized_sub = m_event_bus.subscribe<ViewportResizedEvent>([this](const ViewportResizedEvent&) {
 		emitResolutionChangedEvent();
 	});
+	m_settings_request_sub = m_event_bus.subscribe<RenderSettingsRequestEvent>([this](const RenderSettingsRequestEvent& e) {
+		if (e.exposure)
+			m_settings.exposure = *e.exposure;
+		if (e.ibl_diffuse_intensity)
+			m_settings.ibl_diffuse_intensity = *e.ibl_diffuse_intensity;
+		if (e.ibl_specular_intensity)
+			m_settings.ibl_specular_intensity = *e.ibl_specular_intensity;
+		if (e.ambient_light_intensity)
+			m_settings.ambient_light_intensity = *e.ambient_light_intensity;
+		if (e.bloom_strength)
+			m_settings.bloom_strength = *e.bloom_strength;
+	});
 }
 
 RenderPipeline::~RenderPipeline() {
 	m_event_bus.unsubscribe<SceneLoadedEvent>(m_scene_loaded_sub);
 	m_event_bus.unsubscribe<SwapChainRecreatedEvent>(m_swap_chain_recreated_sub);
 	m_event_bus.unsubscribe<ViewportResizedEvent>(m_viewport_resized_sub);
+	m_event_bus.unsubscribe<RenderSettingsRequestEvent>(m_settings_request_sub);
 }
 
 void RenderPipeline::createPerFrameResources(const VeBuffer& material_ssbo) {

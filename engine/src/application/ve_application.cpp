@@ -268,6 +268,7 @@ void VeApplication::loadDefaultScene(int index) {
 		for (size_t i = 0; i < entries.size(); ++i) {
 			if (entries[i].name == m_benchmark->config().scene) {
 				m_scene_manager->loadDefaultScene(static_cast<int>(i));
+				applyBenchmarkSkybox();
 				return;
 			}
 		}
@@ -276,6 +277,13 @@ void VeApplication::loadDefaultScene(int index) {
 		return;
 	}
 	m_scene_manager->loadDefaultScene(index);
+	applyBenchmarkSkybox();
+}
+
+void VeApplication::applyBenchmarkSkybox() {
+	if (!m_benchmark || m_benchmark->config().skybox.empty())
+		return;
+	m_event_bus.enqueue(SkyboxRequestEvent{.name = m_benchmark->config().skybox});
 }
 
 // ─── Benchmark Mode ──────────────────────────────────────────────────────────
