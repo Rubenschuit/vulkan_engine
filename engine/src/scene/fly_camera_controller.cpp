@@ -1,35 +1,12 @@
 #include "pch.hpp"
 #include "scene/fly_camera_controller.hpp"
+#include "scene/camera_math.hpp"
 #include "input/input_action.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 
 namespace ve {
-
-static constexpr glm::vec3 WORLD_UP{0.0f, 0.0f, 1.0f};
-
-static glm::vec3 forwardFromYawPitch(float yaw, float pitch) {
-	return glm::normalize(glm::vec3(
-		-std::cos(pitch) * std::cos(yaw),
-		 std::cos(pitch) * std::sin(yaw),
-		 std::sin(pitch)));
-}
-
-static void clampPitch(float& p) {
-	constexpr float lim = glm::radians(89.0f);
-	if (p > lim)
-		p = lim;
-	else if (p < -lim)
-		p = -lim;
-}
-
-static void wrapYaw(float& y) {
-	if (y > glm::pi<float>())
-		y -= glm::two_pi<float>();
-	else if (y < -glm::pi<float>())
-		y += glm::two_pi<float>();
-}
 
 void FlyCameraController::setYawPitch(float yaw_rad, float pitch_rad) {
 	m_yaw_rad = yaw_rad;
@@ -38,42 +15,13 @@ void FlyCameraController::setYawPitch(float yaw_rad, float pitch_rad) {
 	clampPitch(m_pitch_rad);
 }
 
-// Compute yaw/pitch consistent with forwardFromYawPitch. We have
-//
-//    -cos(pitch) * cos(yaw)        dir.x
-// 	  cos(pitch) * sin(yaw)    =    dir.y
-//	    	  sin(pitch)           	dir.z ,
-//
-// therefore
-//
-//	   pitch = arcsin(dir.z).
-//
-// The yaw angle follows from
-//
-//     (dir.y / -dir.x) = sin(yaw) / cos(yaw) = tan(yaw),
-//
-// so
-//
-//     yaw = arctan( dir.y / -dir.x).
-//
-// Somewhat expensive, but only called when the camera is re-oriented
-// to look at a specific point.
 void FlyCameraController::lookAt(const glm::vec3& target) {
 	glm::vec3 dir = target - m_position;
-	float len = glm::length(dir);
-	if (len < 1e-6f)
+	if (glm::length(dir) < 1e-6f)
 		return;
-	dir = glm::normalize(dir);
-
-	m_pitch_rad = std::asin(glm::dot(dir, WORLD_UP));
-
-	glm::vec2 xy{dir.x, dir.y};
-	float xy_len = glm::length(xy);
-	if (xy_len > 1e-6f) {
-		glm::vec2 d = glm::normalize(xy);
-		m_yaw_rad = std::atan2(d.y, -d.x);
-		wrapYaw(m_yaw_rad);
-	}
+	glm::vec2 yp = yawPitchFromForward(dir, m_yaw_rad);
+	m_yaw_rad = yp.x;
+	m_pitch_rad = yp.y;
 	clampPitch(m_pitch_rad);
 }
 

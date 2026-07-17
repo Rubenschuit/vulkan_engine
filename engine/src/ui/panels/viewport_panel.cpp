@@ -171,10 +171,7 @@ void ViewportPanel::renderGizmoToolbar(EditorState& state) {
 }
 
 void ViewportPanel::renderCameraSelector(Registry* registry, EditorState& state) {
-	bool selection_is_editor = state.viewport_camera.isNull()
-		|| !registry
-		|| !registry->isAlive(state.viewport_camera)
-		|| !registry->hasComponent<CameraComponent>(state.viewport_camera);
+	bool selection_is_editor = !isSceneCamera(registry, state.viewport_camera);
 	if (selection_is_editor)
 		state.viewport_camera = Entity::null();
 

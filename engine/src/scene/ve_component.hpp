@@ -11,6 +11,7 @@
 #include "resources/ve_texture.hpp"
 
 #include "rendering/particle_emitter_params.hpp"
+#include "scene/camera_sweep.hpp"
 
 #include <glm/glm.hpp>
 #include <functional>
@@ -23,6 +24,7 @@ namespace ve {
 
 // Forward declarations
 class Registry;
+struct InputActions;
 
 // ---------------------------------------------------------------------------
 // Component type ID system
@@ -408,6 +410,8 @@ public:
 	float acceleration = 20.0f;
 	float turn_rate_deg = 540.0f;
 	float jump_speed = 7.0f; // initial upward velocity
+	float air_pitch_up_deg = 20.0f;   // nose up while ascending
+	float air_pitch_down_deg = 10.0f; // nose down while descending
 	// Yaw offset (deg) from the engine forward (+Y) to the mesh's visual front.
 	// 0 for a model authored facing +Y; 180 for one facing -Y.
 	float facing_offset_deg = 0.0f;
@@ -430,6 +434,44 @@ private:
 	float m_stick_to_floor = 0.5f;
 	float m_mass = 70.0f;
 	float m_max_strength = 100.0f;
+};
+
+// ---------------------------------------------------------------------------
+// FollowCameraComponent
+// ---------------------------------------------------------------------------
+// Third-person orbit rig that poses its own entity from the target each frame.
+// Expects a camera component on the same entity.
+class VENGINE_API FollowCameraComponent : public Component {
+public:
+	Entity target = Entity::null();
+
+	float distance = 5.0f;
+	float pivot_height = 1.2f;      // above the target origin
+	float min_distance = 0.6f;
+	float collision_radius = 0.25f;
+	float pull_out_speed = 4.0f;    // m/s the arm extends back toward `distance`
+	float mouse_sensitivity = 0.2f;
+	float look_speed = 2.0f;        // arrow keys
+	float min_pitch_deg = -70.0f;
+	float max_pitch_deg = 60.0f;
+
+	float yaw = 0.0f;
+	float pitch = glm::radians(-15.0f);
+	float current_distance = 5.0f;
+
+	// Look input + spring arm + Transform write. False when the target is invalid.
+	bool tick(const CameraSweepFn& sweep, const InputActions& actions, float dt);
+
+	// Possess entry: face the target's heading, reset the arm, write the pose now.
+	void alignBehind();
+
+	// Clamping pitch limits
+	glm::vec2 pitchLimitsRad() const;
+
+	void remapEntities(const std::unordered_map<uint32_t, Entity>& old_to_new);
+
+private:
+	void writePose(const glm::vec3& pivot);
 };
 
 // ---------------------------------------------------------------------------
@@ -495,6 +537,14 @@ public:
 	void setLocomotionCadence(float rate) { m_locomotion_cadence = std::max(rate, 0.0f); }
 	float getLocomotionCadence() const { return m_locomotion_cadence; }
 
+	// Frozen frame shown while airborne 
+	void setAirPose(int clip_index, float time) { m_air_pose_clip = clip_index; m_air_pose_time = time; }
+	int getAirPoseClip() const { return m_air_pose_clip; }
+	float getAirPoseTime() const { return m_air_pose_time; }
+
+	// Ramps one clip's weight toward `target` over fade_seconds 
+	void fadeClipWeight(uint32_t clip_index, float target, float fade_seconds);
+
 	void setNodeToEntityMap(std::vector<Entity> map) { m_node_to_entity = std::move(map); }
 	void remapEntities(const std::unordered_map<uint32_t, Entity>& old_to_new);
 
@@ -531,6 +581,8 @@ private:
 	std::vector<BlendSample1D> m_blend_samples; // sorted by position
 	float m_blend_param = 0.0f;
 	float m_locomotion_cadence = 1.0f;
+	int m_air_pose_clip = -1;
+	float m_air_pose_time = 0.0f;
 	float m_phase = 0.0f;                       // in [0,1)
 	bool m_blend_space_active = false;
 	bool m_phase_sync = true;
@@ -558,20 +610,12 @@ public:
 	float getFar() const { return m_far_plane; }
 	void setFar(float v) { m_far_plane = v; }
 
-	bool isActive() const { return m_active; }
-	void setActive(bool v) { m_active = v; }
-
-	int getPriority() const { return m_priority; }
-	void setPriority(int v) { m_priority = v; }
-
 private:
 	ProjectionType m_projection = ProjectionType::Perspective;
 	float m_fov_y_radians = glm::radians(55.0f);
 	float m_ortho_size = 10.0f;
 	float m_near_plane = 0.1f;
 	float m_far_plane = 1000.0f;
-	bool  m_active = true;
-	int   m_priority = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -685,5 +729,6 @@ extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<CameraCompon
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<ParticleEmitterComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MorphComponent>();
 extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<CharacterControllerComponent>();
+extern template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<FollowCameraComponent>();
 
 } // namespace ve

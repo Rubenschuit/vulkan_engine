@@ -1,9 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <scene/ve_entity.hpp>
 #include <scene/ve_component_pool.hpp>
 #include <scene/ve_registry.hpp>
 #include <scene/ve_component.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+
+using Catch::Approx;
 
 // ── Entity ──────────────────────────────────────────────────────────────────
 
@@ -536,4 +540,59 @@ TEST_CASE("Registry clear resets everything", "[ecs][registry]") {
 	REQUIRE(reg.entityCount() == 0);
 	REQUIRE(reg.transforms().size() == 0);
 	REQUIRE(reg.pointLights().size() == 0);
+}
+
+// ── Registry: setWorldPose ──────────────────────────────────────────────────
+
+TEST_CASE("setWorldPose lands the entity at the requested world pose", "[ecs][registry][transform]") {
+	ve::Registry reg;
+
+	const glm::vec3 want_pos{3.0f, -4.0f, 5.0f};
+	const glm::quat want_rot = glm::angleAxis(glm::radians(35.0f), glm::normalize(glm::vec3(1.0f, 2.0f, 3.0f)));
+
+	SECTION("root entity: the write is the local transform") {
+		ve::Entity e = reg.createGameObject();
+		reg.setWorldPose(e, want_pos, want_rot);
+
+		auto* tc = reg.getComponent<ve::TransformComponent>(e);
+		REQUIRE(glm::length(tc->getTranslation() - want_pos) == Approx(0.0f).margin(1e-5));
+		REQUIRE(std::abs(glm::dot(tc->getRotation(), want_rot)) == Approx(1.0f).margin(1e-5));
+	}
+
+	SECTION("parented entity: the parent chain is undone") {
+		ve::Entity parent = reg.createGameObject();
+		auto* ptc = reg.getComponent<ve::TransformComponent>(parent);
+		ptc->setTranslation({10.0f, 20.0f, -5.0f});
+		ptc->setRotationEuler({0.0f, 0.0f, glm::radians(90.0f)});
+
+		ve::Entity child = reg.createGameObject();
+		reg.setParent(child, parent);
+		reg.setWorldPose(child, want_pos, want_rot);
+
+		const glm::mat4& world = reg.getWorldTransform(child);
+		REQUIRE(glm::length(glm::vec3(world[3]) - want_pos) == Approx(0.0f).margin(1e-4));
+		REQUIRE(std::abs(glm::dot(reg.getWorldRotation(child), want_rot)) == Approx(1.0f).margin(1e-4));
+
+		// The local transform is genuinely different -- otherwise this proves nothing.
+		auto* ctc = reg.getComponent<ve::TransformComponent>(child);
+		REQUIRE(glm::length(ctc->getTranslation() - want_pos) > 0.1f);
+	}
+
+	SECTION("scaled parent: position still resolves, basis stays unit") {
+		ve::Entity parent = reg.createGameObject();
+		reg.getComponent<ve::TransformComponent>(parent)->setScale({2.0f, 2.0f, 2.0f});
+
+		ve::Entity child = reg.createGameObject();
+		reg.setParent(child, parent);
+		reg.setWorldPose(child, want_pos, want_rot);
+
+		const glm::mat4& world = reg.getWorldTransform(child);
+		REQUIRE(glm::length(glm::vec3(world[3]) - want_pos) == Approx(0.0f).margin(1e-4));
+	}
+
+	SECTION("no TransformComponent is a no-op, not a crash") {
+		ve::Entity bare = reg.createEntity("bare");
+		reg.setWorldPose(bare, want_pos, want_rot);
+		REQUIRE_FALSE(reg.hasComponent<ve::TransformComponent>(bare));
+	}
 }

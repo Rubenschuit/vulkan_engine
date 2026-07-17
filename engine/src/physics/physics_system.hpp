@@ -28,6 +28,13 @@ struct DebugShape {
 	std::vector<DebugShape> sub_shapes; // compound sub-shapes
 };
 
+struct PhysicsSweepHit {
+	float distance = 0.0f;
+	glm::vec3 position{0.0f};
+	glm::vec3 normal{0.0f, 0.0f, 1.0f};
+	Entity entity = Entity::null();
+};
+
 struct PhysicsConfig {
 	float fixed_timestep = 1.0f / 60.0f;
 	uint32_t max_substeps = 4;
@@ -59,6 +66,8 @@ public:
 
 	uint32_t getActiveBodyCount() const;
 	std::optional<DebugShape> getDebugShape(Entity entity, Registry& registry) const;
+	std::optional<PhysicsSweepHit> sweepSphereStatic(const glm::vec3& from, const glm::vec3& to,
+	                                                 float radius) const;
 
 private:
 	// Opaque pointer to implementation to avoid heavy includes in the header

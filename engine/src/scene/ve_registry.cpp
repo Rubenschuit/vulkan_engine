@@ -436,6 +436,23 @@ glm::quat Registry::getWorldRotation(Entity e) const {
 	return glm::normalize(glm::quat_cast(basis));
 }
 
+void Registry::setWorldPose(Entity e, const glm::vec3& world_pos, const glm::quat& world_rot) {
+	auto* tc = getComponent<TransformComponent>(e);
+	if (!tc)
+		return;
+
+	Entity parent = getParent(e);
+	if (parent.isNull() || !isAlive(parent) || !hasComponent<TransformComponent>(parent)) {
+		tc->setTranslation(world_pos);
+		tc->setRotation(glm::normalize(world_rot));
+		return;
+	}
+
+	const glm::mat4& parent_world = getWorldTransform(parent);
+	tc->setTranslation(glm::vec3(glm::inverse(parent_world) * glm::vec4(world_pos, 1.0f)));
+	tc->setRotation(glm::normalize(glm::inverse(getWorldRotation(parent)) * world_rot));
+}
+
 void Registry::invalidateWorldTransform(Entity e) {
 	if (e.isNull() || e.index() >= m_world_cache.size())
 		return;
@@ -556,13 +573,15 @@ Entity Registry::cloneEntityRecursive(Entity source) {
 	}
 
 	// Remap cross-entity references so clones drive their own joints/targets.
-	// Hand-listed: AnimatorComponent and SkinComponent are the only components
-	// that store Entity references today.
+	// Hand-listed: AnimatorComponent, SkinComponent, and FollowCameraComponent are
+	// the only components that store Entity references today.
 	for (Entity clone : cloned_entities) {
 		if (auto* anim = getComponent<AnimatorComponent>(clone))
 			anim->remapEntities(old_to_new);
 		if (auto* skin = getComponent<SkinComponent>(clone))
 			skin->remapEntities(old_to_new);
+		if (auto* fc = getComponent<FollowCameraComponent>(clone))
+			fc->remapEntities(old_to_new);
 	}
 
 	m_events.endBatch();
@@ -625,6 +644,16 @@ Entity Registry::createSpotLight(float intensity, float radius, glm::vec3 color,
 	m_events.endBatch();
 	auto* transform = getComponent<TransformComponent>(e);
 	transform->setScale(glm::vec3(radius));
+	return e;
+}
+
+Entity Registry::createFollowCamera(Entity target, const std::string& name) {
+	Entity e = createGameObject(name);
+	m_events.beginBatch();
+	addComponent<CameraComponent>(e);
+	auto& fc = addComponent<FollowCameraComponent>(e);
+	fc.target = target;
+	m_events.endBatch();
 	return e;
 }
 

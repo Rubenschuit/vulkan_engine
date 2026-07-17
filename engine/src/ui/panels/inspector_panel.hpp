@@ -18,6 +18,7 @@ class CharacterControllerComponent;
 class AnimatorComponent;
 class SkinComponent;
 class CameraComponent;
+class FollowCameraComponent;
 class ParticleEmitterComponent;
 class VeTexture;
 class TextureInspector;
@@ -42,10 +43,11 @@ private:
 	void renderSpotLight(SpotLightComponent& light);
 	void renderAreaLight(AreaLightComponent& light, TransformComponent& transform);
 	void renderRigidbody(RigidbodyComponent& rb, EditorState& state);
-	void renderCharacterController(Entity entity, CharacterControllerComponent& cc, EditorState& state);
+	void renderCharacterController(Registry& registry, Entity entity, CharacterControllerComponent& cc, EditorState& state);
 	void renderAnimator(AnimatorComponent& animator);
 	void renderSkin(Registry& registry, SkinComponent& skin, EditorState& state);
 	void renderCamera(CameraComponent& camera);
+	void renderFollowCamera(Registry& registry, FollowCameraComponent& fc);
 	void renderParticleEmitter(ParticleEmitterComponent& emitter);
 
 	// Texture thumbnail cache

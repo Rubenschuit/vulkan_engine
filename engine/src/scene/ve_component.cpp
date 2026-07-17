@@ -1,6 +1,8 @@
 #include "scene/ve_component.hpp"
 #include "scene/ve_registry.hpp"
 #include "scene/ecs_event_dispatcher.hpp"
+#include "scene/camera_math.hpp"
+#include "input/input_action.hpp"
 #include "resources/ve_mesh.hpp"
 #include "ve_config.hpp"
 
@@ -31,6 +33,7 @@ template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<CameraComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<ParticleEmitterComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<MorphComponent>();
 template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<CharacterControllerComponent>();
+template VENGINE_API size_t ComponentTypeIDSystem::getTypeID<FollowCameraComponent>();
 
 
 // ---------------------------------------------------------------------------
@@ -857,6 +860,26 @@ void AnimatorComponent::crossFadeTo(uint32_t clip_index, float fade_seconds) {
 	}
 }
 
+void AnimatorComponent::fadeClipWeight(uint32_t clip_index, float target, float fade_seconds) {
+	if (clip_index >= m_clip_bindings.size() || !m_clip_bindings[clip_index].clip)
+		return;
+	auto& b = m_clip_bindings[clip_index];
+	b.target_weight = glm::clamp(target, 0.0f, 1.0f);
+	if (fade_seconds <= 0.0f) {
+		b.weight = b.target_weight;
+		b.fade_rate = 0.0f;
+		if (b.weight == 0.0f && b.playing) {
+			b.playing = false;
+			if (m_registry) {
+				updateAnimatedFlags();
+				m_registry->events().emit(AnimationStateChangedEvent{m_entity});
+			}
+		}
+		return;
+	}
+	b.fade_rate = 1.0f / fade_seconds;
+}
+
 bool AnimatorComponent::isPhaseSyncedMember(uint32_t clip_index) const {
 	for (const auto& s : m_blend_samples)
 		if (s.clip_index == clip_index)
@@ -961,6 +984,85 @@ void SkinComponent::remapEntities(const std::unordered_map<uint32_t, Entity>& ol
 		if (it != old_to_new.end())
 			m_skeleton_root = it->second;
 	}
+}
+
+void FollowCameraComponent::remapEntities(const std::unordered_map<uint32_t, Entity>& old_to_new) {
+	if (!target.isNull()) {
+		auto it = old_to_new.find(target.index());
+		if (it != old_to_new.end())
+			target = it->second;
+	}
+}
+
+glm::vec2 FollowCameraComponent::pitchLimitsRad() const {
+	const float lim = glm::radians(ORBIT_PITCH_LIMIT_DEG);
+	float lo = glm::clamp(glm::radians(min_pitch_deg), -lim, lim);
+	float hi = glm::clamp(glm::radians(max_pitch_deg), -lim, lim);
+	return {lo, std::max(lo, hi)};
+}
+
+void FollowCameraComponent::writePose(const glm::vec3& pivot) {
+	const glm::vec3 fwd = forwardFromYawPitch(yaw, pitch);
+	const glm::vec3 right = glm::normalize(glm::cross(fwd, WORLD_UP));
+	const glm::vec3 up = glm::cross(right, fwd);
+	m_registry->setWorldPose(m_entity, pivot - fwd * current_distance,
+	                         glm::quat_cast(glm::mat3(right, fwd, up)));
+}
+
+bool FollowCameraComponent::tick(const CameraSweepFn& sweep, const InputActions& actions, float dt) {
+	if (!m_registry || target.isNull() || !m_registry->isAlive(target))
+		return false;
+	if (!m_registry->hasComponent<TransformComponent>(m_entity))
+		return false;
+
+	float yaw_delta = actions.look_yaw * look_speed * dt;
+	float pitch_delta = actions.look_pitch * look_speed * dt;
+	if (actions.mouse_look_enabled) {
+		yaw_delta += glm::radians(actions.mouse_dx * mouse_sensitivity);
+		pitch_delta += glm::radians(actions.mouse_dy * mouse_sensitivity);
+	}
+	yaw += yaw_delta;
+	pitch += pitch_delta;
+	wrapYaw(yaw);
+	const glm::vec2 limits = pitchLimitsRad();
+	clampPitchRange(pitch, limits.x, limits.y);
+
+	const glm::vec3 pivot = glm::vec3(m_registry->getWorldTransform(target)[3]) + WORLD_UP * pivot_height;
+	const glm::vec3 fwd = forwardFromYawPitch(yaw, pitch);
+
+	float target_len = std::max(distance, min_distance);
+	if (sweep) {
+		if (auto hit = sweep(pivot, pivot - fwd * target_len, collision_radius))
+			target_len = glm::clamp(*hit, min_distance, target_len);
+	}
+	// Pull in instantly, pull out gradually.
+	if (target_len < current_distance)
+		current_distance = target_len;
+	else
+		current_distance = std::min(target_len, current_distance + pull_out_speed * dt);
+
+	writePose(pivot);
+	return true;
+}
+
+void FollowCameraComponent::alignBehind() {
+	if (!m_registry || target.isNull() || !m_registry->isAlive(target))
+		return;
+	if (!m_registry->hasComponent<TransformComponent>(m_entity))
+		return;
+
+	glm::vec3 heading = glm::vec3(m_registry->getWorldTransform(target)[1]);
+	if (const auto* cc = m_registry->getComponent<CharacterControllerComponent>(target)) {
+		float off = glm::radians(cc->facing_offset_deg);
+		heading = glm::vec3(glm::rotate(glm::mat4(1.0f), -off, WORLD_UP) * glm::vec4(heading, 0.0f));
+	}
+	yaw = yawPitchFromForward(heading, yaw).x;
+	const glm::vec2 limits = pitchLimitsRad();
+	clampPitchRange(pitch, limits.x, limits.y);
+	current_distance = distance;
+
+	const glm::vec3 pivot = glm::vec3(m_registry->getWorldTransform(target)[3]) + WORLD_UP * pivot_height;
+	writePose(pivot);
 }
 
 void AnimatorComponent::update(float delta_time) {

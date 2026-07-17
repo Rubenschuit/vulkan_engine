@@ -32,9 +32,15 @@ struct CameraView {
 
 CameraView buildCameraView(const Registry& registry, Entity entity, float aspect);
 
-// Returns a CameraView built from `camera` if it is alive in `registry` and has
-// a CameraComponent; otherwise nullopt. Caller decides what to do when empty
-// (e.g. fall back to an editor camera).
+// True when `camera` is alive in `registry` and carries a CameraComponent
+bool isSceneCamera(const Registry* registry, Entity camera);
+
+// Basis of an entity camera: columns are {right, forward, up}. Identity rotation
+// looks +Y, right +X, up +Z. Scale is stripped.
+glm::mat3 sceneCameraBasis(const Registry& registry, Entity entity);
+
+// Returns a CameraView built from `camera` if isSceneCamera(registry, camera);
+// otherwise nullopt
 std::optional<CameraView> tryGetSceneCamera(const Registry* registry, Entity camera, float aspect);
 
 }

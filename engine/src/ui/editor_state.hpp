@@ -68,8 +68,6 @@ struct CopiedCamera {
 	float ortho_size{10.0f};
 	float near_plane{0.1f};
 	float far_plane{1000.0f};
-	bool active{true};
-	int priority{0};
 };
 
 using ComponentClipboard = std::variant<CopiedTransform, CopiedPointLight, CopiedDirectionalLight, CopiedSpotLight, CopiedAreaLight, CopiedRigidbody, CopiedCamera>;
@@ -137,6 +135,8 @@ struct VENGINE_API EditorState {
 
 	// Entity driven by WASD instead of the editor camera. Null = none.
 	Entity possessed_entity = Entity::null();
+
+	bool follow_possessed_camera = true;
 
 	// Panel visibility
 	bool show_hierarchy = true;

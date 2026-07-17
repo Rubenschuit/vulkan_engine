@@ -23,6 +23,10 @@ public:
 private:
 	Entity m_driven = Entity::null();
 	bool m_jump_was_down = false;
+	float m_air_time = 0.0f;
+	bool m_air_posed = false;
+	float m_air_pitch = 0.0f; // current lean, rad
+	bool m_was_pitched = false;
 };
 
 } 

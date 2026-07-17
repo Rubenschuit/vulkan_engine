@@ -69,7 +69,8 @@ using ComponentPools = std::tuple<
 	ComponentPool<CameraComponent>,
 	ComponentPool<ParticleEmitterComponent>,
 	ComponentPool<MorphComponent>,
-	ComponentPool<CharacterControllerComponent>
+	ComponentPool<CharacterControllerComponent>,
+	ComponentPool<FollowCameraComponent>
 >;
 
 class VENGINE_API Registry {
@@ -161,6 +162,9 @@ public:
 	ComponentPool<CameraComponent>& cameras() { return pool<CameraComponent>(); }
 	const ComponentPool<CameraComponent>& cameras() const { return pool<CameraComponent>(); }
 
+	ComponentPool<FollowCameraComponent>& followCameras() { return pool<FollowCameraComponent>(); }
+	const ComponentPool<FollowCameraComponent>& followCameras() const { return pool<FollowCameraComponent>(); }
+
 	ComponentPool<ParticleEmitterComponent>& particleEmitters() { return pool<ParticleEmitterComponent>(); }
 	const ComponentPool<ParticleEmitterComponent>& particleEmitters() const { return pool<ParticleEmitterComponent>(); }
 
@@ -188,6 +192,9 @@ public:
 	const glm::mat4& getWorldTransform(Entity e) const;
 	const glm::mat3& getWorldNormal(Entity e) const;
 	glm::quat getWorldRotation(Entity e) const;
+	// Writes a world-space pose onto e's local TransformComponent, undoing the parent
+	// chain. Local scale is left alone. No-op if e has no TransformComponent.
+	void setWorldPose(Entity e, const glm::vec3& world_pos, const glm::quat& world_rot);
 	void invalidateWorldTransform(Entity e);
 	// Ensures the world-transform cache entry for e is populated
 	void primeWorldTransform(Entity e) const { (void)getWorldTransform(e); }
@@ -210,6 +217,8 @@ public:
 	                       float outer_cone = glm::radians(35.0f));
 	Entity createAreaLight(float intensity = 1.0f, glm::vec3 color = glm::vec3(1.0f),
 	                       float width = 1.0f, float height = 1.0f);
+	// Root-level camera entity (Transform + Camera + FollowCamera) orbiting `target`
+	Entity createFollowCamera(Entity target, const std::string& name = "Follow Camera");
 
 	void clear();
 

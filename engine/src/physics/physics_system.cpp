@@ -31,6 +31,12 @@
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
+#include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/ShapeCast.h>
+#include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/ObjectLayer.h>
+#include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
 #include <Jolt/Core/IssueReporting.h>
 
 JPH_SUPPRESS_WARNINGS
@@ -60,6 +66,20 @@ static void JoltTrace(const char* inFmt, ...) {
 }
 
 namespace ve {
+
+// ── Entity <-> Jolt user data ───────────────────────────────────────────────
+
+// Jolt zero-initializes user data, and Entity(index 0, generation 0) packs to raw id
+// 0 -- the first entity of every scene. Biasing by one keeps 0 meaning "no entity"
+static uint64_t toUserData(Entity e) {
+	return static_cast<uint64_t>(e.id()) + 1;
+}
+
+static Entity entityFromUserData(uint64_t user_data) {
+	if (user_data == 0)
+		return Entity::null();
+	return Entity::fromRaw(static_cast<uint32_t>(user_data - 1));
+}
 
 // ── Jolt layer configuration ────────────────────────────────────────────────
 
@@ -141,8 +161,8 @@ public:
 		const JPH::Body& body2,
 		[[maybe_unused]] const JPH::ContactManifold& manifold,
 		[[maybe_unused]] JPH::ContactSettings& settings) override {
-		Entity a = Entity::fromRaw(static_cast<uint32_t>(body1.GetUserData()));
-		Entity b = Entity::fromRaw(static_cast<uint32_t>(body2.GetUserData()));
+		Entity a = entityFromUserData(body1.GetUserData());
+		Entity b = entityFromUserData(body2.GetUserData());
 		auto cp = manifold.GetWorldSpaceContactPointOn1(0);
 		auto cn = manifold.mWorldSpaceNormal;
 		event_bus.enqueue(CollisionEvent{
@@ -475,7 +495,7 @@ struct PhysicsSystem::Impl {
 			VE_LOGW("PhysicsSystem: failed to create body for entity " << entity.index());
 			return;
 		}
-		body->SetUserData(static_cast<uint64_t>(entity.id()));
+		body->SetUserData(toUserData(entity));
 
 		JPH::EActivation activation = (rb.getMotionType() == PhysicsMotionType::Static)
 			? JPH::EActivation::DontActivate
@@ -564,7 +584,7 @@ struct PhysicsSystem::Impl {
 		// Rotation stays identity: the capsule is symmetric and entity yaw is visual-only
 		return new JPH::CharacterVirtual(&settings,
 			JPH::RVec3(pos.x, pos.y, pos.z), JPH::Quat::sIdentity(),
-			static_cast<uint64_t>(entity.id()), physics_system.get());
+			toUserData(entity), physics_system.get());
 	}
 
 	void onCharacterAdded(Entity entity, CharacterControllerComponent& cc) {
@@ -1265,7 +1285,7 @@ struct PhysicsSystem::Impl {
 		JPH::Body* body = body_interface.CreateBody(body_settings);
 		if (!body)
 			return false;
-		body->SetUserData(static_cast<uint64_t>(entity.id()));
+		body->SetUserData(toUserData(entity));
 
 		JPH::EActivation activation = (rb.getMotionType() == PhysicsMotionType::Static)
 			? JPH::EActivation::DontActivate
@@ -1707,6 +1727,53 @@ void PhysicsSystem::addStaticCollidersForAllMeshes(Registry& registry) {
 
 uint32_t PhysicsSystem::getActiveBodyCount() const {
 	return m_impl->physics_system->GetNumActiveBodies(JPH::EBodyType::RigidBody);
+}
+
+std::optional<PhysicsSweepHit> PhysicsSystem::sweepSphereStatic(const glm::vec3& from,
+                                                                const glm::vec3& to,
+                                                                float radius) const {
+	if (!m_impl || !m_impl->physics_system)
+		return std::nullopt;
+
+	const glm::vec3 delta = to - from;
+	const float len = glm::length(delta);
+	if (len < 1e-4f || radius <= 0.0f)
+		return std::nullopt;
+
+	JPH::SphereShape sphere(radius);
+	sphere.SetEmbedded();
+
+	const JPH::RShapeCast cast = JPH::RShapeCast::sFromWorldTransform(
+		&sphere, JPH::Vec3::sReplicate(1.0f),
+		JPH::RMat44::sTranslation(JPH::RVec3(from.x, from.y, from.z)),
+		JPH::Vec3(delta.x, delta.y, delta.z));
+
+	JPH::ShapeCastSettings settings;
+	JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
+
+	// Static only
+	const JPH::SpecifiedBroadPhaseLayerFilter bp_filter(BPLayers::NON_MOVING);
+	const JPH::SpecifiedObjectLayerFilter obj_filter(Layers::NON_MOVING);
+
+	m_impl->physics_system->GetNarrowPhaseQuery().CastShape(
+		cast, settings, JPH::RVec3::sZero(), collector, bp_filter, obj_filter);
+
+	if (!collector.HadHit())
+		return std::nullopt;
+
+	const JPH::ShapeCastResult& h = collector.mHit;
+	PhysicsSweepHit out;
+	out.distance = h.mFraction * len;
+	out.position = {h.mContactPointOn2.GetX(), h.mContactPointOn2.GetY(), h.mContactPointOn2.GetZ()};
+	if (h.mPenetrationAxis.LengthSq() > 1e-12f) {
+		const JPH::Vec3 n = -h.mPenetrationAxis.Normalized();
+		out.normal = {n.GetX(), n.GetY(), n.GetZ()};
+	} else {
+		out.normal = -delta / len;
+	}
+	out.entity = entityFromUserData(
+		m_impl->physics_system->GetBodyInterface().GetUserData(h.mBodyID2));
+	return out;
 }
 
 // Convert a Jolt shape into a DebugShape at a given world position/rotation.

@@ -112,19 +112,22 @@ void VeApplication::run() {
 		}
 		m_total_time += m_frame_time;
 
-		// Process input
+		// Process input. The camera itself advances post-physics; this phase only
+		// consumes input for the character (with last frame's camera forward).
+		InputActions cam_actions{};
 		if (!benchmarking) {
 			m_input_controller.processInput(m_frame_time);
-			InputActions cam_actions = m_input_controller.getActions();
-			if (Registry* reg = m_scene_manager->getActiveRegistry()) {
-				if (m_character_input.tick(*reg, cam_actions, m_cameras.flyCamera().forward(),
-				                           m_editor->getState().possessed_entity, m_frame_time)) {
-					cam_actions.move_forward = 0.0f;
-					cam_actions.move_right = 0.0f;
-					cam_actions.move_up = 0.0f;
-				}
+			cam_actions = m_input_controller.getActions();
+			Registry* reg = m_scene_manager->getActiveRegistry();
+			EditorState& state = m_editor->getState();
+
+			glm::vec3 camera_forward = m_cameras.activeForward(reg, state.viewport_camera);
+			if (reg && m_character_input.tick(*reg, cam_actions, camera_forward,
+			                                  state.possessed_entity, m_frame_time)) {
+				cam_actions.move_forward = 0.0f;
+				cam_actions.move_right = 0.0f;
+				cam_actions.move_up = 0.0f;
 			}
-			m_cameras.flyCamera().tick(cam_actions, m_frame_time);
 		}
 
 		{
@@ -145,6 +148,14 @@ void VeApplication::run() {
 			m_ve_renderer.getProfiler().beginCpuTimer(ProfileTimer::PHYSICS);
 			m_physics_system->update(m_frame_time, scene->getRegistry());
 			m_ve_renderer.getProfiler().endCpuTimer(ProfileTimer::PHYSICS);
+		}
+
+		// Advance the active camera post-physics
+		{
+			EditorState& state = m_editor->getState();
+			if (!m_cameras.tick(m_scene_manager->getActiveRegistry(), state.viewport_camera,
+			                    cam_actions, m_frame_time))
+				state.viewport_camera = Entity::null();
 		}
 
 		{
@@ -381,6 +392,18 @@ void VeApplication::initSystems() {
 	});
 
 	m_physics_system = std::make_unique<PhysicsSystem>(m_event_bus);
+
+	// The follow camera's spring arm probes the world through this, so CameraManager
+	// stays free of physics.
+	m_cameras.setSweepFn(
+		[this](const glm::vec3& from, const glm::vec3& to, float radius) -> std::optional<float> {
+			if (!m_physics_system)
+				return std::nullopt;
+			auto hit = m_physics_system->sweepSphereStatic(from, to, radius);
+			if (!hit)
+				return std::nullopt;
+			return hit->distance;
+		});
 }
 
 void VeApplication::initEditor() {

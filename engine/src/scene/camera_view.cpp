@@ -4,11 +4,18 @@
 #include "scene/ve_component.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/gtx/matrix_decompose.hpp>
 #include <cmath>
 
 namespace ve {
+
+glm::mat3 sceneCameraBasis(const Registry& registry, Entity entity) {
+	return glm::mat3_cast(registry.getWorldRotation(entity));
+}
+
+bool isSceneCamera(const Registry* registry, Entity camera) {
+	return registry && !camera.isNull() && registry->isAlive(camera)
+	       && registry->hasComponent<CameraComponent>(camera);
+}
 
 CameraView buildCameraView(const Registry& registry, Entity entity, float aspect) {
 	CameraView v;
@@ -16,19 +23,13 @@ CameraView buildCameraView(const Registry& registry, Entity entity, float aspect
 	v.source = entity;
 
 	const glm::mat4& world = registry.getWorldTransform(entity);
-	glm::vec3 scale;
-	glm::vec3 translation;
-	glm::vec3 skew;
-	glm::quat rotation;
-	glm::vec4 perspective;
-	glm::decompose(world, scale, rotation, translation, skew, perspective);
 
 	// Identity rotation: forward = +Y, right = +X, up = +Z. Entity rotation rotates this basis.
-	glm::mat3 R = glm::mat3_cast(rotation);
-	v.right   = glm::normalize(glm::vec3(R[0]));
-	v.forward = glm::normalize(glm::vec3(R[1]));
-	v.up      = glm::normalize(glm::vec3(R[2]));
-	v.position = translation;
+	glm::mat3 R = sceneCameraBasis(registry, entity);
+	v.right   = R[0];
+	v.forward = R[1];
+	v.up      = R[2];
+	v.position = glm::vec3(world[3]);
 
 	v.view = glm::lookAt(v.position, v.position + v.forward, v.up);
 	v.inv_view = glm::inverse(v.view);
@@ -66,9 +67,7 @@ CameraView buildCameraView(const Registry& registry, Entity entity, float aspect
 }
 
 std::optional<CameraView> tryGetSceneCamera(const Registry* registry, Entity camera, float aspect) {
-	if (!registry || camera.isNull())
-		return std::nullopt;
-	if (!registry->isAlive(camera) || !registry->hasComponent<CameraComponent>(camera))
+	if (!isSceneCamera(registry, camera))
 		return std::nullopt;
 	return buildCameraView(*registry, camera, aspect);
 }

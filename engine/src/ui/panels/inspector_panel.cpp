@@ -6,6 +6,7 @@
 #include "ui/texture_inspector.hpp"
 #include "scene/ve_registry.hpp"
 #include "scene/ve_component.hpp"
+#include "scene/camera_math.hpp"
 #include "resources/ve_mesh.hpp"
 #include "resources/ve_material.hpp"
 #include "resources/ve_texture.hpp"
@@ -482,7 +483,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		}
 		ImGui::PopID();
 		if (open && registry->hasComponent<CharacterControllerComponent>(entity))
-			renderCharacterController(entity, *registry->getComponent<CharacterControllerComponent>(entity), state);
+			renderCharacterController(*registry, entity, *registry->getComponent<CharacterControllerComponent>(entity), state);
 	}
 
 	// Animator
@@ -532,8 +533,6 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 				ccp.ortho_size = cc->getOrthoSize();
 				ccp.near_plane = cc->getNear();
 				ccp.far_plane = cc->getFar();
-				ccp.active = cc->isActive();
-				ccp.priority = cc->getPriority();
 				state.component_clipboard = ccp;
 			}
 			if (state.component_clipboard && std::holds_alternative<CopiedCamera>(*state.component_clipboard))
@@ -545,8 +544,6 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 					cc->setOrthoSize(ccp.ortho_size);
 					cc->setNear(ccp.near_plane);
 					cc->setFar(ccp.far_plane);
-					cc->setActive(ccp.active);
-					cc->setPriority(ccp.priority);
 				}
 			ImGui::EndPopup();
 		}
@@ -557,6 +554,18 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		ImGui::PopID();
 		if (open && registry->hasComponent<CameraComponent>(entity))
 			renderCamera(*registry->getComponent<CameraComponent>(entity));
+	}
+
+	// Follow Camera
+	if (registry->hasComponent<FollowCameraComponent>(entity)) {
+		bool open = ImGui::CollapsingHeader(ICON_CAMERA "  Follow Camera", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+		ImGui::SameLine(ImGui::GetContentRegionAvail().x - 8.0f);
+		ImGui::PushID("remove_follow");
+		if (ImGui::SmallButton("X"))
+			registry->queueComponentRemoval<FollowCameraComponent>(entity);
+		ImGui::PopID();
+		if (open && registry->hasComponent<FollowCameraComponent>(entity))
+			renderFollowCamera(*registry, *registry->getComponent<FollowCameraComponent>(entity));
 	}
 
 	// Particle Emitter
@@ -586,6 +595,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 		bool no_dl = !registry->hasComponent<DirectionalLightComponent>(entity);
 		bool no_al = !registry->hasComponent<AreaLightComponent>(entity);
 		bool no_cam = !registry->hasComponent<CameraComponent>(entity);
+		bool no_follow = !registry->hasComponent<FollowCameraComponent>(entity);
 		bool no_emitter = !registry->hasComponent<ParticleEmitterComponent>(entity);
 		bool no_rb = !registry->hasComponent<RigidbodyComponent>(entity);
 		bool no_cc = !registry->hasComponent<CharacterControllerComponent>(entity);
@@ -602,10 +612,15 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 				registry->addComponent<AreaLightComponent>(entity);
 		}
 
-		if (no_cam || no_emitter) {
+		if (no_cam || no_follow || no_emitter) {
 			ImGui::SeparatorText("Rendering");
 			if (no_cam && ImGui::MenuItem(ICON_CAMERA "  Camera"))
 				registry->addComponent<CameraComponent>(entity);
+			if (no_follow && ImGui::MenuItem(ICON_CAMERA "  Follow Camera")) {
+				if (no_cam)
+					registry->addComponent<CameraComponent>(entity);
+				registry->addComponent<FollowCameraComponent>(entity);
+			}
 			if (no_emitter && ImGui::MenuItem(ICON_PARTICLE "  Particle Emitter"))
 				registry->addComponent<ParticleEmitterComponent>(entity);
 		}
@@ -619,7 +634,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 				registry->addComponent<CharacterControllerComponent>(entity);
 		}
 
-		if (!no_pl && !no_sl && !no_dl && !no_al && !no_cam && !no_emitter && !show_physics)
+		if (!no_pl && !no_sl && !no_dl && !no_al && !no_cam && !no_follow && !no_emitter && !show_physics)
 			ImGui::TextDisabled("No components to add");
 
 		ImGui::EndPopup();
@@ -1092,7 +1107,32 @@ void InspectorPanel::renderRigidbody(RigidbodyComponent& rb, EditorState& state)
 	}
 }
 
-void InspectorPanel::renderCharacterController(Entity entity, CharacterControllerComponent& cc, EditorState& state) {
+// Find the follow camera targeting `target`, creating one when none exists, and
+// snap it behind the character.
+static Entity acquireFollowCamera(Registry& registry, Entity target) {
+	Entity cam = Entity::null();
+	for (auto [e, fc] : registry.view<FollowCameraComponent>().includeInactive()) {
+		if (fc.target == target) {
+			cam = e;
+			break;
+		}
+	}
+	if (cam.isNull()) {
+		const std::string& name = registry.getName(target);
+		cam = registry.createFollowCamera(target, (name.empty() ? std::string{"Follow"} : name) + " Camera");
+	}
+	if (auto* fc = registry.getComponent<FollowCameraComponent>(cam))
+		fc->alignBehind();
+	return cam;
+}
+
+// True when `camera` is a follow camera whose target is `target`.
+static bool isFollowCameraOf(Registry& registry, Entity camera, Entity target) {
+	const auto* fc = registry.getComponent<FollowCameraComponent>(camera);
+	return fc && fc->target == target;
+}
+
+void InspectorPanel::renderCharacterController(Registry& registry, Entity entity, CharacterControllerComponent& cc, EditorState& state) {
 	constexpr float label_w = 110.0f;
 
 	float radius = cc.getRadius();
@@ -1134,6 +1174,12 @@ void InspectorPanel::renderCharacterController(Entity entity, CharacterControlle
 	labeledWidget(label_w, "Jump Speed", [&]() {
 		ImGui::DragFloat("##CcJumpSpeed", &cc.jump_speed, 0.1f, 0.0f, 50.0f, "%.2f m/s");
 	});
+	labeledWidget(label_w, "Air Pitch Up", [&]() {
+		ImGui::DragFloat("##CcAirPitchUp", &cc.air_pitch_up_deg, 0.5f, 0.0f, 45.0f, "%.0f deg");
+	});
+	labeledWidget(label_w, "Air Pitch Down", [&]() {
+		ImGui::DragFloat("##CcAirPitchDown", &cc.air_pitch_down_deg, 0.5f, 0.0f, 45.0f, "%.0f deg");
+	});
 	labeledWidget(label_w, "Facing Offset", [&]() {
 		ImGui::DragFloat("##CcFacing", &cc.facing_offset_deg, 1.0f, -180.0f, 180.0f, "%.0f deg");
 	});
@@ -1144,12 +1190,26 @@ void InspectorPanel::renderCharacterController(Entity entity, CharacterControlle
 	const bool possessed = state.possessed_entity == entity;
 	float button_width = ImGui::GetContentRegionAvail().x;
 	if (possessed) {
-		if (ImGui::Button("Unpossess", ImVec2(button_width, 0)))
+		if (ImGui::Button("Unpossess", ImVec2(button_width, 0))) {
 			state.possessed_entity = Entity::null();
-		ImGui::TextDisabled("WASD moves this character (camera-relative), Shift runs");
+			if (isFollowCameraOf(registry, state.viewport_camera, entity))
+				state.viewport_camera = Entity::null();
+		}
+		if (ImGui::Checkbox("Follow camera", &state.follow_possessed_camera)) {
+			if (state.follow_possessed_camera)
+				state.viewport_camera = acquireFollowCamera(registry, entity);
+			else if (isFollowCameraOf(registry, state.viewport_camera, entity))
+				state.viewport_camera = Entity::null();
+		}
+		ImGui::TextDisabled(state.follow_possessed_camera
+			? "WASD moves this character (camera-relative), mouse orbits, Shift runs, Space jumps"
+			: "WASD moves this character (camera-relative), Shift runs, Space jumps");
 	} else {
-		if (ImGui::Button("Possess", ImVec2(button_width, 0)))
+		if (ImGui::Button("Possess", ImVec2(button_width, 0))) {
 			state.possessed_entity = entity;
+			if (state.follow_possessed_camera)
+				state.viewport_camera = acquireFollowCamera(registry, entity);
+		}
 	}
 }
 
@@ -1312,9 +1372,15 @@ void InspectorPanel::renderAnimator(AnimatorComponent& animator) {
 					ImGui::Text("Time  %.2fs / %.2fs", binding.current_time, binding.clip->duration);
 				} else {
 					float time = binding.current_time;
-					if (ImGui::SliderFloat("Time", &time, 0.0f, binding.clip->duration, "%.2fs"))
+					if (ImGui::SliderFloat("Time", &time, 0.0f, binding.clip->duration, "%.2fs")) {
 						animator.setTime(i, time);
+						// Scrubbing the air-pose binding retunes the pose frame itself
+						if (static_cast<int>(i) == animator.getAirPoseClip())
+							animator.setAirPose(static_cast<int>(i), time);
+					}
 				}
+				if (static_cast<int>(i) == animator.getAirPoseClip())
+					ImGui::TextDisabled("Air clip: Time sets the airborne entry frame");
 
 				float speed = binding.speed;
 				if (ImGui::DragFloat("Speed", &speed, 0.01f, -10.0f, 10.0f, "%.2f"))
@@ -1413,15 +1479,51 @@ void InspectorPanel::renderCamera(CameraComponent& camera) {
 			camera.setFar(far_p);
 	}, [&]() { camera.setFar(1000.0f); });
 
-	bool active = camera.isActive();
-	if (ImGui::Checkbox("Active##Camera", &active))
-		camera.setActive(active);
+}
 
-	int priority = camera.getPriority();
-	labeledWidget(label_w, "Priority", [&]() {
-		if (ImGui::DragInt("##Priority", &priority, 1.0f, -1000, 1000))
-			camera.setPriority(priority);
-	}, [&]() { camera.setPriority(0); });
+void InspectorPanel::renderFollowCamera(Registry& registry, FollowCameraComponent& fc) {
+	constexpr float label_w = 110.0f;
+
+	if (fc.target.isNull() || !registry.isAlive(fc.target)) {
+		ImGui::TextDisabled("Target: none");
+	} else {
+		const std::string& name = registry.getName(fc.target);
+		ImGui::TextDisabled("Target: %s", name.empty() ? "<unnamed>" : name.c_str());
+	}
+	ImGui::TextDisabled("arm %.2f / %.2f m", fc.current_distance, fc.distance);
+
+	labeledWidget(label_w, "Distance", [&]() {
+		ImGui::DragFloat("##FcDistance", &fc.distance, 0.05f, 0.5f, 20.0f, "%.2f m",
+			ImGuiSliderFlags_AlwaysClamp);
+	});
+	labeledWidget(label_w, "Pivot Height", [&]() {
+		ImGui::DragFloat("##FcPivot", &fc.pivot_height, 0.02f, 0.0f, 4.0f, "%.2f m",
+			ImGuiSliderFlags_AlwaysClamp);
+	});
+	labeledWidget(label_w, "Min Distance", [&]() {
+		ImGui::DragFloat("##FcMinDist", &fc.min_distance, 0.02f, 0.1f, 3.0f, "%.2f m",
+			ImGuiSliderFlags_AlwaysClamp);
+	});
+	labeledWidget(label_w, "Collision Radius", [&]() {
+		ImGui::DragFloat("##FcRadius", &fc.collision_radius, 0.01f, 0.05f, 1.0f, "%.2f m",
+			ImGuiSliderFlags_AlwaysClamp);
+	});
+	labeledWidget(label_w, "Pull Out Speed", [&]() {
+		ImGui::DragFloat("##FcPullOut", &fc.pull_out_speed, 0.1f, 0.5f, 20.0f, "%.1f m/s",
+			ImGuiSliderFlags_AlwaysClamp);
+	});
+	labeledWidget(label_w, "Sensitivity", [&]() {
+		ImGui::DragFloat("##FcSens", &fc.mouse_sensitivity, 0.005f, 0.01f, 2.0f, "%.3f",
+			ImGuiSliderFlags_AlwaysClamp);
+	});
+	labeledWidget(label_w, "Pitch Min", [&]() {
+		ImGui::DragFloat("##FcPitchMin", &fc.min_pitch_deg, 1.0f, -ORBIT_PITCH_LIMIT_DEG, 0.0f,
+			"%.0f deg", ImGuiSliderFlags_AlwaysClamp);
+	});
+	labeledWidget(label_w, "Pitch Max", [&]() {
+		ImGui::DragFloat("##FcPitchMax", &fc.max_pitch_deg, 1.0f, 0.0f, ORBIT_PITCH_LIMIT_DEG,
+			"%.0f deg", ImGuiSliderFlags_AlwaysClamp);
+	});
 }
 
 void InspectorPanel::renderParticleEmitter(ParticleEmitterComponent& emitter) {

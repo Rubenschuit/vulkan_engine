@@ -1,4 +1,5 @@
 #include "bistro_scene.hpp"
+#include "fox.hpp"
 
 #include <string>
 
@@ -64,6 +65,8 @@ BistroScene::BistroScene(const SceneContext& ctx, const AssetPaths& paths)
 			},
 		});
 	}
+
+	placeModel(foxModelRequest(m_registry, paths.fox_model, {9.0f, -46.0f, 39.0f}));
 }
 
 }

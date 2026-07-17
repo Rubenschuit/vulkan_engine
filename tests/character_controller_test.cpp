@@ -271,6 +271,59 @@ TEST_CASE("A rigidbody is refused on an entity that already has a character", "[
 }
 
 
+// ── sweepSphereStatic (camera spring-arm probe) ─────────────────────────────
+
+TEST_CASE("Sweep ignores dynamic bodies", "[character][physics][sweep]") {
+	PhysicsFixture f;
+	f.addFloor();
+	f.addDynamicBox({0.0f, 0.0f, 5.0f}, {1.0f, 1.0f, 1.0f}, 10.0f);
+	f.step(1); // bodies materialize via component events
+
+	// Straight through the box. Seeding DefaultBroadPhaseLayerFilter with NON_MOVING
+	// selects the INVERSE set (MOVING) and would hit the box -- this is that guard.
+	auto hit = f.physics.sweepSphereStatic({-5.0f, 0.0f, 5.0f}, {5.0f, 0.0f, 5.0f}, 0.25f);
+	REQUIRE_FALSE(hit.has_value());
+}
+
+TEST_CASE("Sweep ignores the CharacterVirtual capsule", "[character][physics][sweep]") {
+	PhysicsFixture f;
+	f.addFloor();
+	f.addCharacter({0.0f, 0.0f, 0.0f});
+	f.step(1);
+
+	// CharacterVirtual is not a Body, so it is invisible to queries: the camera arm
+	// needs no exclusion filter for the character it follows.
+	auto hit = f.physics.sweepSphereStatic({-5.0f, 0.0f, 0.3f}, {5.0f, 0.0f, 0.3f}, 0.1f);
+	REQUIRE_FALSE(hit.has_value());
+}
+
+TEST_CASE("Sweep hits static geometry and reports the contact", "[character][physics][sweep]") {
+	PhysicsFixture f;
+	ve::Entity floor = f.addFloor(); // top face at z = 0
+	f.step(1);
+
+	auto hit = f.physics.sweepSphereStatic({0.0f, 0.0f, 5.0f}, {0.0f, 0.0f, -5.0f}, 0.25f);
+	REQUIRE(hit.has_value());
+	// Sphere centre stops one radius above the surface: 5 - 0.25 = 4.75 travelled.
+	REQUIRE(hit->distance == Approx(4.75f).margin(0.05));
+	REQUIRE(hit->position.z == Approx(0.0f).margin(0.05));
+	REQUIRE(hit->normal.z == Approx(1.0f).margin(0.01));
+	REQUIRE(hit->entity == floor);
+}
+
+TEST_CASE("Sweep returns nullopt for a clear path and degenerate input", "[character][physics][sweep]") {
+	PhysicsFixture f;
+	f.addFloor();
+	f.step(1);
+
+	// Clear path well above the floor
+	REQUIRE_FALSE(f.physics.sweepSphereStatic({-5.0f, 0.0f, 5.0f}, {5.0f, 0.0f, 5.0f}, 0.25f).has_value());
+	// Degenerate: from == to
+	REQUIRE_FALSE(f.physics.sweepSphereStatic({0.0f, 0.0f, 5.0f}, {0.0f, 0.0f, 5.0f}, 0.25f).has_value());
+	// Non-positive radius
+	REQUIRE_FALSE(f.physics.sweepSphereStatic({0.0f, 0.0f, 5.0f}, {0.0f, 0.0f, -5.0f}, 0.0f).has_value());
+}
+
 // ── CharacterInputDriver ────────────────────────────────────────────────────
 
 namespace {
@@ -471,6 +524,92 @@ TEST_CASE("Driver turns the mesh front toward the movement heading", "[character
 		REQUIRE(mesh_front.x == Approx(-1.0f).margin(1e-3));
 		REQUIRE(mesh_front.y == Approx(0.0f).margin(1e-3));
 	}
+}
+
+TEST_CASE("Driver holds a frozen air pose while airborne and resumes the gait on landing", "[character][driver]") {
+	ve::Registry registry;
+	ve::CharacterInputDriver driver;
+
+	ve::Entity node = registry.createEntity("node");
+	registry.addComponent<ve::TransformComponent>(node);
+	ve::Entity e = registry.createEntity("c");
+	registry.addComponent<ve::TransformComponent>(e);
+	auto& cc = registry.addComponent<ve::CharacterControllerComponent>(e);
+
+	auto& anim = registry.addComponent<ve::AnimatorComponent>(e);
+	anim.setNodeToEntityMap({node});
+	uint32_t idle = anim.addClip(constantClip("idle"));
+	uint32_t run = anim.addClip(constantClip("run"), false);
+	anim.setBlendSpace1D({{.position = 0.0f, .clip_index = idle},
+	                      {.position = 1.0f, .clip_index = run}});
+	uint32_t air = anim.addClip(constantClip("air"), false);
+	anim.setSpeed(air, 0.0f);
+	anim.setAirPose(static_cast<int>(air), 0.4f);
+
+	ve::InputActions actions{};
+	ve::Entity possessed = e;
+	const glm::vec3 cam_fwd{1.0f, 0.0f, 0.0f};
+
+	// Grounded: gait drives, no air pose
+	cc.grounded = true;
+	driver.tick(registry, actions, cam_fwd, possessed, 0.06f);
+	REQUIRE(anim.isBlendSpaceActive());
+	REQUIRE_FALSE(anim.getClipBindings()[air].playing);
+
+	// Airborne but inside the debounce window: still the gait
+	cc.grounded = false;
+	driver.tick(registry, actions, cam_fwd, possessed, 0.06f);
+	REQUIRE(anim.isBlendSpaceActive());
+	REQUIRE_FALSE(anim.getClipBindings()[air].playing);
+
+	// Past the debounce: air pose in, pinned at the configured frame, gait suspended
+	driver.tick(registry, actions, cam_fwd, possessed, 0.06f);
+	REQUIRE(anim.getClipBindings()[air].playing);
+	REQUIRE(anim.getClipBindings()[air].current_time == Approx(0.4f));
+	REQUIRE_FALSE(anim.isBlendSpaceActive());
+
+	// Landing: gait resumes, air pose fades out
+	cc.grounded = true;
+	driver.tick(registry, actions, cam_fwd, possessed, 0.06f);
+	REQUIRE(anim.isBlendSpaceActive());
+	REQUIRE(anim.getClipBindings()[air].target_weight == Approx(0.0f));
+}
+
+TEST_CASE("Driver leans the character with vertical velocity while airborne", "[character][driver]") {
+	ve::Registry registry;
+	ve::CharacterInputDriver driver;
+
+	ve::Entity e = registry.createEntity("c");
+	auto& tc = registry.addComponent<ve::TransformComponent>(e);
+	auto& cc = registry.addComponent<ve::CharacterControllerComponent>(e);
+	cc.jump_speed = 5.0f;
+	cc.air_pitch_up_deg = 20.0f;
+	cc.air_pitch_down_deg = 10.0f;
+
+	ve::InputActions actions{};
+	ve::Entity possessed = e;
+	const glm::vec3 cam_fwd{1.0f, 0.0f, 0.0f};
+	auto frontZ = [&]() { return (tc.getRotation() * glm::vec3(0.0f, 1.0f, 0.0f)).z; };
+
+	// Ascending at full jump speed: nose tilts up to the configured max
+	cc.grounded = false;
+	cc.velocity = {0.0f, 0.0f, 5.0f};
+	for (int i = 0; i < 30; i++)
+		driver.tick(registry, actions, cam_fwd, possessed, 0.016f);
+	REQUIRE(frontZ() == Approx(std::sin(glm::radians(20.0f))).margin(0.02));
+
+	// Descending: nose tilts down, capped by the weaker down limit
+	cc.velocity = {0.0f, 0.0f, -5.0f};
+	for (int i = 0; i < 30; i++)
+		driver.tick(registry, actions, cam_fwd, possessed, 0.016f);
+	REQUIRE(frontZ() == Approx(-std::sin(glm::radians(10.0f))).margin(0.02));
+
+	// Landing: decays back to level
+	cc.grounded = true;
+	cc.velocity = glm::vec3(0.0f);
+	for (int i = 0; i < 30; i++)
+		driver.tick(registry, actions, cam_fwd, possessed, 0.016f);
+	REQUIRE(frontZ() == Approx(0.0f).margin(1e-3));
 }
 
 TEST_CASE("Driver maps ground speed into a normalized gait", "[character][driver]") {

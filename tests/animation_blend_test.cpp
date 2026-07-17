@@ -221,6 +221,26 @@ TEST_CASE("A non-positive speed member does not stall the shared phase", "[anima
 	REQUIRE(f.animator->getClipBindings()[a].current_time - t0 == Approx(0.1f).margin(1e-3));
 }
 
+TEST_CASE("fadeClipWeight ramps one binding and auto-stops at zero", "[animator][blend]") {
+	BlendFixture f;
+	uint32_t a = f.animator->addClip(makeClip("a", 1.0f, vec3Sampler({0.0f}, {0.0f, 0.0f, 0.0f})));
+	uint32_t b = f.animator->addClip(makeClip("b", 1.0f, vec3Sampler({0.0f}, {1.0f, 0.0f, 0.0f})));
+
+	f.animator->fadeClipWeight(b, 0.0f, 0.5f);
+	f.animator->update(0.25f);
+	REQUIRE(f.animator->getClipWeight(b) == Approx(0.5f));
+	REQUIRE(f.animator->getClipWeight(a) == Approx(1.0f)); // other bindings untouched
+
+	f.animator->update(0.3f);
+	REQUIRE(f.animator->getClipWeight(b) == Approx(0.0f));
+	REQUIRE_FALSE(f.animator->getClipBindings()[b].playing); // auto-stopped
+
+	// fade_seconds <= 0 snaps
+	f.animator->fadeClipWeight(a, 0.0f, 0.0f);
+	REQUIRE(f.animator->getClipWeight(a) == Approx(0.0f));
+	REQUIRE_FALSE(f.animator->getClipBindings()[a].playing);
+}
+
 TEST_CASE("1D blend space brackets the parameter and drives member weights", "[animator][blend]") {
 	BlendFixture f;
 	uint32_t survey = f.animator->addClip(
