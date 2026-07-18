@@ -1,5 +1,6 @@
 #pragma once
 #include "ve_entity.hpp"
+#include "ve_export.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
