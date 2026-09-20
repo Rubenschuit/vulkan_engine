@@ -20,6 +20,7 @@
 #include <glm/vec3.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ve {
@@ -30,9 +31,16 @@ struct CameraKeypoint {
 	glm::vec3 look{0.0f};
 };
 
-// --bench-culling selector; DEFAULT leaves RenderSettings untouched. The app
-// maps GPU/MESHLET to their CullingBackendMode and forces Hi-Z occlusion on.
 enum class BenchCulling { DEFAULT, CPU, GPU, MESHLET };
+
+struct RenderSettings;
+
+struct BenchSetKey {
+	const char* name;
+	void (*apply)(RenderSettings&, float);
+	bool unsigned_only = false;
+};
+VENGINE_API const BenchSetKey* findBenchSetKey(std::string_view name);
 
 struct VENGINE_API BenchmarkConfig {
 	std::string scene;                     // registered scene name; empty = app default scene
@@ -47,18 +55,33 @@ struct VENGINE_API BenchmarkConfig {
 	std::vector<CameraKeypoint> keypoints;
 	BenchCulling culling = BenchCulling::DEFAULT;
 
-	// Skybox display-name override; empty = scene/app default.
+	// Skybox display-name and exposure overrides; empty / nullopt = the scene's.
 	std::string skybox;
+	std::optional<float> skybox_exposure;
+
+	// --bench-set key=value pairs, validated against the BenchSetKey table
+	std::vector<std::pair<std::string, float>> set_values;
+
+	int debug_render_mode = -1; // RenderMode id
+	int rc_view = -1;           // RcDebugView id
 
 	// Window size override
 	uint32_t width = 0;
 	uint32_t height = 0;
 
+	// Reset the RC probe store once the scene is idle.
+	bool rc_cold_start = true;
+
 	// Recognized flags: --benchmark, --bench-scene <name>, --bench-frames <n>,
 	// --bench-warmup <n>, --bench-dt <seconds>, --bench-stats <path>,
 	// --bench-screenshot <path>, --bench-camera px,py,pz:lx,ly,lz,
 	// --bench-path <file> (one keypoint per line, same syntax; # comments ok),
-	// --bench-culling cpu|gpu|meshlet, --bench-res WxH, --bench-skybox <name>.
+	// --bench-culling cpu|gpu|meshlet, --bench-res WxH, --bench-skybox <name>,
+	// --bench-skybox-exposure <f>,
+	// --bench-set key=value (repeatable; keys in benchmark_runner.cpp's BENCH_SET_KEYS),
+	// --bench-debug-view <RenderMode id> / --bench-rc-view <RcDebugView id>
+	// (screenshot frame only),
+	// --bench-rc-cold (the default) / --bench-rc-warm (keep the load-phase store).
 	// Any of them enables benchmark mode; returns nullopt when none are present.
 	// Throws std::runtime_error on a malformed flag or unreadable path file.
 	static std::optional<BenchmarkConfig> parseArgs(int argc, char** argv);
@@ -79,6 +102,7 @@ struct VENGINE_API BenchmarkRunInfo {
 	std::string culling_backend = "cpu"; // resolved backend actually rendered
 	bool hiz_occlusion = false;
 	bool draw_indirect_count = false;
+	bool rc_enabled = false;
 };
 
 class VENGINE_API BenchmarkRunner {
@@ -93,6 +117,12 @@ public:
 
 	const BenchmarkConfig& config() const { return m_config; }
 
+	// True while the frame whose image the screenshot copies is being prepared
+	bool screenshotFrame() const {
+		return m_phase == Phase::MEASURE && !m_config.screenshot_path.empty()
+			&& m_samples.size() + 1 == m_config.measure_frames;
+	}
+
 	// Camera pose to apply for the frame about to render, or nullopt to leave
 	// the camera alone. Warmup/wait hold at keypoint 0; measure interpolates by
 	// sample index. Called by the app before building the camera view.
@@ -101,6 +131,10 @@ public:
 	// Once per rendered scene frame, before endFrame. scene_idle = active scene
 	// present and no scene swap or model load pending or in flight.
 	Action onFrame(bool scene_idle, const FrameStats& stats);
+
+	// True once, on the first frame after the scene went idle, when the config
+	// asked for a cold GI start. The app resets the RC store before rendering.
+	bool consumeRcReset();
 
 	// Aggregates samples and writes the stats JSON. Returns the process exit
 	// code: 0 ok, 3 = validation errors occurred, 4 = scene never became idle.
@@ -118,6 +152,7 @@ private:
 	uint32_t m_phase_frames = 0;
 	bool m_screenshot_requested = false;
 	bool m_load_timed_out = false;
+	bool m_rc_reset_pending = false;
 	std::vector<FrameStats> m_samples;
 };
 

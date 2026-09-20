@@ -66,14 +66,13 @@ LightSystem::LightSystem(VeDevice& device,
 									const vk::raii::DescriptorSetLayout& global_set_layout,
 									ResourceHandle<VeTexture> particle_texture,
 									vk::Format color_format,
-									vk::SampleCountFlagBits sample_count,
 									std::filesystem::path shader_path,
 									EventBus& event_bus)
 									: m_ve_device(device), m_shader_path(shader_path),
 									  m_particle_handle(std::move(particle_texture)) {
 
 	event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
-		recreatePipeline(e.offscreen_format, e.sample_count);
+		recreatePipeline(e.offscreen_format);
 	});
 
 	m_billboard_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
@@ -81,7 +80,7 @@ LightSystem::LightSystem(VeDevice& device,
 		.build();
 
 	createPipelineLayout(global_set_layout, m_billboard_set_layout->getDescriptorSetLayout());
-	createPipeline(color_format, sample_count);
+	createPipeline(color_format);
 	createBillboardDescriptorSet(descriptor_pool);
 }
 
@@ -112,10 +111,11 @@ void LightSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& glob
 	m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), pipeline_layout_info);
 }
 
-void LightSystem::createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+void LightSystem::createPipeline(vk::Format color_format) {
 	PipelineConfigInfo pipeline_config{};
 	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
-	pipeline_config.multisample_info.rasterizationSamples = sample_count;
+	// Drawn in the single-sample overlay pass after the screen-ray history copy
+	pipeline_config.multisample_info.rasterizationSamples = vk::SampleCountFlagBits::e1;
 
 	// set formats for dynamic rendering
 	pipeline_config.color_format = color_format;

@@ -27,6 +27,8 @@ GUARD_FIELDS = [
     ("hdr", lambda d: d.get("hdr")),
     ("schema", lambda d: d.get("schema")),
     ("fixed_dt", lambda d: d.get("fixed_dt")),
+    ("rc", lambda d: d.get("rc")),
+    ("overrides", lambda d: d.get("overrides")),
 ]
 
 

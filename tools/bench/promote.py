@@ -28,7 +28,8 @@ def runConfig(d):
     return (d.get("schema"), d["device"], d["driver"],
             d["resolution"]["width"], d["resolution"]["height"],
             d["msaa_samples"], d["hdr"], d["warmup_frames"], d["measured_frames"],
-            d.get("fixed_dt"))
+            d.get("fixed_dt"),
+            json.dumps(d.get("rc"), sort_keys=True), json.dumps(d.get("overrides"), sort_keys=True))
 
 
 def main():

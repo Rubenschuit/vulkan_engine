@@ -1,7 +1,7 @@
 /*  Watches RenderSettings for changes that the renderer can't apply per-frame
 *  (require pipeline recreation, descriptor rebuild, or device wait-idle) and
 *  emits the corresponding event.
-* 
+*
 *  Call tick() each frame, diffs current settings against cached, emits events.
 */
 #pragma once
@@ -48,6 +48,13 @@ private:
 	float m_depth_bias_clamp = ve::SHADOW_DEPTH_BIAS_CLAMP;
 	ShadowCullMode m_shadow_cull_mode = ShadowCullMode::Front;
 	Topology m_last_topology = Topology::TRIANGLE_LIST;
+
+	int m_ssr_max_steps = -1;
+	float m_ssr_thickness = -1.0f;
+	float m_ssr_max_roughness = -1.0f;
+	float m_ssr_max_distance = -1.0f;
+	float m_gtao_radius = -1.0f;
+	float m_gtao_intensity = -1.0f;
 };
 
-} // namespace ve
+}

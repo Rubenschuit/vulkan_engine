@@ -56,6 +56,12 @@ void SettingsWatcher::tick() {
 	bool gtao_res_changed = m_settings.gtao_half_res != m_gtao_half_res;
 	bool ssr_res_changed = m_settings.ssr_half_res != m_ssr_half_res;
 	bool shadow_atlas_res_changed = m_settings.shadow_resolution_preset != m_shadow_resolution_preset;
+	bool ssr_params_changed = m_settings.ssr_max_steps != m_ssr_max_steps
+		|| m_settings.ssr_thickness != m_ssr_thickness
+		|| m_settings.ssr_max_roughness != m_ssr_max_roughness
+		|| m_settings.ssr_max_distance != m_ssr_max_distance;
+	bool gtao_params_changed = m_settings.gtao_radius != m_gtao_radius
+		|| m_settings.gtao_intensity != m_gtao_intensity;
 
 	if (samples_changed || shadow_mask_res_changed || gtao_res_changed || ssr_res_changed || shadow_atlas_res_changed)
 		m_ve_device.getDevice().waitIdle();
@@ -118,6 +124,28 @@ void SettingsWatcher::tick() {
 		m_event_bus.emitImmediate(ShadowAtlasResolutionChangedEvent{
 			.pool = *m_resources.pool(),
 			.preset = m_shadow_resolution_preset
+		});
+	}
+
+	if (ssr_params_changed) {
+		m_ssr_max_steps = m_settings.ssr_max_steps;
+		m_ssr_thickness = m_settings.ssr_thickness;
+		m_ssr_max_roughness = m_settings.ssr_max_roughness;
+		m_ssr_max_distance = m_settings.ssr_max_distance;
+		m_event_bus.emitImmediate(SsrParametersChangedEvent{
+			.max_steps = m_ssr_max_steps,
+			.thickness = m_ssr_thickness,
+			.max_roughness = m_ssr_max_roughness,
+			.max_distance = m_ssr_max_distance
+		});
+	}
+
+	if (gtao_params_changed) {
+		m_gtao_radius = m_settings.gtao_radius;
+		m_gtao_intensity = m_settings.gtao_intensity;
+		m_event_bus.emitImmediate(GtaoParametersChangedEvent{
+			.radius = m_gtao_radius,
+			.intensity = m_gtao_intensity
 		});
 	}
 }

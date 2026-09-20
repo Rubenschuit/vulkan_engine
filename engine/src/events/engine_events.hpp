@@ -127,10 +127,13 @@ struct SkyboxRequestEvent {
 
 struct RenderSettingsRequestEvent {
 	std::optional<float> exposure;
-	std::optional<float> ibl_diffuse_intensity;
-	std::optional<float> ibl_specular_intensity;
+	std::optional<bool> ibl_enabled;
 	std::optional<float> ambient_light_intensity;
 	std::optional<float> bloom_strength;
+	std::optional<bool> bloom_enabled;
+	std::optional<bool> gtao_enabled;
+	std::optional<bool> ssr_enabled;
+	std::optional<float> ibl_min_ambient;
 };
 
 } // namespace ve

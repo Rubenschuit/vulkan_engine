@@ -10,6 +10,7 @@
 #include <vulkan/vulkan_raii.hpp>
 
 #include <glm/glm.hpp>
+#include <filesystem>
 #include <memory>
 #include <vector>
 
@@ -37,7 +38,10 @@ class ShadowRenderSystem;
 class GeometryPrePassSystem;
 class ShadowMaskSystem;
 class GtaoSystem;
+class ScreenRayResources;
 class SsrSystem;
+class RcSystem;
+class AoGiDescriptorSetManager;
 class ClusterLightSystem;
 class PbrRenderSystem;
 class DebugDrawSystem;
@@ -91,6 +95,8 @@ public:
 	FrameStats& stats() { return m_stats; }
 	const FrameStats& stats() const { return m_stats; }
 
+	void resetRcStore();
+
 private:
 	void initRenderSystems();
 	void emitSwapChainRecreatedEvents();
@@ -99,6 +105,7 @@ private:
 	void selectBackend();
 	void recordDepthConsumerToAttachBarriers(vk::raii::CommandBuffer& cmd);
 	void recordSsrTrace(VeFrameInfo& fi, vk::raii::CommandBuffer& cmd, bool async);
+	void recordRcDispatch(VeFrameInfo& fi, vk::raii::CommandBuffer& cmd, bool async, bool history_copy);
 	void ensureHizInfrastructure();
 	void ensureGpuCullingInfrastructure();
 	void ensureMeshletCullingInfrastructure();
@@ -136,8 +143,11 @@ private:
 	std::unique_ptr<ShadowRenderSystem> m_shadow_render_system;
 	std::unique_ptr<GeometryPrePassSystem> m_geometry_prepass_system;
 	std::unique_ptr<ShadowMaskSystem> m_shadow_mask_system;
-	std::unique_ptr<GtaoSystem> m_gtao_system;
+	std::unique_ptr<ScreenRayResources> m_screen_rays;
 	std::unique_ptr<SsrSystem> m_ssr_system;
+	std::unique_ptr<RcSystem> m_rc_system;
+	std::unique_ptr<GtaoSystem> m_gtao_system;
+	std::unique_ptr<AoGiDescriptorSetManager> m_ao_gi_set_manager;
 	std::unique_ptr<ClusterLightSystem> m_cluster_light_system;
 	std::unique_ptr<PbrRenderSystem> m_pbr_render_system;
 	std::unique_ptr<DebugDrawSystem> m_debug_draw_system;
@@ -166,13 +176,15 @@ private:
 
 	RenderServices m_services{};
 
-	glm::mat4 m_prev_projection_view{1.0f};
+	glm::mat4 m_prev_projection_view{1.0f}; // of the frame held in the screen-ray history
 
 
 	EventSubscriptionId m_scene_loaded_sub = 0;
+	EventSubscriptionId m_skybox_changed_sub = 0;
 	EventSubscriptionId m_swap_chain_recreated_sub = 0;
 	EventSubscriptionId m_viewport_resized_sub = 0;
 	EventSubscriptionId m_settings_request_sub = 0;
+	EventSubscriptionId m_gtao_resolution_sub = 0;
 };
 
 } // namespace ve

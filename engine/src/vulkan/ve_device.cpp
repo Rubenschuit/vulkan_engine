@@ -422,10 +422,13 @@ void VeDevice::createLogicalDevice() {
 	m_compute_queue_index  = m_queue_family_indices.compute_family;
 	m_transfer_queue_index = m_queue_family_indices.transfer_family;
 
-	// Query drawIndirectCount support
+	// Query the optional features
 	{
 		auto chain = m_physical_device.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan12Features>();
 		m_supports_draw_indirect_count = chain.get<vk::PhysicalDeviceVulkan12Features>().drawIndirectCount;
+		m_supports_shader_int16 = chain.get<vk::PhysicalDeviceFeatures2>().features.shaderInt16;
+		if (!m_supports_shader_int16)
+			VE_LOGW("shaderInt16 not supported: RC GI unavailable on this device");
 	}
 
 	// Setup a chain of structures to enable required Vulkan features
@@ -436,7 +439,14 @@ void VeDevice::createLogicalDevice() {
 					vk::PhysicalDeviceVulkan12Features,
 					vk::PhysicalDeviceVulkan13Features,
 					vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> feature_chain = {
-		{.features = {.independentBlend = true, .multiDrawIndirect = true, .drawIndirectFirstInstance = true, .depthClamp = true, .depthBiasClamp = true, .samplerAnisotropy = true, .shaderStorageImageExtendedFormats = true}},
+		{.features = {.independentBlend = true, 
+					  .multiDrawIndirect = true, 
+					  .drawIndirectFirstInstance = true, 
+					  .depthClamp = true, 
+					  .depthBiasClamp = true, 
+					  .samplerAnisotropy = true, 
+					  .shaderStorageImageExtendedFormats = true, 
+					  .shaderInt16 = m_supports_shader_int16}},
 		{.multiview = true, .shaderDrawParameters = true},
 		{	// Vulkan 1.2 features (descriptor indexing + timeline semaphore)
 			.drawIndirectCount = m_supports_draw_indirect_count,

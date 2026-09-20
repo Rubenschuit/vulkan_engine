@@ -262,7 +262,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 			registry->queueComponentRemoval<MeshComponent>(entity);
 		ImGui::PopID();
 		if (open && registry->hasComponent<MeshComponent>(entity))
-			renderMesh(*registry->getComponent<MeshComponent>(entity));
+			renderMesh(*registry->getComponent<MeshComponent>(entity), state);
 	}
 
 	// Point Light
@@ -746,7 +746,7 @@ void InspectorPanel::renderTransform(TransformComponent& transform) {
 		transform.setScale(scl);
 }
 
-void InspectorPanel::renderMesh(MeshComponent& mesh) {
+void InspectorPanel::renderMesh(MeshComponent& mesh, const EditorState& state) {
 	// Mesh info (read-only)
 	VeMesh* m = mesh.getMesh();
 	if (m) {
@@ -777,6 +777,36 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 	ImGui::TextDisabled("%s", mat->getId().c_str());
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("%s", mat->getId().c_str());
+
+	if (Registry* registry = mesh.getRegistry()) {
+		uint32_t users = 0;
+		uint32_t selected_users = 0;
+		for (auto [e, mc] : registry->view<MeshComponent>().includeInactive())
+			if (mc.getMaterial() == mat)
+				users++;
+		for (Entity selected : state.selected_entities) {
+			auto* selected_mesh = registry->getComponent<MeshComponent>(selected);
+			if (selected_mesh && selected_mesh->getMaterial() == mat)
+				selected_users++;
+		}
+		if (users > 1) {
+			ImGui::TextDisabled("Shared by %u meshes", users);
+			if (m_resource_manager && selected_users < users) {
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Make Unique")) {
+					ResourceHandle<VeMaterial> copy = m_resource_manager->cloneMaterial(*mat);
+					for (Entity selected : state.selected_entities) {
+						auto* selected_mesh = registry->getComponent<MeshComponent>(selected);
+						if (selected_mesh && selected_mesh->getMaterial() == mat)
+							selected_mesh->setMaterial(copy);
+					}
+					mat = copy.get();
+				}
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Give the selected meshes their own copy of this material");
+			}
+		}
+	}
 
 	auto factors = mat->getMaterialFactors();
 	auto alpha = mat->getAlphaProps();
@@ -854,8 +884,13 @@ void InspectorPanel::renderMesh(MeshComponent& mesh) {
 		mat->setMaterialFactors(factors);
 	if (alpha_changed)
 		mat->setAlphaProps(alpha);
-	if ((changed || alpha_changed) && mesh.getRegistry())
-		mesh.getRegistry()->events().emit(MeshDataChangedEvent{mesh.getEntity()});
+	// The material is shared: every holder's cached draw state must refresh
+	if ((changed || alpha_changed) && mesh.getRegistry()) {
+		Registry* registry = mesh.getRegistry();
+		for (auto [e, mc] : registry->view<MeshComponent>().includeInactive())
+			if (mc.getMaterial() == mat)
+				registry->events().emit(MeshDataChangedEvent{e});
+	}
 
 	// Texture thumbnails
 	if (ImGui::TreeNode(ICON_TEXTURE "  Textures")) {

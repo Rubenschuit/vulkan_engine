@@ -116,6 +116,7 @@ public:
 
 	// Release per-mesh GPU buffers
 	void releaseGpuBuffers();
+	bool hasGpuBuffers() const { return m_vertex_buffer != nullptr; }
 
 	void setMeshletData(std::unique_ptr<CpuMeshletData> data);
 	const CpuMeshletData* getMeshletData() const { return m_meshlet_data.get(); }

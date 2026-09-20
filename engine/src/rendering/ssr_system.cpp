@@ -1,6 +1,6 @@
 #include "pch.hpp"
 #include "rendering/ssr_system.hpp"
-#include "rendering/ssr_hiz_pyramid.hpp"
+#include "rendering/screen_ray_resources.hpp"
 #include "vulkan/ve_buffer.hpp"
 #include "platform/ve_file_system.hpp"
 #include "events/event_bus.hpp"
@@ -44,9 +44,11 @@ SsrSystem::SsrSystem(
 	vk::Format color_format,
 	const vk::raii::ImageView& depth_image_view,
 	const vk::raii::ImageView& normal_roughness_image_view,
+	const ScreenRayResources& screen_rays,
 	EventBus& event_bus)
 	: m_ve_device(device), m_shader_path(std::move(shader_path)),
-	  m_ssr_extent(ssr_extent), m_full_extent(full_extent), m_format(color_format) {
+	  m_ssr_extent(ssr_extent), m_full_extent(full_extent), m_format(color_format),
+	  m_screen_rays(screen_rays) {
 
 	event_bus.subscribe<ResolutionChangedEvent>([this](const ResolutionChangedEvent& e) {
 		m_full_extent = e.extent;
@@ -55,12 +57,9 @@ SsrSystem::SsrSystem(
 			? vk::Extent2D{std::max(1u, e.extent.width / 2), std::max(1u, e.extent.height / 2)} : e.extent;
 		m_depth_image_view = *e.depth_image_view;
 		m_normal_image_view = *e.normal_roughness_image_view;
-		m_hiz_pyramid->recreate(e.pool, e.extent, e.depth_image_view);
-		createHistoryImage();
 		createOutputImage();
 		createResolvedImage();
 		createDescriptorSets(e.pool);
-		m_history_valid = false;
 	});
 	event_bus.subscribe<SsrResolutionChangedEvent>([this](const SsrResolutionChangedEvent& e) {
 		m_ssr_extent = e.ssr_extent;
@@ -77,9 +76,6 @@ SsrSystem::SsrSystem(
 
 	m_depth_image_view = *depth_image_view;
 	m_normal_image_view = *normal_roughness_image_view;
-	m_hiz_pyramid = std::make_unique<SsrHizPyramid>(
-		device, descriptor_pool, m_full_extent, depth_image_view, m_shader_path);
-	createHistoryImage();
 	createOutputImage();
 	createResolvedImage();
 	createDummyImage();
@@ -90,32 +86,6 @@ SsrSystem::SsrSystem(
 }
 
 SsrSystem::~SsrSystem() = default;
-
-void SsrSystem::createHistoryImage() {
-	// Full mip chain
-	uint32_t mips = static_cast<uint32_t>(std::floor(std::log2(
-		std::max(m_full_extent.width, m_full_extent.height)))) + 1u;
-	m_history_image = std::make_unique<VeImage>(
-		m_ve_device,
-		m_full_extent.width,
-		m_full_extent.height,
-		vk::SampleCountFlagBits::e1,
-		m_format,
-		vk::ImageTiling::eOptimal,
-		vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc
-			| vk::ImageUsageFlagBits::eSampled,
-		vk::MemoryPropertyFlagBits::eDeviceLocal,
-		vk::ImageAspectFlagBits::eColor,
-		false, 1, mips);
-	m_history_image->transitionImageLayout(
-		vk::ImageLayout::eUndefined,
-		vk::ImageLayout::eShaderReadOnlyOptimal,
-		vk::AccessFlagBits2::eNone,
-		vk::AccessFlagBits2::eShaderRead,
-		vk::PipelineStageFlagBits2::eTopOfPipe,
-		vk::PipelineStageFlagBits2::eComputeShader);
-	m_history_image->setDebugName("SSR History");
-}
 
 void SsrSystem::createOutputImage() {
 	m_output_image = std::make_unique<VeImage>(
@@ -311,7 +281,7 @@ void SsrSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 	};
 	vk::DescriptorImageInfo history_info{
-		.imageView = *m_history_image->getImageView(),
+		.imageView = *m_screen_rays.historyView(),
 		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 	};
 	vk::DescriptorImageInfo sampler_info{
@@ -340,7 +310,7 @@ void SsrSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 	};
 	vk::DescriptorImageInfo pyramid_info{
-		.imageView = *m_hiz_pyramid->getPyramidView(),
+		.imageView = *m_screen_rays.pyramidView(),
 		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 	};
 
@@ -371,8 +341,6 @@ void SsrSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 }
 
 void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, bool async) {
-	m_hiz_pyramid->generate(cmd);
-
 	// The resolve only runs below full resolution, where it doubles as the
 	// upsample prefilter; at full res the raw trace is sharper and we
 	// sample it directly
@@ -432,7 +400,7 @@ void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, 
 		.max_roughness = m_max_roughness,
 		.max_distance = m_max_distance,
 		.max_steps = m_max_steps,
-		.hiz_mip_count = m_hiz_pyramid->getMipLevels(),
+		.hiz_mip_count = m_screen_rays.pyramidMipLevels(),
 		._pad = 0.0f,
 	};
 	cmd.pushConstants(
@@ -503,140 +471,6 @@ void SsrSystem::acquireForRead(vk::raii::CommandBuffer& cmd) {
 	};
 	vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &acquire};
 	cmd.pipelineBarrier2(dep);
-}
-
-void SsrSystem::recordHistoryCopy(vk::raii::CommandBuffer& command_buffer, vk::Image resolve_target) {
-	constexpr vk::ImageSubresourceRange color_range{vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
-	uint32_t mips = m_history_image->getMipLevels();
-	vk::ImageSubresourceRange history_all_mips{vk::ImageAspectFlagBits::eColor, 0, mips, 0, 1};
-
-	// Transition resolve_target and all history mips for copy + mip blits
-	std::array<vk::ImageMemoryBarrier2, 2> to_transfer = {
-		vk::ImageMemoryBarrier2{
-			.srcStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
-			.srcAccessMask = vk::AccessFlagBits2::eNone,
-			.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
-			.dstAccessMask = vk::AccessFlagBits2::eTransferRead,
-			.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-			.newLayout = vk::ImageLayout::eTransferSrcOptimal,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = resolve_target,
-			.subresourceRange = color_range
-		},
-		vk::ImageMemoryBarrier2{
-			.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader,
-			.srcAccessMask = vk::AccessFlagBits2::eNone,
-			.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
-			.dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
-			.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-			.newLayout = vk::ImageLayout::eTransferDstOptimal,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = m_history_image->getImage(),
-			.subresourceRange = history_all_mips
-		}
-	};
-	vk::DependencyInfo to_transfer_dep = {
-		.imageMemoryBarrierCount = static_cast<uint32_t>(to_transfer.size()),
-		.pImageMemoryBarriers = to_transfer.data()
-	};
-	command_buffer.pipelineBarrier2(to_transfer_dep);
-
-	vk::ImageCopy region{
-		.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-		.srcOffset = {0, 0, 0},
-		.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-		.dstOffset = {0, 0, 0},
-		.extent = {m_full_extent.width, m_full_extent.height, 1}
-	};
-	command_buffer.copyImage(
-		resolve_target, vk::ImageLayout::eTransferSrcOptimal,
-		m_history_image->getImage(), vk::ImageLayout::eTransferDstOptimal,
-		region);
-
-	// Build the mip chain: blit each level from the previous
-	int32_t src_w = static_cast<int32_t>(m_full_extent.width);
-	int32_t src_h = static_cast<int32_t>(m_full_extent.height);
-	for (uint32_t i = 1; i < mips; i++) {
-		vk::ImageMemoryBarrier2 to_src{
-			.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-			.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-			.dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
-			.dstAccessMask = vk::AccessFlagBits2::eTransferRead,
-			.oldLayout = vk::ImageLayout::eTransferDstOptimal,
-			.newLayout = vk::ImageLayout::eTransferSrcOptimal,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = m_history_image->getImage(),
-			.subresourceRange = {vk::ImageAspectFlagBits::eColor, i - 1, 1, 0, 1},
-		};
-		vk::DependencyInfo to_src_dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &to_src};
-		command_buffer.pipelineBarrier2(to_src_dep);
-
-		int32_t dst_w = std::max(src_w / 2, 1);
-		int32_t dst_h = std::max(src_h / 2, 1);
-		vk::ImageBlit blit{
-			.srcSubresource = {vk::ImageAspectFlagBits::eColor, i - 1, 0, 1},
-			.srcOffsets = std::array<vk::Offset3D, 2>{vk::Offset3D{0, 0, 0}, vk::Offset3D{src_w, src_h, 1}},
-			.dstSubresource = {vk::ImageAspectFlagBits::eColor, i, 0, 1},
-			.dstOffsets = std::array<vk::Offset3D, 2>{vk::Offset3D{0, 0, 0}, vk::Offset3D{dst_w, dst_h, 1}},
-		};
-		command_buffer.blitImage(
-			m_history_image->getImage(), vk::ImageLayout::eTransferSrcOptimal,
-			m_history_image->getImage(), vk::ImageLayout::eTransferDstOptimal,
-			blit, vk::Filter::eLinear);
-		src_w = dst_w;
-		src_h = dst_h;
-	}
-
-	// Back to shader read: after the blit loop mips [0, mips-1) sit in
-	// TransferSrc and the last mip in TransferDst
-	std::array<vk::ImageMemoryBarrier2, 3> from_transfer = {
-		vk::ImageMemoryBarrier2{
-			.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-			.srcAccessMask = vk::AccessFlagBits2::eNone,
-			.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
-			.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
-			.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
-			.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = resolve_target,
-			.subresourceRange = color_range
-		},
-		vk::ImageMemoryBarrier2{
-			.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-			.srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader,
-			.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
-			.oldLayout = vk::ImageLayout::eTransferDstOptimal,
-			.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = m_history_image->getImage(),
-			.subresourceRange = {vk::ImageAspectFlagBits::eColor, mips - 1, 1, 0, 1}
-		},
-		vk::ImageMemoryBarrier2{
-			.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-			.srcAccessMask = vk::AccessFlagBits2::eNone,
-			.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader,
-			.dstAccessMask = vk::AccessFlagBits2::eShaderRead,
-			.oldLayout = vk::ImageLayout::eTransferSrcOptimal,
-			.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = m_history_image->getImage(),
-			.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, mips - 1, 0, 1}
-		}
-	};
-	vk::DependencyInfo from_transfer_dep = {
-		.imageMemoryBarrierCount = (mips > 1) ? 3u : 2u,
-		.pImageMemoryBarriers = from_transfer.data()
-	};
-	command_buffer.pipelineBarrier2(from_transfer_dep);
-
-	m_history_valid = true;
 }
 
 } // namespace ve

@@ -1,15 +1,20 @@
 #include "pch.hpp"
 #include "application/benchmark_runner.hpp"
+#include "rendering/render_settings.hpp"
 #include "utils/ve_log.hpp"
 #include "utils/ve_path.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <format>
 #include <fstream>
+#include <map>
 #include <numeric>
+#include <span>
 #include <stdexcept>
 
 namespace ve {
@@ -33,6 +38,15 @@ constexpr FloatMetric FLOAT_METRICS[] = {
 	{"gpu_gtao", &FrameStats::gpu_gtao},
 	{"gpu_scene_render", &FrameStats::gpu_scene_render},
 	{"gpu_ssr", &FrameStats::gpu_ssr},
+	{"gpu_rc", &FrameStats::gpu_rc},
+	{"gpu_rc_build", &FrameStats::gpu_rc_build},
+	{"gpu_rc_shade", &FrameStats::gpu_rc_shade},
+	{"gpu_rc_map", &FrameStats::gpu_rc_map},
+	{"gpu_rc_trace", &FrameStats::gpu_rc_trace},
+	{"gpu_rc_resolve", &FrameStats::gpu_rc_resolve},
+	{"gpu_rc_merge", &FrameStats::gpu_rc_merge},
+	{"gpu_rc_irradiance", &FrameStats::gpu_rc_irradiance},
+	{"gpu_rc_gather", &FrameStats::gpu_rc_gather},
 	{"gpu_bloom", &FrameStats::gpu_bloom},
 	{"gpu_post_process", &FrameStats::gpu_post_process},
 	{"gpu_hiz", &FrameStats::gpu_hiz},
@@ -47,6 +61,7 @@ constexpr FloatMetric FLOAT_METRICS[] = {
 	{"cpu_gtao", &FrameStats::cpu_gtao},
 	{"cpu_scene_render", &FrameStats::cpu_scene_render},
 	{"cpu_ssr", &FrameStats::cpu_ssr},
+	{"cpu_rc", &FrameStats::cpu_rc},
 	{"cpu_bloom", &FrameStats::cpu_bloom},
 	{"cpu_post_process", &FrameStats::cpu_post_process},
 	{"cpu_hiz", &FrameStats::cpu_hiz},
@@ -57,6 +72,18 @@ constexpr FloatMetric FLOAT_METRICS[] = {
 	{"cpu_skinning", &FrameStats::cpu_skinning},
 	{"cpu_cluster_lights", &FrameStats::cpu_cluster_lights},
 	{"cpu_particles", &FrameStats::cpu_particles},
+};
+
+// Written as "rc_rays", outside timings_ms so no timing gate reads them
+constexpr FloatMetric RAY_METRICS[] = {
+	{"rc_rays_hit", &FrameStats::rc_rays_hit},
+	{"rc_rays_clear", &FrameStats::rc_rays_clear},
+	{"rc_rays_sky", &FrameStats::rc_rays_sky},
+	{"rc_rays_sky_gated", &FrameStats::rc_rays_sky_gated},
+	{"rc_rays_unk_occluded", &FrameStats::rc_rays_unk_occluded},
+	{"rc_rays_unk_stepcap", &FrameStats::rc_rays_unk_stepcap},
+	{"rc_rays_unk_edge", &FrameStats::rc_rays_unk_edge},
+	{"rc_rays_unk_clip", &FrameStats::rc_rays_unk_clip},
 };
 
 struct CounterMetric {
@@ -73,6 +100,14 @@ constexpr CounterMetric COUNTER_METRICS[] = {
 	{"num_directional_lights", &FrameStats::num_directional_lights},
 	{"num_spot_lights", &FrameStats::num_spot_lights},
 	{"num_area_lights", &FrameStats::num_area_lights},
+	{"rc_probes", &FrameStats::rc_probes},
+	{"rc_overflow", &FrameStats::rc_overflow},
+	{"rc_probes_c0", &FrameStats::rc_probes_c0},
+	{"rc_probes_c1", &FrameStats::rc_probes_c1},
+	{"rc_probes_c2", &FrameStats::rc_probes_c2},
+	{"rc_probes_c3", &FrameStats::rc_probes_c3},
+	{"rc_probes_c4", &FrameStats::rc_probes_c4},
+	{"rc_probes_c5", &FrameStats::rc_probes_c5},
 };
 
 struct Aggregate {
@@ -115,6 +150,64 @@ bool parseKeypoint(const char* s, CameraKeypoint& kp) {
 		&kp.pos.x, &kp.pos.y, &kp.pos.z, &kp.look.x, &kp.look.y, &kp.look.z) == 6;
 }
 
+float parseFloat(std::string_view text, const std::string& flag) {
+	std::string s(text);
+	char* end = nullptr;
+	float v = std::strtof(s.c_str(), &end);
+	if (s.empty() || end != s.c_str() + s.size() || !std::isfinite(v))
+		throw std::runtime_error(flag + " expects a finite number, got '" + s + "'");
+	return v;
+}
+
+uint32_t parseUnsigned(std::string_view text, const std::string& flag) {
+	float v = parseFloat(text, flag);
+	if (v < 0.0f || v != std::floor(v))
+		throw std::runtime_error(flag + " expects a non-negative integer, got '" + std::string(text) + "'");
+	return static_cast<uint32_t>(v);
+}
+
+using S = RenderSettings;
+constexpr BenchSetKey BENCH_SET_KEYS[] = {
+	{.name = "rc_enabled", .apply = [](S& s, float v) { s.rc.enabled = v != 0.0f; }},
+	{.name = "rc_thickness", .apply = [](S& s, float v) { s.rc.thickness = v; }},
+	{.name = "rc_intensity", .apply = [](S& s, float v) { s.rc.intensity = v; }},
+	{.name = "rc_luma_clamp", .apply = [](S& s, float v) { s.rc.luma_clamp = v; }},
+	{.name = "rc_resolution_div", .apply = [](S& s, float v) { s.rc.resolution_div = static_cast<int>(v); }},
+	{.name = "rc_short_range_ao", .apply = [](S& s, float v) { s.rc.short_range_ao = v; }},
+	{.name = "rc_spec_occlusion", .apply = [](S& s, float v) { s.rc.spec_occlusion = v; }},
+	{.name = "ssr_max_roughness", .apply = [](S& s, float v) { s.ssr_max_roughness = v; }},
+	{.name = "rc_rays_per_pixel", .apply = [](S& s, float v) { s.rc.rays_per_pixel = static_cast<int>(v); }},
+	{.name = "rc_ds0", .apply = [](S& s, float v) { s.rc.ds0 = v; }},
+	{.name = "rc_lod0_dist", .apply = [](S& s, float v) { s.rc.lod0_dist = v; }},
+	{.name = "rc_sky_min_frac", .apply = [](S& s, float v) { s.rc.sky_min_frac = v; }},
+	{.name = "rc_probe_ttl", .apply = [](S& s, float v) { s.rc.probe_ttl = static_cast<int>(v); }},
+	{.name = "rc_sky_visibility", .apply = [](S& s, float v) { s.rc.sky_visibility = v; }},
+	{.name = "rc_blend_zone", .apply = [](S& s, float v) { s.rc.blend_zone = v; }},
+	{.name = "rc_cascades", .apply = [](S& s, float v) { s.rc.cascades = static_cast<int>(v); }},
+	{.name = "rc_c0_polar_bins", .apply = [](S& s, float v) { s.rc.c0_polar_bins = static_cast<int>(v); }},
+	{.name = "rc_c0_ray_length", .apply = [](S& s, float v) { s.rc.c0_ray_length = v; }},
+	{.name = "rc_memory_mb", .apply = [](S& s, float v) { s.rc.memory_mb = static_cast<int>(v); }},
+	{.name = "rc_hist_depth_check", .apply = [](S& s, float v) { s.rc.hist_depth_check = v != 0.0f; }},
+	{.name = "rc_rough_specular", .apply = [](S& s, float v) { s.rc.rough_specular = v != 0.0f; }},
+	{.name = "rc_spec_handoff_roughness", .apply = [](S& s, float v) { s.rc.spec_handoff_roughness = v; }},
+	{.name = "rc_parent_mode", .apply = [](S& s, float v) { s.rc.parent_mode = static_cast<int>(v); }},
+	{.name = "rc_deposit_mode", .apply = [](S& s, float v) { s.rc.deposit_mode = static_cast<int>(v); }},
+	{.name = "rc_count_weighted_read", .apply = [](S& s, float v) { s.rc.count_weighted_read = v != 0.0f; }},
+	{.name = "rc_freeze_probes", .apply = [](S& s, float v) { s.rc.freeze_probes = v != 0.0f; }},
+	{.name = "rc_single_frame", .apply = [](S& s, float v) { s.rc.single_frame = v != 0.0f; }},
+	{.name = "rc_probe_j_cascade", .apply = [](S& s, float v) { s.rc.probe_j_cascade = static_cast<int>(v); }},
+	{.name = "ibl_enabled", .apply = [](S& s, float v) { s.ibl_enabled = v != 0.0f; }},
+	{.name = "ibl_min_ambient", .apply = [](S& s, float v) { s.ibl_min_ambient = v; }},
+	{.name = "ambient_light_intensity", .apply = [](S& s, float v) { s.ambient_light_intensity = v; }},
+	{.name = "gtao_enabled", .apply = [](S& s, float v) { s.gtao_enabled = v != 0.0f; }},
+	{.name = "exposure", .apply = [](S& s, float v) { s.exposure = v; }},
+	{.name = "bloom_enabled", .apply = [](S& s, float v) { s.bloom_enabled = v != 0.0f; }},
+	{.name = "ssr_enabled", .apply = [](S& s, float v) { s.ssr_enabled = v != 0.0f; }},
+	{.name = "render_mode", .apply = [](S& s, float v) { s.render_mode = static_cast<RenderMode>(static_cast<uint32_t>(v)); },
+		.unsigned_only = true},
+	{.name = "tone_map_mode", .apply = [](S& s, float v) { s.tone_map_mode = static_cast<int>(v); }},
+};
+
 // One keypoint per line in --bench-camera syntax; blank lines and # comments ok.
 std::vector<CameraKeypoint> loadCameraPath(const std::filesystem::path& file) {
 	std::ifstream in(file);
@@ -139,10 +232,8 @@ std::vector<CameraKeypoint> loadCameraPath(const std::filesystem::path& file) {
 	return keypoints;
 }
 
-// FNV-1a over the per-frame counter stream. Under frame-indexed camera motion
-// the sequence is deterministic across runs, so this is the exact-match gate
-// that replaces min==max once counters are no longer per-frame constant.
-// (GPU-readback backends may lag counts a frame; gate their checksum with care.)
+// FNV-1a over the per-frame counter stream: the exact-match gate. Deterministic
+// across runs under frame-indexed camera motion.
 std::string counterChecksum(const std::vector<FrameStats>& samples) {
 	uint64_t h = 1469598103934665603ull;
 	auto mix = [&](uint32_t v) {
@@ -158,6 +249,13 @@ std::string counterChecksum(const std::vector<FrameStats>& samples) {
 }
 
 } // namespace
+
+const BenchSetKey* findBenchSetKey(std::string_view name) {
+	for (const BenchSetKey& k : BENCH_SET_KEYS)
+		if (name == k.name)
+			return &k;
+	return nullptr;
+}
 
 std::optional<BenchmarkConfig> BenchmarkConfig::parseArgs(int argc, char** argv) {
 	BenchmarkConfig config;
@@ -185,13 +283,19 @@ std::optional<BenchmarkConfig> BenchmarkConfig::parseArgs(int argc, char** argv)
 			config.warmup_frames = static_cast<uint32_t>(std::stoul(value(i, "--bench-warmup")));
 			enabled = true;
 		} else if (arg == "--bench-dt") {
-			config.fixed_dt = std::stof(value(i, "--bench-dt"));
+			config.fixed_dt = parseFloat(value(i, "--bench-dt"), "--bench-dt");
 			enabled = true;
 		} else if (arg == "--bench-stats") {
 			config.stats_path = value(i, "--bench-stats");
 			enabled = true;
 		} else if (arg == "--bench-screenshot") {
 			config.screenshot_path = value(i, "--bench-screenshot");
+			enabled = true;
+		} else if (arg == "--bench-rc-cold") {
+			config.rc_cold_start = true;
+			enabled = true;
+		} else if (arg == "--bench-rc-warm") {
+			config.rc_cold_start = false;
 			enabled = true;
 		} else if (arg == "--bench-camera") {
 			CameraKeypoint kp;
@@ -215,6 +319,32 @@ std::optional<BenchmarkConfig> BenchmarkConfig::parseArgs(int argc, char** argv)
 			enabled = true;
 		} else if (arg == "--bench-skybox") {
 			config.skybox = value(i, "--bench-skybox");
+			enabled = true;
+		} else if (arg == "--bench-skybox-exposure") {
+			config.skybox_exposure = parseFloat(value(i, "--bench-skybox-exposure"), "--bench-skybox-exposure");
+			enabled = true;
+		} else if (arg == "--bench-debug-view") {
+			config.debug_render_mode = static_cast<int>(parseUnsigned(value(i, "--bench-debug-view"), "--bench-debug-view"));
+			enabled = true;
+		} else if (arg == "--bench-rc-view") {
+			uint32_t id = parseUnsigned(value(i, "--bench-rc-view"), "--bench-rc-view");
+			if (!isRcDebugView(id))
+				throw std::runtime_error("--bench-rc-view: no RcDebugView with id " + std::to_string(id));
+			config.rc_view = static_cast<int>(id);
+			enabled = true;
+		} else if (arg == "--bench-set") {
+			std::string_view kv = value(i, "--bench-set");
+			size_t eq = kv.find('=');
+			if (eq == std::string_view::npos || eq == 0 || eq + 1 >= kv.size())
+				throw std::runtime_error("--bench-set expects key=value");
+			std::string key(kv.substr(0, eq));
+			const BenchSetKey* entry = findBenchSetKey(key);
+			if (!entry)
+				throw std::runtime_error("--bench-set unknown key: " + key);
+			float v = parseFloat(kv.substr(eq + 1), "--bench-set " + key);
+			if (entry->unsigned_only && v < 0.0f)
+				throw std::runtime_error("--bench-set " + key + " must not be negative");
+			config.set_values.emplace_back(std::move(key), v);
 			enabled = true;
 		} else if (arg == "--bench-res") {
 			unsigned w = 0, h = 0;
@@ -271,12 +401,19 @@ CameraKeypoint BenchmarkRunner::poseAtFrame(uint32_t measure_index) const {
 	return out;
 }
 
+bool BenchmarkRunner::consumeRcReset() {
+	bool pending = m_rc_reset_pending;
+	m_rc_reset_pending = false;
+	return pending;
+}
+
 BenchmarkRunner::Action BenchmarkRunner::onFrame(bool scene_idle, const FrameStats& stats) {
 	switch (m_phase) {
 	case Phase::WAIT_SCENE:
 		if (scene_idle) {
 			m_phase = Phase::WARMUP;
 			m_phase_frames = 0;
+			m_rc_reset_pending = m_config.rc_cold_start;
 			VE_LOGI("[bench] scene ready, warming up for " << m_config.warmup_frames << " frames");
 		} else if (++m_phase_frames > MAX_WAIT_SCENE_FRAMES) {
 			VE_LOGE("[bench] scene never finished loading, aborting");
@@ -318,7 +455,7 @@ int BenchmarkRunner::finish(const BenchmarkRunInfo& info) {
 
 	std::string json;
 	json += "{\n";
-	json += std::format("  \"schema\": 1,\n");
+	json += std::format("  \"schema\": 2,\n");
 	json += std::format("  \"timestamp\": \"{}\",\n", utcTimestamp());
 	json += std::format("  \"scene\": \"{}\",\n", jsonEscape(info.scene_name));
 	json += std::format("  \"device\": \"{}\",\n", jsonEscape(info.device_name));
@@ -335,13 +472,26 @@ int BenchmarkRunner::finish(const BenchmarkRunInfo& info) {
 		info.culling_backend, info.hiz_occlusion, info.draw_indirect_count);
 	json += std::format("  \"camera\": {{\"keypoints\": {}, \"moving\": {}}},\n",
 		m_config.keypoints.size(), m_config.keypoints.size() > 1);
+	json += std::format("  \"rc\": {{\"enabled\": {}, \"cold_start\": {}}},\n",
+		info.rc_enabled, m_config.rc_cold_start);
+
+	std::map<std::string, float> overrides;
+	for (const auto& [key, v] : m_config.set_values)
+		overrides[key] = v;
+	json += "  \"overrides\": {";
+	bool first = true;
+	for (const auto& [key, v] : overrides) {
+		json += std::format("{}\"{}\": {}", first ? "" : ", ", key, v);
+		first = false;
+	}
+	json += "},\n";
 
 	// Counters are a deterministic per-frame sequence under a fixed workload +
 	// frame-indexed camera. counter_checksum is the exact-match gate; min/max
 	// are for human reading (min==max only when the camera is static).
 	json += std::format("  \"counter_checksum\": \"{}\",\n", counterChecksum(m_samples));
 	json += "  \"counters\": {\n";
-	bool first = true;
+	first = true;
 	for (const auto& metric : COUNTER_METRICS) {
 		uint32_t min_v = m_samples.front().*metric.member;
 		uint32_t max_v = min_v;
@@ -355,24 +505,30 @@ int BenchmarkRunner::finish(const BenchmarkRunInfo& info) {
 	}
 	json += "\n  },\n";
 
-	json += "  \"timings_ms\": {\n";
-	first = true;
 	Aggregate gpu_total{}, cpu_total{};
 	std::vector<float> values(m_samples.size());
-	for (const auto& metric : FLOAT_METRICS) {
-		for (size_t i = 0; i < m_samples.size(); ++i)
-			values[i] = m_samples[i].*metric.member;
-		Aggregate a = aggregate(values);
-		if (metric.member == &FrameStats::gpu_time)
-			gpu_total = a;
-		if (metric.member == &FrameStats::cpu_time)
-			cpu_total = a;
-		json += std::format(
-			"{}    \"{}\": {{\"mean\": {:.4f}, \"median\": {:.4f}, \"p95\": {:.4f}, \"min\": {:.4f}, \"max\": {:.4f}}}",
-			first ? "" : ",\n", metric.name, a.mean, a.median, a.p95, a.min, a.max);
-		first = false;
-	}
-	json += "\n  }\n}\n";
+	auto write_aggregates = [&](const char* section, std::span<const FloatMetric> metrics) {
+		json += std::format("  \"{}\": {{\n", section);
+		bool first_metric = true;
+		for (const auto& metric : metrics) {
+			for (size_t i = 0; i < m_samples.size(); ++i)
+				values[i] = m_samples[i].*metric.member;
+			Aggregate a = aggregate(values);
+			if (metric.member == &FrameStats::gpu_time)
+				gpu_total = a;
+			if (metric.member == &FrameStats::cpu_time)
+				cpu_total = a;
+			json += std::format(
+				"{}    \"{}\": {{\"mean\": {:.4f}, \"median\": {:.4f}, \"p95\": {:.4f}, \"min\": {:.4f}, \"max\": {:.4f}}}",
+				first_metric ? "" : ",\n", metric.name, a.mean, a.median, a.p95, a.min, a.max);
+			first_metric = false;
+		}
+		json += "\n  }";
+	};
+	write_aggregates("timings_ms", FLOAT_METRICS);
+	json += ",\n";
+	write_aggregates("rc_rays", RAY_METRICS);
+	json += "\n}\n";
 
 	if (!m_config.stats_path.empty()) {
 		std::error_code ec;

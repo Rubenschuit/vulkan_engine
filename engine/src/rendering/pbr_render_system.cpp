@@ -127,9 +127,9 @@ void PbrRenderSystem::buildForwardConfig(PipelineConfigInfo& config, vk::Format 
 
 std::unordered_map<uint32_t, uint32_t> PbrRenderSystem::specConstants(
 	uint32_t shadow_mode, uint32_t shadow_mask, uint32_t area_lights, uint32_t debug_shading,
-	uint32_t alpha_mask) const {
+	uint32_t alpha_mask, uint32_t rc_composite) const {
 	return {{0, shadow_mode}, {1, m_pcf_samples}, {2, m_pcss_filter_samples}, {3, shadow_mask},
-	        {4, area_lights}, {5, debug_shading}, {6, alpha_mask}};
+	        {4, area_lights}, {5, debug_shading}, {6, alpha_mask}, {7, rc_composite}};
 }
 
 void PbrRenderSystem::createPipelines(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
@@ -138,11 +138,11 @@ void PbrRenderSystem::createPipelines(vk::Format color_format, vk::SampleCountFl
 
 	for (uint32_t area = 0; area < AREA_VARIANTS; area++) {
 		for (uint32_t mode = 0; mode < SHADOW_MODE_COUNT; mode++) {
-			pipeline_config.specialization_constants = specConstants(mode, 0u, area, 0u, 0u);
+			pipeline_config.specialization_constants = specConstants(mode, 0u, area, 0u, 0u, 1u);
 			m_pipelines[area][mode] = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
-			pipeline_config.specialization_constants = specConstants(mode, 1u, area, 0u, 0u);
+			pipeline_config.specialization_constants = specConstants(mode, 1u, area, 0u, 0u, 1u);
 			m_pipelines_mask[area][mode] = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
-			pipeline_config.specialization_constants = specConstants(mode, 0u, area, 0u, 1u);
+			pipeline_config.specialization_constants = specConstants(mode, 0u, area, 0u, 1u, 1u);
 			m_masked_pipelines[area][mode] = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
 		}
 	}
@@ -153,9 +153,9 @@ void PbrRenderSystem::ensureDebugPipelines() const {
 		PipelineConfigInfo config{};
 		buildForwardConfig(config, m_color_format, m_sample_count);
 		for (uint32_t mode = 0; mode < SHADOW_MODE_COUNT; mode++) {
-			config.specialization_constants = specConstants(mode, 0u, 1u, 1u, 1u);
+			config.specialization_constants = specConstants(mode, 0u, 1u, 1u, 1u, 1u);
 			m_pipelines_dbg[mode] = std::make_unique<VePipeline>(m_ve_device, m_shader_path, config);
-			config.specialization_constants = specConstants(mode, 1u, 1u, 1u, 1u);
+			config.specialization_constants = specConstants(mode, 1u, 1u, 1u, 1u, 1u);
 			m_pipelines_mask_dbg[mode] = std::make_unique<VePipeline>(m_ve_device, m_shader_path, config);
 		}
 	}
@@ -164,10 +164,23 @@ void PbrRenderSystem::ensureDebugPipelines() const {
 		buildWboitConfig(config);
 		auto wboit_shader_path = m_shader_path.parent_path() / "pbr_wboit.spv";
 		for (uint32_t mode = 0; mode < SHADOW_MODE_COUNT; mode++) {
-			config.specialization_constants = specConstants(mode, 0u, 1u, 1u, 1u);
+			config.specialization_constants = specConstants(mode, 0u, 1u, 1u, 1u, 1u);
 			m_wboit_pipelines_dbg[mode] = std::make_unique<VePipeline>(m_ve_device, wboit_shader_path, config);
 		}
 	}
+}
+
+void PbrRenderSystem::ensureNoRcPipelines(uint32_t area, uint32_t mode) const {
+	if (m_pipelines_no_rc[area][mode])
+		return;
+	PipelineConfigInfo config{};
+	buildForwardConfig(config, m_color_format, m_sample_count);
+	config.specialization_constants = specConstants(mode, 0u, area, 0u, 0u, 0u);
+	m_pipelines_no_rc[area][mode] = std::make_unique<VePipeline>(m_ve_device, m_shader_path, config);
+	config.specialization_constants = specConstants(mode, 1u, area, 0u, 0u, 0u);
+	m_pipelines_mask_no_rc[area][mode] = std::make_unique<VePipeline>(m_ve_device, m_shader_path, config);
+	config.specialization_constants = specConstants(mode, 0u, area, 0u, 1u, 0u);
+	m_masked_pipelines_no_rc[area][mode] = std::make_unique<VePipeline>(m_ve_device, m_shader_path, config);
 }
 
 VePipeline& PbrRenderSystem::forwardPipeline(const VeFrameInfo& frame_info) const {
@@ -177,6 +190,10 @@ VePipeline& PbrRenderSystem::forwardPipeline(const VeFrameInfo& frame_info) cons
 		return frame_info.shadow_mask_active ? *m_pipelines_mask_dbg[mode] : *m_pipelines_dbg[mode];
 	}
 	uint32_t area = frame_info.area_lights_active ? 1u : 0u;
+	if (!frame_info.rc_composite_active) {
+		ensureNoRcPipelines(area, mode);
+		return frame_info.shadow_mask_active ? *m_pipelines_mask_no_rc[area][mode] : *m_pipelines_no_rc[area][mode];
+	}
 	return frame_info.shadow_mask_active ? *m_pipelines_mask[area][mode] : *m_pipelines[area][mode];
 }
 
@@ -185,7 +202,22 @@ VePipeline& PbrRenderSystem::maskedPipeline(const VeFrameInfo& frame_info) const
 		return forwardPipeline(frame_info);
 	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
 	uint32_t area = frame_info.area_lights_active ? 1u : 0u;
+	if (!frame_info.rc_composite_active) {
+		ensureNoRcPipelines(area, mode);
+		return *m_masked_pipelines_no_rc[area][mode];
+	}
 	return *m_masked_pipelines[area][mode];
+}
+
+VePipeline& PbrRenderSystem::transparentPipeline(const VeFrameInfo& frame_info) const {
+	auto mode = static_cast<uint32_t>(frame_info.shadow_mode);
+	if (frame_info.debug_shading) {
+		ensureDebugPipelines();
+		return frame_info.shadow_mask_active ? *m_pipelines_mask_dbg[mode] : *m_pipelines_dbg[mode];
+	}
+	uint32_t area = frame_info.area_lights_active ? 1u : 0u;
+	ensureNoRcPipelines(area, mode);
+	return frame_info.shadow_mask_active ? *m_pipelines_mask_no_rc[area][mode] : *m_pipelines_no_rc[area][mode];
 }
 
 VePipeline& PbrRenderSystem::wboitPipeline(const VeFrameInfo& frame_info) const {
@@ -663,7 +695,7 @@ void PbrRenderSystem::renderTransparent(VeFrameInfo& frame_info, const vk::raii:
 		return;
 
 	auto& cmd = frame_info.cmd();
-	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, forwardPipeline(frame_info).getPipeline());
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, transparentPipeline(frame_info).getPipeline());
 
 	cmd.setDepthCompareOp(vk::CompareOp::eGreaterOrEqual);
 	cmd.setDepthBias(0.0f, 0.0f, 0.0f);
@@ -791,7 +823,7 @@ void PbrRenderSystem::createWboitGeometryPipelines() {
 	// WBOIT carries the dynamic discard for MASK+transmissive materials
 	for (uint32_t area = 0; area < AREA_VARIANTS; area++) {
 		for (uint32_t mode = 0; mode < SHADOW_MODE_COUNT; mode++) {
-			config.specialization_constants = specConstants(mode, 0u, area, 0u, 1u);
+			config.specialization_constants = specConstants(mode, 0u, area, 0u, 1u, 0u);
 			m_wboit_pipelines[area][mode] = std::make_unique<VePipeline>(m_ve_device, wboit_shader_path, config);
 		}
 	}
@@ -1046,6 +1078,15 @@ void PbrRenderSystem::recreateAllPipelines() {
 		for (auto& p : set)
 			p.reset();
 	for (auto& set : m_masked_pipelines)
+		for (auto& p : set)
+			p.reset();
+	for (auto& set : m_pipelines_no_rc)
+		for (auto& p : set)
+			p.reset();
+	for (auto& set : m_pipelines_mask_no_rc)
+		for (auto& p : set)
+			p.reset();
+	for (auto& set : m_masked_pipelines_no_rc)
 		for (auto& p : set)
 			p.reset();
 	for (auto& p : m_pipelines_dbg)

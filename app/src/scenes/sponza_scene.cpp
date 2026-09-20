@@ -17,8 +17,7 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 	m_event_bus.enqueue(SkyboxRequestEvent{
 		.name = "qwantani_moon_noon_puresky_4k", .exposure = 0.15f, .is_day = false});
 	m_event_bus.enqueue(RenderSettingsRequestEvent{
-		.exposure = 1.05f, .ibl_diffuse_intensity = 0.1f, .ibl_specular_intensity = 0.18f,
-		.bloom_strength = 0.015f});
+		.exposure = 1.05f, .bloom_strength = 0.015f});
 
 	const float sponza_scale = 2.0f;
 	const glm::vec3 root_translation = glm::vec3{0.0f, 0.0f, -50.0f};
@@ -129,6 +128,29 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 	makeLight(2.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f), "Green eye (right)",
 		sponzaPos({10.136f, 0.4864f, 1.504f}), false, false,
 		glm::vec3(0.03f));
+
+	// Emissive sphere in the middle
+	if (auto sphere_mesh = m_resource_manager.loadMesh(paths.sphere_model.lexically_normal());
+	    sphere_mesh.isValid()) {
+		auto emissive_mat = m_resource_manager.createMaterial("sponza_scene::emissive_sphere",
+			MaterialTextures{}, MaterialAlphaProps{},
+			MaterialFactors{
+				.base_color_factor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),
+				.emissive_factor = glm::vec3(0.3f, 0.9f, 1.0f),
+				.metallic_factor = 0.0f,
+				.emissive_strength = 50.0f});
+
+		Entity sphere = m_registry.createGameObject("Emissive Sphere");
+		auto* tc = m_registry.getComponent<TransformComponent>(sphere);
+		tc->setTranslation(sponzaPos({0.0f, 0.0f, 2.0f}));
+		tc->setScale(glm::vec3(0.5f));
+		m_registry.addComponent<MeshComponent>(sphere, sphere_mesh, emissive_mat);
+
+		auto& rb = m_registry.addComponent<RigidbodyComponent>(sphere);
+		rb.setMotionType(PhysicsMotionType::Dynamic);
+		rb.setMass(30);
+		rb.setShapeDesc({.type = PhysicsShapeType::Sphere});
+	}
 }
 
 void SponzaScene::update(float dt) {

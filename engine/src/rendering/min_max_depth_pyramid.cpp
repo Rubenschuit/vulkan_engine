@@ -1,5 +1,5 @@
 #include "pch.hpp"
-#include "rendering/ssr_hiz_pyramid.hpp"
+#include "rendering/min_max_depth_pyramid.hpp"
 #include "rendering/spd_util.hpp"
 #include "vulkan/ve_device.hpp"
 #include "vulkan/ve_image.hpp"
@@ -13,7 +13,7 @@
 
 namespace ve {
 
-SsrHizPyramid::SsrHizPyramid(
+MinMaxDepthPyramid::MinMaxDepthPyramid(
 	VeDevice& device,
 	VeDescriptorPool& descriptor_pool,
 	vk::Extent2D depth_extent,
@@ -32,14 +32,14 @@ SsrHizPyramid::SsrHizPyramid(
 	createAtomicCounterBuffer();
 	createDescriptorSet(descriptor_pool);
 
-	VE_LOGI("SsrHizPyramid: SPD (screen " << m_screen_width << "x" << m_screen_height
+	VE_LOGI("MinMaxDepthPyramid: SPD (screen " << m_screen_width << "x" << m_screen_height
 	         << ", padded " << m_width << "x" << m_height
 	         << ", " << m_mip_levels << " mips)");
 }
 
-SsrHizPyramid::~SsrHizPyramid() = default;
+MinMaxDepthPyramid::~MinMaxDepthPyramid() = default;
 
-void SsrHizPyramid::createImage(vk::Extent2D depth_extent) {
+void MinMaxDepthPyramid::createImage(vk::Extent2D depth_extent) {
 	m_screen_width = depth_extent.width;
 	m_screen_height = depth_extent.height;
 	m_padded_source_width = nextPow2(depth_extent.width);
@@ -55,7 +55,8 @@ void SsrHizPyramid::createImage(vk::Extent2D depth_extent) {
 		vk::SampleCountFlagBits::e1,
 		vk::Format::eR32G32Sfloat,
 		vk::ImageTiling::eOptimal,
-		vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled,
+		// TransferSrc: RcSystem copies mip 0 into its prev-frame depth each frame
+		vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		vk::ImageAspectFlagBits::eColor,
 		false, 1,
@@ -71,7 +72,7 @@ void SsrHizPyramid::createImage(vk::Extent2D depth_extent) {
 	m_image->setDebugName("SSR Hi-Z");
 }
 
-void SsrHizPyramid::createMipViews() {
+void MinMaxDepthPyramid::createMipViews() {
 	m_mip_views.clear();
 	m_mip_views.reserve(m_mip_levels);
 
@@ -94,7 +95,7 @@ void SsrHizPyramid::createMipViews() {
 	}
 }
 
-void SsrHizPyramid::createSampler() {
+void MinMaxDepthPyramid::createSampler() {
 	vk::SamplerCreateInfo sampler_info{
 		.magFilter = vk::Filter::eNearest,
 		.minFilter = vk::Filter::eNearest,
@@ -113,7 +114,7 @@ void SsrHizPyramid::createSampler() {
 	m_point_sampler = vk::raii::Sampler(m_ve_device.getDevice(), sampler_info);
 }
 
-void SsrHizPyramid::createComputeSetLayout() {
+void MinMaxDepthPyramid::createComputeSetLayout() {
 	m_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute)
 		.addBinding(1, vk::DescriptorType::eSampler, vk::ShaderStageFlagBits::eCompute)
@@ -122,7 +123,7 @@ void SsrHizPyramid::createComputeSetLayout() {
 		.build();
 }
 
-void SsrHizPyramid::createPipelineLayout() {
+void MinMaxDepthPyramid::createPipelineLayout() {
 	vk::PushConstantRange push_range{
 		.stageFlags = vk::ShaderStageFlagBits::eCompute,
 		.offset = 0,
@@ -143,12 +144,12 @@ void SsrHizPyramid::createPipelineLayout() {
 	m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), layout_info);
 }
 
-void SsrHizPyramid::createPipeline(const std::filesystem::path& shaders_dir) {
+void MinMaxDepthPyramid::createPipeline(const std::filesystem::path& shaders_dir) {
 	m_compute_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, shaders_dir / "ssr_hiz_spd_comp.spv", m_pipeline_layout);
+		m_ve_device, shaders_dir / "min_max_depth_spd_comp.spv", m_pipeline_layout);
 }
 
-void SsrHizPyramid::createAtomicCounterBuffer() {
+void MinMaxDepthPyramid::createAtomicCounterBuffer() {
 	m_atomic_counter_buffer = std::make_unique<VeBuffer>(
 		m_ve_device,
 		sizeof(uint32_t), 1,
@@ -162,7 +163,7 @@ void SsrHizPyramid::createAtomicCounterBuffer() {
 	m_atomic_counter_buffer->unmap();
 }
 
-void SsrHizPyramid::createDescriptorSet(VeDescriptorPool& pool) {
+void MinMaxDepthPyramid::createDescriptorSet(VeDescriptorPool& pool) {
 	vk::DescriptorImageInfo sampler_info{.sampler = *m_point_sampler};
 
 	vk::DescriptorImageInfo src_info{
@@ -192,7 +193,7 @@ void SsrHizPyramid::createDescriptorSet(VeDescriptorPool& pool) {
 		.build(m_descriptor_set);
 }
 
-void SsrHizPyramid::generate(vk::raii::CommandBuffer& cmd) {
+void MinMaxDepthPyramid::generate(vk::raii::CommandBuffer& cmd) {
 	// All mips to eGeneral for storage writes. This is a write-after-read
 	// against the previous frame's trace
 	vk::ImageMemoryBarrier2 to_general{
@@ -252,7 +253,7 @@ void SsrHizPyramid::generate(vk::raii::CommandBuffer& cmd) {
 	cmd.pipelineBarrier2(dep_out);
 }
 
-void SsrHizPyramid::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D depth_extent,
+void MinMaxDepthPyramid::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D depth_extent,
                               const vk::raii::ImageView& depth_image_view) {
 	m_ve_device.assertDeviceIdle();
 	m_depth_image_view = *depth_image_view;
@@ -261,8 +262,12 @@ void SsrHizPyramid::recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D dep
 	createDescriptorSet(descriptor_pool);
 }
 
-const vk::raii::ImageView& SsrHizPyramid::getPyramidView() const {
+const vk::raii::ImageView& MinMaxDepthPyramid::getPyramidView() const {
 	return m_image->getImageView();
+}
+
+vk::Image MinMaxDepthPyramid::getImage() const {
+	return m_image->getImage();
 }
 
 }

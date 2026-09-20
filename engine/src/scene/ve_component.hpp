@@ -156,6 +156,9 @@ public:
 	// Mutates this material's PBR factors and notifies the
 	// renderer to re-upload
 	void editMaterialFactors(const std::function<void(MaterialFactors&)>& fn);
+	// Notifies the renderer through MeshDataChangedEvent only, which an open
+	// registry batch suppresses: not batch-safe
+	void setMaterial(ResourceHandle<VeMaterial> material_h);
 	ResourceHandle<VeMesh> getMeshHandle() const { return mesh_handle; }
 	ResourceHandle<VeMaterial> getMaterialHandle() const { return material_handle; }
 	bool hasMesh() const { return mesh_handle.isValid(); }

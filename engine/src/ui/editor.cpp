@@ -202,6 +202,7 @@ void Editor::setContext(const EditorContext& ctx, const RenderServices& services
 	if (m_debug_panel) {
 		m_debug_panel->setShadowRenderSystem(services.shadow);
 		m_debug_panel->setFlyCamera(&m_cameras.flyCamera());
+		m_debug_panel->setRcSystem(services.rc);
 	}
 	if (m_graphics_panel) {
 		m_graphics_panel->setParticleBackend(services.particles);

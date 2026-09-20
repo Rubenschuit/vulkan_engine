@@ -1,5 +1,5 @@
 // Screen-space reflections trace.
-// Hi-Z traversal: walks the SsrHizPyramid min/max depth pyramid (built from
+// Hi-Z traversal: walks the MinMaxDepthPyramid (built from
 // the current-frame resolved depth) along the reflection ray in
 // post-projective space, where the ray is a straight line in (uv, ndc_z) and
 // empty cells can be skipped at coarse mips without stepping over thin
@@ -275,7 +275,7 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	float2 prev_border = saturate((0.5 - abs(prev_uv - 0.5)) / 0.1);
 	float history_fade = prev_border.x * prev_border.y;
 	float dist_fade = 1.0 - saturate(hit_dist / push.max_distance);
-	float rough_fade = 1.0 - smoothstep(push.max_roughness * 0.85, max(push.max_roughness, 1e-4), roughness);
+	float rough_fade = 1.0 - smoothstep(push.max_roughness * SPEC_HANDOFF_FADE_START, max(push.max_roughness, 1e-4), roughness);
 	float confidence = edge_fade * history_fade * dist_fade * rough_fade;
 
 	ssr_out[id.xy] = float4(color, confidence);

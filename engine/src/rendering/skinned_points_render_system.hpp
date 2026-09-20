@@ -26,7 +26,6 @@ public:
 		VeDevice& device,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		vk::Format color_format,
-		vk::SampleCountFlagBits sample_count,
 		std::filesystem::path shader_path,
 		EventBus& event_bus);
 	~SkinnedPointsRenderSystem();
@@ -35,13 +34,13 @@ public:
 	SkinnedPointsRenderSystem& operator=(const SkinnedPointsRenderSystem&) = delete;
 
 	void render(VeFrameInfo& fi, const DeformPrePass& prepass, const PbrMegaBuffer& mega_buffer);
-	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count);
+	void recreatePipeline(vk::Format color_format);
 
 	void setPointSize(float px) { m_point_size = px; }
 
 private:
 	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout);
-	void createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count);
+	void createPipeline(vk::Format color_format);
 
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;

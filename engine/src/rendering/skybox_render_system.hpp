@@ -81,9 +81,12 @@ public:
 	SkyboxSettings& getSettings() { return m_settings; }
 	const SkyboxSettings& getSettings() const { return m_settings; }
 
+	glm::vec3 skyRadianceScale() const;
+
 	bool isLoading() const { return m_pending_load.has_value(); }
 
 private:
+	static glm::vec3 dayNightTint(bool is_day);
 	void discoverSkyboxes();
 	void loadSkyboxTexture(const std::filesystem::path& path);
 	void createCubeMesh(VeResourceManager& resource_manager);

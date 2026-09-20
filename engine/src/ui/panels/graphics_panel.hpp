@@ -1,5 +1,6 @@
 #pragma once
 #include "ui/editor_panel.hpp"
+#include "rendering/rc_params.hpp"
 #include <cstdint>
 
 namespace ve {
@@ -26,6 +27,7 @@ private:
 	EventBus& m_event_bus;
 	ParticleBackend* m_particles = nullptr;
 	uint32_t m_max_particle_capacity = 0;
+	RcSettings m_rc_held; // RC settings being dragged, applied on release
 };
 
 } // namespace ve

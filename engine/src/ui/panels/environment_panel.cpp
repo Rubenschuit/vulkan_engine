@@ -33,12 +33,12 @@ void EnvironmentPanel::render(Registry* /*registry*/, EditorState& state, UICont
 		labeledWidget("Rotate", [&]() {
 			ImGui::Checkbox("##rotate", &settings.rotate);
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Disable for skyboxes with a horizon (e.g. clouds).");
+				ImGui::SetTooltip("Rotates the drawn sky box only, not the lighting.");
 		});
 		labeledWidget("Exposure", [&]() {
 			ImGui::SliderFloat("##skybox_exposure", &settings.exposure, 0.1f, 5.0f, "%.2f");
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Skybox brightness (independent of post-process exposure).");
+				ImGui::SetTooltip("Brightness of the sky as drawn and, with IBL enabled, as it lights the scene.");
 		});
 		labeledWidget("Day", [&]() {
 			ImGui::Checkbox("##day", &settings.is_day);
@@ -53,36 +53,13 @@ void EnvironmentPanel::render(Registry* /*registry*/, EditorState& state, UICont
 	labeledWidget("Enabled", [&]() {
 		ImGui::Checkbox("##ibl_enabled", &ctx.settings.ibl_enabled);
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Use skybox environment for ambient lighting (requires IBL data).");
+			ImGui::SetTooltip("Use skybox environment for diffuse and specular ambient lighting\n(requires IBL data). SSR and RC Rough Specular only apply while on.");
 	});
 	if (ctx.settings.ibl_enabled) {
-		labeledWidget("Auto Exposure", [&]() {
-			ImGui::Checkbox("##ibl_auto_exposure", &ctx.settings.ibl_auto_exposure);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Automatically compensate intensity for dark environments.");
-			if (ctx.settings.ibl_auto_exposure) {
-				ImGui::SameLine();
-				ImGui::TextDisabled("(%.1fx)", ctx.stats.ibl_exposure_compensation);
-			}
-		});
-		labeledWidget("Diffuse", [&]() {
-			ImGui::SliderFloat("##ibl_diffuse", &ctx.settings.ibl_diffuse_intensity, 0.0f, 5.0f, "%.2f");
-			if (ImGui::IsItemHovered()) {
-				float effective = ctx.settings.ibl_diffuse_intensity * (ctx.settings.ibl_auto_exposure ? ctx.stats.ibl_exposure_compensation : 1.0f);
-				ImGui::SetTooltip("Diffuse IBL contribution. Effective: %.2f", effective);
-			}
-		});
-		labeledWidget("Specular", [&]() {
-			ImGui::SliderFloat("##ibl_specular", &ctx.settings.ibl_specular_intensity, 0.0f, 5.0f, "%.2f");
-			if (ImGui::IsItemHovered()) {
-				float effective = ctx.settings.ibl_specular_intensity * (ctx.settings.ibl_auto_exposure ? ctx.stats.ibl_exposure_compensation : 1.0f);
-				ImGui::SetTooltip("Specular IBL contribution. Effective: %.2f", effective);
-			}
-		});
 		labeledWidget("Min Ambient", [&]() {
 			ImGui::SliderFloat("##ibl_min_ambient", &ctx.settings.ibl_min_ambient, 0.0f, 0.05f, "%.4f");
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Minimum ambient floor to prevent completely black areas.");
+				ImGui::SetTooltip("Minimum ambient floor, scaled by albedo.");
 		});
 		if (m_skybox) {
 			const auto& available = m_skybox->getAvailableSkyboxes();

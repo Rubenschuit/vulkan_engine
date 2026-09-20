@@ -1,8 +1,8 @@
-// Screen-space reflections: Hi-Z traversal of a min/max pyramid built from
-// the current-frame depth (SsrHizPyramid) along reflection rays from the
-// prepass normals, fetching radiance from the previous frame's HDR history
-// (reprojected via prev_projection_view). Output is rgb radiance + confidence
-// in alpha, composited into the IBL specular term by the PBR shader
+// Screen-space reflections: Hi-Z traversal of the ScreenRayResources min/max
+// depth pyramid along reflection rays from the prepass normals, fetching
+// radiance from its previous-frame HDR history (reprojected via
+// prev_projection_view). Output is rgb radiance + confidence in alpha,
+// composited into the IBL specular term by the PBR shader
 #pragma once
 #include "ve_export.hpp"
 #include "vulkan/ve_device.hpp"
@@ -16,7 +16,7 @@
 namespace ve {
 
 class EventBus;
-class SsrHizPyramid;
+class ScreenRayResources;
 
 class VENGINE_API SsrSystem {
 public:
@@ -30,6 +30,7 @@ public:
 		vk::Format color_format,
 		const vk::raii::ImageView& depth_image_view,
 		const vk::raii::ImageView& normal_roughness_image_view,
+		const ScreenRayResources& screen_rays,
 		EventBus& event_bus);
 	~SsrSystem();
 
@@ -42,14 +43,6 @@ public:
 	// graphics command buffer before scene render.
 	void acquireForRead(vk::raii::CommandBuffer& cmd);
 
-	// Copies the resolve target into the history image and rebuilds its mip
-	// chain.
-	// Expects the resolve target in eShaderReadOnlyOptimal and returns both images
-	// there. Must be recorded on the graphics queue
-	void recordHistoryCopy(vk::raii::CommandBuffer& command_buffer, vk::Image resolve_target);
-	void invalidateHistory() { m_history_valid = false; }
-	bool historyValid() const { return m_history_valid; }
-
 	const vk::raii::DescriptorSetLayout& getSsrSetLayout() const {
 		return m_output_set_layout->getDescriptorSetLayout();
 	}
@@ -58,7 +51,6 @@ public:
 	vk::raii::DescriptorSet& getDummyOutputDescriptorSet() { return m_dummy_output_descriptor_set; }
 
 private:
-	void createHistoryImage();
 	void createOutputImage();
 	void createResolvedImage();
 	void createDummyImage();
@@ -70,21 +62,19 @@ private:
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;
 	vk::Extent2D m_ssr_extent;    // trace resolution (may be half-res)
-	vk::Extent2D m_full_extent;   // history / depth / normal resolution
+	vk::Extent2D m_full_extent;   // depth / normal resolution
 	vk::Format m_format;
+	const ScreenRayResources& m_screen_rays;
 
 	// Trace parameters
 	int m_max_steps = 48;
 	float m_thickness = 0.3f;
-	float m_max_roughness = 0.85f;
+	float m_max_roughness = 0.4f; // overwritten from RenderSettings on the first SettingsWatcher tick
 	float m_max_distance = 55.0f;
 
-	std::unique_ptr<VeImage> m_history_image;
 	std::unique_ptr<VeImage> m_output_image;
 	std::unique_ptr<VeImage> m_resolved_image;
 	std::unique_ptr<VeImage> m_dummy_image;
-	std::unique_ptr<SsrHizPyramid> m_hiz_pyramid;
-	bool m_history_valid = false;
 	bool m_resolve_active = false;
 
 	vk::raii::Sampler m_linear_clamp_sampler{nullptr};

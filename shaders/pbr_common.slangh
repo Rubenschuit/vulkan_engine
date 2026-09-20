@@ -11,6 +11,12 @@
 [vk::constant_id(4)] const uint AREA_LIGHTS_SPEC = 1;   // 0 compiles out LTC rect-light evaluation
 [vk::constant_id(5)] const uint DEBUG_SHADING_SPEC = 1; // 0 compiles out ubo.render_mode debug views
 [vk::constant_id(6)] const uint ALPHA_MASK_SPEC = 1;    // 0 compiles out the alpha-mask discard
+[vk::constant_id(7)] const uint RC_COMPOSITE_SPEC = 1;  // 0 compiles out the RC composite
+
+// pbr_wboit sets this to 0 before its include
+#ifndef RC_EDGE_AWARE_UPSAMPLE
+#define RC_EDGE_AWARE_UPSAMPLE 1
+#endif
 
 // Per-light early-out thresholds
 static const float LIGHT_RADIANCE_CUTOFF = 1e-3;
@@ -172,6 +178,70 @@ float upsampleShadowMask(float2 uv, float frag_view_z) {
 	return sum / wsum;
 }
 
+// Edge-aware upsample of the RC outputs. Each RC texel was computed at one
+// full-res pixel, the one under its centre. The four texels around a fragment
+// are weighted by how well that pixel's surface matches the fragment's: its
+// depth against the fragment's depth plane extended to that pixel, and its
+// normal. With no match the result is the plain bilinear blend.
+static const float RC_UPSAMPLE_DEPTH_SIGMA = 0.01; // relative depth mismatch
+static const float RC_UPSAMPLE_FLOOR = 1e-3;       // keeps the weight sum above 0
+
+struct RcUpsampleTaps {
+	int2 texels[4];
+	float4 weights; // sum to 1
+	float match;    // bilinear-weighted surface match, 0..1 (debug view)
+};
+
+RcUpsampleTaps rcUpsampleTaps(float2 pixel, float depth, float2 depth_slope, float3 normal) {
+	uint width, height;
+	rc_texture.GetDimensions(width, height);
+	float2 rc_size = float2(width, height);
+	float2 coord = pixel * (rc_size / ubo.screen_size) - 0.5;
+	int2 base = int2(floor(coord));
+	float2 f = coord - float2(base);
+	int2 max_texel = int2(width - 1, height - 1);
+	float2 texel_to_pixel = ubo.screen_size / rc_size;
+
+	RcUpsampleTaps taps;
+	taps.match = 0.0;
+	float weight_sum = 0.0;
+	[unroll]
+	for (int i = 0; i < 4; i++) {
+		int2 offset = int2(i & 1, i >> 1);
+		int2 texel = clamp(base + offset, int2(0, 0), max_texel);
+		float4 surface = rc_geometry_texture.Load(int3(texel, 0));
+		float2 surface_pixel = float2(int2((float2(texel) + 0.5) * texel_to_pixel)) + 0.5;
+		float expected_depth = depth + dot(depth_slope, surface_pixel - pixel);
+		float mismatch = abs(surface.w - expected_depth) / (max(depth, 1e-8) * RC_UPSAMPLE_DEPTH_SIGMA);
+		float facing = saturate(dot(surface.xyz, normal));
+		facing *= facing;
+		float surface_match = exp(-mismatch * mismatch) * facing * facing;
+		float bilinear = (offset.x == 0 ? 1.0 - f.x : f.x) * (offset.y == 0 ? 1.0 - f.y : f.y);
+		taps.texels[i] = texel;
+		taps.match += bilinear * surface_match;
+		taps.weights[i] = bilinear * (surface_match + RC_UPSAMPLE_FLOOR);
+		weight_sum += taps.weights[i];
+	}
+	taps.weights /= weight_sum;
+	return taps;
+}
+
+float4 rcUpsample(Texture2D<float4> source, RcUpsampleTaps taps) {
+	float4 sum = float4(0.0);
+	[unroll]
+	for (int i = 0; i < 4; i++)
+		sum += source.Load(int3(taps.texels[i], 0)) * taps.weights[i];
+	return sum;
+}
+
+float rcUpsample(Texture2D<float> source, RcUpsampleTaps taps) {
+	float sum = 0.0;
+	[unroll]
+	for (int i = 0; i < 4; i++)
+		sum += source.Load(int3(taps.texels[i], 0)) * taps.weights[i];
+	return sum;
+}
+
 // ============================================================================
 // PBR Lighting Computation
 // Returns the fully-lit fragment color (rgb = HDR color, a = alpha).
@@ -179,6 +249,9 @@ float upsampleShadowMask(float2 uv, float frag_view_z) {
 
 float4 computePbrLighting(VertexOutput in_vert) {
 	float4 c;
+#if RC_EDGE_AWARE_UPSAMPLE
+	float2 depth_slope = float2(ddx(in_vert.pos.z), ddy(in_vert.pos.z));
+#endif
 	MaterialGPU mat = materials[in_vert.material_index];
 
 	float2 tex_coord = in_vert.frag_tex_coord;
@@ -221,6 +294,14 @@ float4 computePbrLighting(VertexOutput in_vert) {
 			return float4(lodDebugColor(albedo.rgb, in_vert.lod_level), albedo.a);
 		else if (ubo.render_mode == RenderMode::MESHLET_ID)
 			return float4(meshletDebugColor(albedo.rgb, in_vert.meshlet_id), albedo.a);
+		else if (ubo.render_mode == RenderMode::RC_IRRADIANCE) {
+			float2 rc_uv = in_vert.pos.xy / ubo.screen_size;
+			return float4(rc_texture.SampleLevel(rc_sampler, rc_uv, 0).rgb, 1.0);
+		} else if (ubo.render_mode == RenderMode::RC_SKY_VISIBILITY) {
+			float2 rc_uv = in_vert.pos.xy / ubo.screen_size;
+			float v = rc_sky_visibility.SampleLevel(rc_sampler, rc_uv, 0.0);
+			return float4(v, v, v, 1.0);
+		}
 	}
 
 	if ((mat.material_flags & MAT_FLAG_UNLIT) != 0u)
@@ -272,7 +353,11 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	// Without debug shading the render mode is always BRDF_MICROFACET
 	float3 world_normal = N;
 	if (DEBUG_SHADING_SPEC == 0
-		|| ubo.render_mode == RenderMode::BRDF_MICROFACET || ubo.render_mode == RenderMode::NORMAL_MAP) {
+		|| ubo.render_mode == RenderMode::BRDF_MICROFACET || ubo.render_mode == RenderMode::NORMAL_MAP
+#if RC_EDGE_AWARE_UPSAMPLE
+		|| ubo.render_mode == RenderMode::RC_UPSAMPLE_MATCH
+#endif
+		) {
 		world_normal = applyNormalMap(normal_map.xyz, T, B, N);
 	}
 
@@ -414,13 +499,31 @@ float4 computePbrLighting(VertexOutput in_vert) {
 
 	// Ambient / IBL
 	float3 ambient;
-	bool ibl_active = (ubo.ibl_diffuse_intensity > 0.0) || (ubo.ibl_specular_intensity > 0.0);
-	if (ibl_active) {
-		float3 kD_ibl = (1.0 - F0) * (1.0 - metallic);
+	float diffuse_ao = occlusion * ssao;
 
+	// GI
+	float4 rc = float4(0.0);
+#if RC_EDGE_AWARE_UPSAMPLE
+	RcUpsampleTaps rc_taps = (RcUpsampleTaps)0;
+	if (RC_COMPOSITE_SPEC != 0) {
+		rc_taps = rcUpsampleTaps(in_vert.pos.xy, in_vert.pos.z, depth_slope, world_normal);
+		if (DEBUG_SHADING_SPEC != 0 && ubo.render_mode == RenderMode::RC_UPSAMPLE_MATCH)
+			return float4(rc_taps.match, rc_taps.match, rc_taps.match, 1.0);
+		rc = rcUpsample(rc_texture, rc_taps);
+	}
+#else
+	if (RC_COMPOSITE_SPEC != 0)
+		rc = rc_texture.SampleLevel(rc_sampler, screen_uv, 0.0);
+#endif
+	float rc_ao = occlusion * lerp(1.0, ssao, ubo.rc_short_range_ao);
+	float3 kD_ibl = (1.0 - F0) * (1.0 - metallic);
+	if (ubo.ibl_active != 0u) {
 		// Convert engine Z-up to cubemap Y-up
 		float3 n_yup = float3(world_normal.x, world_normal.z, world_normal.y);
-		float3 irradiance = evaluateSH(n_yup, ubo.sh_coefficients);
+		float3 sh_raw = evaluateSH(n_yup, ubo.sh_coefficients);
+
+		float3 sh_irradiance = sh_raw * ubo.sky_radiance_scale.rgb;
+		float3 irradiance = sh_irradiance * diffuse_ao * (1.0 - rc.a) + rc.rgb * rc_ao;
 		float3 diffuse_ibl = kD_ibl * irradiance * albedo.rgb;
 
 		float3 R = reflect(-view_dir, world_normal);
@@ -429,9 +532,36 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		float3 prefiltered = ibl_prefiltered.SampleLevel(R_yup, lod).rgb;
 		float2 env_brdf = ibl_brdf_lut.SampleLevel(float2(NdotV, 1.0 - roughness), 0).rg;
 
-		// SSR replaces the prefiltered environment sample where confident.
+		// The prefiltered cubemap has  no scene visibility,
+		// so it leaks sky indoors. This mitigates that
+		float env_occl = 1.0;
+		if (RC_COMPOSITE_SPEC != 0 && ubo.rc_spec_occlusion > 0.0) {
+#if RC_EDGE_AWARE_UPSAMPLE
+			float sky_visibility = rcUpsample(rc_sky_visibility, rc_taps);
+#else
+			float sky_visibility = rc_sky_visibility.SampleLevel(rc_sampler, screen_uv, 0.0);
+#endif
+			float fade = rc.a * ubo.rc_spec_occlusion;
+			env_occl = lerp(1.0, saturate(sky_visibility), fade);
+		}
+
+		// SSR claims its confidence first, RC rough specular
+		// claims its band out of the remainder, the environment fills the rest.
 		float4 ssr = ssr_texture.SampleLevel(ssr_sampler, screen_uv, 0);
-		float3 spec_env = lerp(prefiltered * ubo.ibl_specular_intensity, ssr.rgb, ssr.a);
+		float env_share = 1.0 - ssr.a;
+		float3 spec_env = ssr.rgb;
+		if (RC_COMPOSITE_SPEC != 0 && ubo.rc_rough_spec != 0u) {
+#if RC_EDGE_AWARE_UPSAMPLE
+			float4 rc_spec = rcUpsample(rc_spec_texture, rc_taps);
+#else
+			float4 rc_spec = rc_spec_texture.SampleLevel(rc_sampler, screen_uv, 0.0);
+#endif
+			float band = min(smoothstep(ubo.rc_spec_handoff_roughness * SPEC_HANDOFF_FADE_START,
+				max(ubo.rc_spec_handoff_roughness, 1e-4), roughness), env_share);
+			spec_env += band * rc_spec.rgb;
+			env_share -= band * rc_spec.a;
+		}
+		spec_env += prefiltered * ubo.sky_radiance_scale.rgb * env_occl * env_share;
 
 		// Multiscatter energy compensation (Fdez-Aguera 2019). env_brdf precomputed assuming F90=1, so scale by F90.
 		float3 Fr = max(F0 * env_brdf.x + F90 * env_brdf.y, 0.0);
@@ -440,13 +570,14 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		float3 specular_ibl = spec_env * (Fr + FmsEms);
 		specular_ibl *= saturate(NdotV * 4.0);
 
-		float diffuse_ao = occlusion * ssao;
 		float spec_ao = specularAO(NdotV, diffuse_ao, roughness);
-		ambient = diffuse_ibl * diffuse_ao * ubo.ibl_diffuse_intensity
+		ambient = diffuse_ibl // GTAO already applied per irradiance share
 				+ specular_ibl * spec_ao;
 		ambient *= 1.0 - transmission;
 	} else {
-		ambient = ubo.ambient_light_color.xyz * albedo.rgb * occlusion * ssao;
+		// IBL off
+		float3 flat_ambient = ubo.ambient_light_color.xyz * diffuse_ao;
+		ambient = kD_ibl * (flat_ambient * (1.0 - rc.a) + rc.rgb * rc_ao) * albedo.rgb;
 		ambient *= 1.0 - transmission;
 	}
 

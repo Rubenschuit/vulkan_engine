@@ -48,7 +48,7 @@ public:
 	// present in `previous->m_entries` are sourced via GPU->GPU copy from the
 	// previous mega buffers (since per-mesh GPU buffers are released after the
 	// initial build); other meshes are copied from their own per-mesh buffers.
-	void build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh*>& meshes,
+	void build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh*>& candidates,
 	           const PbrMegaBuffer* previous = nullptr);
 
 	// Swaps all GPU buffers + lookup tables with `other`

@@ -178,6 +178,12 @@ void MeshComponent::editMaterialFactors(const std::function<void(MaterialFactors
 		m_registry->events().emit(MeshDataChangedEvent{m_entity});
 }
 
+void MeshComponent::setMaterial(ResourceHandle<VeMaterial> material_h) {
+	material_handle = std::move(material_h);
+	if (m_registry)
+		m_registry->events().emit(MeshDataChangedEvent{m_entity});
+}
+
 void MeshComponent::updateWorldAABB() const {
 	assert(m_registry && "MeshComponent must have Registry context for world AABB");
 	const glm::mat4& model = m_registry->getWorldTransform(m_entity);

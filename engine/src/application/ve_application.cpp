@@ -13,6 +13,7 @@
 #include "rendering/render_pipeline.hpp"
 #include "rendering/render_resources.hpp"
 #include "rendering/render_settings.hpp"
+#include "rendering/rc_system.hpp"
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
 #include "ve_tracy.hpp"
@@ -189,6 +190,9 @@ void VeApplication::run() {
 				m_ve_renderer.resetSceneRenderExtent();
 				m_benchmark_scene_started = true;
 			}
+			applyBenchmarkOverrides();
+			if (m_benchmark->consumeRcReset())
+				m_render_pipeline->resetRcStore();
 			// Apply the scripted pose before the camera view is built below.
 			if (auto pose = m_benchmark->cameraPose()) {
 				auto& cam = m_cameras.flyCamera();
@@ -281,9 +285,12 @@ void VeApplication::loadDefaultScene(int index) {
 }
 
 void VeApplication::applyBenchmarkSkybox() {
-	if (!m_benchmark || m_benchmark->config().skybox.empty())
+	if (!m_benchmark)
 		return;
-	m_event_bus.enqueue(SkyboxRequestEvent{.name = m_benchmark->config().skybox});
+	const BenchmarkConfig& bc = m_benchmark->config();
+	if (bc.skybox.empty() && !bc.skybox_exposure)
+		return;
+	m_event_bus.enqueue(SkyboxRequestEvent{.name = bc.skybox, .exposure = bc.skybox_exposure});
 }
 
 // ─── Benchmark Mode ──────────────────────────────────────────────────────────
@@ -316,6 +323,23 @@ void VeApplication::setupBenchmark() {
 	VE_LOGI("[bench] benchmark mode: scene='" << (bc.scene.empty() ? "<default>" : bc.scene)
 		<< "' warmup=" << bc.warmup_frames << " frames=" << bc.measure_frames
 		<< " camera_keypoints=" << bc.keypoints.size());
+	applyBenchmarkOverrides();
+}
+
+void VeApplication::applyBenchmarkOverrides() {
+	const BenchmarkConfig& bc = m_benchmark->config();
+	auto& settings = m_render_pipeline->settings();
+	for (const auto& [key, v] : bc.set_values) {
+		const BenchSetKey* entry = findBenchSetKey(key);
+		assert(entry);
+		entry->apply(settings, v);
+	}
+	if (m_benchmark->screenshotFrame()) {
+		if (bc.debug_render_mode >= 0)
+			settings.render_mode = static_cast<RenderMode>(bc.debug_render_mode);
+		if (bc.rc_view >= 0)
+			settings.rc.debug_view = static_cast<RcDebugView>(bc.rc_view);
+	}
 }
 
 static const char* cullingBackendName(CullingBackendMode mode) {
@@ -352,6 +376,7 @@ void VeApplication::finishBenchmark() {
 		.culling_backend = cullingBackendName(settings.culling_backend),
 		.hiz_occlusion = settings.hiz_occlusion_enabled,
 		.draw_indirect_count = m_ve_device.supportsDrawIndirectCount(),
+		.rc_enabled = settings.rc.enabled && settings.geometry_prepass_enabled,
 	});
 	glfwSetWindowShouldClose(m_ve_window.getGLFWwindow(), GLFW_TRUE);
 }

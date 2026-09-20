@@ -615,7 +615,7 @@ void HierarchyPanel::renderSaveLightsButton(Registry& registry) {
 		if (path.empty())
 			ImGui::SetTooltip("This scene has no overlay file to save to.");
 		else
-			ImGui::SetTooltip("Write all enabled lights (color/intensity/spot)\nto %s", pathToUtf8(path).c_str());
+			ImGui::SetTooltip("Write all enabled Emissive lights (color/intensity/range/spot)\nto %s", pathToUtf8(path).c_str());
 	}
 	if (!m_save_lights_status.empty()) {
 		ImGui::SameLine();

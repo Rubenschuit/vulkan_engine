@@ -44,6 +44,7 @@ public:
 	// When true, vertex shader flips tex coord v. Required for some gltf exporters.
 	bool getFlipTexCoordV() const { return m_flip_tex_coord_v; }
 	const MaterialUvTransforms& getUvTransforms() const { return m_uv_transforms; }
+	const MaterialTextures& getTextures() const { return m_textures; }
 
 	const ResourceHandle<VeTexture>& getAlbedoTexture() const { return m_textures.albedo; }
 	const ResourceHandle<VeTexture>& getNormalTexture() const { return m_textures.normal; }

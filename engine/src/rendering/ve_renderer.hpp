@@ -1,7 +1,7 @@
 /* VeRenderer owns the swap chain, per-frame command buffers, and the frame
 lifecycle: begin/end frame, render-pass begin/end pairs, split submission for
 the async-compute path, and present. Also exposes display settings
-(MSAA/VSync/HDR) and the frame profiler. Default present mode is immediate. 
+(MSAA/VSync/HDR) and the frame profiler. Default present mode is immediate.
 */
 #pragma once
 #include "ve_export.hpp"
@@ -15,6 +15,7 @@ the async-compute path, and present. Also exposes display settings
 #include "vulkan/ve_swap_chain.hpp"
 #include <filesystem>
 #include <memory>
+#include <utility>
 #include <vector>
 
 
@@ -51,6 +52,8 @@ public:
 	void markSceneFrame() { m_scene_frame = true; }
 	bool isFrameInProgress() const { return m_is_frame_started; }
 	bool isSwapChainOutOfDate() const { return m_swap_chain_needs_recreation; }
+	// True once after a frame whose recorded command buffers were discarded.
+	bool consumeFrameDropped() { return std::exchange(m_frame_dropped, false); }
 
 	// --- Render passes, in frame order ---
 
@@ -64,6 +67,10 @@ public:
 	void endWboitRender(vk::raii::CommandBuffer& command_buffer);
 	void beginWboitComposite(vk::raii::CommandBuffer& command_buffer);
 	void endWboitComposite(vk::raii::CommandBuffer& command_buffer);
+	// Single-sample pass over the resolved HDR target and resolved depth, for
+	// editor overlays that must stay out of the screen-ray history.
+	void beginOverlayRender(vk::raii::CommandBuffer& command_buffer);
+	void endOverlayRender(vk::raii::CommandBuffer& command_buffer);
 	// Render to the swapchain (editor_mode=false) or viewport image (editor_mode=true).
 	void beginPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode = false);
 	void endPostProcessRender(vk::raii::CommandBuffer& command_buffer, bool editor_mode = false);
@@ -196,6 +203,7 @@ private:
 	bool m_swap_chain_needs_recreation = false;
 	bool m_image_acquired_this_frame = false;
 	bool m_frame_aborted = false;
+	bool m_frame_dropped = false;
 	bool m_pre_swap_submitted_this_frame = false;
 	bool m_scene_frame = false;
 	bool m_ui_label_open = false;

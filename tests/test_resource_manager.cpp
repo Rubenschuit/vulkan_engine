@@ -2,6 +2,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <resources/ve_resource.hpp>
 #include <resources/ve_resource_manager.hpp>
+#include <resources/ve_material.hpp>
+#include <resources/ve_texture.hpp>
 #include <vulkan/ve_device.hpp>
 #include <platform/ve_window.hpp>
 #include <events/event_bus.hpp>
@@ -268,4 +270,43 @@ TEST_CASE("Manager destructor flushes pending unloads", "[resource][destructor]"
 	}
 	// Fixture (and manager) destructed.
 	REQUIRE(unloaded);
+}
+
+TEST_CASE("cloneMaterial copies factors and shares textures under a fresh id", "[resource][clone]") {
+	ManagerFixture fix;
+	auto texture = [&](const std::string& id) {
+		return fix.manager.registerExisting<ve::VeTexture>(id, std::make_shared<ve::VeTexture>(fix.device, id));
+	};
+	auto src = fix.manager.createMaterial("curtain",
+		ve::MaterialTextures{
+			.albedo = texture("albedo"),
+			.normal = texture("normal"),
+			.metallic_roughness = texture("metallic_roughness"),
+			.occlusion = texture("occlusion"),
+			.emissive = texture("emissive"),
+			.specular = texture("specular"),
+			.specular_color = texture("specular_color"),
+		},
+		ve::MaterialAlphaProps{}, ve::MaterialFactors{.emissive_strength = 3.0f});
+
+	auto first = fix.manager.cloneMaterial(*src);
+	auto second = fix.manager.cloneMaterial(*src);
+	REQUIRE(first.getId() == "curtain#1");
+	REQUIRE(second.getId() == "curtain#2");
+	REQUIRE(first.get() != src.get());
+	REQUIRE(first->getAlbedoTexture().get() == src->getAlbedoTexture().get());
+	REQUIRE(first->getMaterialFactors().emissive_strength == 3.0f);
+
+	auto factors = first->getMaterialFactors();
+	factors.emissive_strength = 7.0f;
+	first->setMaterialFactors(factors);
+	REQUIRE(src->getMaterialFactors().emissive_strength == 3.0f);
+
+	// A clone of a clone joins the same family instead of stacking suffixes
+	auto of_clone = fix.manager.cloneMaterial(*first);
+	REQUIRE(of_clone.getId() == "curtain#3");
+
+	// A released copy keeps its id until the deferred unload runs
+	first = ve::ResourceHandle<ve::VeMaterial>{};
+	REQUIRE(fix.manager.cloneMaterial(*src).getId() == "curtain#4");
 }

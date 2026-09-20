@@ -251,6 +251,16 @@ void SkyboxRenderSystem::processPendingLoad() {
 	m_event_bus.emitImmediate(SkyboxChangedEvent{m_available_skyboxes[idx].path});
 }
 
+glm::vec3 SkyboxRenderSystem::dayNightTint(bool is_day) {
+	return is_day ? glm::vec3(1.05f, 1.0f, 0.95f) : glm::vec3(0.9f, 0.95f, 1.1f);
+}
+
+glm::vec3 SkyboxRenderSystem::skyRadianceScale() const {
+	if (!m_has_cubemap_descriptor)
+		return glm::vec3(0.0f);
+	return m_settings.exposure * dayNightTint(m_settings.is_day);
+}
+
 void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 	if (!m_has_cubemap_descriptor)
 		return;
@@ -276,10 +286,10 @@ void SkyboxRenderSystem::render(VeFrameInfo& frame_info) {
 	SkyboxPushConstantData push{};
 	push.transform = m_cube_transform.getTransform();
 	push.params.x = m_settings.exposure;
-	// Day: slight warm tint, Night: cool tint
-	push.params.y = m_settings.is_day ? 1.05f : 0.9f;   // R
-	push.params.z = m_settings.is_day ? 1.0f : 0.95f;   // G
-	push.params.w = m_settings.is_day ? 0.95f : 1.1f;   // B
+	glm::vec3 tint = dayNightTint(m_settings.is_day);
+	push.params.y = tint.r;
+	push.params.z = tint.g;
+	push.params.w = tint.b;
 	frame_info.cmd().pushConstants(
 		*m_pipeline_layout,
 		vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,

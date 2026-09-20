@@ -114,8 +114,8 @@ private:
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VeComputePipeline> m_compute_pipeline;
 
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_descriptor_sets{
-		vk::raii::DescriptorSet{nullptr}, vk::raii::DescriptorSet{nullptr}};
+	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_descriptor_sets =
+		makeNullArray<vk::raii::DescriptorSet>();
 	// Mega-buffer generation each frame's descriptor set was last written against
 	std::array<uint64_t, MAX_FRAMES_IN_FLIGHT> m_cached_mega_generation{};
 

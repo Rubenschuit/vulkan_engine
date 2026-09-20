@@ -1,6 +1,5 @@
 # Vulkan Engine
-![PBR Rendering](screenshots/bistro_1.png)
-![PBR Rendering](screenshots/sponza.png)
+![Bistro](screenshots/bistro.png)
 
 Cross-platform C++20 Vulkan 1.3+ GPU-driven clustered forward renderer with an integrated editor, built from scratch as a personal project to explore real-time graphics and engine architecture. Produces a shared library and an app.
 
@@ -16,11 +15,15 @@ Cross-platform C++20 Vulkan 1.3+ GPU-driven clustered forward renderer with an i
   - [Windows (cmd or PowerShell)](#windows-cmd-or-powershell)
 - [Manual build](#manual-build)
   - [Unix or MinGW shell](#unix-or-mingw64-shell)
-  - [Windows (Visual Studio)](#windows-with-visual-studio)
+  - [Windows with MSVC](#windows-with-msvc)
+- [Build options](#build-options)
+- [Running the sandbox](#running-the-sandbox)
+- [Tests](#tests)
+- [Benchmarks and visual regression](#benchmarks-and-visual-regression)
 - [Credits](#credits)
 
 
-![Simple scene](screenshots/simple_scene.png)
+![Sponza](screenshots/sponza_night.png)
 
 ![Particle System](screenshots/particles.png)
 ![Fireworks](screenshots/fireworks.png)
@@ -39,12 +42,16 @@ Cross-platform C++20 Vulkan 1.3+ GPU-driven clustered forward renderer with an i
 - Automatic LOD selection
 - Multi-threaded command buffer recording with secondary command buffers
 - Shaders written in Slang, compiled to SPIR-V at build time
+- Screen space reflections
+- Specialization-constant pipeline variants, cached to disk between runs
 
 #### Lighting & Shadows
-- Point lights, directional lights, spot lights
-- Cascaded Shadow Maps
+- Point lights, directional lights, spot lights, area lights
+- Cascaded Shadow Maps, plus a packed atlas for point and spot shadows
 - Screen-space shadow mask (compute), PCF, PCSS
 - GTAO (Ground Truth Ambient Occlusion)
+- Global illumination: world-space [Split Radiance Cascades](https://arxiv.org/abs/2607.20384) - sparse probe hashmaps with a screen space
+ray marcher
 
 #### Architecture
 - Shared-library + app split
@@ -56,7 +63,10 @@ Cross-platform C++20 Vulkan 1.3+ GPU-driven clustered forward renderer with an i
 
 #### Simulation
 - Rigid-body physics via Jolt
-- Skeletal animation: glTF skin import, keyframed TRS clips, compute skinning
+- Character controller on Jolt's CharacterVirtual
+- Skeletal animation: glTF skin import, keyframed TRS clips, compute skinning, morph targets
+- Animation blending: per-clip weights, cross-fade, 1D blend spaces
+- Third-person follow camera with a physics-probed spring arm
 - Compute-based particle system, async on a dedicated compute queue when available
 
 #### Post-processing & Effects
@@ -68,9 +78,11 @@ Cross-platform C++20 Vulkan 1.3+ GPU-driven clustered forward renderer with an i
 
 
 #### Editor & Tools
-- Dear ImGui docked UI with hierarchy, inspector, viewport, graphics settings, performance, and environment panels
+- Dear ImGui docked UI with hierarchy, inspector, viewport, asset browser, graphics settings, performance, environment and debug panels
 - ImGuizmo 3D transform gizmos
 - Outline rendering for selected entities
+- Debug views: normals, tangents, normal maps, shadow cascades, cluster heatmap, LOD level, meshlet ID, GI irradiance and sky visibility
+- Headless benchmark mode with per-pass timings, deterministic counters and golden-image comparison
 - Tracy profiler integration (optional)
 - Cross-platform builds: Windows (MSVC or MinGW), macOS, and Linux
 - FPS-style camera (WASD + mouse)
@@ -79,15 +91,18 @@ Cross-platform C++20 Vulkan 1.3+ GPU-driven clustered forward renderer with an i
 ## Requirements
 
 - Git
-- CMake ≥ 3.16
+- CMake ≥ 3.20
 - C++20 toolchain: Clang 14+, MSVC 2019+, or GCC 11+
 - Vulkan SDK ≥ 1.3 with Slang compiler
 
 Fetched automatically if not found on the system:
-- KTX, GLFW 3.3+, GLM, Meshoptimizer
+- KTX-Software 4.4.2, GLFW 3.3.9, GLM 1.0.1, meshoptimizer 1.0, Jolt Physics 5.5.0
+- Catch2 3.5.2 when tests are enabled, Tracy 0.13.1 when profiling is enabled
 
 Included in `external/`:
-- TinyGLTF, Dear ImGui, ImGuizmo, Mikktspace, Portable File Dialogs, AMD FidelityFX SPD (Hi-Z downsampler)
+- TinyGLTF, Dear ImGui, ImGuizmo, Mikktspace, Portable File Dialogs, Vulkan Memory Allocator, AMD FidelityFX SPD (Hi-Z downsampler)
+
+The sandbox scenes and their models are in the repository, so there is nothing to download before running.
 
 
 #### Downloads:
@@ -115,14 +130,14 @@ sudo apt install git cmake xorg-dev libglfw3-dev libglm-dev libxcb-xinerama0-dev
 After installing all the dependencies, we can build and run with one script.
 
 - ##### macOS, Linux and Windows (MinGW64 shell):
-Optional arguments include [release|debug|test|clean]. Default is release.
+Optional arguments include [debug|release|test|tracy|leaks|clean] and [no-vk-val]. Default is release.
 ```bash
 cd vulkan_engine
 ./unixBuild.sh
 ```
 
 - ##### Windows (cmd or PowerShell):
-Optional arguments include [release|debug|tracy|test|clean] and [vs2022|vs2026]. Default is release vs2026.
+Optional arguments include [debug|release|test|tracy|clean] and [vs2022|vs2026]. Default is release vs2026.
 ```cmd
 cd vulkan_engine
 .\windowsBuild.bat
@@ -165,3 +180,4 @@ Huge thanks to:
 - The Khronos Vulkan Tutorial: https://docs.vulkan.org/tutorial/latest/00_Introduction.html
 - Physically Based Rendering in Filament: https://google.github.io/filament/Filament.md.html
 - Vulkan samples by Sascha Willems: https://github.com/SaschaWillems/Vulkan
+- Rouli Freeman and Alexander Sannikov, "Split Radiance Cascades: Real-Time Global Illumination via Sparse Radiance Probes": https://arxiv.org/abs/2607.20384

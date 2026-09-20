@@ -30,6 +30,15 @@ enum class ProfileTimer : uint32_t {
 	CLUSTER_LIGHTS,
 	PARTICLES,
 	SSR,
+	RC,
+	RC_BUILD,
+	RC_SHADE,
+	RC_MAP,
+	RC_TRACE,
+	RC_RESOLVE,
+	RC_MERGE,
+	RC_IRRADIANCE,
+	RC_GATHER,
 	COUNT
 };
 
@@ -53,6 +62,15 @@ inline const char* profileTimerName(ProfileTimer timer) {
 		case ProfileTimer::CLUSTER_LIGHTS: return "Cluster Lights";
 		case ProfileTimer::PARTICLES:      return "Particles";
 		case ProfileTimer::SSR:            return "SSR";
+		case ProfileTimer::RC:             return "RC GI";
+		case ProfileTimer::RC_BUILD:       return "RC Build";
+		case ProfileTimer::RC_SHADE:       return "RC Shade";
+		case ProfileTimer::RC_MAP:         return "RC Map";
+		case ProfileTimer::RC_TRACE:       return "RC Trace";
+		case ProfileTimer::RC_RESOLVE:     return "RC Resolve";
+		case ProfileTimer::RC_MERGE:       return "RC Merge";
+		case ProfileTimer::RC_IRRADIANCE:  return "RC Irradiance";
+		case ProfileTimer::RC_GATHER:      return "RC Gather";
 		default:                           return "Unknown";
 	}
 }

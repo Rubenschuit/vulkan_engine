@@ -25,17 +25,16 @@ SkinnedPointsRenderSystem::SkinnedPointsRenderSystem(
 		VeDevice& device,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		vk::Format color_format,
-		vk::SampleCountFlagBits sample_count,
 		std::filesystem::path shader_path,
 		EventBus& event_bus)
 	: m_ve_device(device), m_shader_path(std::move(shader_path)) {
 
 	event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
-		recreatePipeline(e.offscreen_format, e.sample_count);
+		recreatePipeline(e.offscreen_format);
 	});
 
 	createPipelineLayout(global_set_layout);
-	createPipeline(color_format, sample_count);
+	createPipeline(color_format);
 }
 
 SkinnedPointsRenderSystem::~SkinnedPointsRenderSystem() = default;
@@ -55,10 +54,11 @@ void SkinnedPointsRenderSystem::createPipelineLayout(const vk::raii::DescriptorS
 	m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), info);
 }
 
-void SkinnedPointsRenderSystem::createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+void SkinnedPointsRenderSystem::createPipeline(vk::Format color_format) {
 	PipelineConfigInfo config{};
 	VePipeline::defaultPipelineConfigInfo(config, m_ve_device);
-	config.multisample_info.rasterizationSamples = sample_count;
+	// Drawn in the single-sample overlay pass after the screen-ray history copy
+	config.multisample_info.rasterizationSamples = vk::SampleCountFlagBits::e1;
 	config.input_assembly_info.topology = vk::PrimitiveTopology::ePointList;
 	config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	config.depth_stencil_info.depthWriteEnable = VK_FALSE;
@@ -75,9 +75,9 @@ void SkinnedPointsRenderSystem::createPipeline(vk::Format color_format, vk::Samp
 	m_pipeline = std::make_unique<VePipeline>(m_ve_device, m_shader_path, config);
 }
 
-void SkinnedPointsRenderSystem::recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+void SkinnedPointsRenderSystem::recreatePipeline(vk::Format color_format) {
 	m_pipeline.reset();
-	createPipeline(color_format, sample_count);
+	createPipeline(color_format);
 }
 
 void SkinnedPointsRenderSystem::render(VeFrameInfo& fi, const DeformPrePass& prepass, const PbrMegaBuffer& mega_buffer) {

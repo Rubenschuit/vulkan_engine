@@ -134,12 +134,14 @@ private:
 	void buildWboitConfig(PipelineConfigInfo& config) const;
 	std::unordered_map<uint32_t, uint32_t> specConstants(uint32_t shadow_mode, uint32_t shadow_mask,
 	                                                     uint32_t area_lights, uint32_t debug_shading,
-	                                                     uint32_t alpha_mask) const;
+	                                                     uint32_t alpha_mask, uint32_t rc_composite) const;
 
 	void ensureDebugPipelines() const;
+	void ensureNoRcPipelines(uint32_t area, uint32_t mode) const;
 	void recreateAllPipelines();
 	VePipeline& forwardPipeline(const VeFrameInfo& frame_info) const;
 	VePipeline& maskedPipeline(const VeFrameInfo& frame_info) const;
+	VePipeline& transparentPipeline(const VeFrameInfo& frame_info) const;
 	VePipeline& wboitPipeline(const VeFrameInfo& frame_info) const;
 
 	VeDevice& m_ve_device;
@@ -158,6 +160,10 @@ private:
 	std::array<ShadowModeSet, AREA_VARIANTS> m_pipelines;
 	std::array<ShadowModeSet, AREA_VARIANTS> m_pipelines_mask;
 	std::array<ShadowModeSet, AREA_VARIANTS> m_masked_pipelines;
+
+	mutable std::array<ShadowModeSet, AREA_VARIANTS> m_pipelines_no_rc;
+	mutable std::array<ShadowModeSet, AREA_VARIANTS> m_pipelines_mask_no_rc;
+	mutable std::array<ShadowModeSet, AREA_VARIANTS> m_masked_pipelines_no_rc;
 
 	mutable ShadowModeSet m_pipelines_dbg;
 	mutable ShadowModeSet m_pipelines_mask_dbg;

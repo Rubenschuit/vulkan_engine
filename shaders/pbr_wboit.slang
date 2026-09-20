@@ -3,6 +3,8 @@
 //   RT0 (RGBA16F): accumulated weighted premultiplied color
 //   RT1 (R16F): revealage (product of 1-alpha via multiplicative blending)
 
+// Keeps the plain bilinear RC reads
+#define RC_EDGE_AWARE_UPSAMPLE 0
 #include "pbr_common.slangh"
 
 struct WboitOutput {

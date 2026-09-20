@@ -57,6 +57,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		context.stats.gpu_hiz, context.stats.gpu_shadow_maps,
 		context.stats.gpu_shadow_mask, context.stats.gpu_gtao,
 		context.stats.gpu_scene_render, context.stats.gpu_ssr,
+		context.stats.gpu_rc,
 		context.stats.gpu_outline,
 		context.stats.gpu_bloom, context.stats.gpu_post_process,
 		0.0f, 0.0f,
@@ -68,6 +69,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		context.stats.cpu_hiz, context.stats.cpu_shadow_maps,
 		context.stats.cpu_shadow_mask, context.stats.cpu_gtao,
 		context.stats.cpu_scene_render, context.stats.cpu_ssr,
+		context.stats.cpu_rc,
 		context.stats.cpu_outline,
 		context.stats.cpu_bloom, context.stats.cpu_post_process,
 		context.stats.cpu_physics, context.stats.cpu_ui,
@@ -78,6 +80,14 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		m_gpu_breakdown_sum[i] += gpu_src[i];
 		m_cpu_breakdown_sum[i] += cpu_src[i];
 	}
+	const float rc_src[] = {
+		context.stats.gpu_rc_build, context.stats.gpu_rc_map,
+		context.stats.gpu_rc_trace, context.stats.gpu_rc_resolve,
+		context.stats.gpu_rc_shade, context.stats.gpu_rc_merge,
+		context.stats.gpu_rc_irradiance, context.stats.gpu_rc_gather
+	};
+	for (int i = 0; i < RC_BREAKDOWN_COUNT; i++)
+		m_rc_breakdown_sum[i] += rc_src[i];
 
 	if (m_frame_count >= 60) {
 		m_fps = (m_accumulated_dt > 0.0f) ? (60.0f / m_accumulated_dt) : 0.0f;
@@ -93,6 +103,10 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 			m_cpu_breakdown_ms[i] = m_cpu_breakdown_sum[i] / 60.0f;
 			m_gpu_breakdown_sum[i] = 0.0f;
 			m_cpu_breakdown_sum[i] = 0.0f;
+		}
+		for (int i = 0; i < RC_BREAKDOWN_COUNT; i++) {
+			m_rc_breakdown_ms[i] = m_rc_breakdown_sum[i] / 60.0f;
+			m_rc_breakdown_sum[i] = 0.0f;
 		}
 
 		m_frame_count = 0;
@@ -291,14 +305,19 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	ImGui::Spacing();
 	ImGui::Separator();
 	ImGui::Checkbox("GPU Profiling", &context.settings.gpu_profiling);
-	ImGui::SetItemTooltip("Collect per-pass GPU timings (very small overhead)");
+	ImGui::SetItemTooltip("Collect per-pass GPU timings");
 	ImGui::Spacing();
 
 	// --- Per-system breakdown table ---
 	static const char* breakdown_labels[] = {
 		"Culling", "Geometry Pass", "Hi-Z", "Shadows", "Shadow Mask", "GTAO",
-		"Scene", "SSR", "Outline", "Bloom", "Post Process", "Physics",
+		"Scene", "SSR", "RC GI", "Outline", "Bloom", "Post Process", "Physics",
 		"UI", "Skinning", "Cluster Lights", "Particles"
+	};
+	constexpr int RC_ROW = 8;
+	static const struct { const char* label; bool group; } rc_rows[] = {
+		{"Build", true}, {"Map", false}, {"Trace", false}, {"Resolve", false},
+		{"Shade", true}, {"Merge", false}, {"Irradiance", false}, {"Gather", false},
 	};
 
 	if (ImGui::BeginTable("##Breakdown", 3, ImGuiTableFlags_RowBg)) {
@@ -321,11 +340,36 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 
 			ImGui::TableNextRow();
 			ImGui::TableNextColumn();
-			ImGui::Text("%s", breakdown_labels[i]);
+			bool rc_open = false;
+			if (i == RC_ROW && gpu > 0.0f)
+				rc_open = ImGui::TreeNodeEx(breakdown_labels[i],
+					ImGuiTreeNodeFlags_SpanAllColumns | ImGuiTreeNodeFlags_NoTreePushOnOpen);
+			else
+				ImGui::Text("%s", breakdown_labels[i]);
 			ImGui::TableNextColumn();
 			ImGui::Text("%.2f", cpu);
 			ImGui::TableNextColumn();
 			ImGui::Text("%.2f", gpu);
+
+			if (rc_open) {
+				for (int k = 0; k < RC_BREAKDOWN_COUNT; k++) {
+					float indent = rc_rows[k].group ? 16.0f : 32.0f;
+					ImGui::TableNextRow();
+					ImGui::TableNextColumn();
+					ImGui::Indent(indent);
+					if (rc_rows[k].group)
+						ImGui::Text("%s", rc_rows[k].label);
+					else
+						ImGui::TextDisabled("%s", rc_rows[k].label);
+					ImGui::Unindent(indent);
+					ImGui::TableNextColumn();
+					ImGui::TableNextColumn();
+					if (rc_rows[k].group)
+						ImGui::Text("%.2f", m_rc_breakdown_ms[k]);
+					else
+						ImGui::TextDisabled("%.2f", m_rc_breakdown_ms[k]);
+				}
+			}
 		}
 
 		ImGui::TableNextRow();

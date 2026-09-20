@@ -1,0 +1,806 @@
+// Shared structs, bindings, and helpers for the rcw_* passes (world-space
+// radiance cascades GI, after Freeman & Sannikov, "Split Radiance Cascades",
+// https://arxiv.org/abs/2607.20384). Included by every pass so they agree on
+// the probe store layout and the push-constant layout.
+//
+// Probes live on nested grids: the grid at scale s (= cascade + lod) has
+// spacing ds0 * 2^s. A point's cell at scale s is the grid cube containing
+// it, named by the integer coordinate of its lowest corner; one probe sits
+// at each cell's centre, so a point's cell names its nearest probe.
+// cell0 = int3(floor(p / ds0)) is computed once; the cell at scale s is
+// cell0 >> s.
+//
+// Probes are stored in a hashmap. A probe's 32 bit key holds its lod and its
+// offset from the camera's cell, per axis in [-255, 255]:
+//
+//   key = 0x80000000 (bit 31) | lod (bits 27-30) | z offset (bits 18-26)
+// 			| y offset (bits 9-17) | x offset (bits 0-8)
+//
+// Adding 256 makes each offset a 9-bit unsigned field, and bit 31 keeps any
+// occupied key nonzero so that key 0 can mean "empty hash slot".
+//
+// The hashmaps are rebuilt every frame, ping-ponging by frame parity. Probe
+// data lives in persistent slots; an insert finds last frame's slot through
+// the previous map. On any overflow a probe simply goes missing for a frame.
+//
+// Terms used throughout:
+//   bin         one cell of a cascade's direction grid (rcwDirToBin). Every
+//               per-direction quantity is stored per (probe, bin).
+//   J           float3, linear radiance. The mean over the rays deposited
+//               into a bin of the radiance found inside the cascade's
+//               interval: a ray that hits there contributes the radiance at
+//               its hit, a ray that passes through contributes 0.
+//   beta        float in [0, 1]. The fraction of the rays deposited into a
+//               bin that passed through the cascade's interval without
+//               hitting anything. Stored with J.
+//   evidence    float in [0, 1]. The fraction of a bin's rays whose sky
+//               outcome is known: an unsampled bin has 0; a ray that hits
+//               inside the interval is known; a ray that passes through is
+//               known to the degree the parent bin is. An unsampled
+//               cascade-0 bin stands for a clear interval and takes its
+//               parents' evidence.
+//   visibility_lower  float in [0, 1]. The fraction of a bin's rays proven
+//               to reach the sky: sampled times beta at the top cascade;
+//               below, the bin's own share (sampled, or 1 at cascade 0)
+//               times beta times the parents' mean; 0 with no parent.
+//   slot        a probe's persistent storage index, kept across frames; the
+//               probe's per-frame record, probes[probe_index], holds it.
+//   husk        a hash entry with value RCW_INVALID, left by an insert that
+//               claimed its key and found no free slot; counted in
+//               RcwCounters.husks, read as zero.
+//   spawn pixel an output pixel whose depth hits a surface (rcwPixelWorld
+//               true); it inserts the c0 probes around its point and traces
+//               rays from it.
+
+#pragma once
+#include "ve_common.slangh"
+
+// ============================================================================
+// Push-constant layout; must match RcwPushConstant in rc_system.cpp.
+// ============================================================================
+struct RcwPush {
+	int4 anchor0_curr;      // xyz: floor(camera / ds0); w: frame parity (0/1)
+	int4 anchor0_prev;      // xyz: anchor of the prev map's dispatch; w: probe TTL
+	float2 out_size;        // RC output resolution
+	float2 depth_size;      // full-res depth resolution
+	float ds0;              // c0 probe spacing at LOD 0, metres
+	float lod0_dist;        // Chebyshev distance where LOD 0 ends, metres
+	float proj_22;
+	float proj_32;          // reverse-Z linearization: proj[3][2]
+	float thickness;        // view-space hit tolerance, metres
+	float luma_clamp;       // history radiance luma clamp
+	float intensity;        // bounce multiplier, applied to the history radiance the trace reads
+	uint hash_words_per_parity;       // words per frame in hash_keys/hash_vals
+	uint probes_per_parity;      // elements per frame in probes
+	uint cascade_index;     // per-pass cascade (insert_parent: source cascade)
+	uint n_cascades;
+	uint debug_gather_mode; // RCW_GATHER_*
+	uint probe_j_cascade;   // PROBE_J view: cascade whose stored J is shown
+	uint frame_counter;
+	uint rays_per_pixel;
+	uint flags;             // RCW_FLAG_*, see below
+	uint hiz_mip_count;     // min/max pyramid mip count
+	float blend_zone;       // cross-fade fraction of the lod boundary distance
+};
+
+[[vk::push_constant]] RcwPush push;
+
+// push.flags: bits 0-3 single-bit switches, 4-6 the two mode fields,
+// 8-23 two 8-bit fixed-point values, 24-25 diagnostic switches, bit 7 and
+// 26-31 free.
+
+static const uint RCW_FLAG_ROUGH_SPEC = 1u << 0;
+// Debug: store the evidence in the visibility atlas instead.
+static const uint RCW_FLAG_VISIBILITY_EVIDENCE = 1u << 1;
+// Zero the radiance of hits that were occluded in the previous frame (their
+// history pixel showed something else then).
+static const uint RCW_FLAG_HIST_DEPTH = 1u << 2;
+// The merge weights each parent by its sample count on top of position
+static const uint RCW_FLAG_COUNT_WEIGHT = 1u << 3;
+
+// Which probes of the parent cascade insert_parent stamps per child probe.
+static const uint RCW_PARENT_FULL = 0u;     // all 8 corners, the set the merge reads
+static const uint RCW_PARENT_NEAREST = 1u;  // the single nearest parent
+static const uint RCW_PARENT_MODE_SHIFT = 4u;
+static const uint RCW_PARENT_MODE_MASK = 1u;
+uint rcwParentMode() {
+	return (push.flags >> RCW_PARENT_MODE_SHIFT) & RCW_PARENT_MODE_MASK;
+}
+
+// Which c0 probes a spawn pixel inserts
+static const uint RCW_DEPOSIT_NEAREST = 0u;  // that chain, each with the ray's full share
+static const uint RCW_DEPOSIT_WEIGHTED = 1u; // the 8 corners of the cell, trilinear shares
+static const uint RCW_DEPOSIT_RANDOM = 2u;   // 1 of those 8, drawn per pixel per frame
+static const uint RCW_DEPOSIT_MODE_SHIFT = 5u;
+static const uint RCW_DEPOSIT_MODE_MASK = 3u;
+uint rcwDepositMode() {
+	return (push.flags >> RCW_DEPOSIT_MODE_SHIFT) & RCW_DEPOSIT_MODE_MASK;
+}
+
+// Minimum fraction of a ray's full length that must be
+// proven empty before a sky exit deposits (0 = always, 1 = never).
+// Quantized to 8 bits in push.flags
+static const uint RCW_SKY_MIN_FRAC_SHIFT = 8u;
+float rcwSkyMinFrac() {
+	return float((push.flags >> RCW_SKY_MIN_FRAC_SHIFT) & 0xFFu) * (1.0 / 255.0);
+}
+
+// How much the probes' sky estimate replaces the environment
+static const uint RCW_SKY_TRUST_SHIFT = 16u;
+float rcwSkyTrust() {
+	return float((push.flags >> RCW_SKY_TRUST_SHIFT) & 0xFFu) * (1.0 / 255.0);
+}
+
+static const uint RCW_FLAG_FREEZE_PROBES = 1u << 24;
+static const uint RCW_FLAG_SINGLE_FRAME = 1u << 25;
+
+// ============================================================================
+// Constants
+// ============================================================================
+static const uint RCW_INVALID = 0xFFFFFFFFu;
+static const uint RCW_MAX_LOD = 15;          // largest lod the key's 4-bit field can store
+static const uint RCW_MAX_CASCADES = 6;      // sizes per-cascade locals; the host clamps n_cascades to it
+static const uint RCW_HASH_MAX_PROBES = 64;  // max lookup steps (maps are sized at most half full)
+static const uint RCW_LINEAR_WG = 64;
+
+// Ray exit-cause codes, produced by the march and counted in the 'ray_stats'
+// buffer (one RCW_RAY_STAT_WORDS histogram per parity region, zeroed every
+// frame).
+static const uint RCW_RAY_STAT_WORDS = 8;
+static const uint RCW_RAY_HIT = 0;
+static const uint RCW_RAY_CLEAR = 1;        // full length proven empty
+static const uint RCW_RAY_SKY = 2;          // sky exit, rcwSkyMinFrac passed
+static const uint RCW_RAY_SKY_GATED = 3;    // sky exit, gated off (clears kept)
+static const uint RCW_RAY_UNK_OCCLUDED = 4; // dived behind geometry > thickness
+static const uint RCW_RAY_UNK_STEPCAP = 5;  // step budget exhausted mid-walk
+static const uint RCW_RAY_UNK_EDGE = 6;     // screen-edge exit over geometry
+static const uint RCW_RAY_UNK_CLIP = 7;     // camera-ward / near-plane / degenerate
+
+// Deposits accumulate as integers, radiance * RCW_FIXED_ONE: integer atomic
+// adds are commutative, so output is bit-deterministic
+static const float RCW_FIXED_ONE = 1024.0;
+static const uint RCW_SCRATCH_WORDS = 5;
+
+static const uint RCW_SLOT_FRESH = 0x80000000u;
+static const uint RCW_SLOT_SEEDED = 0x40000000u;
+static const uint RCW_SLOT_MASK = 0x3FFFFFFFu;
+
+// Slot free pool, per cascade: [0] = slots handed out so far, [1] = size of
+// the freed-slot stack, [2..] = the stack itself.
+static const uint RCW_FREE_WATERMARK = 0;
+static const uint RCW_FREE_TOP = 1;
+
+// Gather debug views: 0 = none, the gather writes its outputs; the others
+// replace rc_output with the view, data in rgb, a = 0
+static const uint RCW_GATHER_PROBE_J = 11;   // nearest-probe stored J at cascade probe_j_cascade
+static const uint RCW_GATHER_COVERAGE = 12;  // r/g/b = c0/c1/c2 corner fractions
+static const uint RCW_GATHER_TRACE_KIND = 13;
+static const uint RCW_GATHER_CONVERGENCE = 14; // EMA sample count of the pixel's probes, over 64
+static const uint RCW_GATHER_PROBE_GRID = 15;  // nearest probe at cascade probe_j_cascade, hash-coloured; black = absent
+static const uint RCW_GATHER_SPEC = 19;
+
+// Probe tiles. Each probe owns an RCW_TILE x RCW_TILE square of texels in an
+// atlas texture, storing a value per direction (octahedral mapping, one
+// direction per texel). The inner RCW_TILE_INNER^2 texels hold the data; the
+// 1-texel border repeats the opposite edge so a bilinear tap wraps across the
+// sphere.
+static const uint RCW_TILE = 8;
+static const uint RCW_TILE_INNER = 6;
+
+uint rcwTilesPerRow(uint probe_cap) {
+	uint p = firstbithigh(probe_cap);
+	return 1u << ((p + 1u) >> 1u);
+}
+
+// The skybox SH coefficients store irradiance divided by pi, which turns a
+// factor of {1, 2/3, 1/4} into the degree 0/1/2 terms. RC needs plain sky
+// radiance (the irradiance pass applies its own cosine weighting), so those
+// degrees are scaled back up by {1, 3/2, 4}.
+float3 rcwEvaluateSkyRadiance(float3 n, float4 sh[9]) {
+	return max(sh[0].xyz
+		+ (sh[1].xyz * n.y + sh[2].xyz * n.z + sh[3].xyz * n.x) * 1.5
+		+ (sh[4].xyz * (n.y * n.x) + sh[5].xyz * (n.y * n.z)
+			+ sh[6].xyz * (3.0 * n.z * n.z - 1.0)
+			+ sh[7].xyz * (n.z * n.x)
+			+ sh[8].xyz * (n.x * n.x - n.y * n.y)) * 4.0, 0.0);
+}
+
+// ============================================================================
+// Buffer layouts
+// ============================================================================
+
+// The 'counters' buffer holds one struct per (parity, cascade).
+// The three x/y/z triples are VkDispatchIndirectCommand
+// workgroup counts: probe insertion grows them, the later passes dispatch
+// indirectly from them. Must match CountersGpu in rc_world_mirrors.hpp.
+struct RcwCounters {
+	uint probes;   // probes allocated this frame
+	uint overflow;  // failed inserts; nonzero also voids run-to-run determinism
+	uint linear_x;  // insert_parent / keepalive: one thread per probe
+	uint linear_y;
+	uint linear_z;
+	uint pair_x;    // resolve / merge / dirmip: one thread per (probe, direction)
+	uint pair_y;
+	uint pair_z;
+	uint probe_x;   // irradiance: one workgroup per probe
+	uint probe_y;
+	uint probe_z;
+	uint husks;     // inserts retracted into husks
+};
+
+uint rcwCounterIndex(uint cascade, uint parity) {
+	return parity * push.n_cascades + cascade;
+}
+
+// Per-cascade buffer offsets, CPU-written once per store (re)build. hash_base and
+// probe_base are frame-0 relative; add parity * push.hash_words_per_parity or
+// parity * push.probes_per_parity for the current frame's region.
+struct RcwCascadeDesc {
+	uint hash_base;    // word offset into hash_keys / hash_vals
+	uint hash_cap;     // power of two
+	uint probe_base;   // element offset into probes
+	uint probe_cap;    // == persistent slot capacity of this cascade
+	uint slot_base;    // element offset into slot_age
+	uint free_base;    // word offset into free_lists (layout at RCW_FREE_*)
+	uint pair_base;    // (probe, dir)-pair offset into scratch / persistent pools
+};
+
+// ============================================================================
+// Bindings (set 1) shared by every rcw_* pipeline.
+// ============================================================================
+[vk::binding(0, 1)]
+Texture2D<float> depth_texture;
+[vk::binding(1, 1)]
+RWStructuredBuffer<uint> hash_keys;
+[vk::binding(2, 1)]
+RWStructuredBuffer<uint> hash_vals;   // probe index, or RCW_INVALID husk
+[vk::binding(3, 1)]
+RWStructuredBuffer<uint2> probes;    // {key, persistent slot}
+[vk::binding(4, 1)]
+RWStructuredBuffer<RcwCounters> counters; // element = rcwCounterIndex(cascade, parity)
+[vk::binding(5, 1)]
+RWStructuredBuffer<uint> slot_age;    // frames a slot's probe missed insertion
+[vk::binding(6, 1)]
+RWStructuredBuffer<uint> free_lists;  // slot free pool; layout at RCW_FREE_*
+[vk::binding(7, 1)]
+StructuredBuffer<RcwCascadeDesc> cascade_descs;
+[vk::binding(8, 1)]
+RWTexture2D<float4> rc_output;
+[vk::binding(9, 1)]
+Texture2D<float4> normal_roughness_texture;
+[vk::binding(10, 1)]
+Texture2D<float4> history_texture;
+[vk::binding(11, 1)]
+SamplerState linear_sampler;
+// Min/max depth pyramid: x = min depth (farthest in reverse-Z), y = max
+// (closest); (0,0) marks sky/padding. Mip 0 is half the power-of-two padded
+// depth resolution, so full-res pixel p maps to mip-L texel p >> (L + 1).
+[vk::binding(12, 1)]
+Texture2D<float2> hiz_pyramid;
+// Last frame's copy of hiz_pyramid mip 0 (the pyramid itself is rebuilt in
+// place each frame). Only valid under RCW_FLAG_HIST_DEPTH.
+[vk::binding(23, 1)]
+Texture2D<float2> prev_depth_texture;
+// Per-frame deposit scratch, RCW_SCRATCH_WORDS u32 per (probe, dir) pair:
+// {J.rgb fixed-point, hit_mass, clear_mass}. Masses are separate words: a
+// packed u16|u16 InterlockedAdd would carry into the next field. All zero
+// outside the trace-to-resolve window (one fill at store reset, then resolve
+// re-zeroes the pairs it consumed).
+[vk::binding(13, 1)]
+RWStructuredBuffer<uint> scratch;
+// Cross-frame store per (slot, dir) pair: half4 {J.rgb, beta}, with the EMA
+// sample count in persist_count. Never cleared; RCW_SLOT_FRESH makes the
+// first resolve of a reused slot overwrite instead of blend.
+[vk::binding(14, 1)]
+RWStructuredBuffer<uint2> persist_j;
+[vk::binding(15, 1)]
+RWStructuredBuffer<uint> persist_count;
+// Irradiance tiles: rgb = cosine-weighted mean radiance (bounce plus sky,
+// proven or assumed, the sky scaled by the trust) for the texel's direction,
+// a = the Sky Visibility trust. One tile per probe, rebuilt every frame.
+[vk::binding(16, 1)]
+RWTexture2D<float4> irradiance_atlas;
+[vk::binding(17, 1)]
+Texture2D<float4> irradiance_atlas_in;
+// Sky-visibility tiles: per texel direction, the cosine mean of the c0 bins'
+// sky estimate (proven fraction plus the prior for the unknown remainder).
+[vk::binding(20, 1)]
+RWTexture2D<float> visibility_atlas;
+[vk::binding(21, 1)]
+Texture2D<float> visibility_atlas_in;
+// Gathered sky visibility for the composite.
+[vk::binding(22, 1)]
+RWTexture2D<float> rc_visibility_output;
+// Working buffers of the merge: merged holds one cascade's merged intervals
+// (a half4 per (probe, direction bin) pair), dirmip the same averaged down
+// to the direction resolution of the cascade below.
+[vk::binding(18, 1)]
+RWStructuredBuffer<uint2> merged;
+[vk::binding(19, 1)]
+RWStructuredBuffer<uint2> dirmip;
+// Beside merged / dirmip, one float per pair: the fraction of the bin's
+// rays proven to reach the sky
+[vk::binding(27, 1)]
+RWStructuredBuffer<float> merged_lower;
+[vk::binding(28, 1)]
+RWStructuredBuffer<float> dirmip_lower;
+// Gathered rough-specular radiance + confidence, the composite's set-5 spec
+// input. Garbage while RCW_FLAG_ROUGH_SPEC is clear.
+[vk::binding(24, 1)]
+RWTexture2D<float4> rc_spec_output;
+// Ray exit diagnostics, RCW_RAY_STAT_WORDS counts per parity region.
+[vk::binding(25, 1)]
+RWStructuredBuffer<uint> ray_stats;
+// The surface each gathered texel stands for, read by the composite's
+// edge-aware upsample: xyz = world normal, w = depth, both at the full-res
+// pixel under the texel centre (all 0 on sky or where there is no normal).
+[vk::binding(26, 1)]
+RWTexture2D<float4> rc_geometry_output;
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+// Direction grid: directions bin by azimuth angle (2t columns) and by z
+// (t rows), with t = RCW_THETA0 * 2^cascade, so 2 * RCW_THETA0^2 * 4^cascade
+// bins per cascade (32 * 4^cascade at the default 4). Uniform steps in z give
+// every bin the same solid angle. RCW_THETA0 is a specialization constant set
+// by RcSystem from RcSettings::c0_polar_bins.
+[vk::constant_id(7)] const uint RCW_THETA0 = 4;
+
+uint rcwThetaBins(uint cascade) {
+	return RCW_THETA0 << cascade;
+}
+
+uint rcwDirCount(uint cascade) {
+	uint t = rcwThetaBins(cascade);
+	return 2u * t * t;
+}
+
+uint2 rcwDirToBin(float3 w, uint cascade) {
+	uint t = rcwThetaBins(cascade);
+	float u = atan2(w.y, w.x) * (1.0 / 6.2831853) + 0.5;
+	float v = (w.z + 1.0) * 0.5;
+	uint bi = min(uint(saturate(u) * float(2u * t)), 2u * t - 1u);
+	uint bj = min(uint(saturate(v) * float(t)), t - 1u);
+	return uint2(bi, bj);
+}
+
+float3 rcwBinToDir(uint2 bin, uint cascade) {
+	uint t = rcwThetaBins(cascade);
+	float phi = ((float(bin.x) + 0.5) / float(2u * t) - 0.5) * 6.2831853;
+	float z = (float(bin.y) + 0.5) / float(t) * 2.0 - 1.0;
+	float r = sqrt(max(1.0 - z * z, 0.0));
+	return float3(r * cos(phi), r * sin(phi), z);
+}
+
+uint rcwBinIndex(uint2 bin, uint cascade) {
+	return bin.y * (2u * rcwThetaBins(cascade)) + bin.x;
+}
+
+// Ray interval cutoffs: cascade n traces from cutoff(n - 1) (0 for cascade 0)
+// to cutoff(n), with cutoff(n) = RCW_C0_RAY_LENGTH * ds0_lod * 4^n.
+[vk::constant_id(8)] const float RCW_C0_RAY_LENGTH = 1.6;
+float rcwCascadeCutoff(uint cascade, float ds0_lod) {
+	return RCW_C0_RAY_LENGTH * ds0_lod * pow(4.0, float(cascade));
+}
+
+// Low discrepancy sequence for stochastic direction generation.
+float2 rcwR2(uint i) {
+	// 2^32 * {1/phi, 1/phi^2} with phi the plastic ratio, phi^3 = phi + 1
+	uint2 k = uint2(i * 3242174889u, i * 2447445413u);
+	return float2(k >> 8) * (1.0 / 16777216.0);
+}
+
+// Morton (Z-order) rank of a pixel, interleaving the x and y bits of a
+// pixel p = (x, y)
+uint rcwMorton2D(uint2 p) {
+	uint x = p.x & 0xFFFFu;
+	uint y = p.y & 0xFFFFu;
+	x = (x | (x << 8)) & 0x00FF00FFu;
+	x = (x | (x << 4)) & 0x0F0F0F0Fu;
+	x = (x | (x << 2)) & 0x33333333u;
+	x = (x | (x << 1)) & 0x55555555u;
+	y = (y | (y << 8)) & 0x00FF00FFu;
+	y = (y | (y << 4)) & 0x0F0F0F0Fu;
+	y = (y | (y << 2)) & 0x33333333u;
+	y = (y | (y << 1)) & 0x55555555u;
+	return x | (y << 1);
+}
+
+// floor(2^32 / phi)
+static const uint RCW_GOLDEN_RATIO_STEP = 0x9E3779B9u;
+
+uint rcwPcgHash(uint v) {
+	uint state = v * 747796405u + 2891336453u;
+	uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+	return (word >> 22u) ^ word;
+}
+
+// LOD and blend factor from the Chebyshev distance to the camera.
+uint rcwLodBlend(float3 position, out float blend) {
+	blend = 0.0;
+	float3 axis_distance = abs(position - ubo.camera_position.xyz);
+	float chebyshev_distance = max(max(axis_distance.x, axis_distance.y), axis_distance.z);
+	float lod0_distance = max(push.lod0_dist, 1e-3);
+	float distance_ratio = chebyshev_distance / lod0_distance;
+	uint lod = 0u;
+	if (distance_ratio > 1.0)
+		lod = min(uint(floor(log2(distance_ratio))) + 1u, RCW_MAX_LOD);
+	if (lod < RCW_MAX_LOD) {
+		float boundary = lod0_distance * float(1u << lod);
+		float zone = (1.0 - push.blend_zone) * boundary;
+		if (chebyshev_distance > zone)
+			blend = saturate((chebyshev_distance - zone) / max(boundary - zone, 1e-3));
+	}
+	return lod;
+}
+
+// Cascade 0 cell containing the point
+int3 rcwCell0(float3 p) {
+	return int3(floor(p / push.ds0));
+}
+
+// Returns 0 (impossible for a real key, which has bit 31 set) when the offset
+// leaves the +-255 window; such probes cannot be stored.
+uint rcwEncodeKey(int3 cell, int3 anchor, uint lod) {
+	int3 offset = cell - anchor;
+	if (any(abs(offset) > 255))
+		return 0u;
+	uint3 biased = uint3(offset + 256);
+	return 0x80000000u | (lod << 27) | (biased.z << 18) | (biased.y << 9) | biased.x;
+}
+
+void rcwDecodeKey(uint key, out int3 offset, out uint lod) {
+	lod = (key >> 27) & 0xFu;
+	offset = int3(int(key & 0x1FFu), int((key >> 9) & 0x1FFu), int((key >> 18) & 0x1FFu))
+		- int3(256, 256, 256);
+}
+
+bool rcwHashLookup(RcwCascadeDesc desc, uint parity, uint key, out uint probe_index) {
+	probe_index = RCW_INVALID;
+	if (key == 0u)
+		return false;
+	uint base = desc.hash_base + parity * push.hash_words_per_parity;
+	uint mask = desc.hash_cap - 1u;
+	uint position = rcwPcgHash(key) & mask;
+	for (uint i = 0; i < RCW_HASH_MAX_PROBES; i++) {
+		uint stored_key = hash_keys[base + position];
+		if (stored_key == 0u)
+			return false;
+		if (stored_key == key) {
+			probe_index = hash_vals[base + position];
+			return probe_index != RCW_INVALID;
+		}
+		position = (position + 1u) & mask;
+	}
+	return false;
+}
+
+static const uint RCW_CLAIM_NEW = 0;  // this thread owns the key; finish the probe record
+static const uint RCW_CLAIM_LIVE = 1; // already inserted with a valid probe index
+static const uint RCW_CLAIM_DEAD = 2; // present as an overflow husk
+static const uint RCW_CLAIM_FULL = 3; // probe budget exhausted
+
+// Claim a key in the hashmap
+uint rcwHashClaim(RcwCascadeDesc desc, uint parity, uint key, out uint hash_index) {
+	hash_index = 0u;
+	uint base = desc.hash_base + parity * push.hash_words_per_parity;
+	uint mask = desc.hash_cap - 1u;
+	uint position = rcwPcgHash(key) & mask;
+	for (uint i = 0; i < RCW_HASH_MAX_PROBES; i++) {
+		uint prev;
+		InterlockedCompareExchange(hash_keys[base + position], 0u, key, prev);
+		if (prev == 0u) {
+			hash_index = base + position;
+			return RCW_CLAIM_NEW;
+		}
+		if (prev == key) {
+			hash_index = base + position;
+			if (hash_vals[base + position] == RCW_INVALID)
+				return RCW_CLAIM_DEAD;
+			return RCW_CLAIM_LIVE;
+		}
+		position = (position + 1u) & mask;
+	}
+	return RCW_CLAIM_FULL;
+}
+
+// Claims a probe index and grows the indirect dispatch sizes to cover it.
+// When the pool is full the increment is rolled back and the insert fails.
+uint rcwAllocEntry(RcwCascadeDesc desc, uint counter_index, uint direction_count) {
+	uint probe_index;
+	InterlockedAdd(counters[counter_index].probes, 1u, probe_index);
+	if (probe_index >= desc.probe_cap) {
+		InterlockedAdd(counters[counter_index].probes, 0xFFFFFFFFu);
+		InterlockedAdd(counters[counter_index].overflow, 1u);
+		return RCW_INVALID;
+	}
+	InterlockedMax(counters[counter_index].linear_x, (probe_index + RCW_LINEAR_WG) / RCW_LINEAR_WG);
+	// Group counts can exceed the 65,535 spec minimum for x.
+	uint pair_groups = ((probe_index + 1u) * direction_count + RCW_LINEAR_WG - 1u) / RCW_LINEAR_WG;
+	InterlockedMax(counters[counter_index].pair_x, min(pair_groups, 65535u));
+	InterlockedMax(counters[counter_index].pair_y, (pair_groups + 65534u) / 65535u);
+	InterlockedMax(counters[counter_index].probe_x, min(probe_index + 1u, 65535u));
+	InterlockedMax(counters[counter_index].probe_y, (probe_index + 1u + 65534u) / 65535u);
+	return probe_index;
+}
+
+// Flat indices for the indirect dispatches
+uint rcwFlatGroup(uint3 group_id) {
+	return group_id.y * 65535u + group_id.x;
+}
+uint rcwFlatThread(uint3 group_id, uint local_x) {
+	return rcwFlatGroup(group_id) * RCW_LINEAR_WG + local_x;
+}
+
+// Inserts only pop and keepalive only pushes, so pop and push never race
+// within one dispatch.
+uint rcwAllocSlot(RcwCascadeDesc desc) {
+	uint top = free_lists[desc.free_base + RCW_FREE_TOP];
+	while (top > 0u) {
+		uint actual;
+		InterlockedCompareExchange(free_lists[desc.free_base + RCW_FREE_TOP], top, top - 1u, actual);
+		if (actual == top)
+			return free_lists[desc.free_base + 2u + top - 1u];
+		top = actual;
+	}
+	uint slot;
+	InterlockedAdd(free_lists[desc.free_base + RCW_FREE_WATERMARK], 1u, slot);
+	if (slot < desc.probe_cap)
+		return slot;
+	InterlockedAdd(free_lists[desc.free_base + RCW_FREE_WATERMARK], 0xFFFFFFFFu);
+	return RCW_INVALID;
+}
+
+void rcwFreeSlot(RcwCascadeDesc desc, uint slot) {
+	uint top;
+	InterlockedAdd(free_lists[desc.free_base + RCW_FREE_TOP], 1u, top);
+	free_lists[desc.free_base + 2u + top] = slot;
+}
+
+// Insert key_curr into the cascade's current map. The slot carries over from
+// the prev map when the probe existed last frame (key_prev is the same grid
+// point encoded against the prev anchor), else a fresh one is popped. Every
+// failure path counts overflow, and every one past the key claim leaves a husk;
+// a fresh slot is only popped once the probe index is secured.
+void rcwInsertProbe(uint cascade, uint parity, uint key_curr, uint key_prev) {
+	RcwCascadeDesc desc = cascade_descs[cascade];
+	uint counter_index = rcwCounterIndex(cascade, parity);
+
+	if (counters[counter_index].probes >= desc.probe_cap) {
+		InterlockedAdd(counters[counter_index].overflow, 1u);
+		return;
+	}
+	if ((push.flags & RCW_FLAG_FREEZE_PROBES) != 0u) {
+		uint frozen_probe_index;
+		if (!rcwHashLookup(desc, 1u - parity, key_prev, frozen_probe_index))
+			return;
+	}
+	uint hash_index;
+	uint status = rcwHashClaim(desc, parity, key_curr, hash_index);
+	if (status == RCW_CLAIM_FULL)
+		InterlockedAdd(counters[counter_index].overflow, 1u);
+	if (status != RCW_CLAIM_NEW)
+		return;
+	uint probe_index = rcwAllocEntry(desc, counter_index, rcwDirCount(cascade));
+	if (probe_index == RCW_INVALID) {
+		hash_vals[hash_index] = RCW_INVALID;
+		return;
+	}
+	uint slot = RCW_INVALID;
+	uint fresh = 0u;
+	uint prev_probe_index;
+	if (rcwHashLookup(desc, 1u - parity, key_prev, prev_probe_index))
+		slot = probes[desc.probe_base + (1u - parity) * push.probes_per_parity + prev_probe_index].y
+			& RCW_SLOT_MASK;
+	if (slot == RCW_INVALID) {
+		slot = rcwAllocSlot(desc);
+		fresh = RCW_SLOT_FRESH;
+	}
+	if (slot == RCW_INVALID) {
+		// Pool exhausted, index already published: retract via a husk,
+		// never the counter (an under-cap decrement can re-issue a live index).
+		probes[desc.probe_base + parity * push.probes_per_parity + probe_index] = uint2(0u, RCW_INVALID);
+		InterlockedAdd(counters[counter_index].husks, 1u);
+		InterlockedAdd(counters[counter_index].overflow, 1u);
+		hash_vals[hash_index] = RCW_INVALID;
+		return;
+	}
+	slot_age[desc.slot_base + slot] = 0u;
+	probes[desc.probe_base + parity * push.probes_per_parity + probe_index] = uint2(key_curr, slot | fresh);
+	hash_vals[hash_index] = probe_index;
+}
+
+// When every lane in the wave wants the same key (neighbouring pixels usually
+// share a cell), one lane inserts for all of them. key 0 means "nothing to
+// insert".
+void rcwInsertProbeElected(uint cascade, uint parity, uint key_curr, uint key_prev) {
+	if (WaveActiveAllEqual(key_curr)) {
+		if (WaveIsFirstLane() && key_curr != 0u)
+			rcwInsertProbe(cascade, parity, key_curr, key_prev);
+	} else if (key_curr != 0u)
+		rcwInsertProbe(cascade, parity, key_curr, key_prev);
+}
+
+// The corner of a cell with index 0-7: bit 0 is x, bit 1 is y, bit 2 is z
+int3 rcwCorner(uint corner_index) {
+	return int3(int(corner_index) & 1, int(corner_index >> 1) & 1, int(corner_index >> 2) & 1);
+}
+
+// Trilinear weight of one corner for a point inside the cell.
+// position_in_cell is the point's offset from the cell's low corner, per
+// axis in [0, 1).
+float rcwCornerWeight(uint corner_index, float3 position_in_cell) {
+	float3 axis_weights = float3(
+		((corner_index & 1u) != 0u) ? position_in_cell.x : 1.0 - position_in_cell.x,
+		((corner_index & 2u) != 0u) ? position_in_cell.y : 1.0 - position_in_cell.y,
+		((corner_index & 4u) != 0u) ? position_in_cell.z : 1.0 - position_in_cell.z);
+	return axis_weights.x * axis_weights.y * axis_weights.z;
+}
+
+// ============================================================================
+// Probe lattice. Index g at scale s (spacing ds0 * 2^s)
+// names the probe at (g + 1/2) * spacing: floor(p / spacing) is the probe
+// nearest to p, the 8 probes around p start at floor(p / spacing - 1/2),
+// no probe of one scale coincides with one of another, and a probe lies a
+// quarter or three quarters of the way between its parents.
+// ============================================================================
+float rcwSpacing(int scale) {
+	return push.ds0 * float(1u << uint(scale));
+}
+
+float3 rcwProbePosition(int3 g, int scale) {
+	return (float3(g) + 0.5) * rcwSpacing(scale);
+}
+
+// Index of the probe nearest to p at a scale; cell0 = rcwCell0(p)
+int3 rcwNearestIndex(int3 cell0, int scale) {
+	return cell0 >> scale;
+}
+
+// The 8 probes around p at a scale: the low index, and p's offset from it
+// per axis in [0, 1) (rcwCornerWeight's input)
+int3 rcwProbeBase(float3 p, int scale, out float3 position_in_cell) {
+	// floor(p / spacing - 1/2) from the half-spacing floor, exact in integers
+	int3 cell_half = int3(floor(p * (2.0 / push.ds0)));
+	int3 base = (cell_half - int3(1 << scale)) >> (scale + 1);
+	position_in_cell = p / rcwSpacing(scale) - 0.5 - float3(base);
+	return base;
+}
+
+// Parents of the probe with index g: the low index of the 8 probes around
+// it at the next scale, and the weight of each of those 8 in its merge, a
+// product of per-axis weights, 3/4 for the nearer parent and 1/4 for the
+// other.
+int3 rcwParentBase(int3 g) {
+	return (g - int3(1, 1, 1)) >> 1;
+}
+
+float rcwParentWeight(int3 g, int3 corner) {
+	int3 odd = g & int3(1, 1, 1);
+	float weight = 1.0;
+	for (uint axis = 0; axis < 3; axis++) {
+		float low = (odd[axis] != 0) ? 0.75 : 0.25;
+		weight *= (corner[axis] == 0) ? low : 1.0 - low;
+	}
+	return weight;
+}
+
+// The parent nearest to the probe.
+int3 rcwNearestParent(int3 g) {
+	return g >> 1;
+}
+
+// The full-res depth texel under an output pixel's centre.
+int2 rcwDepthTexel(int2 pixel) {
+	return int2((float2(pixel) + 0.5) * (push.depth_size / push.out_size));
+}
+
+float rcwLuma(float3 radiance) {
+	return dot(radiance, float3(0.2126, 0.7152, 0.0722));
+}
+
+float3 rcwWorldFromUvDepth(float2 uv, float depth) {
+	float4 ndc = float4(uv * 2.0 - 1.0, depth, 1.0);
+	float4 world = mul(ubo.inverse_projection_view, ndc);
+	return world.xyz / world.w;
+}
+
+// Surface point behind a pixel; false on sky.
+// Returns the world position, the LOD to insert at, and the LOD blend factor.
+bool rcwPixelWorld(int2 pixel, out float3 world, out uint lod, out float lod_blend) {
+	world = float3(0.0);
+	lod = 0u;
+	lod_blend = 0.0;
+	float2 pixel_center = float2(pixel) + 0.5;
+	float depth = depth_texture.Load(int3(rcwDepthTexel(pixel), 0));
+	if (depth == 0.0)
+		return false;
+	world = rcwWorldFromUvDepth(pixel_center / push.out_size, depth);
+	lod = rcwLodBlend(world, lod_blend);
+	return true;
+}
+
+uint rcwRngSeed(int2 px, uint stream) {
+	return rcwPcgHash(uint(px.x) ^ (uint(px.y) << 16) ^ (stream * RCW_GOLDEN_RATIO_STEP));
+}
+
+float rcwRandFloat(inout uint state) {
+	state = rcwPcgHash(state);
+	return float(state >> 8) * (1.0 / 16777216.0);
+}
+
+uint2 rcwPackHalf4(float4 v) {
+	return uint2(f32tof16(v.x) | (f32tof16(v.y) << 16),
+		f32tof16(v.z) | (f32tof16(v.w) << 16));
+}
+
+// The fourth half lane of merged / dirmip values holds the evidence in its
+// low 10 bits and the bin's sample count (frames with mass, 0..63
+// saturating; a dirmip bin sums its four source bins) in the high 6; the
+// radiance lanes are untouched. The merge weights a parent by its count.
+static const uint RCW_COUNT_SHIFT = 10u;
+static const uint RCW_COUNT_MAX = 63u;
+uint rcwPackEvidence(float evidence) {
+	return uint(saturate(evidence) * 1023.0 + 0.5);
+}
+float rcwUnpackEvidence(uint bits) {
+	return float(bits & 0x3FFu) * (1.0 / 1023.0);
+}
+uint rcwPackCount(uint count) {
+	return min(count, RCW_COUNT_MAX) << RCW_COUNT_SHIFT;
+}
+uint rcwUnpackCount(uint bits) {
+	return (bits >> RCW_COUNT_SHIFT) & RCW_COUNT_MAX;
+}
+
+float4 rcwUnpackHalf4(uint2 p) {
+	return float4(f16tof32(p.x & 0xFFFFu), f16tof32(p.x >> 16),
+		f16tof32(p.y & 0xFFFFu), f16tof32(p.y >> 16));
+}
+
+float2 rcwOctEncode(float3 n) {
+	float2 p = n.xy / (abs(n.x) + abs(n.y) + abs(n.z));
+	if (n.z < 0.0) {
+		float2 s;
+		s.x = (p.x >= 0.0) ? 1.0 : -1.0;
+		s.y = (p.y >= 0.0) ? 1.0 : -1.0;
+		p = (float2(1.0, 1.0) - abs(float2(p.y, p.x))) * s;
+	}
+	return p * 0.5 + 0.5;
+}
+
+// Continuation across the octahedral seam (reflect the crossed coordinate,
+// flip the other); fills border texels so a bilinear tap wraps correctly.
+float2 rcwOctWrap(float2 q) {
+	if (q.x < 0.0) {
+		q.x = -q.x;
+		q.y = 1.0 - q.y;
+	}
+	if (q.x > 1.0) {
+		q.x = 2.0 - q.x;
+		q.y = 1.0 - q.y;
+	}
+	if (q.y < 0.0) {
+		q.y = -q.y;
+		q.x = 1.0 - q.x;
+	}
+	if (q.y > 1.0) {
+		q.y = 2.0 - q.y;
+		q.x = 1.0 - q.x;
+	}
+	return q;
+}
+
+float3 rcwOctDecode(float2 uv01) {
+	float2 f = uv01 * 2.0 - 1.0;
+	float3 n = float3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+	if (n.z < 0.0) {
+		float2 s;
+		s.x = (n.x >= 0.0) ? 1.0 : -1.0;
+		s.y = (n.y >= 0.0) ? 1.0 : -1.0;
+		n.xy = (float2(1.0, 1.0) - abs(float2(n.y, n.x))) * s;
+	}
+	return normalize(n);
+}

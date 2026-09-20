@@ -185,7 +185,6 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 				auto mat_handle = m_resource_manager.createMaterial(
 					"pbr_grid::" + name + "_r" + std::to_string(j) + "_m" + std::to_string(i),
 					MaterialTextures{
-						// MaterialFactors alone drives metallic/roughness; use unit MR texture so factors are not multiplied by the standard default's 0/1
 						.metallic_roughness = m_resource_manager.load<VeTexture>("default_mr_unit"),
 					},
 					MaterialAlphaProps{
@@ -211,23 +210,24 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 			}
 		}
 	};
+	int grid_dim = 5;
 
 	// Spheres in a grid
-	createPbrGrid(paths.sphere_model, 5, 5,
+	createPbrGrid(paths.sphere_model, grid_dim, grid_dim,
 	              {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, 4.0f, 4.0f, 1.0f,
 	              PhysicsShapeType::Sphere);
 
 	// Cubes in a grid
-	createPbrGrid(paths.cube_model, 5, 5,
+	createPbrGrid(paths.cube_model, grid_dim, grid_dim,
 	              {-4.0f, 0, 0}, {0, 0, 0}, {1, 1, 1}, -4.0f, 4.0f, 1.0f);
 
 	// Flat vases (bad normals) in a grid
-	createPbrGrid(paths.flat_vase_model, 5, 5,
+	createPbrGrid(paths.flat_vase_model, grid_dim, grid_dim,
 	              {-4.0f, -4.0f, 0}, {glm::radians(-180.0f), 0.0f, 0.0f}, {6.0f, 6.0f, 3.0f}, -4.0f, -4.0f, 0,
 	              PhysicsShapeType::ConvexHull);
 
 	// Smooth vases (interpolated normals) in a grid
-	createPbrGrid(paths.smooth_vase_model, 5, 5,
+	createPbrGrid(paths.smooth_vase_model, grid_dim, grid_dim,
 	              {0, -4.0f, 0}, {glm::radians(-180.0f), 0.0f, 0.0f}, {6.0f, 6.0f, 3.0f}, 4.0f, -4.0f, 0,
 	              PhysicsShapeType::ConvexHull);
 

@@ -21,6 +21,15 @@ struct VENGINE_API FrameStats {
 	float gpu_gtao = 0.0f;
 	float gpu_scene_render = 0.0f;
 	float gpu_ssr = 0.0f;
+	float gpu_rc = 0.0f;
+	float gpu_rc_build = 0.0f;
+	float gpu_rc_shade = 0.0f;
+	float gpu_rc_map = 0.0f;
+	float gpu_rc_trace = 0.0f;
+	float gpu_rc_resolve = 0.0f;
+	float gpu_rc_merge = 0.0f;
+	float gpu_rc_irradiance = 0.0f;
+	float gpu_rc_gather = 0.0f;
 	float gpu_bloom = 0.0f;
 	float gpu_post_process = 0.0f;
 	float gpu_hiz = 0.0f;
@@ -37,6 +46,7 @@ struct VENGINE_API FrameStats {
 	float cpu_gtao = 0.0f;
 	float cpu_scene_render = 0.0f;
 	float cpu_ssr = 0.0f;
+	float cpu_rc = 0.0f;
 	float cpu_bloom = 0.0f;
 	float cpu_post_process = 0.0f;
 	float cpu_hiz = 0.0f;
@@ -58,8 +68,23 @@ struct VENGINE_API FrameStats {
 	uint32_t num_spot_lights = 0;
 	uint32_t num_area_lights = 0;
 
-	// IBL exposure compensation computed by the IBL system; displayed by EnvironmentPanel.
-	float ibl_exposure_compensation = 1.0f;
+	// Radiance Cascades probe store
+	uint32_t rc_probes = 0;
+	uint32_t rc_overflow = 0;
+	uint32_t rc_probes_c0 = 0;
+	uint32_t rc_probes_c1 = 0;
+	uint32_t rc_probes_c2 = 0;
+	uint32_t rc_probes_c3 = 0;
+	uint32_t rc_probes_c4 = 0;
+	uint32_t rc_probes_c5 = 0;
+	float rc_rays_hit = 0.0f;
+	float rc_rays_clear = 0.0f;
+	float rc_rays_sky = 0.0f;
+	float rc_rays_sky_gated = 0.0f;
+	float rc_rays_unk_occluded = 0.0f;
+	float rc_rays_unk_stepcap = 0.0f;
+	float rc_rays_unk_edge = 0.0f;
+	float rc_rays_unk_clip = 0.0f;
 };
 
 }

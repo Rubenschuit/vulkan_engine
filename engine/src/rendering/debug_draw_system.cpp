@@ -29,7 +29,6 @@ DebugDrawSystem::DebugDrawSystem(
 	VeResourceManager& resource_manager,
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	vk::Format color_format,
-	vk::SampleCountFlagBits sample_count,
 	std::filesystem::path line_shader_path,
 	std::filesystem::path axes_shader_path,
 	EventBus& event_bus)
@@ -38,11 +37,11 @@ DebugDrawSystem::DebugDrawSystem(
 	  m_axes_shader_path(std::move(axes_shader_path)) {
 
 	event_bus.subscribe<PipelineRecreateEvent>([this](const PipelineRecreateEvent& e) {
-		recreatePipelines(e.offscreen_format, e.sample_count);
+		recreatePipelines(e.offscreen_format);
 	});
 
 	createPipelineLayout(global_set_layout);
-	createPipelines(color_format, sample_count);
+	createPipelines(color_format);
 	createAxesMesh(resource_manager);
 }
 
@@ -57,10 +56,11 @@ void DebugDrawSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& 
 	m_pipeline_layout = vk::raii::PipelineLayout(m_ve_device.getDevice(), pipeline_layout_info);
 }
 
-void DebugDrawSystem::createPipelines(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+void DebugDrawSystem::createPipelines(vk::Format color_format) {
 	PipelineConfigInfo config{};
 	VePipeline::defaultPipelineConfigInfo(config, m_ve_device);
-	config.multisample_info.rasterizationSamples = sample_count;
+	// Drawn in the single-sample overlay pass after the screen-ray history copy
+	config.multisample_info.rasterizationSamples = vk::SampleCountFlagBits::e1;
 	config.input_assembly_info.topology = vk::PrimitiveTopology::eLineList;
 	config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	config.depth_stencil_info.depthWriteEnable = VK_FALSE;
@@ -80,7 +80,7 @@ void DebugDrawSystem::createPipelines(vk::Format color_format, vk::SampleCountFl
 
 	PipelineConfigInfo axes_config{};
 	VePipeline::defaultPipelineConfigInfo(axes_config, m_ve_device);
-	axes_config.multisample_info.rasterizationSamples = sample_count;
+	axes_config.multisample_info.rasterizationSamples = vk::SampleCountFlagBits::e1;
 	axes_config.input_assembly_info.topology = vk::PrimitiveTopology::eTriangleList;
 	axes_config.depth_stencil_info.depthTestEnable = VK_TRUE;
 	axes_config.depth_stencil_info.depthWriteEnable = VK_FALSE;
@@ -307,10 +307,10 @@ void DebugDrawSystem::render(VeFrameInfo& frame_info) {
 	m_lines.clear();
 }
 
-void DebugDrawSystem::recreatePipelines(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+void DebugDrawSystem::recreatePipelines(vk::Format color_format) {
 	m_line_pipeline.reset();
 	m_axes_pipeline.reset();
-	createPipelines(color_format, sample_count);
+	createPipelines(color_format);
 }
 
 } // namespace ve

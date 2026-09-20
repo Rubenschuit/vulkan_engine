@@ -37,7 +37,7 @@ public:
 private:
 	void renderEntityHeader(Registry& registry, Entity entity, EditorState& state);
 	void renderTransform(TransformComponent& transform);
-	void renderMesh(MeshComponent& mesh);
+	void renderMesh(MeshComponent& mesh, const EditorState& state);
 	void renderPointLight(PointLightComponent& light);
 	void renderDirectionalLight(DirectionalLightComponent& light);
 	void renderSpotLight(SpotLightComponent& light);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare benchmark candidate run(s) against baseline run(s); gate regressions.
+"""Compare benchmark candidate run(s) against baseline run(s)
 
     python3 tools/bench/compare.py --baseline base.json [base2.json ...] \
                                    --candidate cand.json [cand2.json ...] \
@@ -13,8 +13,8 @@ thermal envelope.
 Gates, in order:
   * config guard  - GUARD_FIELDS (scene, driver, resolution, backend, ...) must
                     match, else exit 2
-  * counter gate  - counter_checksum must match, else the workload diverged (a
-                    culling/LOD/visibility change): investigate, then rebaseline
+  * counter gate  - counter_checksum must match, else the workload diverged
+                    (culling, LOD or RC probes): investigate, then rebaseline
   * timing gate   - per metric, regression if best-candidate is slower than
                     best-baseline by more than tolerance = max(k*sigma, rel%, abs)
 
@@ -39,6 +39,8 @@ GUARD_FIELDS = [
     ("measured_frames", lambda d: d.get("measured_frames")),
     ("schema", lambda d: d.get("schema")),
     ("fixed_dt", lambda d: d.get("fixed_dt")),
+    ("rc", lambda d: d.get("rc")),
+    ("overrides", lambda d: d.get("overrides")),
 ]
 
 
@@ -132,7 +134,7 @@ def main():
         for k in br:
             if br[k] != cr.get(k):
                 print(f"    {k}: {br[k]} -> {cr.get(k)}")
-        print("  A code change altered visibility/LOD. Investigate; rebaseline if intended.\n")
+        print("  Culling, LOD or RC probes changed. Investigate; rebaseline if intended.\n")
     if workload_diverged:
         status = 1
 

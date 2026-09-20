@@ -14,6 +14,7 @@
 #include "ve_config.hpp"
 
 #include <cassert>
+#include <cctype>
 #include <cstddef>
 #include <limits>
 
@@ -177,6 +178,19 @@ ResourceHandle<VeMaterial> VeResourceManager::createMaterial(const std::string& 
 	type_resources[resource_id] = std::move(resource);
 	m_ref_counts[type_idx][resource_id] = 1;
 	return ResourceHandle<VeMaterial>(resource_id, this);
+}
+
+ResourceHandle<VeMaterial> VeResourceManager::cloneMaterial(const VeMaterial& src) {
+	std::string base = src.getId();
+	size_t hash = base.rfind('#');
+	if (hash != std::string::npos && hash + 1 < base.size()
+		&& std::all_of(base.begin() + hash + 1, base.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); }))
+		base.erase(hash);
+	uint32_t n = 1;
+	while (hasResource<VeMaterial>(base + "#" + std::to_string(n)))
+		n++;
+	return createMaterial(base + "#" + std::to_string(n), src.getTextures(), src.getAlphaProps(),
+	                      src.getMaterialFactors(), src.getFlipTexCoordV(), src.getUvTransforms());
 }
 
 ResourceHandle<VeMesh> VeResourceManager::createMeshFromData(

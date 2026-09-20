@@ -1,6 +1,7 @@
 #pragma once
-// Single-image min/max depth pyramid for the SSR Hi-Z traversal, built from
-// the current frame's resolved depth in one FidelityFX SPD dispatch.
+// Single-image min/max depth pyramid for the screen-space Hi-Z traversals
+// (SSR and RC), built from the current frame's resolved depth in one
+// FidelityFX SPD dispatch. Owned by ScreenRayResources.
 // R32G32Sfloat: .x = per-tile MIN (farthest), .y = MAX (closest).
 
 #include "ve_export.hpp"
@@ -21,29 +22,34 @@ class VeComputePipeline;
 
 namespace ve {
 
-class VENGINE_API SsrHizPyramid {
+class VENGINE_API MinMaxDepthPyramid {
 public:
-	SsrHizPyramid(
+	MinMaxDepthPyramid(
 		VeDevice& device,
 		VeDescriptorPool& descriptor_pool,
 		vk::Extent2D depth_extent,
 		const vk::raii::ImageView& depth_image_view,
 		const std::filesystem::path& shaders_dir);
-	~SsrHizPyramid();
+	~MinMaxDepthPyramid();
 
-	SsrHizPyramid(const SsrHizPyramid&) = delete;
-	SsrHizPyramid& operator=(const SsrHizPyramid&) = delete;
+	MinMaxDepthPyramid(const MinMaxDepthPyramid&) = delete;
+	MinMaxDepthPyramid& operator=(const MinMaxDepthPyramid&) = delete;
 
 	// Pre: depth in eDepthStencilReadOnlyOptimal.
 	// Post: all pyramid mips in eShaderReadOnlyOptimal.
-	// Must be recorded on the graphics timeline.
+	// May be recorded on the graphics or the dedicated compute queue.
 	void generate(vk::raii::CommandBuffer& cmd);
 
 	void recreate(VeDescriptorPool& descriptor_pool, vk::Extent2D depth_extent,
 	              const vk::raii::ImageView& depth_image_view);
 
 	const vk::raii::ImageView& getPyramidView() const;
+	// Raw image handle for mip-0 copies (RC's prev-frame reprojection check).
+	vk::Image getImage() const;
 	uint32_t getMipLevels() const { return m_mip_levels; }
+	// Mip 0 extent (= padded source / 2); consumers map full-res pixel p to
+	// mip-L texel p >> (L + 1).
+	vk::Extent2D getMip0Extent() const { return {m_width, m_height}; }
 
 private:
 	void createImage(vk::Extent2D depth_extent);
@@ -60,9 +66,9 @@ private:
 	// SPD's hard cap is 12 mips per dispatch.
 	static constexpr uint32_t SPD_MAX_MIPS = 12;
 
-	// m_width/m_height       = pyramid image extent = padded_source / 2 (SPD destination mip 0).
+	// m_width/m_height
 	// m_padded_source_*      = source extent rounded up to next POT.
-	// m_screen_width/height  = exact depth-buffer (source) extent.
+	// m_screen_width/height
 	uint32_t m_width = 0;
 	uint32_t m_height = 0;
 	uint32_t m_padded_source_width = 0;

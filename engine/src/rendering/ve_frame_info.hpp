@@ -10,10 +10,13 @@
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
 #include <glm/glm.hpp>
+#include <cstddef>
 #include <vector>
 #include <span>
 
 namespace ve {
+
+class FrameProfiler;
 
 // --- Rendering mode enums ---
 
@@ -28,6 +31,9 @@ enum class RenderMode : uint32_t {
 	CLUSTER_HEATMAP = 7,
 	LOD_LEVEL = 8,
 	MESHLET_ID = 9,
+	RC_IRRADIANCE = 10,
+	RC_SKY_VISIBILITY = 11,
+	RC_UPSAMPLE_MATCH = 12,
 };
 
 enum class ShadowMode : uint32_t {
@@ -142,22 +148,28 @@ struct UniformBufferObject {
 	alignas(16) SpotLight spot_lights[ve::MAX_SPOT_LIGHTS];
 
 	// IBL
-	alignas(4) float    ibl_diffuse_intensity = 0.0f;
+	alignas(4) uint32_t ibl_active = 0;
 	alignas(4) uint32_t prefiltered_mip_levels = 1;
-	alignas(4) float    ibl_specular_intensity = 0.0f;
 	alignas(4) float    ibl_min_ambient = 0.0f;
 	alignas(16) glm::vec4 sh_coefficients[9]{};
 
 	// LTC area lights
 	alignas(16) RectLight rect_lights[ve::MAX_RECT_LIGHTS];
 	alignas(4)  uint32_t num_rect_lights = 0;
+
+	// RC
+	alignas(16) glm::vec4 sky_radiance_scale{0.0f};
+	alignas(4) float rc_short_range_ao = 0.0f;
+	alignas(4) float rc_spec_occlusion = 0.0f;
+	alignas(4) uint32_t rc_rough_spec = 0;
+	alignas(4) float rc_spec_handoff_roughness = 0.0f; // = RcSettings::spec_handoff_roughness
 };
-static_assert(offsetof(UniformBufferObject, dir_lights) % 16 == 0,
-	"dir_lights must be 16-byte aligned for GPU UBO layout");
-static_assert(offsetof(UniformBufferObject, sh_coefficients) % 16 == 0,
-	"sh_coefficients must be 16-byte aligned for GPU UBO layout");
-static_assert(offsetof(UniformBufferObject, rect_lights) % 16 == 0,
-	"rect_lights must be 16-byte aligned for GPU UBO layout");
+// Layout must match UniformBuffer in ve_common.slangh
+static_assert(sizeof(UniformBufferObject) == 7536);
+static_assert(offsetof(UniformBufferObject, sh_coefficients) == 3248);
+static_assert(offsetof(UniformBufferObject, rect_lights) == 3392);
+static_assert(offsetof(UniformBufferObject, sky_radiance_scale) == 7504);
+static_assert(offsetof(UniformBufferObject, rc_spec_handoff_roughness) == 7532);
 
 // --- Push constants ---
 
@@ -220,6 +232,9 @@ struct VeFrameInfo {
 	// renderFrame
 	std::span<const Entity> selected_entities;
 
+	// Per-frame GPU/CPU timers, for systems that split their own sub-passes
+	FrameProfiler* profiler = nullptr;
+
 	// Per-frame state
 	uint32_t current_frame;
 	float    frame_time;
@@ -249,6 +264,8 @@ struct VeFrameInfo {
 
 	bool     area_lights_active = false;  // any active rect area light this frame (AREA_LIGHTS_SPEC variant)
 	bool     debug_shading = false;       // render_mode != BRDF_MICROFACET
+	bool     rc_composite_active = true;  // RC enabled
+
 	// Post-processing
 	PostProcessPushConstant post_process_push;
 

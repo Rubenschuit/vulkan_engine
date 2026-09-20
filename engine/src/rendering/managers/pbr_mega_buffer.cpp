@@ -23,7 +23,7 @@ PbrMegaBuffer::~PbrMegaBuffer() {
 		m_event_bus.unsubscribe<ResourceUnloadingEvent<VeMesh>>(m_mesh_unload_sub);
 }
 
-void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh*>& meshes,
+void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh*>& candidates,
                           const PbrMegaBuffer* previous) {
 	m_entries.clear();
 	m_meshlet_entries.clear();
@@ -40,6 +40,17 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 	m_static_vertex_count = 0;
 	static uint64_t s_generation_counter = 0;
 	m_generation = ++s_generation_counter;
+
+	// Each mesh copies from its previous-mega entry or from its own buffers. A
+	// mesh with neither is skipped.
+	std::vector<VeMesh*> meshes;
+	meshes.reserve(candidates.size());
+	for (VeMesh* mesh : candidates) {
+		if ((previous && previous->getEntry(mesh)) || mesh->hasGpuBuffers())
+			meshes.push_back(mesh);
+		else
+			VE_LOGE("PBR mega-buffer: skipping a mesh with no previous entry and released GPU buffers");
+	}
 
 	if (meshes.empty())
 		return;

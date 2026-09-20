@@ -1,6 +1,7 @@
 #pragma once
 #include "ve_export.hpp"
 #include "ve_config.hpp"
+#include "rendering/rc_params.hpp"
 #include "rendering/ve_frame_info.hpp"
 
 #include <glm/glm.hpp>
@@ -39,25 +40,27 @@ struct VENGINE_API RenderSettings {
 	glm::vec3 ambient_light_color = glm::vec3(1.0f);
 	float ambient_light_intensity = 0.006f;
 	bool ibl_enabled = true;
-	float ibl_diffuse_intensity = 0.2f;
-	float ibl_specular_intensity = 0.2f;
 	float ibl_min_ambient = 0.005f;
-	bool ibl_auto_exposure = true;
 
 	// passes
 	bool geometry_prepass_enabled = true;
+
 	bool shadow_mask_enabled = true;
 	bool shadow_mask_half_res = true;
+
 	bool gtao_enabled = true;
 	bool gtao_half_res = true;
 	float gtao_radius = 0.25f;
 	float gtao_intensity = 0.5f;
+
 	bool ssr_enabled = true;
 	bool ssr_half_res = true;
 	int ssr_max_steps = 48;
 	float ssr_thickness = 0.3f;
-	float ssr_max_roughness = 0.85f;
+	float ssr_max_roughness = 0.4f;
 	float ssr_max_distance = 55.0f;
+
+	RcSettings rc;
 
 	// culling
 	bool enable_frustum_culling = true;
@@ -81,14 +84,13 @@ struct VENGINE_API RenderSettings {
 	bool bloom_enabled = true;
 	float bloom_strength = 0.01f;
 
-	// debug overlays (renderer-respected toggles)
+	// debug overlays
 	bool show_axes = false;
 	bool show_aabb_debug = false;
 	bool show_skinned_points = false;
 	bool show_area_lights = false;
 
-	// profiling
 	bool gpu_profiling = false;
 };
 
-} // namespace ve
+}

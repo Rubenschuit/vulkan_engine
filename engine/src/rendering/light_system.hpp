@@ -29,7 +29,6 @@ public:
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		ResourceHandle<VeTexture> particle_texture,
 		vk::Format color_format,
-		vk::SampleCountFlagBits sample_count,
 		std::filesystem::path shader_path,
 		EventBus& event_bus);
 	~LightSystem();
@@ -40,14 +39,14 @@ public:
 
 	void updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObject& ubo);
 	void render(VeFrameInfo& frame_info) const;
-	void recreatePipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count) {
+	void recreatePipeline(vk::Format color_format) {
 		m_ve_pipeline.reset();
-		createPipeline(color_format, sample_count);
+		createPipeline(color_format);
 	}
 
 private:
 	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout, const vk::raii::DescriptorSetLayout& billboard_set_layout);
-	void createPipeline(vk::Format color_format, vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1);
+	void createPipeline(vk::Format color_format);
 	void createBillboardDescriptorSet(VeDescriptorPool& descriptor_pool);
 
 	VeDevice& m_ve_device;

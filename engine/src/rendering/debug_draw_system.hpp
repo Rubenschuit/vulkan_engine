@@ -26,7 +26,6 @@ public:
 		VeResourceManager& resource_manager,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		vk::Format color_format,
-		vk::SampleCountFlagBits sample_count,
 		std::filesystem::path line_shader_path,
 		std::filesystem::path axes_shader_path,
 		EventBus& event_bus);
@@ -45,7 +44,7 @@ public:
 
 	void renderAxes(VeFrameInfo& frame_info) const;
 	void render(VeFrameInfo& frame_info);
-	void recreatePipelines(vk::Format color_format, vk::SampleCountFlagBits sample_count);
+	void recreatePipelines(vk::Format color_format);
 
 private:
 	struct LineVertex {
@@ -54,7 +53,7 @@ private:
 	};
 
 	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout);
-	void createPipelines(vk::Format color_format, vk::SampleCountFlagBits sample_count);
+	void createPipelines(vk::Format color_format);
 	void createAxesMesh(VeResourceManager& resource_manager);
 
 	VeDevice& m_ve_device;

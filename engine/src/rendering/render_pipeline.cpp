@@ -18,6 +18,7 @@
 #include "rendering/frame_profiler.hpp"
 #include "rendering/geometry_prepass_system.hpp"
 #include "rendering/gtao_system.hpp"
+#include "rendering/ao_gi_descriptor_set_manager.hpp"
 #include "rendering/hiz_system.hpp"
 #include "rendering/ibl_system.hpp"
 #include "rendering/light_system.hpp"
@@ -30,6 +31,8 @@
 #include "rendering/particle_emitter_system.hpp"
 #include "rendering/pbr_render_system.hpp"
 #include "rendering/post_process_system.hpp"
+#include "rendering/screen_ray_resources.hpp"
+#include "rendering/rc_system.hpp"
 #include "rendering/shadow_mask_system.hpp"
 #include "rendering/shadow_render_system.hpp"
 #include "rendering/skinned_points_render_system.hpp"
@@ -55,6 +58,21 @@
 #include "vulkan/ve_device.hpp"
 
 namespace ve {
+
+// The render mode the frame uses: an RC view overrides the user's choice
+static RenderMode effectiveRenderMode(const RenderSettings& s) {
+	switch (s.rc.debug_view) {
+		case RcDebugView::NONE:
+			return s.render_mode;
+		case RcDebugView::SKY_VISIBILITY:
+		case RcDebugView::EVIDENCE:
+			return RenderMode::RC_SKY_VISIBILITY;
+		case RcDebugView::UPSAMPLE_MATCH:
+			return RenderMode::RC_UPSAMPLE_MATCH;
+		default:
+			return RenderMode::RC_IRRADIANCE;
+	}
+}
 
 static vk::Extent2D halveExtent(vk::Extent2D e, bool half) {
 	if (!half)
@@ -84,7 +102,8 @@ RenderPipeline::RenderPipeline(VeDevice& device,
 	m_scene_loaded_sub = m_event_bus.subscribe<SceneLoadedEvent>([this](const SceneLoadedEvent& e) {
 		if (!e.scene)
 			return;
-		m_ssr_system->invalidateHistory();
+		m_screen_rays->invalidateHistory();
+		m_rc_system->invalidateStore();
 		// Configure particle backend
 		uint32_t requested = e.scene->getParticleCapacity();
 		uint32_t target = (requested > 0)
@@ -96,6 +115,10 @@ RenderPipeline::RenderPipeline(VeDevice& device,
 		m_particle_backend->setEnabled(true);
 	});
 
+	m_skybox_changed_sub = m_event_bus.subscribe<SkyboxChangedEvent>([this](const SkyboxChangedEvent&) {
+		m_rc_system->invalidateStore();
+	});
+
 	m_swap_chain_recreated_sub = m_event_bus.subscribe<SwapChainRecreatedEvent>([this](const SwapChainRecreatedEvent&) {
 		m_ve_device.assertDeviceIdle();
 		emitSwapChainRecreatedEvents();
@@ -103,24 +126,37 @@ RenderPipeline::RenderPipeline(VeDevice& device,
 	m_viewport_resized_sub = m_event_bus.subscribe<ViewportResizedEvent>([this](const ViewportResizedEvent&) {
 		emitResolutionChangedEvent();
 	});
+	m_gtao_resolution_sub = m_event_bus.subscribe<GtaoResolutionChangedEvent>([this](const GtaoResolutionChangedEvent& e) {
+		m_gtao_system->recreate(e.pool, e.ao_extent, e.depth_extent, e.depth_image_view, e.depth_image,
+			e.normal_roughness_image_view);
+		m_ao_gi_set_manager->rewrite(e.pool);
+	});
 	m_settings_request_sub = m_event_bus.subscribe<RenderSettingsRequestEvent>([this](const RenderSettingsRequestEvent& e) {
 		if (e.exposure)
 			m_settings.exposure = *e.exposure;
-		if (e.ibl_diffuse_intensity)
-			m_settings.ibl_diffuse_intensity = *e.ibl_diffuse_intensity;
-		if (e.ibl_specular_intensity)
-			m_settings.ibl_specular_intensity = *e.ibl_specular_intensity;
+		if (e.ibl_enabled)
+			m_settings.ibl_enabled = *e.ibl_enabled;
 		if (e.ambient_light_intensity)
 			m_settings.ambient_light_intensity = *e.ambient_light_intensity;
 		if (e.bloom_strength)
 			m_settings.bloom_strength = *e.bloom_strength;
+		if (e.bloom_enabled)
+			m_settings.bloom_enabled = *e.bloom_enabled;
+		if (e.gtao_enabled)
+			m_settings.gtao_enabled = *e.gtao_enabled;
+		if (e.ssr_enabled)
+			m_settings.ssr_enabled = *e.ssr_enabled;
+		if (e.ibl_min_ambient)
+			m_settings.ibl_min_ambient = *e.ibl_min_ambient;
 	});
 }
 
 RenderPipeline::~RenderPipeline() {
 	m_event_bus.unsubscribe<SceneLoadedEvent>(m_scene_loaded_sub);
+	m_event_bus.unsubscribe<SkyboxChangedEvent>(m_skybox_changed_sub);
 	m_event_bus.unsubscribe<SwapChainRecreatedEvent>(m_swap_chain_recreated_sub);
 	m_event_bus.unsubscribe<ViewportResizedEvent>(m_viewport_resized_sub);
+	m_event_bus.unsubscribe<GtaoResolutionChangedEvent>(m_gtao_resolution_sub);
 	m_event_bus.unsubscribe<RenderSettingsRequestEvent>(m_settings_request_sub);
 }
 
@@ -196,14 +232,12 @@ void RenderPipeline::initRenderSystems() {
 		m_event_bus
 	);
 
-	m_gtao_system = std::make_unique<GtaoSystem>(
-		m_ve_device, *m_resources.pool(), m_resource_manager,
-		m_resources.globalSetLayout().getDescriptorSetLayout(),
-		m_config.shaders_dir, halveExtent(m_ve_renderer.getExtent(), m_settings.gtao_half_res),
+	m_screen_rays = std::make_unique<ScreenRayResources>(
+		m_ve_device, *m_resources.pool(),
 		m_ve_renderer.getExtent(),
-		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage(),
-		m_ve_renderer.getResolvedNormalRoughnessImageView(),
-		m_event_bus
+		m_ve_renderer.getOffscreenImageFormat(),
+		m_ve_renderer.getResolvedDepthImageView(),
+		m_config.shaders_dir
 	);
 
 	m_ssr_system = std::make_unique<SsrSystem>(
@@ -215,8 +249,33 @@ void RenderPipeline::initRenderSystems() {
 		m_ve_renderer.getOffscreenImageFormat(),
 		m_ve_renderer.getResolvedDepthImageView(),
 		m_ve_renderer.getResolvedNormalRoughnessImageView(),
+		*m_screen_rays,
 		m_event_bus
 	);
+
+	m_rc_system = std::make_unique<RcSystem>(
+		m_ve_device, *m_resources.pool(),
+		m_resources.globalSetLayout().getDescriptorSetLayout(),
+		m_config.shaders_dir,
+		m_ve_renderer.getExtent(),
+		m_ve_renderer.getResolvedDepthImageView(),
+		m_ve_renderer.getResolvedNormalRoughnessImageView(),
+		*m_screen_rays,
+		m_event_bus
+	);
+
+	m_gtao_system = std::make_unique<GtaoSystem>(
+		m_ve_device, *m_resources.pool(),
+		m_resources.globalSetLayout().getDescriptorSetLayout(),
+		m_config.shaders_dir, halveExtent(m_ve_renderer.getExtent(), m_settings.gtao_half_res),
+		m_ve_renderer.getExtent(),
+		m_ve_renderer.getResolvedDepthImageView(), m_ve_renderer.getResolvedDepthImage(),
+		m_ve_renderer.getResolvedNormalRoughnessImageView(),
+		m_event_bus
+	);
+
+	m_ao_gi_set_manager = std::make_unique<AoGiDescriptorSetManager>(
+		m_ve_device, *m_resources.pool(), m_resource_manager, *m_gtao_system, *m_rc_system);
 
 	m_cluster_light_system = std::make_unique<ClusterLightSystem>(
 		m_ve_device, *m_resources.pool(),
@@ -239,7 +298,7 @@ void RenderPipeline::initRenderSystems() {
 		m_shadow_render_system->getShadowSetLayout(),
 		m_shadow_mask_system->getShadowMaskSetLayout(),
 		m_cluster_light_system->getOutputSetLayout(),
-		m_gtao_system->getAoSetLayout(),
+		m_ao_gi_set_manager->layout(),
 		m_ibl_system->getIblSetLayout(),
 		m_ssr_system->getSsrSetLayout(),
 		m_ve_renderer.getOffscreenImageFormat(),
@@ -256,7 +315,7 @@ void RenderPipeline::initRenderSystems() {
 	m_debug_draw_system = std::make_unique<DebugDrawSystem>(
 		m_ve_device, m_resource_manager,
 		m_resources.globalSetLayout().getDescriptorSetLayout(),
-		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
+		m_ve_renderer.getOffscreenImageFormat(),
 		shader("debug_line_shader.spv"), shader("axes_shader.spv"),
 		m_event_bus
 	);
@@ -269,7 +328,7 @@ void RenderPipeline::initRenderSystems() {
 		*m_resources.pool(),
 		m_resources.globalSetLayout().getDescriptorSetLayout(),
 		std::move(light_billboard_texture),
-		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
+		m_ve_renderer.getOffscreenImageFormat(),
 		shader("light_billboard_shader.spv"),
 		m_event_bus
 	);
@@ -326,7 +385,7 @@ void RenderPipeline::initRenderSystems() {
 
 	m_skinned_points_render_system = std::make_unique<SkinnedPointsRenderSystem>(
 		m_ve_device, m_resources.globalSetLayout().getDescriptorSetLayout(),
-		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getSampleCount(),
+		m_ve_renderer.getOffscreenImageFormat(),
 		shader("skinned_points.spv"), m_event_bus);
 
 	m_cpu_backend = std::make_unique<CpuCullingBackend>(
@@ -343,6 +402,7 @@ void RenderPipeline::initRenderSystems() {
 		.skybox    = m_skybox_render_system.get(),
 		.shadow    = m_shadow_render_system.get(),
 		.particles = m_particle_backend.get(),
+		.rc        = m_rc_system.get(),
 	};
 }
 
@@ -356,6 +416,8 @@ void RenderPipeline::emitSwapChainRecreatedEvents() {
 
 void RenderPipeline::emitResolutionChangedEvent() {
 	auto extent = m_ve_renderer.getExtent();
+	m_screen_rays->recreate(*m_resources.pool(), extent,
+		m_ve_renderer.getOffscreenImageFormat(), m_ve_renderer.getResolvedDepthImageView());
 	m_event_bus.emitImmediate(ResolutionChangedEvent{
 		.pool = *m_resources.pool(),
 		.extent = extent,
@@ -371,6 +433,7 @@ void RenderPipeline::emitResolutionChangedEvent() {
 		.gtao_half_res = m_settings.gtao_half_res,
 		.ssr_half_res = m_settings.ssr_half_res
 	});
+	m_ao_gi_set_manager->rewrite(*m_resources.pool());
 }
 
 void RenderPipeline::pushPerFrameSettings() {
@@ -381,6 +444,40 @@ void RenderPipeline::prepareFrame() {
 	pushPerFrameSettings();
 	m_settings_watcher->tick();
 	m_particle_backend->applyPendingResize();
+
+	if (m_ve_renderer.consumeFrameDropped())
+		m_rc_system->invalidateStore();
+
+	if (m_settings.rc.enabled && !m_ve_device.supportsShaderInt16())
+		m_settings.rc.enabled = false;
+	m_rc_system->setParams(m_settings.rc);
+	bool rc_quality_changed = m_rc_system->setQuality(static_cast<uint32_t>(m_settings.rc.resolution_div),
+		static_cast<uint32_t>(m_settings.rc.cascades),
+		static_cast<uint32_t>(m_settings.rc.memory_mb),
+		static_cast<uint32_t>(m_settings.rc.c0_polar_bins),
+		m_settings.rc.c0_ray_length);
+	auto allocate_rc = [this] {
+		try {
+			m_rc_system->allocate();
+		} catch (const std::exception& e) {
+			VE_LOGE("Radiance Cascades disabled, allocation failed: " << e.what());
+			m_rc_system->release();
+			m_settings.rc.enabled = false;
+		}
+	};
+	bool rc_active = m_settings.rc.enabled && m_settings.geometry_prepass_enabled;
+	if (rc_active != m_rc_system->isAllocated()) {
+		m_ve_device.getDevice().waitIdle();
+		if (rc_active)
+			allocate_rc();
+		else
+			m_rc_system->release();
+		m_ao_gi_set_manager->rewrite(*m_resources.pool());
+	} else if (rc_quality_changed && rc_active) {
+		m_ve_device.getDevice().waitIdle();
+		allocate_rc();
+		m_ao_gi_set_manager->rewrite(*m_resources.pool());
+	}
 }
 
 void RenderPipeline::renderFrame(VeScene& scene,
@@ -603,6 +700,7 @@ VeFrameInfo RenderPipeline::buildFrameInfo(VeScene& scene,
 		.registry = &scene.getRegistry(),
 		.camera_view = camera_view,
 		.selected_entities = editor_state.selected_entities,
+		.profiler = &m_ve_renderer.getProfiler(),
 		.current_frame = current_frame,
 		.frame_time = frame_time,
 		.total_time = total_time,
@@ -646,26 +744,23 @@ void RenderPipeline::populateUBO(VeFrameInfo& fi) {
 	auto extent = m_ve_renderer.getExtent();
 
 	UniformBufferObject ubo{};
-	ubo.render_mode = m_settings.render_mode;
+	ubo.render_mode = effectiveRenderMode(m_settings);
 	ubo.shadow_mode = m_settings.shadow_mode;
 	ubo.pcss_light_size = m_settings.pcss_light_size;
 	ubo.shadow_bias = m_settings.shadow_bias;
 	ubo.csm_normal_bias = m_settings.csm_normal_bias;
 	ubo.csm_blend_dithered = static_cast<uint32_t>(m_settings.csm_blend_mode);
 	ubo.ambient_light_color = glm::vec4(m_settings.ambient_light_color, m_settings.ambient_light_intensity);
-	m_stats.ibl_exposure_compensation = m_ibl_system->isAvailable() ? m_ibl_system->getExposureCompensation() : 1.0f;
-	if (m_settings.ibl_enabled && m_ibl_system->isAvailable()) {
-		float comp = m_settings.ibl_auto_exposure ? m_stats.ibl_exposure_compensation : 1.0f;
-		ubo.ibl_diffuse_intensity = m_settings.ibl_diffuse_intensity * comp;
-		ubo.ibl_specular_intensity = m_settings.ibl_specular_intensity * comp;
-	} else {
-		ubo.ibl_diffuse_intensity = 0.0f;
-		ubo.ibl_specular_intensity = 0.0f;
-	}
+	ubo.ibl_active = (m_settings.ibl_enabled && m_ibl_system->isAvailable()) ? 1u : 0u;
 	ubo.ibl_min_ambient = m_settings.ibl_min_ambient;
 	ubo.prefiltered_mip_levels = m_ibl_system->getPrefilteredMipLevels();
 	auto& sh = m_ibl_system->getSHCoefficients();
 	std::copy(sh.begin(), sh.end(), ubo.sh_coefficients);
+	ubo.sky_radiance_scale = glm::vec4(m_skybox_render_system->skyRadianceScale(), 0.0f);
+	ubo.rc_short_range_ao = m_settings.rc.enabled ? m_settings.rc.short_range_ao : 0.0f;
+	ubo.rc_spec_occlusion = m_settings.rc.enabled ? m_settings.rc.spec_occlusion : 0.0f;
+	ubo.rc_rough_spec = (m_settings.rc.enabled && m_settings.rc.rough_specular) ? 1u : 0u;
+	ubo.rc_spec_handoff_roughness = m_settings.rc.spec_handoff_roughness;
 
 	m_light_system->updateUniformBuffer(fi, ubo);
 	m_shadow_render_system->updateUniformBuffer(current_frame, ubo, fi.csm_data);
@@ -681,7 +776,7 @@ void RenderPipeline::populateUBO(VeFrameInfo& fi) {
 
 	// Pipeline-variant selectors
 	fi.area_lights_active = ubo.num_rect_lights > 0;
-	fi.debug_shading = m_settings.render_mode != RenderMode::BRDF_MICROFACET;
+	fi.debug_shading = effectiveRenderMode(m_settings) != RenderMode::BRDF_MICROFACET;
 }
 
 void RenderPipeline::dispatchCompute(VeFrameInfo& fi) {
@@ -772,8 +867,16 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		&& m_settings.geometry_prepass_enabled;
 	bool gtao_active = m_settings.gtao_enabled && m_settings.geometry_prepass_enabled;
 	bool ssr_active = m_settings.ssr_enabled && m_settings.geometry_prepass_enabled;
+	assert((m_settings.rc.enabled && m_settings.geometry_prepass_enabled) == m_rc_system->isAllocated());
+	bool rc_active = m_settings.rc.enabled && m_settings.geometry_prepass_enabled && m_rc_system->isAllocated();
 	bool perspective_cam = fi.camera_view.proj[3][3] == 0.0f;
-	bool ssr_trace_active = ssr_active && perspective_cam && m_ssr_system->historyValid();
+	bool ssr_trace_active = ssr_active && perspective_cam && m_screen_rays->historyValid();
+	bool rc_trace_active = rc_active && perspective_cam && m_screen_rays->historyValid();
+	if (!rc_trace_active)
+		m_rc_system->markInactive();
+	// Debug render modes keep the history frozen on the last shaded frame
+	bool history_copy = effectiveRenderMode(m_settings) == RenderMode::BRDF_MICROFACET;
+	fi.rc_composite_active = rc_active && perspective_cam;
 
 	if (m_settings.geometry_prepass_enabled) {
 		ZoneScopedN("Geometry Prepass");
@@ -790,9 +893,9 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 	bool shadows_enabled = m_settings.shadow_mode != ShadowMode::DISABLED;
 	bool any_depth_consumer = m_settings.geometry_prepass_enabled
-		&& (hiz_active || fi.shadow_mask_active || gtao_active || ssr_trace_active);
+		&& (hiz_active || fi.shadow_mask_active || gtao_active || ssr_trace_active || rc_trace_active);
 	bool any_async_consumer = m_ve_device.hasDedicatedComputeQueue()
-		&& (gtao_active || hiz_active || ssr_trace_active);
+		&& (gtao_active || hiz_active || ssr_trace_active || rc_trace_active);
 
 	if (shadows_enabled && !any_async_consumer) {
 		ScopedDebugLabel label(command_buffer, "Shadow Maps", {0.5f, 0.2f, 0.2f, 1.0f});
@@ -863,7 +966,6 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 				m_gtao_system->dispatch(fi, depth_compute_cb);
 				profiler.endGpuTimer(depth_compute_cb, ProfileTimer::GTAO);
 				profiler.endCpuTimer(ProfileTimer::GTAO);
-				fi.ao_descriptor_set = &m_gtao_system->getOutputDescriptorSet(fi.current_frame);
 			}
 
 			if (hiz_active) {
@@ -877,8 +979,14 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 				profiler.endCpuTimer(ProfileTimer::HIZ);
 			}
 
+			// The min/max pyramid is generated once per frame: inside the SSR
+			// trace when SSR runs (recordSsrTrace), else here for RC alone.
 			if (ssr_trace_active)
 				recordSsrTrace(fi, depth_compute_cb, /*async=*/true);
+			else if (rc_trace_active)
+				m_screen_rays->generatePyramid(depth_compute_cb);
+			if (rc_trace_active)
+				recordRcDispatch(fi, depth_compute_cb, /*async=*/true, history_copy);
 
 			auto& shadow_cb = m_ve_renderer.getShadowGraphicsCommandBuffer();
 			fi.command_buffer = &shadow_cb;
@@ -936,7 +1044,6 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 				m_gtao_system->dispatch(fi, command_buffer);
 				profiler.endGpuTimer(command_buffer, ProfileTimer::GTAO);
 				profiler.endCpuTimer(ProfileTimer::GTAO);
-				fi.ao_descriptor_set = &m_gtao_system->getOutputDescriptorSet(fi.current_frame);
 			}
 
 			if (hiz_active) {
@@ -952,6 +1059,10 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 			if (ssr_trace_active)
 				recordSsrTrace(fi, command_buffer, /*async=*/false);
+			else if (rc_trace_active)
+				m_screen_rays->generatePyramid(command_buffer);
+			if (rc_trace_active)
+				recordRcDispatch(fi, command_buffer, /*async=*/false, history_copy);
 		}
 	}
 
@@ -960,8 +1071,7 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 	if (!fi.shadow_mask_active)
 		fi.shadow_mask_descriptor_set = &m_shadow_mask_system->getDummyOutputDescriptorSet();
-	if (!gtao_active)
-		fi.ao_descriptor_set = &m_gtao_system->getDummyOutputDescriptorSet();
+	fi.ao_descriptor_set = &m_ao_gi_set_manager->select(fi.current_frame, gtao_active, rc_trace_active);
 	if (!ssr_trace_active)
 		fi.ssr_descriptor_set = &m_ssr_system->getDummyOutputDescriptorSet();
 
@@ -972,6 +1082,9 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 	if (ssr_trace_active)
 		m_ssr_system->acquireForRead(active_cb);
+
+	if (rc_trace_active)
+		m_rc_system->acquireForRead(active_cb, fi.current_frame);
 
 	{
 		ZoneScopedN("Scene Render");
@@ -999,26 +1112,6 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 			TracyVkZone(tracy_gfx, *active_cb, "Particles");
 			m_particle_backend->render(fi);
 		}
-		if (m_settings.show_axes || m_settings.show_aabb_debug || m_settings.show_skinned_points
-			|| m_settings.show_area_lights) {
-			ZoneScopedN("Debug Overlays");
-			TracyVkZone(tracy_gfx, *active_cb, "Debug Overlays");
-			if (m_settings.show_axes)
-				m_debug_draw_system->renderAxes(fi);
-			if (m_settings.show_aabb_debug)
-				m_debug_draw_system->addVisibleAabbs(fi);
-			if (m_settings.show_area_lights)
-				m_debug_draw_system->addAreaLightGizmos(fi);
-			m_debug_draw_system->render(fi);
-			if (m_settings.show_skinned_points)
-				m_skinned_points_render_system->render(fi, *m_deform_pre_pass,
-					m_scene_resources->getMegaBuffer());
-		}
-		{
-			ZoneScopedN("Light Billboards");
-			TracyVkZone(tracy_gfx, *active_cb, "Light Billboards");
-			m_light_system->render(fi);
-		}
 		m_ve_renderer.endSceneRender(active_cb);
 		profiler.endGpuTimer(active_cb, ProfileTimer::SCENE_RENDER);
 		profiler.endCpuTimer(ProfileTimer::SCENE_RENDER);
@@ -1031,13 +1124,40 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 			gpu_scene, m_ve_renderer);
 	}
 
-	if (ssr_active && perspective_cam) {
-		ScopedDebugLabel label(active_cb, "SSR History Copy", {0.3f, 0.6f, 1.0f, 1.0f});
-		ZoneScopedN("SSR History Copy");
-		TracyVkZone(tracy_gfx, *active_cb, "SSR History Copy");
-		m_ssr_system->recordHistoryCopy(active_cb, m_ve_renderer.getResolveTargetImage());
+	if ((ssr_active || rc_active) && perspective_cam) {
+		if (history_copy) {
+			ScopedDebugLabel label(active_cb, "SSR History Copy", {0.3f, 0.6f, 1.0f, 1.0f});
+			ZoneScopedN("SSR History Copy");
+			TracyVkZone(tracy_gfx, *active_cb, "SSR History Copy");
+			m_screen_rays->recordHistoryCopy(active_cb, m_ve_renderer.getResolveTargetImage());
+			m_prev_projection_view = fi.camera_view.proj * fi.camera_view.view;
+		}
 	} else
-		m_ssr_system->invalidateHistory();
+		m_screen_rays->invalidateHistory();
+
+	// After the history copy: overlays are not scene radiance for SSR / RC
+	m_ve_renderer.beginOverlayRender(active_cb);
+	if (m_settings.show_axes || m_settings.show_aabb_debug || m_settings.show_skinned_points
+		|| m_settings.show_area_lights) {
+		ZoneScopedN("Debug Overlays");
+		TracyVkZone(tracy_gfx, *active_cb, "Debug Overlays");
+		if (m_settings.show_axes)
+			m_debug_draw_system->renderAxes(fi);
+		if (m_settings.show_aabb_debug)
+			m_debug_draw_system->addVisibleAabbs(fi);
+		if (m_settings.show_area_lights)
+			m_debug_draw_system->addAreaLightGizmos(fi);
+		m_debug_draw_system->render(fi);
+		if (m_settings.show_skinned_points)
+			m_skinned_points_render_system->render(fi, *m_deform_pre_pass,
+				m_scene_resources->getMegaBuffer());
+	}
+	{
+		ZoneScopedN("Light Billboards");
+		TracyVkZone(tracy_gfx, *active_cb, "Light Billboards");
+		m_light_system->render(fi);
+	}
+	m_ve_renderer.endOverlayRender(active_cb);
 
 	bool outline_active = editor_state.outline_enabled && !fi.selected_entities.empty();
 	if (outline_active) {
@@ -1093,14 +1213,35 @@ void RenderPipeline::recordSsrTrace(VeFrameInfo& fi, vk::raii::CommandBuffer& cm
 	profiler.beginGpuTimer(cmd, ProfileTimer::SSR);
 	if (async) {
 		TracyVkZone(tracy_compute, *cmd, "SSR Trace (async)");
+		m_screen_rays->generatePyramid(cmd);
 		m_ssr_system->dispatch(fi, cmd, async);
 	} else {
 		TracyVkZone(tracy_gfx, *cmd, "SSR Trace");
+		m_screen_rays->generatePyramid(cmd);
 		m_ssr_system->dispatch(fi, cmd, async);
 	}
 	profiler.endGpuTimer(cmd, ProfileTimer::SSR);
 	profiler.endCpuTimer(ProfileTimer::SSR);
 	fi.ssr_descriptor_set = &m_ssr_system->getOutputDescriptorSet();
+}
+
+void RenderPipeline::recordRcDispatch(VeFrameInfo& fi, vk::raii::CommandBuffer& cmd, bool async, bool history_copy) {
+	[[maybe_unused]] auto tracy_gfx = m_ve_renderer.getTracyGraphicsCtx();
+	[[maybe_unused]] auto tracy_compute = m_ve_renderer.getTracyComputeCtx();
+	auto& profiler = m_ve_renderer.getProfiler();
+	ScopedDebugLabel label(cmd, "RC GI", {0.9f, 0.6f, 0.2f, 1.0f});
+	ZoneScopedN("RC GI");
+	profiler.beginCpuTimer(ProfileTimer::RC);
+	profiler.beginGpuTimer(cmd, ProfileTimer::RC);
+	if (async) {
+		TracyVkZone(tracy_compute, *cmd, "RC GI (async)");
+		m_rc_system->dispatch(fi, cmd, history_copy);
+	} else {
+		TracyVkZone(tracy_gfx, *cmd, "RC GI");
+		m_rc_system->dispatch(fi, cmd, history_copy);
+	}
+	profiler.endGpuTimer(cmd, ProfileTimer::RC);
+	profiler.endCpuTimer(ProfileTimer::RC);
 }
 
 void RenderPipeline::recordDepthConsumerToAttachBarriers(vk::raii::CommandBuffer& cmd) {
@@ -1157,12 +1298,37 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	m_stats.num_directional_lights = registry.activeDirectionalLightCount();
 	m_stats.num_spot_lights = registry.activeSpotLightCount();
 	m_stats.num_area_lights = registry.activeAreaLightCount();
+	m_stats.rc_probes = m_rc_system->probeCount();
+	m_stats.rc_overflow = m_rc_system->overflowCount();
+	m_stats.rc_probes_c0 = m_rc_system->cascadeProbeCount(0);
+	m_stats.rc_probes_c1 = m_rc_system->cascadeProbeCount(1);
+	m_stats.rc_probes_c2 = m_rc_system->cascadeProbeCount(2);
+	m_stats.rc_probes_c3 = m_rc_system->cascadeProbeCount(3);
+	m_stats.rc_probes_c4 = m_rc_system->cascadeProbeCount(4);
+	m_stats.rc_probes_c5 = m_rc_system->cascadeProbeCount(5);
+	m_stats.rc_rays_hit = static_cast<float>(m_rc_system->rayStat(rcw::RAY_HIT));
+	m_stats.rc_rays_clear = static_cast<float>(m_rc_system->rayStat(rcw::RAY_CLEAR));
+	m_stats.rc_rays_sky = static_cast<float>(m_rc_system->rayStat(rcw::RAY_SKY));
+	m_stats.rc_rays_sky_gated = static_cast<float>(m_rc_system->rayStat(rcw::RAY_SKY_GATED));
+	m_stats.rc_rays_unk_occluded = static_cast<float>(m_rc_system->rayStat(rcw::RAY_UNK_OCCLUDED));
+	m_stats.rc_rays_unk_stepcap = static_cast<float>(m_rc_system->rayStat(rcw::RAY_UNK_STEPCAP));
+	m_stats.rc_rays_unk_edge = static_cast<float>(m_rc_system->rayStat(rcw::RAY_UNK_EDGE));
+	m_stats.rc_rays_unk_clip = static_cast<float>(m_rc_system->rayStat(rcw::RAY_UNK_CLIP));
 
 	const auto& results = profiler.getResults();
 	m_stats.gpu_culling = results.gpu(ProfileTimer::CULLING);
 	m_stats.gpu_shadow_maps = results.gpu(ProfileTimer::SHADOW_MAPS);
 	m_stats.gpu_geometry_prepass = results.gpu(ProfileTimer::GEOMETRY_PREPASS);
 	m_stats.gpu_gtao = results.gpu(ProfileTimer::GTAO);
+	m_stats.gpu_rc = results.gpu(ProfileTimer::RC);
+	m_stats.gpu_rc_build = results.gpu(ProfileTimer::RC_BUILD);
+	m_stats.gpu_rc_shade = results.gpu(ProfileTimer::RC_SHADE);
+	m_stats.gpu_rc_map = results.gpu(ProfileTimer::RC_MAP);
+	m_stats.gpu_rc_trace = results.gpu(ProfileTimer::RC_TRACE);
+	m_stats.gpu_rc_resolve = results.gpu(ProfileTimer::RC_RESOLVE);
+	m_stats.gpu_rc_merge = results.gpu(ProfileTimer::RC_MERGE);
+	m_stats.gpu_rc_irradiance = results.gpu(ProfileTimer::RC_IRRADIANCE);
+	m_stats.gpu_rc_gather = results.gpu(ProfileTimer::RC_GATHER);
 	m_stats.gpu_scene_render = results.gpu(ProfileTimer::SCENE_RENDER);
 	m_stats.gpu_ssr = results.gpu(ProfileTimer::SSR);
 	m_stats.gpu_bloom = results.gpu(ProfileTimer::BLOOM);
@@ -1178,6 +1344,7 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	m_stats.cpu_shadow_maps = results.cpu(ProfileTimer::SHADOW_MAPS);
 	m_stats.cpu_geometry_prepass = results.cpu(ProfileTimer::GEOMETRY_PREPASS);
 	m_stats.cpu_gtao = results.cpu(ProfileTimer::GTAO);
+	m_stats.cpu_rc = results.cpu(ProfileTimer::RC);
 	m_stats.cpu_scene_render = results.cpu(ProfileTimer::SCENE_RENDER);
 	m_stats.cpu_ssr = results.cpu(ProfileTimer::SSR);
 	m_stats.cpu_bloom = results.cpu(ProfileTimer::BLOOM);
@@ -1210,9 +1377,12 @@ void RenderPipeline::writeUniformBuffer(uint32_t current_frame, const CameraView
 	ubo.projection_view = ubo.proj * ubo.view;
 	ubo.inverse_projection_view = glm::inverse(ubo.projection_view);
 	ubo.prev_projection_view = m_prev_projection_view;
-	m_prev_projection_view = ubo.projection_view;
 	ubo.camera_position = glm::vec4{view.position, 1.0f};
 	m_uniform_buffers[current_frame]->writeToBuffer(&ubo);
+}
+
+void RenderPipeline::resetRcStore() {
+	m_rc_system->invalidateStore();
 }
 
 } // namespace ve

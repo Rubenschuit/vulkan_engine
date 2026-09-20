@@ -37,7 +37,6 @@ struct BlurPushConstant {
 GtaoSystem::GtaoSystem(
 	VeDevice& device,
 	VeDescriptorPool& descriptor_pool,
-	VeResourceManager& resource_manager,
 	const vk::raii::DescriptorSetLayout& global_set_layout,
 	std::filesystem::path shader_path,
 	vk::Extent2D ao_extent,
@@ -49,10 +48,6 @@ GtaoSystem::GtaoSystem(
 	: m_ve_device(device), m_shader_path(std::move(shader_path)),
 	  m_extent(ao_extent), m_depth_extent(depth_extent) {
 
-	event_bus.subscribe<GtaoResolutionChangedEvent>([this](const GtaoResolutionChangedEvent& e) {
-		recreate(e.pool, e.ao_extent, e.depth_extent, e.depth_image_view, e.depth_image,
-			e.normal_roughness_image_view);
-	});
 	event_bus.subscribe<ResolutionChangedEvent>([this](const ResolutionChangedEvent& e) {
 		vk::Extent2D ao_extent = e.gtao_half_res
 			? vk::Extent2D{e.extent.width / 2, e.extent.height / 2} : e.extent;
@@ -67,11 +62,9 @@ GtaoSystem::GtaoSystem(
 	m_depth_image = depth_image;
 	m_depth_image_view = *depth_image_view;
 	m_normal_image_view = *normal_roughness_image_view;
-	m_default_ao_texture = resource_manager.load<VeTexture>("default_albedo");
 	createAoImages(m_extent);
 	createComputeSetLayout();
 	createBlurSetLayout();
-	createOutputSetLayout();
 	createSampler();
 	createGtaoPipelineLayout(global_set_layout);
 	createBlurPipelineLayout();
@@ -132,13 +125,6 @@ void GtaoSystem::createBlurSetLayout() {
 		.addBinding(0, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // depth
 		.addBinding(1, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute) // AO input (storage)
 		.addBinding(2, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute) // AO output
-		.build();
-}
-
-void GtaoSystem::createOutputSetLayout() {
-	m_output_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
-		.addBinding(0, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eFragment)
-		.addBinding(1, vk::DescriptorType::eSampler, vk::ShaderStageFlagBits::eFragment)
 		.build();
 }
 
@@ -254,18 +240,10 @@ void GtaoSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 		.imageView = m_normal_image_view,
 		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 	};
-	vk::DescriptorImageInfo sampler_info{
-		.sampler = *m_linear_clamp_sampler,
-	};
-
 	for (uint32_t frame = 0; frame < MAX_FRAMES_IN_FLIGHT; frame++) {
 		vk::DescriptorImageInfo ao_raw_storage_info{
 			.imageView = *m_ao_raw_images[frame]->getImageView(),
 			.imageLayout = vk::ImageLayout::eGeneral,
-		};
-		vk::DescriptorImageInfo ao_raw_sampled_info{
-			.imageView = *m_ao_raw_images[frame]->getImageView(),
-			.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
 		};
 		vk::DescriptorImageInfo ao_blur_storage_info{
 			.imageView = *m_ao_blur_images[frame]->getImageView(),
@@ -292,23 +270,7 @@ void GtaoSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool) {
 			.writeImage(1, &ao_blur_storage_info)
 			.writeImage(2, &ao_raw_storage_info)
 			.build(m_blur_v_descriptor_sets[frame]);
-
-		// Output: raw AO (sampled) + linear sampler (for fragment shaders)
-		VeDescriptorWriter(*m_output_set_layout, descriptor_pool)
-			.writeImage(0, &ao_raw_sampled_info)
-			.writeImage(1, &sampler_info)
-			.build(m_output_descriptor_sets[frame]);
 	}
-
-	// Dummy output: default white texture
-	vk::DescriptorImageInfo default_sampled_info{
-		.imageView = *m_default_ao_texture->getImageView(),
-		.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-	};
-	VeDescriptorWriter(*m_output_set_layout, descriptor_pool)
-		.writeImage(0, &default_sampled_info)
-		.writeImage(1, &sampler_info)
-		.build(m_dummy_output_descriptor_set);
 }
 
 void GtaoSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd) {

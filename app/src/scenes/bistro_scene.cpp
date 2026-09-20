@@ -14,8 +14,7 @@ BistroScene::BistroScene(const SceneContext& ctx, const AssetPaths& paths)
 	m_event_bus.enqueue(SkyboxRequestEvent{
 		.name = "the_sky_is_on_fire_4k", .exposure = 0.5f});
 	m_event_bus.enqueue(RenderSettingsRequestEvent{
-		.exposure = 1.15f, .ibl_diffuse_intensity = 0.5f, .ibl_specular_intensity = 0.35f,
-		.ambient_light_intensity = 0.02f, .bloom_strength = 0.02f});
+		.exposure = 1.15f, .ambient_light_intensity = 0.02f, .bloom_strength = 0.02f});
 
 	Entity dl = m_registry.createDirectionalLight(8.0f, glm::vec3(1.0f, 0.62f, 0.4f),
 		glm::normalize(glm::vec3(0.709f, -0.410f, -0.574f)));

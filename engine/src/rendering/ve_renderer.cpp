@@ -220,6 +220,7 @@ void VeRenderer::endFrame() {
 
 	if (m_frame_aborted) {
 		m_ve_device.getDevice().waitIdle();
+		m_frame_dropped = true;
 		m_is_frame_started = false;
 		m_ui_label_open = false;
 		FrameMark;
@@ -715,6 +716,66 @@ void VeRenderer::endWboitComposite(vk::raii::CommandBuffer& command_buffer) {
 	};
 	vk::DependencyInfo dep{.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &depth_barrier};
 	command_buffer.pipelineBarrier2(dep);
+	endDebugLabel(command_buffer);
+}
+
+void VeRenderer::beginOverlayRender(vk::raii::CommandBuffer& command_buffer) {
+	beginDebugLabel(command_buffer, "Overlays", {0.7f, 0.7f, 0.7f, 1.0f});
+	auto extent = getExtent();
+
+	m_ve_swap_chain->transitionResolveTargetLayout(
+		command_buffer,
+		vk::ImageLayout::eShaderReadOnlyOptimal,
+		vk::ImageLayout::eColorAttachmentOptimal,
+		vk::AccessFlagBits2::eShaderRead,
+		vk::AccessFlagBits2::eColorAttachmentRead | vk::AccessFlagBits2::eColorAttachmentWrite,
+		vk::PipelineStageFlagBits2::eFragmentShader,
+		vk::PipelineStageFlagBits2::eColorAttachmentOutput
+	);
+
+	vk::RenderingAttachmentInfo color_attachment{
+		.imageView = *m_ve_swap_chain->getResolveTargetImageView(),
+		.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+		.loadOp = vk::AttachmentLoadOp::eLoad,
+		.storeOp = vk::AttachmentStoreOp::eStore,
+	};
+	vk::RenderingAttachmentInfo depth_attachment{
+		.imageView = *getResolvedDepthImageView(),
+		.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+		.loadOp = vk::AttachmentLoadOp::eLoad,
+		.storeOp = vk::AttachmentStoreOp::eStore,
+	};
+
+	vk::RenderingInfo rendering_info{
+		.renderArea = {.offset = {0, 0}, .extent = extent},
+		.layerCount = 1,
+		.colorAttachmentCount = 1,
+		.pColorAttachments = &color_attachment,
+		.pDepthAttachment = &depth_attachment
+	};
+	command_buffer.beginRendering(rendering_info);
+
+	command_buffer.setViewport(0, vk::Viewport{
+		.x = 0.0f, .y = 0.0f,
+		.width = static_cast<float>(extent.width),
+		.height = static_cast<float>(extent.height),
+		.minDepth = 0.0f, .maxDepth = 1.0f
+	});
+	command_buffer.setScissor(0, vk::Rect2D{.offset = {0, 0}, .extent = extent});
+}
+
+void VeRenderer::endOverlayRender(vk::raii::CommandBuffer& command_buffer) {
+	command_buffer.endRendering();
+
+	m_ve_swap_chain->transitionResolveTargetLayout(
+		command_buffer,
+		vk::ImageLayout::eColorAttachmentOptimal,
+		vk::ImageLayout::eShaderReadOnlyOptimal,
+		vk::AccessFlagBits2::eColorAttachmentWrite,
+		vk::AccessFlagBits2::eShaderRead,
+		vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		vk::PipelineStageFlagBits2::eFragmentShader
+	);
 	endDebugLabel(command_buffer);
 }
 

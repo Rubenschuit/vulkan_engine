@@ -11,6 +11,8 @@
 #include <vulkan/vulkan_raii.hpp>
 
 // Standard library headers commonly used across the project
+#include <bit>
+#include <cstdlib>
 #include <vector>
 #include <string>
 #include <memory>

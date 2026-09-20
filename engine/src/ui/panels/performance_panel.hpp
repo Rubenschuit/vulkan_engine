@@ -45,11 +45,15 @@ private:
 	int m_graph_frames = 0;
 
 	// Per-system breakdown
-	static constexpr int BREAKDOWN_COUNT = 16;
+	static constexpr int BREAKDOWN_COUNT = 17;
 	float m_gpu_breakdown_ms[BREAKDOWN_COUNT] = {};
 	float m_gpu_breakdown_sum[BREAKDOWN_COUNT] = {};
 	float m_cpu_breakdown_ms[BREAKDOWN_COUNT] = {};
 	float m_cpu_breakdown_sum[BREAKDOWN_COUNT] = {};
+	// RC GI sub-passes, GPU only: build (map, trace, resolve), shade (merge, irradiance, gather)
+	static constexpr int RC_BREAKDOWN_COUNT = 8;
+	float m_rc_breakdown_ms[RC_BREAKDOWN_COUNT] = {};
+	float m_rc_breakdown_sum[RC_BREAKDOWN_COUNT] = {};
 
 	// VRAM stats
 	VmaAllocator m_allocator;

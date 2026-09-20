@@ -43,21 +43,34 @@ void SceneResourceManager::subscribeToEvents(EventBus& event_bus) {
 
 void SceneResourceManager::loadScene(Registry& registry) {
 	auto meshes = collectUniqueMeshes(registry);
-	if (!meshes.empty()) {
-		auto cmd = m_ve_device.beginSingleTimeCommands();
-		m_mega_buffer->build(*cmd, meshes);
-		m_ve_device.endSingleTimeCommands(*cmd);
-		for (VeMesh* mesh : meshes)
-			mesh->releaseGpuBuffers();
-	}
+
+	m_ve_device.getDevice().waitIdle();
+
+	// A mesh shared with the previous scene had its per-mesh buffers released, so
+	// its geometry lives only inside the prior mega; passing it as `previous`
+	// copies from there instead of reading the freed buffers. With nothing
+	// shared the prior mega is freed first, so only one mega is alive at a time.
+	bool shares_previous = std::any_of(meshes.begin(), meshes.end(),
+		[this](VeMesh* mesh) { return m_mega_buffer->getEntry(mesh) != nullptr; });
+	if (!shares_previous)
+		m_mega_buffer->clear();
+	PbrMegaBuffer new_mega(m_ve_device, m_event_bus);
+	auto cmd = m_ve_device.beginSingleTimeCommands();
+	new_mega.build(*cmd, meshes, m_mega_buffer.get());
+	m_ve_device.endSingleTimeCommands(*cmd);
+	m_mega_buffer->swapState(new_mega);
 
 	m_gpu_scene_manager->subscribeToRegistry(registry);
 	m_gpu_scene_manager->registerAllObjects(registry, *m_mega_buffer, *m_material_ssbo_manager);
+
+	for (VeMesh* mesh : meshes)
+		mesh->releaseGpuBuffers();
 }
 
 void SceneResourceManager::unload() {
 	m_ve_device.getDevice().waitIdle();
-	m_mega_buffer->clear();
+	// Mega buffer kept so the next loadScene can source cross-swap shared meshes
+	// from it as `previous`; that loadScene frees it.
 	m_gpu_scene_manager->reset();
 	m_material_ssbo_manager->reset();
 	m_bindless_registry->reset();

@@ -124,6 +124,10 @@ public:
 	                                          bool flip_tex_coord_v = false,
 	                                          MaterialUvTransforms uv_transforms = {});
 
+	// Copy of src's current state sharing its texture handles, registered as
+	// "<id>#<n>" with the first free n
+	ResourceHandle<VeMaterial> cloneMaterial(const VeMaterial& src);
+
 	// Register a VeMesh built from pre-decoded CPU data; records all buffer
 	// copies into ctx.transfer_cmd. Caller owns submit + sync.
 	ResourceHandle<VeMesh> createMeshFromData(const std::string& resource_id,

@@ -9,8 +9,6 @@
 #include "ve_export.hpp"
 #include "ve_config.hpp"
 #include "rendering/ve_frame_info.hpp"
-#include "resources/ve_resource_manager.hpp"
-#include "resources/ve_texture.hpp"
 #include "vulkan/ve_descriptors.hpp"
 
 #include <memory>
@@ -31,7 +29,6 @@ public:
 	GtaoSystem(
 		VeDevice& device,
 		VeDescriptorPool& descriptor_pool,
-		VeResourceManager& resource_manager,
 		const vk::raii::DescriptorSetLayout& global_set_layout,
 		std::filesystem::path shader_path,
 		vk::Extent2D ao_extent,
@@ -60,26 +57,15 @@ public:
 	// Pair with the release-only barrier emitted at the end of dispatch().
 	void acquireForRead(vk::raii::CommandBuffer& cmd, uint32_t frame_index);
 
-	// Descriptor set layout for Set 5 (AO output for PBR/simple shaders)
-	const vk::raii::DescriptorSetLayout& getAoSetLayout() const {
-		return m_output_set_layout->getDescriptorSetLayout();
+	const vk::raii::ImageView& outputView(uint32_t frame_index) const {
+		return m_ao_raw_images[frame_index]->getImageView();
 	}
-
-	// Per-frame output descriptor set for fragment shader binding
-	vk::raii::DescriptorSet& getOutputDescriptorSet(uint32_t frame_index) {
-		return m_output_descriptor_sets[frame_index];
-	}
-
-	// Dummy white descriptor set (AO=1.0 everywhere) when GTAO is disabled
-	vk::raii::DescriptorSet& getDummyOutputDescriptorSet() {
-		return m_dummy_output_descriptor_set;
-	}
+	const vk::raii::Sampler& outputSampler() const { return m_linear_clamp_sampler; }
 
 private:
 	void createAoImages(vk::Extent2D extent);
 	void createComputeSetLayout();
 	void createBlurSetLayout();
-	void createOutputSetLayout();
 	void createSampler();
 	void createGtaoPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout);
 	void createBlurPipelineLayout();
@@ -99,16 +85,12 @@ private:
 	std::array<std::unique_ptr<VeImage>, MAX_FRAMES_IN_FLIGHT> m_ao_raw_images;
 	std::array<std::unique_ptr<VeImage>, MAX_FRAMES_IN_FLIGHT> m_ao_blur_images;
 
-	// Default white texture for disabled state
-	ResourceHandle<VeTexture> m_default_ao_texture;
-
 	// Sampler for output reads (linear clamp)
 	vk::raii::Sampler m_linear_clamp_sampler{nullptr};
 
 	// Descriptor set layouts
 	std::unique_ptr<VeDescriptorSetLayout> m_compute_set_layout;  // GTAO I/O: depth + AO storage
 	std::unique_ptr<VeDescriptorSetLayout> m_blur_set_layout;     // Blur I/O: depth + AO in + AO out
-	std::unique_ptr<VeDescriptorSetLayout> m_output_set_layout;   // Set 5: AO sampled + sampler
 
 	// Pipelines
 	vk::raii::PipelineLayout m_gtao_pipeline_layout{nullptr};
@@ -123,10 +105,6 @@ private:
 		makeNullArray<vk::raii::DescriptorSet>();
 	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_blur_v_descriptor_sets =
 		makeNullArray<vk::raii::DescriptorSet>();
-	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_output_descriptor_sets =
-		makeNullArray<vk::raii::DescriptorSet>();
-	vk::raii::DescriptorSet m_dummy_output_descriptor_set{nullptr};
-
 	// Cached depth image for barriers + descriptors (single-sample resolved depth)
 	vk::Image m_depth_image{};
 	vk::ImageView m_depth_image_view{};
