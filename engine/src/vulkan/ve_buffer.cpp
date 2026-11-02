@@ -105,6 +105,12 @@ void VeBuffer::writeToBuffer(const void* data, vk::DeviceSize size, vk::DeviceSi
 	}
 }
 
+vk::DeviceAddress VeBuffer::getDeviceAddress() const {
+	assert((m_usage_flags & vk::BufferUsageFlagBits::eShaderDeviceAddress)
+		&& "buffer was not created with eShaderDeviceAddress");
+	return m_ve_device.getDevice().getBufferAddress(vk::BufferDeviceAddressInfo{.buffer = m_buffer});
+}
+
 vk::DescriptorBufferInfo VeBuffer::getDescriptorInfo(vk::DeviceSize size, vk::DeviceSize offset) const {
 	vk::DescriptorBufferInfo buffer_info{
 		.buffer = m_buffer,

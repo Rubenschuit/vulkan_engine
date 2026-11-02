@@ -10,9 +10,11 @@
 // Relative start of both roughness fades: SSR fades out over
 // [SPEC_HANDOFF_FADE_START * m, m] with m = push.max_roughness, RC rough
 // specular fades in over [SPEC_HANDOFF_FADE_START * s, s] with
-// s = ubo.rc_spec_handoff_roughness. The two ends are independent; where they
+// s = RC_SPEC_HANDOFF_ROUGHNESS. The two ends are independent; where they
 // overlap the composite arbitrates by SSR confidence.
 static const float SPEC_HANDOFF_FADE_START = 0.85;
+// Roughness at which RC rough specular fully replaces the prefiltered cubemap
+static const float RC_SPEC_HANDOFF_ROUGHNESS = 0.4;
 
 // ============================================================================
 // Light structs (keep in sync with ve_frame_info.hpp)
@@ -128,10 +130,7 @@ struct UniformBuffer {
 
 	// RC GI parameters
 	float4   sky_radiance_scale;
-	float    rc_short_range_ao;
-	float    rc_spec_occlusion;
-	uint     rc_rough_spec;
-	float    rc_spec_handoff_roughness; // = RcSettings::spec_handoff_roughness
+	uint     num_point_lights;
 };
 [vk::binding(0, 0)]
 ConstantBuffer<UniformBuffer> ubo;
@@ -178,6 +177,8 @@ struct MaterialGPU {
 };
 [vk::binding(2, 0)]
 StructuredBuffer<MaterialGPU> materials;
+
+#ifndef VE_COMMON_NO_SCENE_SETS
 
 // ============================================================================
 // Shadow map bindings (set 2)
@@ -261,6 +262,8 @@ Texture2D<float4> ssr_texture;   // rgb premultiplied by a, the confidence
 [vk::binding(1, 7)]
 SamplerState ssr_sampler;
 
+#endif // VE_COMMON_NO_SCENE_SETS
+
 // ============================================================================
 // Utilities
 // ============================================================================
@@ -333,6 +336,10 @@ float specularAO(float NdotV, float ao, float roughness) {
 	return clamp(pow(NdotV + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao, 0.0, 1.0);
 }
 
+// A light whose peak incident radiance times n.l falls below this is skipped:
+// by the raster light loop, and by RC hit shading before its shadow ray
+static const float LIGHT_RADIANCE_CUTOFF = 1e-3;
+
 // KHR_lights_punctual attenuation: smooth windowed falloff within range, 1/d² when range=0
 float calculateAttenuation(float distance_sq, float range) {
 	if (range > 0.0) {
@@ -361,6 +368,8 @@ float calculateSpotAttenuation(float3 frag_to_light_n, float3 spot_direction,
 // ============================================================================
 // Shadow sampling functions
 // ============================================================================
+
+#ifndef VE_COMMON_NO_SCENE_SETS
 
 // Hardware comparison shadow test: returns 1.0 (lit) or 0.0 (shadow) with free 2x2 bilinear PCF
 float calculateShadowTerm(float4 shadow_coord, float2 offset) {
@@ -616,6 +625,8 @@ float getPointShadow(uint32_t light_index, float shadow_terms[MAX_SHADOW_LIGHTS]
 	}
 	return 1.0;
 }
+
+#endif // VE_COMMON_NO_SCENE_SETS
 
 float3 csmDebugColor(float3 albedo, uint cascade, float blend_t, float shadow) {
 	static const float3 CASCADE_COLORS[4] = {

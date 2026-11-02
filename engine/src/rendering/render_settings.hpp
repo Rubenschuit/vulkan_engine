@@ -33,7 +33,6 @@ struct VENGINE_API RenderSettings {
 	Topology topology = Topology::TRIANGLE_LIST;
 	RenderMode render_mode = RenderMode::BRDF_MICROFACET;
 	bool hdr_enabled = false;
-	bool msaa = false;
 	bool vsync = false;
 
 	// lighting

@@ -5,10 +5,16 @@
 
 namespace ve {
 
-InputController::InputController(VeWindow& ve_window, EventBus& event_bus)
+InputController::InputController(VeWindow& ve_window, EventBus& event_bus, bool free_cursor_on_start)
 	: m_event_bus(event_bus) {
 	m_window = ve_window.getGLFWwindow();
 	assert(m_window != nullptr && "InputController: GLFWwindow is null");
+	m_user_editor_mode = free_cursor_on_start;
+	m_last_applied_editor_mode = free_cursor_on_start;
+	if (free_cursor_on_start) {
+		glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+		return;
+	}
 	// Initial state: game mode (cursor disabled, raw motion on).
 	glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 	if (glfwRawMouseMotionSupported())

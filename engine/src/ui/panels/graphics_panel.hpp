@@ -20,6 +20,7 @@ public:
 
 	void setParticleBackend(ParticleBackend* p) { m_particles = p; }
 	void setMaxParticleCapacity(uint32_t v) { m_max_particle_capacity = v; }
+	void setRayQuerySupported(bool v) { m_ray_query_supported = v; }
 
 private:
 	VeRenderer& m_renderer;
@@ -27,6 +28,7 @@ private:
 	EventBus& m_event_bus;
 	ParticleBackend* m_particles = nullptr;
 	uint32_t m_max_particle_capacity = 0;
+	bool m_ray_query_supported = false;
 	RcSettings m_rc_held; // RC settings being dragged, applied on release
 };
 

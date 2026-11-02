@@ -41,6 +41,7 @@ class GtaoSystem;
 class ScreenRayResources;
 class SsrSystem;
 class RcSystem;
+class RayTracingScene;
 class AoGiDescriptorSetManager;
 class ClusterLightSystem;
 class PbrRenderSystem;
@@ -105,7 +106,12 @@ private:
 	void selectBackend();
 	void recordDepthConsumerToAttachBarriers(vk::raii::CommandBuffer& cmd);
 	void recordSsrTrace(VeFrameInfo& fi, vk::raii::CommandBuffer& cmd, bool async);
-	void recordRcDispatch(VeFrameInfo& fi, vk::raii::CommandBuffer& cmd, bool async, bool history_copy);
+	// False, with RC marked inactive, when the frame resolves to a march
+	// without this frame's pyramid over a valid history.
+	bool recordRcDispatch(VeFrameInfo& fi, vk::raii::CommandBuffer& cmd, bool async, bool history_copy,
+		bool pyramid_current);
+	// Frees the scene's acceleration structures; the device must be idle.
+	void resetRayTracingScene();
 	void ensureHizInfrastructure();
 	void ensureGpuCullingInfrastructure();
 	void ensureMeshletCullingInfrastructure();
@@ -146,6 +152,8 @@ private:
 	std::unique_ptr<ScreenRayResources> m_screen_rays;
 	std::unique_ptr<SsrSystem> m_ssr_system;
 	std::unique_ptr<RcSystem> m_rc_system;
+	std::unique_ptr<RayTracingScene> m_ray_tracing_scene; // only where the device has ray query
+	bool m_history_bootstrap = false; // this frame shades normally under a debug mode, to seed the history
 	std::unique_ptr<GtaoSystem> m_gtao_system;
 	std::unique_ptr<AoGiDescriptorSetManager> m_ao_gi_set_manager;
 	std::unique_ptr<ClusterLightSystem> m_cluster_light_system;

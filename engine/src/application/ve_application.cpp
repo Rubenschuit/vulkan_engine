@@ -46,7 +46,7 @@ VeApplication::VeApplication(const EngineConfig& config)
 	  m_ve_device(m_ve_window),
 	  m_resource_manager(m_ve_device, m_event_bus),
 	  m_ve_renderer(m_ve_device, m_ve_window, m_resource_manager, m_event_bus),
-	  m_input_controller(m_ve_window, m_event_bus),
+	  m_input_controller(m_ve_window, m_event_bus, s_pending_benchmark.has_value()),
 	  m_config(config) {
 
 	m_ve_device.loadPipelineCache(config.working_dir / ".cache" / "vk_pipeline_cache.bin");
@@ -362,6 +362,7 @@ void VeApplication::finishBenchmark() {
 
 	auto extent = m_ve_renderer.getSwapChainExtent();
 	const auto& settings = m_render_pipeline->settings();
+	const RcSystem* rc = m_render_pipeline->services().rc;
 	m_exit_code = m_benchmark->finish(BenchmarkRunInfo{
 		.scene_name = scene_name,
 		.device_name = m_ve_renderer.getDeviceName(),
@@ -377,6 +378,8 @@ void VeApplication::finishBenchmark() {
 		.hiz_occlusion = settings.hiz_occlusion_enabled,
 		.draw_indirect_count = m_ve_device.supportsDrawIndirectCount(),
 		.rc_enabled = settings.rc.enabled && settings.geometry_prepass_enabled,
+		.supports_ray_query = m_ve_device.supportsRayQuery(),
+		.rc_ray_query = rc && rc->usingRayQuery(),
 	});
 	glfwSetWindowShouldClose(m_ve_window.getGLFWwindow(), GLFW_TRUE);
 }

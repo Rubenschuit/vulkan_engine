@@ -59,6 +59,11 @@ function(add_slang_spirv_target TARGET)
 
 		# Collect .slangh headers so shaders recompile when shared headers change
 		file(GLOB _SLANG_HEADERS "${PROJECT_SOURCE_DIR}/shaders/*.slangh")
+		file(STRINGS "${SLANG_SRC}" _SLANG_INCLUDE_LINES REGEX "^[ \t]*#include[ \t]+\"[^\"]+\\.slang\"")
+		foreach(_INCLUDE_LINE ${_SLANG_INCLUDE_LINES})
+			string(REGEX REPLACE "^[ \t]*#include[ \t]+\"([^\"]+)\".*$" "\\1" _INCLUDED ${_INCLUDE_LINE})
+			list(APPEND _SLANG_HEADERS "${PROJECT_SOURCE_DIR}/shaders/${_INCLUDED}")
+		endforeach()
 
 		# spvGroupNonUniform* capabilities are auto-derived by slangc when wave
 		# intrinsics are used (gpu_cull_comp.slang etc.). Listing them explicitly
@@ -68,6 +73,7 @@ function(add_slang_spirv_target TARGET)
 			spvImageQuery
 			spvImageGatherExtended
 			spvMinLod
+			spvRayQueryKHR
 			spvSparseResidency
 			spvFragmentFullyCoveredEXT
 			SPV_KHR_non_semantic_info

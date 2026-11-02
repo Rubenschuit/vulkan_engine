@@ -35,6 +35,7 @@ public:
 	vk::DeviceSize getAlignmentSize() const { return m_alignment_size; }
 	vk::DeviceSize getBufferSize() const { return m_buffer_size; }
 	vk::DescriptorBufferInfo getDescriptorInfo(vk::DeviceSize size = VK_WHOLE_SIZE, vk::DeviceSize offset = 0) const;
+	vk::DeviceAddress getDeviceAddress() const;
 
 	void setDebugName(const char* name) {
 		ve::setDebugName(m_ve_device, vk::ObjectType::eBuffer,

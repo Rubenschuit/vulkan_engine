@@ -103,6 +103,8 @@ struct VENGINE_API BenchmarkRunInfo {
 	bool hiz_occlusion = false;
 	bool draw_indirect_count = false;
 	bool rc_enabled = false;
+	bool supports_ray_query = false;
+	bool rc_ray_query = false;
 };
 
 class VENGINE_API BenchmarkRunner {

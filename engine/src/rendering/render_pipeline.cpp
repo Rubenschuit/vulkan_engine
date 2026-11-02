@@ -8,6 +8,7 @@
 #include "rendering/debug_draw_system.hpp"
 #include "rendering/bloom_system.hpp"
 #include "rendering/cluster_light_system.hpp"
+#include "rendering/ray_tracing_scene.hpp"
 #include "rendering/culling/cpu_culling_backend.hpp"
 #include "rendering/culling/culling_backend.hpp"
 #include "rendering/culling/culling_system.hpp"
@@ -59,8 +60,11 @@
 
 namespace ve {
 
-// The render mode the frame uses: an RC view overrides the user's choice
-static RenderMode effectiveRenderMode(const RenderSettings& s) {
+// The render mode the frame uses: an RC view overrides the user's choice,
+// and the history bootstrap frame overrides both (see renderFrame)
+static RenderMode effectiveRenderMode(const RenderSettings& s, bool history_bootstrap) {
+	if (history_bootstrap)
+		return RenderMode::BRDF_MICROFACET;
 	switch (s.rc.debug_view) {
 		case RcDebugView::NONE:
 			return s.render_mode;
@@ -256,6 +260,8 @@ void RenderPipeline::initRenderSystems() {
 	m_rc_system = std::make_unique<RcSystem>(
 		m_ve_device, *m_resources.pool(),
 		m_resources.globalSetLayout().getDescriptorSetLayout(),
+		m_scene_resources->getBindlessRegistry().getSetLayout(),
+		m_scene_resources->getBindlessRegistry().getDescriptorSet(),
 		m_config.shaders_dir,
 		m_ve_renderer.getExtent(),
 		m_ve_renderer.getResolvedDepthImageView(),
@@ -263,6 +269,8 @@ void RenderPipeline::initRenderSystems() {
 		*m_screen_rays,
 		m_event_bus
 	);
+	if (m_ve_device.supportsRayQuery())
+		m_ray_tracing_scene = std::make_unique<RayTracingScene>(m_ve_device);
 
 	m_gtao_system = std::make_unique<GtaoSystem>(
 		m_ve_device, *m_resources.pool(),
@@ -403,6 +411,7 @@ void RenderPipeline::initRenderSystems() {
 		.shadow    = m_shadow_render_system.get(),
 		.particles = m_particle_backend.get(),
 		.rc        = m_rc_system.get(),
+		.ray_tracing = m_ray_tracing_scene.get(),
 	};
 }
 
@@ -445,17 +454,22 @@ void RenderPipeline::prepareFrame() {
 	m_settings_watcher->tick();
 	m_particle_backend->applyPendingResize();
 
-	if (m_ve_renderer.consumeFrameDropped())
+	if (m_ve_renderer.consumeFrameDropped()) {
 		m_rc_system->invalidateStore();
+		// Without a dedicated compute queue the AS builds went into the graphics
+		// command buffer the drop discarded, so the structures were never
+		// filled; endFrame waited idle, so they can go at once. A dedicated
+		// compute queue had its work submitted before the failed acquire.
+		if (m_ray_tracing_scene && !m_ve_device.hasDedicatedComputeQueue())
+			resetRayTracingScene();
+	}
 
 	if (m_settings.rc.enabled && !m_ve_device.supportsShaderInt16())
 		m_settings.rc.enabled = false;
 	m_rc_system->setParams(m_settings.rc);
 	bool rc_quality_changed = m_rc_system->setQuality(static_cast<uint32_t>(m_settings.rc.resolution_div),
 		static_cast<uint32_t>(m_settings.rc.cascades),
-		static_cast<uint32_t>(m_settings.rc.memory_mb),
-		static_cast<uint32_t>(m_settings.rc.c0_polar_bins),
-		m_settings.rc.c0_ray_length);
+		static_cast<uint32_t>(m_settings.rc.memory_mb));
 	auto allocate_rc = [this] {
 		try {
 			m_rc_system->allocate();
@@ -478,6 +492,18 @@ void RenderPipeline::prepareFrame() {
 		allocate_rc();
 		m_ao_gi_set_manager->rewrite(*m_resources.pool());
 	}
+	// No structures while the trace is not going to query them: they cost
+	// both the build and a few hundred MB.
+	const bool ray_query_wanted = rc_active && m_settings.rc.ray_query;
+	if (m_ray_tracing_scene && !ray_query_wanted && m_ray_tracing_scene->holdsResources()) {
+		m_ve_device.getDevice().waitIdle();
+		resetRayTracingScene();
+	}
+}
+
+void RenderPipeline::resetRayTracingScene() {
+	m_ray_tracing_scene->reset();
+	m_rc_system->setTlas(m_ray_tracing_scene->getEmptyTlas(), false);
 }
 
 void RenderPipeline::renderFrame(VeScene& scene,
@@ -499,6 +525,25 @@ void RenderPipeline::renderFrame(VeScene& scene,
 
 	m_active_backend->snapshotStats(fi.current_frame);
 
+	{
+		// Ahead of the UBO and of RC, which reads the same list in place, so
+		// both see this frame's lights and agree on how many there are.
+		ZoneScopedN("Light Upload");
+		auto& profiler = m_ve_renderer.getProfiler();
+		profiler.beginCpuTimer(ProfileTimer::CLUSTER_LIGHTS);
+		uint32_t cluster_light_count = m_cluster_light_system->uploadLightData(fi);
+		m_cluster_light_system->setLightCountActive(cluster_light_count > 0);
+		profiler.endCpuTimer(ProfileTimer::CLUSTER_LIGHTS);
+	}
+	// A debug render mode keeps the history frozen on the last shaded frame.
+	// With none to freeze (first frame, resize, scene load) that would freeze
+	// the screen-space traces off instead, since they need a valid history:
+	// one frame in the normal mode fills it, then the mode resumes.
+	m_history_bootstrap = effectiveRenderMode(m_settings, false) != RenderMode::BRDF_MICROFACET
+		&& !m_screen_rays->historyValid()
+		&& m_settings.geometry_prepass_enabled
+		&& ((m_settings.rc.enabled && !m_rc_system->usingRayQuery()) || m_settings.ssr_enabled)
+		&& fi.camera_view.proj[3][3] == 0.0f;
 	{
 		ZoneScopedN("Populate UBO");
 		populateUBO(fi);
@@ -744,23 +789,23 @@ void RenderPipeline::populateUBO(VeFrameInfo& fi) {
 	auto extent = m_ve_renderer.getExtent();
 
 	UniformBufferObject ubo{};
-	ubo.render_mode = effectiveRenderMode(m_settings);
+	ubo.render_mode = effectiveRenderMode(m_settings, m_history_bootstrap);
 	ubo.shadow_mode = m_settings.shadow_mode;
 	ubo.pcss_light_size = m_settings.pcss_light_size;
 	ubo.shadow_bias = m_settings.shadow_bias;
 	ubo.csm_normal_bias = m_settings.csm_normal_bias;
 	ubo.csm_blend_dithered = static_cast<uint32_t>(m_settings.csm_blend_mode);
 	ubo.ambient_light_color = glm::vec4(m_settings.ambient_light_color, m_settings.ambient_light_intensity);
-	ubo.ibl_active = (m_settings.ibl_enabled && m_ibl_system->isAvailable()) ? 1u : 0u;
+	fi.ibl_active = m_settings.ibl_enabled && m_ibl_system->isAvailable();
+	ubo.ibl_active = fi.ibl_active ? 1u : 0u;
 	ubo.ibl_min_ambient = m_settings.ibl_min_ambient;
 	ubo.prefiltered_mip_levels = m_ibl_system->getPrefilteredMipLevels();
 	auto& sh = m_ibl_system->getSHCoefficients();
 	std::copy(sh.begin(), sh.end(), ubo.sh_coefficients);
 	ubo.sky_radiance_scale = glm::vec4(m_skybox_render_system->skyRadianceScale(), 0.0f);
-	ubo.rc_short_range_ao = m_settings.rc.enabled ? m_settings.rc.short_range_ao : 0.0f;
-	ubo.rc_spec_occlusion = m_settings.rc.enabled ? m_settings.rc.spec_occlusion : 0.0f;
-	ubo.rc_rough_spec = (m_settings.rc.enabled && m_settings.rc.rough_specular) ? 1u : 0u;
-	ubo.rc_spec_handoff_roughness = m_settings.rc.spec_handoff_roughness;
+	// renderFrame uploaded the light list before this, so the count is this
+	// frame's and matches the list RC reads in place.
+	ubo.num_point_lights = m_cluster_light_system->getPointLightCount();
 
 	m_light_system->updateUniformBuffer(fi, ubo);
 	m_shadow_render_system->updateUniformBuffer(current_frame, ubo, fi.csm_data);
@@ -776,7 +821,7 @@ void RenderPipeline::populateUBO(VeFrameInfo& fi) {
 
 	// Pipeline-variant selectors
 	fi.area_lights_active = ubo.num_rect_lights > 0;
-	fi.debug_shading = effectiveRenderMode(m_settings) != RenderMode::BRDF_MICROFACET;
+	fi.debug_shading = effectiveRenderMode(m_settings, m_history_bootstrap) != RenderMode::BRDF_MICROFACET;
 }
 
 void RenderPipeline::dispatchCompute(VeFrameInfo& fi) {
@@ -784,11 +829,6 @@ void RenderPipeline::dispatchCompute(VeFrameInfo& fi) {
 	auto current_frame = fi.current_frame;
 	auto extent = m_ve_renderer.getExtent();
 	auto& profiler = m_ve_renderer.getProfiler();
-
-	profiler.beginCpuTimer(ProfileTimer::CLUSTER_LIGHTS);
-	uint32_t cluster_light_count = m_cluster_light_system->uploadLightData(fi);
-	m_cluster_light_system->setLightCountActive(cluster_light_count > 0);
-	profiler.endCpuTimer(ProfileTimer::CLUSTER_LIGHTS);
 
 	profiler.beginGpuTimer(fi.compute_command_buffer, ProfileTimer::COMPUTE_TOTAL);
 
@@ -871,11 +911,20 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 	bool rc_active = m_settings.rc.enabled && m_settings.geometry_prepass_enabled && m_rc_system->isAllocated();
 	bool perspective_cam = fi.camera_view.proj[3][3] == 0.0f;
 	bool ssr_trace_active = ssr_active && perspective_cam && m_screen_rays->historyValid();
-	bool rc_trace_active = rc_active && perspective_cam && m_screen_rays->historyValid();
+	// The ray query tracer reads no screen history. Which tracer runs is only
+	// settled once recordRcDispatch has updated the structures, so the last
+	// dispatch's tracer stands in until then.
+	bool rc_ray_query = m_rc_system->usingRayQuery();
+	bool rc_trace_active = rc_active && perspective_cam && (rc_ray_query || m_screen_rays->historyValid());
 	if (!rc_trace_active)
 		m_rc_system->markInactive();
-	// Debug render modes keep the history frozen on the last shaded frame
-	bool history_copy = effectiveRenderMode(m_settings) == RenderMode::BRDF_MICROFACET;
+	// The min/max pyramid is generated once per frame, over a valid history:
+	// inside the SSR trace when SSR runs (recordSsrTrace), else for the RC
+	// march alone.
+	bool pyramid_current = ssr_trace_active || (rc_trace_active && !rc_ray_query);
+	// Debug render modes keep the history frozen on the last shaded frame; the
+	// bootstrap frame is that frame
+	bool history_copy = effectiveRenderMode(m_settings, m_history_bootstrap) == RenderMode::BRDF_MICROFACET;
 	fi.rc_composite_active = rc_active && perspective_cam;
 
 	if (m_settings.geometry_prepass_enabled) {
@@ -979,14 +1028,12 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 				profiler.endCpuTimer(ProfileTimer::HIZ);
 			}
 
-			// The min/max pyramid is generated once per frame: inside the SSR
-			// trace when SSR runs (recordSsrTrace), else here for RC alone.
 			if (ssr_trace_active)
 				recordSsrTrace(fi, depth_compute_cb, /*async=*/true);
-			else if (rc_trace_active)
+			else if (pyramid_current)
 				m_screen_rays->generatePyramid(depth_compute_cb);
 			if (rc_trace_active)
-				recordRcDispatch(fi, depth_compute_cb, /*async=*/true, history_copy);
+				rc_trace_active = recordRcDispatch(fi, depth_compute_cb, /*async=*/true, history_copy, pyramid_current);
 
 			auto& shadow_cb = m_ve_renderer.getShadowGraphicsCommandBuffer();
 			fi.command_buffer = &shadow_cb;
@@ -1059,10 +1106,10 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 
 			if (ssr_trace_active)
 				recordSsrTrace(fi, command_buffer, /*async=*/false);
-			else if (rc_trace_active)
+			else if (pyramid_current)
 				m_screen_rays->generatePyramid(command_buffer);
 			if (rc_trace_active)
-				recordRcDispatch(fi, command_buffer, /*async=*/false, history_copy);
+				rc_trace_active = recordRcDispatch(fi, command_buffer, /*async=*/false, history_copy, pyramid_current);
 		}
 	}
 
@@ -1124,7 +1171,10 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 			gpu_scene, m_ve_renderer);
 	}
 
-	if ((ssr_active || rc_active) && perspective_cam) {
+	// Only screen-space traces read the history; skipped, it goes invalid so a
+	// later march waits for a fresh copy.
+	bool rc_marches = rc_active && !m_rc_system->usingRayQuery();
+	if ((ssr_active || rc_marches) && perspective_cam) {
 		if (history_copy) {
 			ScopedDebugLabel label(active_cb, "SSR History Copy", {0.3f, 0.6f, 1.0f, 1.0f});
 			ZoneScopedN("SSR History Copy");
@@ -1225,14 +1275,56 @@ void RenderPipeline::recordSsrTrace(VeFrameInfo& fi, vk::raii::CommandBuffer& cm
 	fi.ssr_descriptor_set = &m_ssr_system->getOutputDescriptorSet();
 }
 
-void RenderPipeline::recordRcDispatch(VeFrameInfo& fi, vk::raii::CommandBuffer& cmd, bool async, bool history_copy) {
+bool RenderPipeline::recordRcDispatch(VeFrameInfo& fi, vk::raii::CommandBuffer& cmd, bool async, bool history_copy,
+	bool pyramid_current) {
 	[[maybe_unused]] auto tracy_gfx = m_ve_renderer.getTracyGraphicsCtx();
 	[[maybe_unused]] auto tracy_compute = m_ve_renderer.getTracyComputeCtx();
 	auto& profiler = m_ve_renderer.getProfiler();
-	ScopedDebugLabel label(cmd, "RC GI", {0.9f, 0.6f, 0.2f, 1.0f});
 	ZoneScopedN("RC GI");
 	profiler.beginCpuTimer(ProfileTimer::RC);
 	profiler.beginGpuTimer(cmd, ProfileTimer::RC);
+	const RayTracingScene* rt_ready = nullptr;
+	if (m_ray_tracing_scene) {
+		if (m_settings.rc.ray_query) {
+			ScopedDebugLabel as_label(cmd, "RT Acceleration Structures", {0.7f, 0.3f, 0.9f, 1.0f});
+			profiler.beginCpuTimer(ProfileTimer::RC_AS);
+			profiler.beginGpuTimer(cmd, ProfileTimer::RC_AS);
+			// A failed allocation hands this and every later frame to the
+			// screen-space tracer.
+			if (!m_ray_tracing_scene->update(cmd, fi.current_frame, m_scene_resources->getMegaBuffer(),
+					m_scene_resources->getGpuSceneManager(), *fi.registry))
+				m_settings.rc.ray_query = false;
+			else if (m_ray_tracing_scene->isReady())
+				rt_ready = m_ray_tracing_scene.get();
+			profiler.endGpuTimer(cmd, ProfileTimer::RC_AS);
+			profiler.endCpuTimer(ProfileTimer::RC_AS);
+		}
+		m_rc_system->setTlas(rt_ready ? rt_ready->getTlas() : m_ray_tracing_scene->getEmptyTlas(),
+			rt_ready != nullptr);
+	}
+	// The frame was let through on the last dispatch's tracer; a march has
+	// nothing valid to read unless this frame built the pyramid.
+	if (!m_rc_system->usingRayQuery() && !pyramid_current) {
+		profiler.endGpuTimer(cmd, ProfileTimer::RC);
+		profiler.endCpuTimer(ProfileTimer::RC);
+		m_rc_system->markInactive();
+		return false;
+	}
+	// What the shade path needs to turn a hit into a surface. The geometry
+	// table only means anything alongside the TLAS it was built with.
+	const auto& mega_buffer = m_scene_resources->getMegaBuffer();
+	m_rc_system->setSceneBindings({
+		.instance_geometry = rt_ready ? rt_ready->getGeometryBuffer(fi.current_frame) : nullptr,
+		.mega_vertices = mega_buffer.isValid() ? mega_buffer.getMegaVbo() : nullptr,
+		.mega_indices = mega_buffer.isValid() ? mega_buffer.getMegaIbo() : nullptr,
+		.lights = rt_ready ? &m_cluster_light_system->getLightList(fi.current_frame) : nullptr,
+		.light_count = m_cluster_light_system->getPointLightCount()
+			+ m_cluster_light_system->getSpotLightCount(),
+		.mega_generation = mega_buffer.isValid() ? mega_buffer.generation() : 0,
+		.geometry_generation = rt_ready ? rt_ready->getGeometryBufferGeneration() : 0,
+		.light_generation = m_cluster_light_system->getLightListGeneration(),
+	});
+	ScopedDebugLabel label(cmd, "RC GI", {0.9f, 0.6f, 0.2f, 1.0f});
 	if (async) {
 		TracyVkZone(tracy_compute, *cmd, "RC GI (async)");
 		m_rc_system->dispatch(fi, cmd, history_copy);
@@ -1242,6 +1334,7 @@ void RenderPipeline::recordRcDispatch(VeFrameInfo& fi, vk::raii::CommandBuffer& 
 	}
 	profiler.endGpuTimer(cmd, ProfileTimer::RC);
 	profiler.endCpuTimer(ProfileTimer::RC);
+	return true;
 }
 
 void RenderPipeline::recordDepthConsumerToAttachBarriers(vk::raii::CommandBuffer& cmd) {
@@ -1306,14 +1399,10 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	m_stats.rc_probes_c3 = m_rc_system->cascadeProbeCount(3);
 	m_stats.rc_probes_c4 = m_rc_system->cascadeProbeCount(4);
 	m_stats.rc_probes_c5 = m_rc_system->cascadeProbeCount(5);
-	m_stats.rc_rays_hit = static_cast<float>(m_rc_system->rayStat(rcw::RAY_HIT));
-	m_stats.rc_rays_clear = static_cast<float>(m_rc_system->rayStat(rcw::RAY_CLEAR));
-	m_stats.rc_rays_sky = static_cast<float>(m_rc_system->rayStat(rcw::RAY_SKY));
-	m_stats.rc_rays_sky_gated = static_cast<float>(m_rc_system->rayStat(rcw::RAY_SKY_GATED));
-	m_stats.rc_rays_unk_occluded = static_cast<float>(m_rc_system->rayStat(rcw::RAY_UNK_OCCLUDED));
-	m_stats.rc_rays_unk_stepcap = static_cast<float>(m_rc_system->rayStat(rcw::RAY_UNK_STEPCAP));
-	m_stats.rc_rays_unk_edge = static_cast<float>(m_rc_system->rayStat(rcw::RAY_UNK_EDGE));
-	m_stats.rc_rays_unk_clip = static_cast<float>(m_rc_system->rayStat(rcw::RAY_UNK_CLIP));
+	m_stats.rc_rays_hit = static_cast<float>(m_rc_system->rayExitCount(rcw::RAY_HIT));
+	m_stats.rc_rays_clear = static_cast<float>(m_rc_system->rayExitCount(rcw::RAY_CLEAR));
+	m_stats.rc_rays_sky = static_cast<float>(m_rc_system->rayExitCount(rcw::RAY_SKY));
+	m_stats.rc_rays_unknown = static_cast<float>(m_rc_system->rayExitCount(rcw::RAY_UNKNOWN));
 
 	const auto& results = profiler.getResults();
 	m_stats.gpu_culling = results.gpu(ProfileTimer::CULLING);
@@ -1321,9 +1410,11 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	m_stats.gpu_geometry_prepass = results.gpu(ProfileTimer::GEOMETRY_PREPASS);
 	m_stats.gpu_gtao = results.gpu(ProfileTimer::GTAO);
 	m_stats.gpu_rc = results.gpu(ProfileTimer::RC);
+	m_stats.gpu_rc_as = results.gpu(ProfileTimer::RC_AS);
 	m_stats.gpu_rc_build = results.gpu(ProfileTimer::RC_BUILD);
 	m_stats.gpu_rc_shade = results.gpu(ProfileTimer::RC_SHADE);
 	m_stats.gpu_rc_map = results.gpu(ProfileTimer::RC_MAP);
+	m_stats.gpu_rc_raygen = results.gpu(ProfileTimer::RC_RAYGEN);
 	m_stats.gpu_rc_trace = results.gpu(ProfileTimer::RC_TRACE);
 	m_stats.gpu_rc_resolve = results.gpu(ProfileTimer::RC_RESOLVE);
 	m_stats.gpu_rc_merge = results.gpu(ProfileTimer::RC_MERGE);
@@ -1345,6 +1436,7 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	m_stats.cpu_geometry_prepass = results.cpu(ProfileTimer::GEOMETRY_PREPASS);
 	m_stats.cpu_gtao = results.cpu(ProfileTimer::GTAO);
 	m_stats.cpu_rc = results.cpu(ProfileTimer::RC);
+	m_stats.cpu_rc_as = results.cpu(ProfileTimer::RC_AS);
 	m_stats.cpu_scene_render = results.cpu(ProfileTimer::SCENE_RENDER);
 	m_stats.cpu_ssr = results.cpu(ProfileTimer::SSR);
 	m_stats.cpu_bloom = results.cpu(ProfileTimer::BLOOM);

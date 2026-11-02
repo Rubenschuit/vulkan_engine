@@ -3,38 +3,31 @@
  */
 
 #pragma once
+#include "resources/ve_mesh.hpp"
+
+#include <cstddef>
 #include <cstdint>
 
 namespace ve::rcw {
 
-// RcwPush.flags layout. bit 7 and bits 26-31 free.
+// RcwPush.flags layout, in rc_world_common.slangh's order. Bits 4-31 free.
 inline constexpr uint32_t FLAG_ROUGH_SPEC = 1u << 0;
 inline constexpr uint32_t FLAG_VISIBILITY_EVIDENCE = 1u << 1;
 inline constexpr uint32_t FLAG_HIST_DEPTH = 1u << 2;
-inline constexpr uint32_t FLAG_COUNT_WEIGHT = 1u << 3;
-inline constexpr uint32_t FLAG_FREEZE_PROBES = 1u << 24;
-inline constexpr uint32_t FLAG_SINGLE_FRAME = 1u << 25;
-inline constexpr uint32_t PARENT_MODE_SHIFT = 4;        // bit 4
-inline constexpr uint32_t DEPOSIT_MODE_SHIFT = 5;       // bits 5-6
-inline constexpr uint32_t SKY_MIN_FRAC_SHIFT = 8;       // bits 8-15
-inline constexpr uint32_t SKY_TRUST_SHIFT = 16;         // bits 16-23
+inline constexpr uint32_t FLAG_SINGLE_FRAME = 1u << 3;
 
 // Store layout
 inline constexpr uint32_t MAX_CASCADES = 6;
 inline constexpr uint32_t LINEAR_WG = 64;
-inline constexpr uint32_t SCRATCH_WORDS = 5;
+inline constexpr uint32_t SCRATCH_RADIANCE_WORDS = 3;
 inline constexpr uint32_t TILE = 8;
 
-// Ray exit codes 
-inline constexpr uint32_t RAY_STAT_WORDS = 8;
+// Ray exit codes
 inline constexpr uint32_t RAY_HIT = 0;
 inline constexpr uint32_t RAY_CLEAR = 1;
 inline constexpr uint32_t RAY_SKY = 2;
-inline constexpr uint32_t RAY_SKY_GATED = 3;
-inline constexpr uint32_t RAY_UNK_OCCLUDED = 4;
-inline constexpr uint32_t RAY_UNK_STEPCAP = 5;
-inline constexpr uint32_t RAY_UNK_EDGE = 6;
-inline constexpr uint32_t RAY_UNK_CLIP = 7;
+inline constexpr uint32_t RAY_UNKNOWN = 3;
+inline constexpr uint32_t RAY_EXIT_CODES = 4;
 
 // Mirrors RcwCounters. The x/y/ztriples are VkDispatchIndirectCommand workgroup counts.
 struct CountersGpu {
@@ -44,11 +37,15 @@ struct CountersGpu {
 	uint32_t pair_x, pair_y, pair_z;
 	uint32_t probe_x, probe_y, probe_z;
 	uint32_t husks;
+	uint32_t raygen_cursor;
+	uint32_t rays[RAY_EXIT_CODES]; // cascade 0 only
 };
-static_assert(sizeof(CountersGpu) == 12 * sizeof(uint32_t));
+static_assert(sizeof(CountersGpu) == 17 * sizeof(uint32_t));
+static_assert(sizeof(VeMesh::Vertex) == 64 && offsetof(VeMesh::Vertex, pos) == 0
+	&& offsetof(VeMesh::Vertex, tex_coord) == 24 && offsetof(VeMesh::Vertex, color) == 48,
+	"RCW_VERTEX_* in rc_world_common.slangh");
 
-// Specialization constant ids ([vk::constant_id] in the shader).
-inline constexpr uint32_t THETA0_SPEC_ID = 7;
-inline constexpr uint32_t C0_RAY_LENGTH_SPEC_ID = 8;
+// RCW_THETA0: polar bins of the cascade-0 direction grid, which sizes the store.
+inline constexpr uint32_t THETA0 = 4;
 
 }

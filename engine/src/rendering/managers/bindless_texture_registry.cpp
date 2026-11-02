@@ -20,9 +20,9 @@ BindlessTextureRegistry::BindlessTextureRegistry(VeDevice& device, EventBus& eve
 	// Sampler at binding 0, texture array at binding 1 (variable count must be highest binding)
 	m_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eSampler,
-			vk::ShaderStageFlagBits::eFragment, 1)
+			vk::ShaderStageFlagBits::eFragment | vk::ShaderStageFlagBits::eCompute, 1)
 		.addBinding(1, vk::DescriptorType::eSampledImage,
-			vk::ShaderStageFlagBits::eFragment, max_textures)
+			vk::ShaderStageFlagBits::eFragment | vk::ShaderStageFlagBits::eCompute, max_textures)
 		.setBindingFlags(0, vk::DescriptorBindingFlagBits::eUpdateAfterBind)
 		.setBindingFlags(1,
 			vk::DescriptorBindingFlagBits::ePartiallyBound |

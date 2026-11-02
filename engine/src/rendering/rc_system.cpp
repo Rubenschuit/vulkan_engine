@@ -25,16 +25,14 @@ namespace {
 // Mirrors RcwPush in rc_world_common.slangh
 struct RcwPushConstant {
 	glm::ivec4 anchor0_curr; // xyz: floor(camera / ds0); w: frame parity
-	glm::ivec4 anchor0_prev; // xyz: anchor of the prev map's dispatch; w: probe TTL
+	glm::ivec4 anchor0_prev; // xyz: anchor of the prev map's dispatch; w: unused
 	glm::vec2 out_size;
 	glm::vec2 depth_size;
 	float ds0;
 	float lod0_dist;
 	float proj_22;
 	float proj_32;
-	float thickness;
 	float luma_clamp;
-	float intensity;
 	uint32_t hash_words_per_parity;
 	uint32_t probes_per_parity;
 	uint32_t cascade_index;
@@ -45,9 +43,9 @@ struct RcwPushConstant {
 	uint32_t rays_per_pixel;
 	uint32_t flags;
 	uint32_t hiz_mip_count;
-	float blend_zone;
+	uint32_t light_count;
 };
-static_assert(sizeof(RcwPushConstant) == 120, "must match RcwPush in rc_world_common.slangh");
+static_assert(sizeof(RcwPushConstant) == 112, "must match RcwPush in rc_world_common.slangh");
 
 // Tile-atlas extent from capacity; mirrors rcwTilesPerRow. See shader comments.
 vk::Extent2D atlasExtent(uint32_t capacity) {
@@ -56,19 +54,17 @@ vk::Extent2D atlasExtent(uint32_t capacity) {
 	return vk::Extent2D{tiles_per_row * TILE, rows * TILE};
 }
 constexpr vk::DeviceSize WORD = sizeof(uint32_t);
-constexpr uint32_t MAX_THETA0 = 8; // largest c0 polar bin count setQuality accepts
 
-// Directions per probe in cascade n: 2 * theta0^2 * 4^n (32, 128, 512, ...
-// at the default theta0 = 4). Mirrors rcwDirCount.
-uint32_t dirCount(uint32_t theta0, uint32_t cascade) {
-	return (2u * theta0 * theta0) << (2 * cascade);
+// Directions per probe in cascade n: 2 * THETA0^2 * 4^n (32, 128, 512, ...).
+// Mirrors rcwDirCount.
+constexpr uint32_t dirCount(uint32_t cascade) {
+	return (2u * THETA0 * THETA0) << (2 * cascade);
 }
 
 // The gather view an RC view selects; 0 for the views that display an output as it is
 uint32_t gatherMode(RcDebugView view) {
 	switch (view) {
 		case RcDebugView::PROBE_J:
-		case RcDebugView::COVERAGE:
 		case RcDebugView::TRACE_KIND:
 		case RcDebugView::CONVERGENCE:
 		case RcDebugView::PROBE_GRID:
@@ -85,6 +81,8 @@ RcSystem::RcSystem(
 	VeDevice& device,
 	VeDescriptorPool& descriptor_pool,
 	const vk::raii::DescriptorSetLayout& global_set_layout,
+	const vk::raii::DescriptorSetLayout& bindless_set_layout,
+	const vk::raii::DescriptorSet& bindless_set,
 	std::filesystem::path shader_path,
 	vk::Extent2D render_extent,
 	const vk::raii::ImageView& depth_image_view,
@@ -92,7 +90,8 @@ RcSystem::RcSystem(
 	const ScreenRayResources& screen_rays,
 	EventBus& event_bus)
 	: m_ve_device(device), m_shader_path(std::move(shader_path)),
-	  m_depth_extent(render_extent), m_descriptor_pool(&descriptor_pool), m_screen_rays(screen_rays) {
+	  m_depth_extent(render_extent), m_descriptor_pool(&descriptor_pool), m_screen_rays(screen_rays),
+	  m_bindless_set(bindless_set) {
 
 	// RenderPipeline recreates the shared history and pyramid before it
 	// broadcasts, so the views fetched during allocate() are fresh. Released,
@@ -118,7 +117,14 @@ RcSystem::RcSystem(
 	m_normal_image_view = *normal_roughness_image_view;
 	createDummyImage();
 	createSampler();
-	createPipelineLayout(global_set_layout);
+	// Outside the store: it backs scene bindings that have to hold something
+	// on every ray query frame, scene or no scene.
+	if (m_ve_device.supportsRayQuery()) {
+		m_dummy_buffer = std::make_unique<VeBuffer>(m_ve_device, sizeof(uint32_t), 1,
+			vk::BufferUsageFlagBits::eStorageBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
+		m_dummy_buffer->setDebugName("RCW Dummy Storage");
+	}
+	createPipelineLayout(global_set_layout, bindless_set_layout);
 	computeLayout();
 }
 
@@ -127,32 +133,25 @@ RcSystem::~RcSystem() = default;
 void RcSystem::invalidateStore() {
 	requestReset();
 	// A dropped/aborted frame voids the "prev depth == the frame the history
-	// shows" pairing; run the next trace frame unvalidated.
+	// shows" pairing; run the next trace frame unvalidated. The other callers
+	// lose nothing by it: the store they start is empty.
 	m_prev_depth_primed = false;
 }
 
 void RcSystem::setParams(const RcSettings& rc) {
-	// Structural params re-key every probe; the population rules decide which
-	// probes exist and receive deposits, so the other rule's probes and their
-	// EMA must not survive a switch
+	// Structural params re-key every probe
 	bool structural = rc.ds0 != m_rc.ds0 || rc.lod0_dist != m_rc.lod0_dist;
-	bool population = rc.deposit_mode != m_rc.deposit_mode || rc.parent_mode != m_rc.parent_mode;
-	bool requested = rc.reset_requests != m_rc.reset_requests;
 	m_rc = rc;
-	if (structural || population || requested)
+	if (structural)
 		requestReset();
 }
 
-bool RcSystem::setQuality(uint32_t resolution_div, uint32_t cascades, uint32_t memory_mb,
-	uint32_t c0_polar_bins, float c0_ray_length) {
+bool RcSystem::setQuality(uint32_t resolution_div, uint32_t cascades, uint32_t memory_mb) {
 	Quality request{
 		.resolution_div = std::clamp(resolution_div, 1u, 8u),
 		.cascades = static_cast<uint32_t>(std::clamp(static_cast<int>(cascades), 1,
 			static_cast<int>(MAX_CASCADES))),
 		.memory_mb = static_cast<uint32_t>(std::clamp(static_cast<int>(memory_mb), 16, 4096)),
-		.theta0 = static_cast<uint32_t>(std::clamp(static_cast<int>(c0_polar_bins), 2,
-			static_cast<int>(MAX_THETA0))),
-		.c0_ray_length = std::clamp(c0_ray_length, 0.5f, 8.0f),
 	};
 	if (request == m_pending)
 		return false;
@@ -169,8 +168,7 @@ void RcSystem::createOutputImages() {
 			vk::SampleCountFlagBits::e1,
 			vk::Format::eR16G16B16A16Sfloat,
 			vk::ImageTiling::eOptimal,
-			vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled
-				| vk::ImageUsageFlagBits::eTransferSrc,
+			vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled,
 			vk::MemoryPropertyFlagBits::eDeviceLocal,
 			vk::ImageAspectFlagBits::eColor,
 			false, 1);
@@ -181,7 +179,6 @@ void RcSystem::createOutputImages() {
 			vk::PipelineStageFlagBits2::eTopOfPipe, vk::PipelineStageFlagBits2::eFragmentShader);
 		m_output_images[i]->setDebugName(("RC Output [" + std::to_string(i) + "]").c_str());
 
-		// No eTransferSrc: the GI dump contract is 4-channel radiance only.
 		m_visibility_images[i] = std::make_unique<VeImage>(
 			m_ve_device,
 			m_extent.width,
@@ -206,8 +203,7 @@ void RcSystem::createOutputImages() {
 			vk::SampleCountFlagBits::e1,
 			vk::Format::eR16G16B16A16Sfloat,
 			vk::ImageTiling::eOptimal,
-			vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled
-				| vk::ImageUsageFlagBits::eTransferSrc,
+			vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled,
 			vk::MemoryPropertyFlagBits::eDeviceLocal,
 			vk::ImageAspectFlagBits::eColor,
 			false, 1);
@@ -339,20 +335,21 @@ void RcSystem::createPrevDepthImage() {
 void RcSystem::computeLayout() {
 	// Per-cascade capacity as a share of cascade 0's
 	constexpr double SHAPE[MAX_CASCADES] = {1.0, 0.2769, 0.0731, 0.0197, 0.0053, 0.0014};
-	constexpr uint32_t BYTES_PER_PAIR = SCRATCH_WORDS * WORD + 2 * WORD + WORD;
+	// Scratch radiance + mass, persistent J + count
+	constexpr uint32_t BYTES_PER_PAIR = (SCRATCH_RADIANCE_WORDS + 2) * WORD + 2 * WORD + WORD;
 	double unit_cost = 0.0;
 	for (uint32_t n = 0; n < m_cascades; n++)
-		unit_cost += SHAPE[n] * dirCount(m_theta0, n) * BYTES_PER_PAIR;
+		unit_cost += SHAPE[n] * dirCount(n) * BYTES_PER_PAIR;
 	double budget = static_cast<double>(m_memory_mb) * 1024.0 * 1024.0;
 	// 65,535 * LINEAR_WG: keeps the per-probe indirect (ceil(probe_cap /
 	// LINEAR_WG) groups) within limits
 	uint32_t cap0 = static_cast<uint32_t>(
 		std::clamp(budget / unit_cost, 1024.0, 65535.0 * LINEAR_WG));
-	// Device limits: scratch, the largest buffer at SCRATCH_WORDS words per
-	// pair, must fit one allocation and one whole storage binding, and the c0
-	// tile atlases one image.
+	// Device limits: the radiance scratch, the largest buffer at
+	// SCRATCH_RADIANCE_WORDS words per pair, must fit one allocation and one
+	// whole storage binding, and the c0 tile atlases one image.
 	double buffer_cap0 = static_cast<double>(m_max_buffer_bytes)
-		/ (SCRATCH_WORDS * WORD * (unit_cost / BYTES_PER_PAIR));
+		/ (SCRATCH_RADIANCE_WORDS * WORD * (unit_cost / BYTES_PER_PAIR));
 	uint32_t tiles_per_side = m_max_image_dimension / TILE;
 	uint32_t tiles_per_row = std::bit_floor(tiles_per_side);
 	double atlas_cap0 = std::min(2.0 * tiles_per_row * tiles_per_row - 1.0,
@@ -367,9 +364,7 @@ void RcSystem::computeLayout() {
 	uint32_t free_off = 0;
 	uint32_t pair_off = 0;
 	m_descs = {};
-	// Accumulated below with max; a recreate must not inherit a larger layout.
-	m_merged_cap = 0;
-	m_dirmip_cap = 0;
+	std::array<uint32_t, 2> dirmip_regions{};
 	for (uint32_t n = 0; n < m_cascades; n++) {
 		uint32_t cap = std::max(256u, static_cast<uint32_t>(std::llround(cap0 * SHAPE[n])));
 		m_descs[n] = CascadeDesc{
@@ -385,19 +380,23 @@ void RcSystem::computeLayout() {
 		probe_off += cap;
 		slot_off += cap;
 		free_off += 2 + cap;
-		pair_off += cap * dirCount(m_theta0, n);
-		m_merged_cap = std::max(m_merged_cap, cap * dirCount(m_theta0, n));
+		pair_off += cap * dirCount(n);
 		if (n > 0)
-			m_dirmip_cap = std::max(m_dirmip_cap, cap * dirCount(m_theta0, n) / 4);
+			dirmip_regions[n % 2] = std::max(dirmip_regions[n % 2], cap * dirCount(n) / 4);
 	}
-	m_dirmip_cap = std::max(m_dirmip_cap, 1u);
+	// Consecutive cascades alternate between two dirmip regions, so a merge
+	// never overwrites the parents it reads.
+	for (uint32_t n = 1; n < m_cascades; n++)
+		m_descs[n].dirmip_base = (n % 2) * dirmip_regions[0];
+	m_merged_cap = m_descs[0].probe_cap * dirCount(0);
+	m_dirmip_cap = std::max(dirmip_regions[0] + dirmip_regions[1], 1u);
 	m_hash_words_per_parity = hash_off;
 	m_probes_per_parity = probe_off;
 	m_slot_total = slot_off;
 	m_free_total = free_off;
 	m_pair_total = pair_off;
-	if (static_cast<vk::DeviceSize>(m_pair_total) * SCRATCH_WORDS * WORD > m_max_buffer_bytes)
-		VE_LOGE("RC store: the per-cascade probe floors exceed the device buffer limit; lower Probe Directions or Cascades");
+	if (static_cast<vk::DeviceSize>(m_pair_total) * SCRATCH_RADIANCE_WORDS * WORD > m_max_buffer_bytes)
+		VE_LOGE("RC store: the per-cascade probe floors exceed the device buffer limit; lower Cascades");
 
 	// Debug-panel readout
 	vk::Extent2D atlas = atlasExtent(m_descs[0].probe_cap);
@@ -408,7 +407,6 @@ void RcSystem::computeLayout() {
 		+ static_cast<vk::DeviceSize>(m_probes_per_parity) * 2 * 2 * WORD
 		+ static_cast<vk::DeviceSize>(m_slot_total + m_free_total) * WORD
 		+ static_cast<vk::DeviceSize>(m_cascades) * 2 * sizeof(CountersGpu)
-		+ static_cast<vk::DeviceSize>(RAY_STAT_WORDS) * 2 * WORD
 		// RGBA16F irradiance + R16F sky-visibility tile atlases.
 		+ static_cast<vk::DeviceSize>(atlas.width) * atlas.height * (8 + 2);
 }
@@ -418,17 +416,18 @@ void RcSystem::releaseStore() {
 		slot.reset();
 	m_visibility_atlas.reset();
 	m_irradiance_atlas.reset();
+	m_ray_cursor.reset();
 	m_dirmip_lower.reset();
 	m_merged_lower.reset();
 	m_dirmip.reset();
 	m_merged.reset();
 	m_persist_count.reset();
 	m_persist_j.reset();
-	m_scratch.reset();
+	m_scratch_mass.reset();
+	m_scratch_radiance.reset();
 	m_cascade_descs.reset();
 	m_free_lists.reset();
 	m_slot_age.reset();
-	m_ray_stat_buffer.reset();
 	m_counters.reset();
 	m_probes.reset();
 	m_hash_vals.reset();
@@ -456,11 +455,6 @@ void RcSystem::createBuffers() {
 			| vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eIndirectBuffer,
 		device_local);
 	m_counters->setDebugName("RCW Counters");
-	m_ray_stat_buffer = std::make_unique<VeBuffer>(m_ve_device, WORD, RAY_STAT_WORDS * 2,
-		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst
-			| vk::BufferUsageFlagBits::eTransferSrc,
-		device_local);
-	m_ray_stat_buffer->setDebugName("RCW Ray Stats");
 	m_slot_age = std::make_unique<VeBuffer>(m_ve_device, WORD, m_slot_total,
 		vk::BufferUsageFlagBits::eStorageBuffer, device_local);
 	m_slot_age->setDebugName("RCW Slot Age");
@@ -468,10 +462,18 @@ void RcSystem::createBuffers() {
 		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
 		device_local);
 	m_free_lists->setDebugName("RCW Free Lists");
-	m_scratch = std::make_unique<VeBuffer>(m_ve_device, WORD, m_pair_total * SCRATCH_WORDS,
+	m_ray_cursor = std::make_unique<VeBuffer>(m_ve_device, WORD, m_probes_per_parity,
 		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
 		device_local);
-	m_scratch->setDebugName("RCW Deposit Scratch");
+	m_ray_cursor->setDebugName("RCW Ray Cursor");
+	m_scratch_radiance = std::make_unique<VeBuffer>(m_ve_device, WORD, m_pair_total * SCRATCH_RADIANCE_WORDS,
+		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+		device_local);
+	m_scratch_radiance->setDebugName("RCW Deposit Radiance");
+	m_scratch_mass = std::make_unique<VeBuffer>(m_ve_device, 2 * WORD, m_pair_total,
+		vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+		device_local);
+	m_scratch_mass->setDebugName("RCW Deposit Mass");
 	m_persist_j = std::make_unique<VeBuffer>(m_ve_device, 2 * WORD, m_pair_total,
 		vk::BufferUsageFlagBits::eStorageBuffer, device_local);
 	m_persist_j->setDebugName("RCW Persistent J");
@@ -530,11 +532,9 @@ void RcSystem::createBuffers() {
 	m_cascade_descs->writeToBuffer(m_descs.data(), sizeof(CascadeDesc) * MAX_CASCADES);
 	m_cascade_descs->setDebugName("RCW Cascade Descs");
 
-	// Readback staging: the cascade counter structs, then the ray stat words.
-	const uint32_t readback_words =
-		m_cascades * static_cast<uint32_t>(sizeof(CountersGpu) / sizeof(uint32_t)) + RAY_STAT_WORDS;
+	// Readback staging: one frame's cascade counter structs
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-		m_readback[i] = std::make_unique<VeBuffer>(m_ve_device, WORD, readback_words,
+		m_readback[i] = std::make_unique<VeBuffer>(m_ve_device, sizeof(CountersGpu), m_cascades,
 			vk::BufferUsageFlagBits::eTransferDst,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
 			1, HostAccess::Random);
@@ -542,8 +542,9 @@ void RcSystem::createBuffers() {
 	}
 }
 
-void RcSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout) {
-	m_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
+void RcSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout,
+	const vk::raii::DescriptorSetLayout& bindless_set_layout) {
+	auto layout_builder = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute)  // depth
 		.addBinding(1, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // hash keys
 		.addBinding(2, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // hash vals
@@ -557,7 +558,7 @@ void RcSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_
 		.addBinding(10, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // history
 		.addBinding(11, vk::DescriptorType::eSampler, vk::ShaderStageFlagBits::eCompute)      // linear clamp
 		.addBinding(12, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // min/max pyramid
-		.addBinding(13, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // deposit scratch
+		.addBinding(13, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // deposit radiance
 		.addBinding(14, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // persistent J
 		.addBinding(15, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // persistent count
 		.addBinding(16, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute)  // irradiance atlas RW
@@ -569,20 +570,32 @@ void RcSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_
 		.addBinding(22, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute)  // gathered sky visibility
 		.addBinding(23, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // prev min/max depth
 		.addBinding(24, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute)  // gathered spec
-		.addBinding(25, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // ray stats
+		.addBinding(25, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // deposit mass
 		.addBinding(26, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute)  // gathered surface
 		.addBinding(27, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // merged lower sky fraction
 		.addBinding(28, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // dir mip lower sky fraction
-		.build();
+		.addBinding(29, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute); // ray generation counts/cursors
+	// Bindings 31-35 exist only alongside the ray query trace variant that reads them.
+	if (m_ve_device.supportsRayQuery())
+		layout_builder
+			.addBinding(31, vk::DescriptorType::eAccelerationStructureKHR, vk::ShaderStageFlagBits::eCompute) // scene TLAS
+			.addBinding(32, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // per-instance geometry + material
+			.addBinding(33, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // mega vertices
+			.addBinding(34, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // mega indices
+			.addBinding(35, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute); // punctual lights
+	m_set_layout = layout_builder.build();
 
 	vk::PushConstantRange push_range{
 		.stageFlags = vk::ShaderStageFlagBits::eCompute,
 		.offset = 0,
 		.size = sizeof(RcwPushConstant),
 	};
-	std::array<vk::DescriptorSetLayout, 2> set_layouts{
+	// Bindless goes at set 2, not the 1 the graphics pipelines give it: set 1
+	// is RC's own, and rc_world_common.slangh declares it to match.
+	std::array<vk::DescriptorSetLayout, 3> set_layouts{
 		*global_set_layout,
 		*m_set_layout->getDescriptorSetLayout(),
+		*bindless_set_layout,
 	};
 	vk::PipelineLayoutCreateInfo layout_info{
 		.setLayoutCount = static_cast<uint32_t>(set_layouts.size()),
@@ -594,35 +607,41 @@ void RcSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_
 }
 
 void RcSystem::createComputePipelines() {
-	const std::unordered_map<uint32_t, uint32_t> specialization{
-		{THETA0_SPEC_ID, m_theta0},
-		{C0_RAY_LENGTH_SPEC_ID, std::bit_cast<uint32_t>(m_c0_ray_length)},
-	};
 	m_insert_c0_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, m_shader_path / "rcw_insert_c0_comp.spv", m_pipeline_layout, specialization);
+		m_ve_device, m_shader_path / "rcw_insert_c0_comp.spv", m_pipeline_layout);
 	m_insert_parent_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, m_shader_path / "rcw_insert_parent_comp.spv", m_pipeline_layout, specialization);
+		m_ve_device, m_shader_path / "rcw_insert_parent_comp.spv", m_pipeline_layout);
 	m_keepalive_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, m_shader_path / "rcw_keepalive_comp.spv", m_pipeline_layout, specialization);
+		m_ve_device, m_shader_path / "rcw_keepalive_comp.spv", m_pipeline_layout);
 	m_seed_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, m_shader_path / "rcw_seed_comp.spv", m_pipeline_layout, specialization);
+		m_ve_device, m_shader_path / "rcw_seed_comp.spv", m_pipeline_layout);
+	m_raygen_count_c0_pipeline = std::make_unique<VeComputePipeline>(
+		m_ve_device, m_shader_path / "rcw_raygen_count_c0_comp.spv", m_pipeline_layout);
+	m_raygen_count_up_pipeline = std::make_unique<VeComputePipeline>(
+		m_ve_device, m_shader_path / "rcw_raygen_count_up_comp.spv", m_pipeline_layout);
+	m_raygen_offset_top_pipeline = std::make_unique<VeComputePipeline>(
+		m_ve_device, m_shader_path / "rcw_raygen_offset_top_comp.spv", m_pipeline_layout);
+	m_raygen_offset_down_pipeline = std::make_unique<VeComputePipeline>(
+		m_ve_device, m_shader_path / "rcw_raygen_offset_down_comp.spv", m_pipeline_layout);
 	m_trace_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, m_shader_path / "rcw_trace_deposit_comp.spv", m_pipeline_layout, specialization);
+		m_ve_device, m_shader_path / "rcw_trace_deposit_comp.spv", m_pipeline_layout);
+	if (m_ve_device.supportsRayQuery())
+		m_trace_rayquery_pipeline = std::make_unique<VeComputePipeline>(
+			m_ve_device, m_shader_path / "rcw_trace_rayquery_comp.spv", m_pipeline_layout);
 	m_resolve_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, m_shader_path / "rcw_resolve_comp.spv", m_pipeline_layout, specialization);
+		m_ve_device, m_shader_path / "rcw_resolve_comp.spv", m_pipeline_layout);
 	m_merge_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, m_shader_path / "rcw_merge_comp.spv", m_pipeline_layout, specialization);
-	m_dirmip_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, m_shader_path / "rcw_dirmip_comp.spv", m_pipeline_layout, specialization);
+		m_ve_device, m_shader_path / "rcw_merge_comp.spv", m_pipeline_layout);
 	m_irradiance_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, m_shader_path / "rcw_irradiance_comp.spv", m_pipeline_layout, specialization);
+		m_ve_device, m_shader_path / "rcw_irradiance_comp.spv", m_pipeline_layout);
 	m_gather_pipeline = std::make_unique<VeComputePipeline>(
-		m_ve_device, m_shader_path / "rcw_gather_comp.spv", m_pipeline_layout, specialization);
-	m_pipeline_theta0 = m_theta0;
-	m_pipeline_c0_ray_length = m_c0_ray_length;
+		m_ve_device, m_shader_path / "rcw_gather_comp.spv", m_pipeline_layout);
 }
 
 void RcSystem::createDescriptorSets() {
+	// These sets are rebuilt on every resize and quality change, with bindings
+	// 32-35 unwritten.
+	m_scene_written = {};
 	vk::DescriptorImageInfo depth_info{
 		.imageView = m_depth_image_view,
 		.imageLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
@@ -650,17 +669,18 @@ void RcSystem::createDescriptorSets() {
 	auto vals_info = m_hash_vals->getDescriptorInfo();
 	auto probes_info = m_probes->getDescriptorInfo();
 	auto counters_info = m_counters->getDescriptorInfo();
-	auto ray_stats_info = m_ray_stat_buffer->getDescriptorInfo();
 	auto age_info = m_slot_age->getDescriptorInfo();
 	auto free_info = m_free_lists->getDescriptorInfo();
 	auto descs_info = m_cascade_descs->getDescriptorInfo();
-	auto scratch_info = m_scratch->getDescriptorInfo();
+	auto scratch_radiance_info = m_scratch_radiance->getDescriptorInfo();
+	auto scratch_mass_info = m_scratch_mass->getDescriptorInfo();
 	auto persist_j_info = m_persist_j->getDescriptorInfo();
 	auto persist_count_info = m_persist_count->getDescriptorInfo();
 	auto merged_info = m_merged->getDescriptorInfo();
 	auto dirmip_info = m_dirmip->getDescriptorInfo();
 	auto merged_lower_info = m_merged_lower->getDescriptorInfo();
 	auto dirmip_lower_info = m_dirmip_lower->getDescriptorInfo();
+	auto ray_cursor_info = m_ray_cursor->getDescriptorInfo();
 	vk::DescriptorImageInfo atlas_storage_info{
 		.imageView = *m_irradiance_atlas->getImageView(),
 		.imageLayout = vk::ImageLayout::eGeneral,
@@ -709,7 +729,7 @@ void RcSystem::createDescriptorSets() {
 			.writeImage(10, &history_info)
 			.writeImage(11, &sampler_info)
 			.writeImage(12, &hiz_info)
-			.writeBuffer(13, &scratch_info)
+			.writeBuffer(13, &scratch_radiance_info)
 			.writeBuffer(14, &persist_j_info)
 			.writeBuffer(15, &persist_count_info)
 			.writeImage(16, &atlas_storage_info)
@@ -721,10 +741,11 @@ void RcSystem::createDescriptorSets() {
 			.writeImage(22, &visibility_out_info)
 			.writeImage(23, &prev_depth_info)
 			.writeImage(24, &spec_out_info)
-			.writeBuffer(25, &ray_stats_info)
+			.writeBuffer(25, &scratch_mass_info)
 			.writeImage(26, &geometry_out_info)
 			.writeBuffer(27, &merged_lower_info)
 			.writeBuffer(28, &dirmip_lower_info)
+			.writeBuffer(29, &ray_cursor_info)
 			.build(m_descriptor_sets[frame]);
 	}
 }
@@ -732,17 +753,65 @@ void RcSystem::createDescriptorSets() {
 void RcSystem::recordReset(vk::raii::CommandBuffer& cmd) {
 	cmd.fillBuffer(m_hash_keys->getBuffer(), 0, m_hash_words_per_parity * 2 * WORD, 0u);
 	cmd.fillBuffer(m_counters->getBuffer(), 0, m_cascades * 2 * sizeof(CountersGpu), 0u);
-	cmd.fillBuffer(m_ray_stat_buffer->getBuffer(), 0, RAY_STAT_WORDS * 2 * WORD, 0u);
 	cmd.fillBuffer(m_free_lists->getBuffer(), 0, m_free_total * WORD, 0u);
 	// Fill with ones so every unwritten hash entry reads as a husk, not garbage
 	cmd.fillBuffer(m_probes->getBuffer(), 0,
 		static_cast<vk::DeviceSize>(m_probes_per_parity) * 2 * 2 * WORD, 0xFFFFFFFFu);
-	cmd.fillBuffer(m_scratch->getBuffer(), 0,
-		static_cast<vk::DeviceSize>(m_pair_total) * SCRATCH_WORDS * WORD, 0u);
+	cmd.fillBuffer(m_scratch_radiance->getBuffer(), 0,
+		static_cast<vk::DeviceSize>(m_pair_total) * SCRATCH_RADIANCE_WORDS * WORD, 0u);
+	cmd.fillBuffer(m_scratch_mass->getBuffer(), 0,
+		static_cast<vk::DeviceSize>(m_pair_total) * 2 * WORD, 0u);
+}
+
+void RcSystem::writeSceneBindings(uint32_t frame_index) {
+	auto buffer_of = [this](const VeBuffer* buffer) {
+		return buffer ? buffer : m_dummy_buffer.get();
+	};
+	const VeBuffer* geometry = buffer_of(m_scene.instance_geometry);
+	const VeBuffer* vertices = buffer_of(m_scene.mega_vertices);
+	const VeBuffer* indices = buffer_of(m_scene.mega_indices);
+	const VeBuffer* lights = buffer_of(m_scene.lights);
+	const bool mega_bound = m_scene.mega_vertices && m_scene.mega_indices;
+	// Keyed by generation, not handle
+	SceneWritten current{
+		.mega_generation = mega_bound ? m_scene.mega_generation + 1 : 0,
+		.geometry_generation = m_scene.instance_geometry ? m_scene.geometry_generation + 1 : 0,
+		.light_generation = m_scene.lights ? m_scene.light_generation + 1 : 0,
+	};
+	if (m_scene_written[frame_index] == current)
+		return;
+
+	auto geometry_info = geometry->getDescriptorInfo();
+	auto vertices_info = vertices->getDescriptorInfo();
+	auto indices_info = indices->getDescriptorInfo();
+	auto lights_info = lights->getDescriptorInfo();
+	auto storage_write = [&](uint32_t binding, const vk::DescriptorBufferInfo& info) {
+		return vk::WriteDescriptorSet{
+			.dstSet = *m_descriptor_sets[frame_index],
+			.dstBinding = binding,
+			.descriptorCount = 1,
+			.descriptorType = vk::DescriptorType::eStorageBuffer,
+			.pBufferInfo = &info,
+		};
+	};
+	std::array<vk::WriteDescriptorSet, 4> writes{
+		storage_write(32, geometry_info),
+		storage_write(33, vertices_info),
+		storage_write(34, indices_info),
+		storage_write(35, lights_info),
+	};
+	m_ve_device.getDevice().updateDescriptorSets(writes, {});
+	m_scene_written[frame_index] = current;
 }
 
 void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, bool history_copy) {
+
+	// Reset store if ray backend changes
 	const uint32_t frame = frame_info.current_frame;
+	const bool ray_query = usingRayQuery();
+	if (ray_query != m_last_ray_query)
+		requestReset();
+	m_last_ray_query = ray_query;
 	if (m_reset_pending)
 		m_frame_counter = 0;
 	const uint32_t parity = m_frame_counter & 1u;
@@ -755,10 +824,8 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 	// Async counter readback: consume what this frame index copied out
 	// MAX_FRAMES_IN_FLIGHT frames ago
 	m_counters_valid = false;
-	auto* staging = static_cast<const uint32_t*>(m_readback[frame]->getMappedMemory());
-	if (staging && m_has_readback[frame]) {
-		auto* blocks = reinterpret_cast<const CountersGpu*>(staging);
-		const uint32_t* stats = staging + m_cascades * (sizeof(CountersGpu) / sizeof(uint32_t));
+	auto* blocks = static_cast<const CountersGpu*>(m_readback[frame]->getMappedMemory());
+	if (blocks && m_has_readback[frame]) {
 		uint32_t probes = 0;
 		uint32_t overflow = 0;
 		for (uint32_t n = 0; n < m_cascades; n++) {
@@ -768,8 +835,7 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 		}
 		m_probe_count = probes;
 		m_overflow_count = overflow;
-		for (uint32_t i = 0; i < RAY_STAT_WORDS; i++)
-			m_ray_stats[i] = stats[i];
+		std::copy(std::begin(blocks[0].rays), std::end(blocks[0].rays), m_ray_exits.begin());
 		m_counters_valid = true;
 		if (overflow > 0 && !m_overflow_warned) {
 			std::string per_cascade;
@@ -832,15 +898,13 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 	}
 	const glm::ivec3 anchor_prev = m_has_prev ? m_last_anchor0 : anchor_curr;
 
-	// Per-frame clear of the curr map region: keys to empty, counters and ray
-	// stats to zero, then the y/z of all three workgroup dispatch triples to 1
-	// (the x words accumulate via InterlockedMax during insertion).
+	// Per-frame clear of the curr map region: keys to empty, counters to zero,
+	// then the y/z of all three workgroup dispatch triples to 1 (the x words
+	// accumulate via InterlockedMax during insertion).
 	cmd.fillBuffer(m_hash_keys->getBuffer(), parity * m_hash_words_per_parity * WORD,
 		m_hash_words_per_parity * WORD, 0u);
 	cmd.fillBuffer(m_counters->getBuffer(), counter_block(parity, 0),
 		m_cascades * sizeof(CountersGpu), 0u);
-	cmd.fillBuffer(m_ray_stat_buffer->getBuffer(), parity * RAY_STAT_WORDS * WORD,
-		RAY_STAT_WORDS * WORD, 0u);
 	// Fills run unordered without a barrier, and the 1s write over part of the
 	// zero fill.
 	memory_barrier(vk::PipelineStageFlagBits2::eTransfer,
@@ -878,16 +942,14 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 	const auto& proj = frame_info.camera_view.proj;
 	RcwPushConstant push{
 		.anchor0_curr = glm::ivec4(anchor_curr, static_cast<int>(parity)),
-		.anchor0_prev = glm::ivec4(anchor_prev, std::max(m_rc.probe_ttl, 0)),
+		.anchor0_prev = glm::ivec4(anchor_prev, 0),
 		.out_size = glm::vec2(static_cast<float>(m_extent.width), static_cast<float>(m_extent.height)),
 		.depth_size = glm::vec2(static_cast<float>(m_depth_extent.width), static_cast<float>(m_depth_extent.height)),
 		.ds0 = ds0,
 		.lod0_dist = lod0,
 		.proj_22 = proj[2][2],
 		.proj_32 = proj[3][2],
-		.thickness = m_rc.thickness,
 		.luma_clamp = m_rc.luma_clamp,
-		.intensity = m_rc.intensity,
 		.hash_words_per_parity = m_hash_words_per_parity,
 		.probes_per_parity = m_probes_per_parity,
 		.cascade_index = 0,
@@ -896,34 +958,44 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 		.probe_j_cascade = static_cast<uint32_t>(std::clamp(m_rc.probe_j_cascade, 0, static_cast<int>(m_cascades) - 1)),
 		.frame_counter = m_frame_counter,
 		.rays_per_pixel = static_cast<uint32_t>(std::clamp(m_rc.rays_per_pixel, 1, 16)),
-		.flags = (static_cast<uint32_t>(std::clamp(m_rc.sky_visibility, 0.0f, 1.0f) * 255.0f + 0.5f)
-				<< SKY_TRUST_SHIFT)
-			| (m_rc.debug_view == RcDebugView::EVIDENCE ? FLAG_VISIBILITY_EVIDENCE : 0u)
-			| (m_rc.rough_specular || m_rc.debug_view == RcDebugView::SPEC ? FLAG_ROUGH_SPEC : 0u)
-			| (m_rc.count_weighted_read ? FLAG_COUNT_WEIGHT : 0u)
-			| (m_rc.hist_depth_check && m_prev_depth_primed ? FLAG_HIST_DEPTH : 0u)
-			| (m_rc.freeze_probes ? FLAG_FREEZE_PROBES : 0u)
-			| (m_rc.single_frame ? FLAG_SINGLE_FRAME : 0u)
-			| (static_cast<uint32_t>(std::clamp(m_rc.parent_mode, 0, 1))
-				<< PARENT_MODE_SHIFT)
-			| (static_cast<uint32_t>(std::clamp(m_rc.deposit_mode, 0, 2))
-				<< DEPOSIT_MODE_SHIFT)
-			| (static_cast<uint32_t>(std::clamp(m_rc.sky_min_frac, 0.0f, 1.0f) * 255.0f + 0.5f)
-				<< SKY_MIN_FRAC_SHIFT),
+		.flags = (m_rc.debug_view == RcDebugView::EVIDENCE ? FLAG_VISIBILITY_EVIDENCE : 0u)
+			| (frame_info.ibl_active || m_rc.debug_view == RcDebugView::SPEC ? FLAG_ROUGH_SPEC : 0u)
+			| (m_prev_depth_primed ? FLAG_HIST_DEPTH : 0u)
+			| (m_rc.single_frame ? FLAG_SINGLE_FRAME : 0u),
 		.hiz_mip_count = m_screen_rays.pyramidMipLevels(),
-		.blend_zone = std::clamp(m_rc.blend_zone, 0.0f, 0.9f),
+		.light_count = m_scene.lights ? m_scene.light_count : 0u,
 	};
 	auto push_constants = [&] {
 		cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0,
 			vk::ArrayProxy<const uint8_t>(sizeof(RcwPushConstant),
 				reinterpret_cast<const uint8_t*>(&push)));
 	};
-	std::array<vk::DescriptorSet, 2> sets{
+	// Set 2 is the bindless texture set the shade path samples albedo and emissive from.
+	std::array<vk::DescriptorSet, 3> sets{
 		*frame_info.global_descriptor_set,
 		*m_descriptor_sets[frame],
+		*m_bindless_set,
 	};
+	// Scene bindings and TLAS go before the bind below
+	if (ray_query)
+		writeSceneBindings(frame);
+	// Rewritten every dispatch, whichever tracer runs, rather than cached on
+	// the handle: a freed structure's handle can be reissued to the next one.
+	if (m_tlas) {
+		vk::WriteDescriptorSetAccelerationStructureKHR tlas_info{
+			.accelerationStructureCount = 1,
+			.pAccelerationStructures = &m_tlas,
+		};
+		vk::WriteDescriptorSet write{
+			.pNext = &tlas_info,
+			.dstSet = *m_descriptor_sets[frame],
+			.dstBinding = 31,
+			.descriptorCount = 1,
+			.descriptorType = vk::DescriptorType::eAccelerationStructureKHR,
+		};
+		m_ve_device.getDevice().updateDescriptorSets(write, {});
+	}
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pipeline_layout, 0, sets, {});
-
 
 	auto chain_barrier = [&] {
 		memory_barrier(vk::PipelineStageFlagBits2::eComputeShader,
@@ -959,20 +1031,60 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 			counter_block(prev, n) + offsetof(CountersGpu, linear_x));
 	}
 
-	// ===== Cross-lod seeding of fresh probes (per-probe indirect over the
-	// finished curr maps; donor payloads are last frame's state - resolve, the
-	// next persistent-store writer, runs after the trace barrier) =====
+	// Ray generation reads the finished curr maps.
 	chain_barrier();
-	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_seed_pipeline->getPipeline());
-	for (uint32_t n = 0; n < m_cascades; n++) {
+
+	if (profiler) {
+		profiler->endGpuTimer(cmd, ProfileTimer::RC_MAP);
+		profiler->beginGpuTimer(cmd, ProfileTimer::RC_RAYGEN);
+	}
+
+	// Give every probe a contiguous run of the R2 sequence, arranged so that
+	// probes sharing a parent take adjacent runs and the parent's rays are one
+	// contiguous stretch too. Counts flow up the parent chain, then offsets are
+	// handed back down; the trace claims each ray's index from its probe's
+	// cursor. Without this, a probe's directions are an arbitrary subset of R2
+	// and higher cascades under-fill
+	cmd.fillBuffer(m_ray_cursor->getBuffer(), 0, m_probes_per_parity * WORD, 0u);
+	memory_barrier(vk::PipelineStageFlagBits2::eTransfer,
+		vk::AccessFlagBits2::eTransferWrite,
+		vk::PipelineStageFlagBits2::eComputeShader,
+		vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eShaderStorageWrite);
+
+	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_raygen_count_c0_pipeline->getPipeline());
+	push_constants();
+	cmd.dispatch((m_extent.width + 7) / 8, (m_extent.height + 7) / 8, 1);
+
+	// Counts up: cascade n must be final before it folds into cascade n + 1.
+	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_raygen_count_up_pipeline->getPipeline());
+	for (uint32_t n = 0; n + 1 < m_cascades; n++) {
+		chain_barrier();
 		push.cascade_index = n;
 		push_constants();
 		cmd.dispatchIndirect(m_counters->getBuffer(),
 			counter_block(parity, n) + offsetof(CountersGpu, linear_x));
 	}
 
+	// Offsets down: a parent's base must be final before its children carve it.
+	chain_barrier();
+	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_raygen_offset_top_pipeline->getPipeline());
+	push.cascade_index = m_cascades - 1;
+	push_constants();
+	cmd.dispatchIndirect(m_counters->getBuffer(),
+		counter_block(parity, m_cascades - 1) + offsetof(CountersGpu, linear_x));
+
+	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_raygen_offset_down_pipeline->getPipeline());
+	for (uint32_t n = m_cascades - 1; n-- > 0;) {
+		chain_barrier();
+		push.cascade_index = n;
+		push_constants();
+		cmd.dispatchIndirect(m_counters->getBuffer(),
+			counter_block(parity, n) + offsetof(CountersGpu, linear_x));
+	}
+	chain_barrier();
+
 	if (profiler) {
-		profiler->endGpuTimer(cmd, ProfileTimer::RC_MAP);
+		profiler->endGpuTimer(cmd, ProfileTimer::RC_RAYGEN);
 		profiler->beginGpuTimer(cmd, ProfileTimer::RC_TRACE);
 	}
 
@@ -994,7 +1106,7 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 	// The visibility, spec and geometry outputs share the radiance output's lifecycle
 	// exactly: same transition here, same acquire in acquireForRead. They must
 	// not diverge or the layout the descriptors declare stops matching one of
-	// them (the spec image's content is only written under the feature flag,
+	// them (the spec image's content is only written under FLAG_ROUGH_SPEC,
 	// but its layout ping-pongs unconditionally).
 	vk::ImageMemoryBarrier2 visibility_to_general = to_general;
 	visibility_to_general.image = m_visibility_images[frame]->getImage();
@@ -1007,8 +1119,36 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 		.imageMemoryBarrierCount = static_cast<uint32_t>(out_barriers.size()),
 		.pImageMemoryBarriers = out_barriers.data()};
 	cmd.pipelineBarrier2(out_dep);
-	chain_barrier();
-	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_trace_pipeline->getPipeline());
+	// The chain barrier, and with ray query also where the TLAS lands:
+	// RayTracingScene::update records its build with no barrier behind it, so
+	// nothing before the trace waits for it.
+	const vk::PipelineStageFlags2 tlas_stage = ray_query
+		? vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR : vk::PipelineStageFlags2{};
+	const vk::AccessFlags2 tlas_write = ray_query
+		? vk::AccessFlagBits2::eAccelerationStructureWriteKHR : vk::AccessFlags2{};
+	const vk::AccessFlags2 tlas_read = ray_query
+		? vk::AccessFlagBits2::eAccelerationStructureReadKHR : vk::AccessFlags2{};
+	memory_barrier(vk::PipelineStageFlagBits2::eComputeShader | tlas_stage,
+		vk::AccessFlagBits2::eShaderStorageWrite | tlas_write,
+		vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eDrawIndirect,
+		vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eShaderStorageWrite
+			| vk::AccessFlagBits2::eIndirectCommandRead | tlas_read);
+
+	// Cross-lod seeding of fresh probes (per-probe indirect over the
+	// finished curr maps). Recorded with no barrier ahead of the trace so its
+	// serial copies overlap it: the trace reads neither the probe records nor
+	// the persistent store. Donor payloads are last frame's state; resolve, the
+	// next persistent-store writer, waits behind the post-trace barrier.
+	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_seed_pipeline->getPipeline());
+	for (uint32_t n = 0; n < m_cascades; n++) {
+		push.cascade_index = n;
+		push_constants();
+		cmd.dispatchIndirect(m_counters->getBuffer(),
+			counter_block(parity, n) + offsetof(CountersGpu, linear_x));
+	}
+
+	cmd.bindPipeline(vk::PipelineBindPoint::eCompute,
+		ray_query ? m_trace_rayquery_pipeline->getPipeline() : m_trace_pipeline->getPipeline());
 	push.cascade_index = 0;
 	push_constants();
 	cmd.dispatch((m_extent.width + 7) / 8, (m_extent.height + 7) / 8, 1);
@@ -1036,24 +1176,13 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 		profiler->beginGpuTimer(cmd, ProfileTimer::RC_MERGE);
 	}
 
-	// ===== Top-down merge with dir-mip pre-averaging: merge(n) writes the
-	// cascade-local merged I, dirmip(n) extracts its 4:1 direction average for
-	// merge(n-1) before the buffer is overwritten =====
 	chain_barrier();
-	for (int32_t n = static_cast<int32_t>(m_cascades) - 1; n >= 0; n--) {
-		vk::DeviceSize pair_args =
-			counter_block(parity, static_cast<uint32_t>(n)) + offsetof(CountersGpu, pair_x);
-		cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_merge_pipeline->getPipeline());
-		push.cascade_index = static_cast<uint32_t>(n);
+	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_merge_pipeline->getPipeline());
+	for (uint32_t n = m_cascades; n-- > 0;) {
+		push.cascade_index = n;
 		push_constants();
-		cmd.dispatchIndirect(m_counters->getBuffer(), pair_args);
+		cmd.dispatchIndirect(m_counters->getBuffer(), counter_block(parity, n) + offsetof(CountersGpu, pair_x));
 		chain_barrier();
-		if (n > 0) {
-			cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_dirmip_pipeline->getPipeline());
-			push_constants();
-			cmd.dispatchIndirect(m_counters->getBuffer(), pair_args);
-			chain_barrier();
-		}
 	}
 
 	if (profiler) {
@@ -1061,7 +1190,7 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 		profiler->beginGpuTimer(cmd, ProfileTimer::RC_IRRADIANCE);
 	}
 
-	// ===== Irradiance tiles: one workgroup per c0 probe =====
+	// Irradiance tiles: one workgroup per c0 probe
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_irradiance_pipeline->getPipeline());
 	push.cascade_index = 0;
 	push_constants();
@@ -1073,7 +1202,7 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 		profiler->beginGpuTimer(cmd, ProfileTimer::RC_GATHER);
 	}
 
-	// ===== Counter readback copy + gather over the finished maps + atlas =====
+	// Counter readback copy + gather over the finished maps + atlas
 	memory_barrier(vk::PipelineStageFlagBits2::eComputeShader,
 		vk::AccessFlagBits2::eShaderStorageWrite,
 		vk::PipelineStageFlagBits2::eTransfer | vk::PipelineStageFlagBits2::eComputeShader,
@@ -1081,9 +1210,6 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 			| vk::AccessFlagBits2::eShaderSampledRead);
 	vk::BufferCopy counter_copy{counter_block(parity, 0), 0, m_cascades * sizeof(CountersGpu)};
 	cmd.copyBuffer(m_counters->getBuffer(), m_readback[frame]->getBuffer(), counter_copy);
-	vk::BufferCopy stat_copy{parity * RAY_STAT_WORDS * WORD,
-		m_cascades * sizeof(CountersGpu), RAY_STAT_WORDS * WORD};
-	cmd.copyBuffer(m_ray_stat_buffer->getBuffer(), m_readback[frame]->getBuffer(), stat_copy);
 	m_has_readback[frame] = true;
 
 	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_gather_pipeline->getPipeline());
@@ -1102,9 +1228,12 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 
 	// Preserve this frame's min/max depth (pyramid mip 0) to validate
 	// reprojection into the history while this frame's image is the history;
-	// the pyramid is rebuilt in place every trace frame. Recorded after the
-	// trace consumed the previous copy.
-	if (!history_copy)
+	// the pyramid is rebuilt in place every march frame. Recorded after the
+	// trace consumed the previous copy. A ray query frame may have built no
+	// pyramid, so it leaves the next march unvalidated instead.
+	if (ray_query)
+		m_prev_depth_primed = false;
+	if (ray_query || !history_copy)
 		return;
 	auto mip0_barrier = [&](vk::Image image, uint32_t mip_count,
 		vk::ImageLayout from, vk::ImageLayout to,
@@ -1177,20 +1306,17 @@ void RcSystem::acquireForRead(vk::raii::CommandBuffer& cmd, uint32_t frame_index
 }
 
 void RcSystem::allocate() {
-	bool store_changed = m_pending.cascades != m_cascades || m_pending.memory_mb != m_memory_mb
-		|| m_pending.theta0 != m_theta0 || m_pending.c0_ray_length != m_c0_ray_length;
+	bool store_changed = m_pending.cascades != m_cascades || m_pending.memory_mb != m_memory_mb;
 	m_resolution_div = m_pending.resolution_div;
 	m_cascades = m_pending.cascades;
 	m_memory_mb = m_pending.memory_mb;
-	m_theta0 = m_pending.theta0;
-	m_c0_ray_length = m_pending.c0_ray_length;
 	if (store_changed) {
 		computeLayout();
 		m_store_stale = true;
 	}
 	m_extent = vk::Extent2D{std::max(1u, m_depth_extent.width / m_resolution_div),
 		std::max(1u, m_depth_extent.height / m_resolution_div)};
-	if (!m_trace_pipeline || m_pipeline_theta0 != m_theta0 || m_pipeline_c0_ray_length != m_c0_ray_length)
+	if (!m_trace_pipeline)
 		createComputePipelines();
 	createOutputImages();
 	createPrevDepthImage();
@@ -1217,10 +1343,14 @@ void RcSystem::release() {
 	m_insert_parent_pipeline.reset();
 	m_keepalive_pipeline.reset();
 	m_seed_pipeline.reset();
+	m_raygen_count_c0_pipeline.reset();
+	m_raygen_count_up_pipeline.reset();
+	m_raygen_offset_top_pipeline.reset();
+	m_raygen_offset_down_pipeline.reset();
 	m_trace_pipeline.reset();
+	m_trace_rayquery_pipeline.reset();
 	m_resolve_pipeline.reset();
 	m_merge_pipeline.reset();
-	m_dirmip_pipeline.reset();
 	m_irradiance_pipeline.reset();
 	m_gather_pipeline.reset();
 	clearStoreState();
@@ -1243,7 +1373,7 @@ void RcSystem::clearStoreState() {
 	m_probe_count = 0;
 	m_overflow_count = 0;
 	m_cascade_probes = {};
-	m_ray_stats = {};
+	m_ray_exits = {};
 	m_overflow_warned = false;
 	m_lod0_clamp_warned = false;
 	m_prev_depth_primed = false;
@@ -1292,10 +1422,10 @@ uint32_t RcSystem::cascadeProbeCount(uint32_t n) const {
 	return m_cascade_probes[n];
 }
 
-uint32_t RcSystem::rayStat(uint32_t i) const {
-	if (!m_counters_valid || i >= m_ray_stats.size())
+uint32_t RcSystem::rayExitCount(uint32_t code) const {
+	if (!m_counters_valid || code >= m_ray_exits.size())
 		return 0u;
-	return m_ray_stats[i];
+	return m_ray_exits[code];
 }
 
 } // namespace ve

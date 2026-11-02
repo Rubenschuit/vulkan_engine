@@ -2,16 +2,26 @@
 setlocal
 
 :: windowsBuild.bat
-:: Usage: windowsBuild.bat [debug|release|test|tracy|clean] [vs2022|vs2026]
+:: Usage: windowsBuild.bat [debug|release|test|tracy|clean] [vs2022|vs2026] [norun]
 ::   debug: builds in debug mode and runs the app
 ::   release (default): builds in release mode and runs the app
 ::   test: builds in debug mode with tests enabled, runs all tests via CTest
 ::   tracy: builds in RelWithDebInfo with Tracy profiler enabled and runs the app
 ::   clean: removes the build directory and compiled shader files
+::   norun: build only, don't launch the app afterwards (it does not self-close,
+::          so this is what you want for scripted or unattended builds)
 
 set MODE=%~1
-if "%MODE%"=="" set MODE=release
 set VS_VERSION=%~2
+set RUN_APP=1
+for %%A in (%*) do (
+	if /I "%%~A"=="norun" (
+		set RUN_APP=0
+		if /I "%MODE%"=="norun" set MODE=
+		if /I "%VS_VERSION%"=="norun" set VS_VERSION=
+	)
+)
+if "%MODE%"=="" set MODE=release
 if "%VS_VERSION%"=="" set VS_VERSION=vs2026
 
 if /I "%MODE%"=="clean" (
@@ -51,12 +61,16 @@ cmake --build "%BUILD_DIR%" --config %BUILD_TYPE% -j
 if errorlevel 1 exit /b %ERRORLEVEL%
 
 :: Run tests
-if /I "%MODE%"=="test" (
-	echo Running tests...
-	ctest --test-dir "%BUILD_DIR%" -C %BUILD_TYPE% --output-on-failure
-	exit /b %ERRORLEVEL%
-)
+if /I not "%MODE%"=="test" goto run_app
+echo Running tests...
+ctest --test-dir "%BUILD_DIR%" -C %BUILD_TYPE% --output-on-failure
+exit /b %ERRORLEVEL%
 
 :: Run the app
+:run_app
+if "%RUN_APP%"=="0" (
+	echo Build complete ^(norun^)
+	exit /b 0
+)
 set APP_PATH=%BUILD_DIR%\%BUILD_TYPE%\VeApp.exe
 "%APP_PATH%"

@@ -4,7 +4,7 @@
 // a falloff with distance from the surface plane, divided by the total
 // weight of the probes that exist.
 //
-// Output: rgb = the averaged radiance times rc_intensity,
+// Output: rgb = the averaged radiance,
 // 		   a = the tiles' a, averaged.
 //
 // Sky pixels and pixels with no probes around them write a = 0, so the
@@ -12,11 +12,7 @@
 
 #include "rc_world_common.slangh"
 
-// Weight fall off with its distance from the surface plane,
-// measured in probe spacings
-static const float RCW_GATHER_PLANE_K = 2.0;
-
-// The 8 probe taps of one lod, scaled by lthe blend factor
+// The 8 probe taps of one lod, scaled by the blend factor
 // between two lods. Missing probes add nothing; the caller divides by the
 // weight that was found across both lods.
 void rcwGatherLod(float3 world, float3 normal, uint lod, uint parity, uint tiles_per_row,
@@ -61,26 +57,6 @@ float4 rcwSpecOutput(float4 spec_sum, float weight_sum) {
 	return float4(spec.rgb, saturate(spec.a));
 }
 
-// Debug: the fraction of the 8 probes around the pixel's point that exist
-// in the cascade's current map. For c0 this is 1 on geometry unless
-// insertion overflowed.
-// Higher cascades only insert the corners merge needs.
-float rcwCornerFraction(uint cascade, uint parity, float3 world, uint lod) {
-	int scale = int(cascade + lod);
-	float3 position_in_cell;
-	int3 cell = rcwProbeBase(world, scale, position_in_cell);
-	int3 anchor = push.anchor0_curr.xyz >> scale;
-	uint found = 0u;
-	for (uint corner_index = 0; corner_index < 8; corner_index++) {
-		int3 grid = cell + rcwCorner(corner_index);
-		uint key = rcwEncodeKey(grid, anchor, lod);
-		uint probe_index;
-		if (rcwHashLookup(cascade_descs[cascade], parity, key, probe_index))
-			found++;
-	}
-	return float(found) / 8.0;
-}
-
 [shader("compute")]
 [numthreads(16, 16, 1)]
 void compMain(uint3 thread_id: SV_DispatchThreadID) {
@@ -113,8 +89,8 @@ void compMain(uint3 thread_id: SV_DispatchThreadID) {
 	}
 	if (mode == RCW_GATHER_TRACE_KIND)
 		return; // the trace wrote this view already
-	bool debug_mode = mode == RCW_GATHER_PROBE_J || mode == RCW_GATHER_COVERAGE
-		|| mode == RCW_GATHER_CONVERGENCE || mode == RCW_GATHER_PROBE_GRID;
+	bool debug_mode = mode == RCW_GATHER_PROBE_J || mode == RCW_GATHER_CONVERGENCE
+		|| mode == RCW_GATHER_PROBE_GRID;
 	uint parity = uint(push.anchor0_curr.w);
 	int3 cell0 = rcwCell0(world);
 	if (!debug_mode) {
@@ -153,7 +129,6 @@ void compMain(uint3 thread_id: SV_DispatchThreadID) {
 			return;
 		}
 		radiance_sum /= weight_sum;
-		// Intensity scales the rgb of the irradiance
 		rc_output[pixel] = float4(radiance_sum.rgb, saturate(radiance_sum.a));
 		rc_visibility_output[pixel] = saturate(visibility_sum / weight_sum);
 		if (spec_on)
@@ -179,7 +154,7 @@ void compMain(uint3 thread_id: SV_DispatchThreadID) {
 		for (uint bin = 0; bin < direction_count; bin++) {
 			if (persist_count[pair_base + bin] == 0u)
 				continue;
-			radiance_sum += rcwUnpackHalf4(persist_j[pair_base + bin]).rgb;
+			radiance_sum += rcwUnpackJBeta(persist_j[pair_base + bin]).rgb;
 			sampled++;
 		}
 		rc_output[pixel] = float4(radiance_sum / float(max(sampled, 1u)), 0.0);
@@ -232,10 +207,5 @@ void compMain(uint3 thread_id: SV_DispatchThreadID) {
 		// The two lods mixed as the gather mixes them
 		float value = lod < RCW_MAX_LOD ? lerp(convergence[0], convergence[1], lod_blend) : convergence[0];
 		rc_output[pixel] = float4(value, value, value, 0.0);
-		return;
 	}
-	float3 fractions = float3(0.0, 0.0, 0.0);
-	for (uint cascade = 0; cascade < min(3u, push.n_cascades); cascade++)
-		fractions[cascade] = rcwCornerFraction(cascade, parity, world, lod);
-	rc_output[pixel] = float4(fractions, 0.0);
 }

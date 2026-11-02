@@ -164,7 +164,7 @@ void PbrRenderSystem::ensureDebugPipelines() const {
 		buildWboitConfig(config);
 		auto wboit_shader_path = m_shader_path.parent_path() / "pbr_wboit.spv";
 		for (uint32_t mode = 0; mode < SHADOW_MODE_COUNT; mode++) {
-			config.specialization_constants = specConstants(mode, 0u, 1u, 1u, 1u, 1u);
+			config.specialization_constants = specConstants(mode, 0u, 1u, 1u, 1u, 0u);
 			m_wboit_pipelines_dbg[mode] = std::make_unique<VePipeline>(m_ve_device, wboit_shader_path, config);
 		}
 	}

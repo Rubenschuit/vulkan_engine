@@ -31,9 +31,11 @@ enum class ProfileTimer : uint32_t {
 	PARTICLES,
 	SSR,
 	RC,
+	RC_AS,
 	RC_BUILD,
 	RC_SHADE,
 	RC_MAP,
+	RC_RAYGEN,
 	RC_TRACE,
 	RC_RESOLVE,
 	RC_MERGE,
@@ -63,9 +65,11 @@ inline const char* profileTimerName(ProfileTimer timer) {
 		case ProfileTimer::PARTICLES:      return "Particles";
 		case ProfileTimer::SSR:            return "SSR";
 		case ProfileTimer::RC:             return "RC GI";
+		case ProfileTimer::RC_AS:          return "RC AS";
 		case ProfileTimer::RC_BUILD:       return "RC Build";
 		case ProfileTimer::RC_SHADE:       return "RC Shade";
 		case ProfileTimer::RC_MAP:         return "RC Map";
+		case ProfileTimer::RC_RAYGEN:      return "RC Raygen";
 		case ProfileTimer::RC_TRACE:       return "RC Trace";
 		case ProfileTimer::RC_RESOLVE:     return "RC Resolve";
 		case ProfileTimer::RC_MERGE:       return "RC Merge";

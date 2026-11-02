@@ -16,10 +16,6 @@ Cross-platform C++20 Vulkan 1.3+ GPU-driven clustered forward renderer with an i
 - [Manual build](#manual-build)
   - [Unix or MinGW shell](#unix-or-mingw64-shell)
   - [Windows with MSVC](#windows-with-msvc)
-- [Build options](#build-options)
-- [Running the sandbox](#running-the-sandbox)
-- [Tests](#tests)
-- [Benchmarks and visual regression](#benchmarks-and-visual-regression)
 - [Credits](#credits)
 
 
@@ -50,8 +46,8 @@ Cross-platform C++20 Vulkan 1.3+ GPU-driven clustered forward renderer with an i
 - Cascaded Shadow Maps, plus a packed atlas for point and spot shadows
 - Screen-space shadow mask (compute), PCF, PCSS
 - GTAO (Ground Truth Ambient Occlusion)
-- Global illumination: world-space [Split Radiance Cascades](https://arxiv.org/abs/2607.20384) - sparse probe hashmaps with a screen space
-ray marcher
+- Global illumination: world-space [Split Radiance Cascades](https://arxiv.org/abs/2607.20384) - sparse probe hashmaps traced with
+hardware ray queries, with a screen-space ray marcher as the fallback
 
 #### Architecture
 - Shared-library + app split
@@ -137,7 +133,7 @@ cd vulkan_engine
 ```
 
 - ##### Windows (cmd or PowerShell):
-Optional arguments include [debug|release|test|tracy|clean] and [vs2022|vs2026]. Default is release vs2026.
+Optional arguments include [debug|release|test|tracy|clean], [vs2022|vs2026] and [norun]. Default is release vs2026.
 ```cmd
 cd vulkan_engine
 .\windowsBuild.bat

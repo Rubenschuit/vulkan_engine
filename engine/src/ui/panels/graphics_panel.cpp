@@ -375,67 +375,32 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		if (ctx.settings.rc.enabled) {
 			ImGui::Indent();
 
-			ImGui::SeparatorText("Look");
-			ImGui::SliderFloat("GI Intensity", &ctx.settings.rc.intensity, 0.0f, 2.0f, "%.2f");
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Scales the bounce light the probes collect. The sky share is not scaled.");
-			ImGui::SliderFloat("Spec Occlusion", &ctx.settings.rc.spec_occlusion, 0.0f, 1.0f, "%.2f");
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Scales the environment reflection by how much sky a surface can\nactually see.\n\nDarkens only; it never brightens.");
-			ImGui::Checkbox("Rough Specular", &ctx.settings.rc.rough_specular);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Rough surfaces reflect the probes' measured scene light\ninstead of the environment map. Mirror-like surfaces keep\nSSR and the environment map.");
-			if (ctx.settings.rc.rough_specular) {
-				ImGui::SliderFloat("Spec Handoff", &ctx.settings.rc.spec_handoff_roughness, 0.0f, 1.0f, "%.2f");
-				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("Roughness at which the probes fully replace the environment map.\nBelow it the probes fade out.");
+			ImGui::BeginDisabled(!m_ray_query_supported);
+			bool ray_query = m_ray_query_supported && ctx.settings.rc.ray_query;
+			if (ImGui::Checkbox("Ray Query Tracing", &ray_query))
+				ctx.settings.rc.ray_query = ray_query;
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+				ImGui::SetTooltip("Trace the scene's acceleration structures, which also see geometry off screen."
+					"\nOff: march the depth pyramid, which sees only what is on screen, and free the structures.");
+			ImGui::EndDisabled();
+			if (!m_ray_query_supported) {
+				ImGui::SameLine();
+				ImGui::TextDisabled("(Not supported by device)");
 			}
-			ImGui::SliderFloat("Short Range AO", &ctx.settings.rc.short_range_ao, 0.0f, 1.0f, "%.2f");
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Applies GTAO to RC's share of diffuse ambient.");
-			ImGui::SliderFloat("Bounce Luma Clamp", &ctx.settings.rc.luma_clamp, 1.0f, 200.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Caps how bright a single bounce can be.");
-
-			ImGui::SliderFloat("Sky Proof Fraction",
-				&ctx.settings.rc.sky_min_frac, 0.0f, 1.0f, "%.4f");
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Fraction of a ray's full range that must be seen empty before\nleaving the screen through sky counts as an open sky direction.");
-			ImGui::SliderFloat("Sky Visibility", &ctx.settings.rc.sky_visibility, 0.0f, 1.0f, "%.2f");
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("How much the probes' estimate of the sky each direction sees\nreplaces the environment map (or flat ambient).\n0: the environment lights every surface unoccluded, the probes\nadd bounce only. 1: the probes' estimate lights the diffuse sky\nand occludes the environment reflection. Between: a linear blend.");
-			ImGui::Checkbox("History Depth Check",
-				&ctx.settings.rc.hist_depth_check);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Only take bounce colour from last frame where the surface was\nactually visible last frame.");
 
 			ImGui::SeparatorText("Probe grid");
 			ImGui::SliderFloat("Probe Spacing", &ctx.settings.rc.ds0, 0.01f, 2.0f, "%.3f m",
 				ImGuiSliderFlags_Logarithmic);
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Distance between c0 probes.");
-			sliderAppliedOnRelease("Probe Directions", ctx.settings.rc.c0_polar_bins, m_rc_held.c0_polar_bins,
-				[](const char* label, int* v) {
-					std::string directions_label = std::format("{} per probe", 2 * *v * *v);
-					ImGui::SliderInt(label, v, 2, 8, directions_label.c_str());
-				});
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Directions each probe stores at the finest level; every level out\nstores four times as many.");
-			sliderAppliedOnRelease("Ray Length", ctx.settings.rc.c0_ray_length, m_rc_held.c0_ray_length,
-				[](const char* label, float* v) { ImGui::SliderFloat(label, v, 0.1f, 64.0f, "%.2f x spacing"); });
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("How far the finest level's rays reach, as a multiple of Probe\nSpacing; each level out reaches four times further.");
 			ImGui::SliderFloat("LOD 0 Distance", &ctx.settings.rc.lod0_dist, 1.0f, 10.0f, "%.0f m");
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("How far from the camera the finest probe spacing reaches.\nBeyond it the spacing doubles at each step out.");
-			ImGui::SliderFloat("LOD Blend Zone", &ctx.settings.rc.blend_zone, 0.0f, 0.5f, "%.2f");
-			ImGui::SliderInt("Probe TTL", &ctx.settings.rc.probe_ttl, 0, 8000);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Frames a probe is kept after it stops being visible.");
 
 			ImGui::SeparatorText("Quality and cost");
-			ImGui::SliderFloat("Surface Thickness", &ctx.settings.rc.thickness, 0.05f, 20.0f, "%.2f m");
 			ImGui::SliderInt("Rays / Pixel", &ctx.settings.rc.rays_per_pixel, 1, 16);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Rays each GI pixel traces per frame.");
 
 			const char* res_labels[] = {"Full", "Half", "Quarter", "Eighth"};
 			const int res_values[] = {1, 2, 4, 8};
@@ -450,33 +415,14 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 				[](const char* label, int* v) { ImGui::SliderInt(label, v, 1, 6); });
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Each level out reaches four times further.\nBeyond the last level, distant bounce is replaced by a plain sky\nestimate.");
-			sliderAppliedOnRelease("Store Budget", ctx.settings.rc.memory_mb, m_rc_held.memory_mb,
-				[](const char* label, int* v) { ImGui::SliderInt(label, v, 32, 4096, "%d MB"); });
+			sliderAppliedOnRelease("Direction Data Budget (MiB)", ctx.settings.rc.memory_mb, m_rc_held.memory_mb,
+				[](const char* label, int* v) { ImGui::SliderInt(label, v, 32, 4096); });
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Memory for per-direction probe data");
-
-			const char* deposit_labels[] = {"Nearest probe", "All 8 weighted", "Random corner"};
-			int deposit_mode = std::clamp(ctx.settings.rc.deposit_mode, 0, 2);
-			if (ImGui::Combo("Deposit", &deposit_mode, deposit_labels, IM_ARRAYSIZE(deposit_labels)))
-				ctx.settings.rc.deposit_mode = deposit_mode;
+				ImGui::SetTooltip("Memory for per-direction probe data, which sets how many probes fit."
+					"\nThe whole probe store is larger; Debug > Probe store shows its size.");
+			ImGui::SliderFloat("Bounce Luma Clamp", &ctx.settings.rc.luma_clamp, 1.0f, 200.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Which probes a pixel registers and its rays inform.\nNearest probe: the probe nearest the pixel, then that probe's nearest\nparent at each level out, each with the ray's full share.\nAll 8 weighted: the 8 probes around the pixel, by trilinear share.\nRandom corner: one of those 8, drawn once per pixel each frame with those\nshares as probabilities.");
-			ImGui::Checkbox("Count-Weighted Read",
-				&ctx.settings.rc.count_weighted_read);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("When a probe reads its parents, each parent is weighted by its slot's\nsample count (frames with samples, up to 63) on top of its position.\nOff: position only. Parents with no samples are skipped either way.");
-			const char* parent_labels[] = {"All 8", "Nearest"};
-			int parent_mode = std::clamp(ctx.settings.rc.parent_mode, 0, 1);
-			if (ImGui::Combo("Parent Insertion", &parent_mode, parent_labels, IM_ARRAYSIZE(parent_labels)))
-				ctx.settings.rc.parent_mode = parent_mode;
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Which probes of the next level each probe registers: all 8 around it,\nor the single nearest one.");
-
-			ImGui::SeparatorText("Diagnostics");
-			ImGui::Checkbox("Freeze Probe Insertion", &ctx.settings.rc.freeze_probes);
-			ImGui::Checkbox("Single Frame", &ctx.settings.rc.single_frame);
-			if (ImGui::Button("Reset Store"))
-				ctx.settings.rc.reset_requests++;
+				ImGui::SetTooltip("Caps how bright a single bounce can be.");
 
 			ImGui::Unindent();
 		}

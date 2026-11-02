@@ -62,6 +62,13 @@ public:
 	void setLightCountActive(bool has_lights);
 	bool isEnabled() const { return m_enabled; }
 
+	// This frame's punctual lights
+	const VeBuffer& getLightList(uint32_t frame_index) const;
+	// Advances whenever the light list buffers are recreated
+	uint64_t getLightListGeneration() const { return m_light_list_generation; }
+	uint32_t getPointLightCount() const { return m_last_point_light_count; }
+	uint32_t getSpotLightCount() const { return m_last_spot_light_count; }
+
 	const vk::raii::DescriptorSetLayout& getOutputSetLayout() const {
 		return m_output_set_layout->getDescriptorSetLayout();
 	}
@@ -85,6 +92,7 @@ private:
 	uint32_t m_last_light_count = 0;
 	uint32_t m_last_point_light_count = 0;
 	uint32_t m_last_spot_light_count = 0;
+	uint64_t m_light_list_generation = 0;
 
 	// Grid dimensions
 	uint32_t m_tiles_x = 0;

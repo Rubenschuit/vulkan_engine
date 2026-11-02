@@ -77,6 +77,11 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 	const uint32_t dynamic_capacity = MAX_DEFORMED_VERTICES_PER_FRAME * MAX_FRAMES_IN_FLIGHT;
 	const uint32_t total_vbo_vertices = total_vertices + dynamic_capacity;
 
+	const vk::BufferUsageFlags as_input = m_ve_device.supportsRayQuery()
+		? vk::BufferUsageFlagBits::eShaderDeviceAddress
+			| vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR
+		: vk::BufferUsageFlags{};
+
 	m_mega_vbo = std::make_unique<VeBuffer>(m_ve_device,
 		sizeof(VeMesh::Vertex), total_vbo_vertices,
 		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer
@@ -86,13 +91,14 @@ void PbrMegaBuffer::build(vk::raii::CommandBuffer& cmd, const std::vector<VeMesh
 	m_mega_shadow_vbo = std::make_unique<VeBuffer>(m_ve_device,
 		sizeof(glm::vec3), total_vbo_vertices,
 		vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer
-			| vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc,
+			| vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc | as_input,
 		vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 	m_mega_ibo = std::make_unique<VeBuffer>(m_ve_device,
 		sizeof(uint32_t), total_indices,
-		vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst
-			| vk::BufferUsageFlagBits::eTransferSrc,
+		vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eStorageBuffer
+			| vk::BufferUsageFlagBits::eTransferDst
+			| vk::BufferUsageFlagBits::eTransferSrc | as_input,
 		vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 	if (total_skin_vertices > 0) {

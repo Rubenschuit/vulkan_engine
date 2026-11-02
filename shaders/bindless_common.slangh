@@ -1,0 +1,12 @@
+//Define BINDLESS_SET before including.
+
+#pragma once
+
+#ifndef BINDLESS_SET
+#define BINDLESS_SET 1
+#endif
+
+[vk::binding(0, BINDLESS_SET)]
+SamplerState bindless_sampler;
+[vk::binding(1, BINDLESS_SET)]
+Texture2D bindless_textures[];

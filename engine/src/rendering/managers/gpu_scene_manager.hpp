@@ -52,6 +52,7 @@ struct CpuObjectData {
 	uint32_t lod_count{};
 	uint32_t first_index[MAX_LOD_LEVELS]{};
 	uint32_t index_count[MAX_LOD_LEVELS]{};
+	bool emissive{};
 };
 
 // GPU-resident per-object transform
@@ -147,6 +148,18 @@ public:
 	VeBuffer& getIndirectTemplateBuffer(uint32_t frame) { return *m_indirect_template[frame]; }
 	VeBuffer& getMeshletObjectInfoBuffer(uint32_t frame) { return *m_meshlet_object_info_buffers[frame]; }
 
+	const std::vector<CpuObjectData>& getCpuObjectData() const { return m_cpu_object_data; }
+	const std::unordered_map<uint32_t, Entity>& getRegisteredObjects() const { return m_gpu_id_to_entity; }
+
+	uint64_t geometrySetGeneration() const { return m_geometry_set_generation; }
+	// Advances when an object is registered, unregistered, shown, hidden or
+	// has its data rewritten; movement goes through takeMovedTraceable instead.
+	uint64_t instanceGeneration() const { return m_instance_generation; }
+	// Swaps into out the gpu_ids of the traceable (non-deformed) objects whose
+	// transform changed since the last call, each once. The ray tracing
+	// scene's own queue: only the GPU culling backends drain m_dirty_ids.
+	void takeMovedTraceable(std::vector<uint32_t>& out);
+
 	const std::vector<uint32_t>& getTransparentEntityIndices() const { return m_transparent_entity_indices; }
 
 	// Draw group accessors
@@ -198,7 +211,9 @@ private:
 	uint32_t m_next_id = 0;
 	uint32_t m_active_count = 0;
 	uint32_t m_dynamic_object_count = 0;
-	bool m_object_limit_warned = false; 
+	uint64_t m_geometry_set_generation = 0;
+	uint64_t m_instance_generation = 0;
+	bool m_object_limit_warned = false;
 	static constexpr uint32_t INVALID_GPU_ID = 0xFFFFFFFFu;
 	std::vector<uint32_t> m_free_list;
 	std::unordered_map<uint32_t, uint32_t> m_entity_to_gpu_id; // entity_index to gpu_id
@@ -240,6 +255,9 @@ private:
 	// for this frame index was last updated
 	std::array<std::vector<uint32_t>, MAX_FRAMES_IN_FLIGHT> m_dirty_ids;
 	std::array<std::vector<bool>, MAX_FRAMES_IN_FLIGHT> m_id_in_dirty_set;
+	// Moved traceable objects awaiting takeMovedTraceable, and which are queued
+	std::vector<uint32_t> m_moved_traceable;
+	std::vector<bool> m_moved_traceable_queued;
 	// Per-frame ObjectData content dirty queue: gpu_ids whose 96B ObjectDataGPU entry
 	// changed (skinned AABB refresh, active/dynamic flag) but whose draw-group membership
 	// did NOT.
@@ -248,7 +266,7 @@ private:
 	std::array<bool, MAX_FRAMES_IN_FLIGHT> m_object_data_dirty{};
 	bool m_draw_groups_dirty = false;
 	bool m_dynamic_classification_changed = false;
-	
+
 	// Scratch reused across restages to avoid per-frame heap allocation.
 	std::vector<DrawGroupGPU> m_draw_group_scratch;
 	std::vector<VkDrawIndexedIndirectCommand> m_indirect_cmd_scratch;

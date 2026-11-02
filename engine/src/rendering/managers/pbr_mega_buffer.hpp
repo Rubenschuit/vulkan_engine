@@ -68,6 +68,7 @@ public:
 	VeBuffer* getMeshletSsbo() const { return m_meshlet_ssbo.get(); }
 	VeBuffer* getMegaVbo() const { return m_mega_vbo.get(); }
 	VeBuffer* getMegaShadowVbo() const { return m_mega_shadow_vbo.get(); }
+	VeBuffer* getMegaIbo() const { return m_mega_ibo.get(); }
 	VeBuffer* getMegaSkinVbo() const { return m_mega_skin_vbo.get(); }
 	VeBuffer* getMegaMorphPosition() const { return m_mega_morph_position.get(); }
 	VeBuffer* getMegaMorphNormal() const { return m_mega_morph_normal.get(); }

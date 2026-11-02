@@ -46,13 +46,14 @@ void ClusterLightSystem::createBuffers(vk::Extent2D screen_extent) {
 	m_tiles_x = (screen_extent.width + CLUSTER_TILE_SIZE - 1) / CLUSTER_TILE_SIZE;
 	m_tiles_y = (screen_extent.height + CLUSTER_TILE_SIZE - 1) / CLUSTER_TILE_SIZE;
 	m_total_clusters = m_tiles_x * m_tiles_y * CLUSTER_Z_SLICES;
+	m_light_list_generation++;
 
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		m_light_staging_ssbos[i] = std::make_unique<VeBuffer>(
 			m_ve_device,
 			sizeof(PointLight),
 			MAX_CLUSTER_LIGHTS,
-			vk::BufferUsageFlagBits::eTransferSrc,
+			vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eStorageBuffer,
 			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 		m_light_staging_ssbos[i]->map();
 
@@ -158,6 +159,10 @@ void ClusterLightSystem::createDescriptorSets(VeDescriptorPool& descriptor_pool)
 			.writeBuffer(3, &param_info)
 			.build(m_output_descriptor_sets[i]);
 	}
+}
+
+const VeBuffer& ClusterLightSystem::getLightList(uint32_t frame_index) const {
+	return *m_light_staging_ssbos[frame_index];
 }
 
 uint32_t ClusterLightSystem::uploadLightData(VeFrameInfo& frame_info) {

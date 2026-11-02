@@ -8,6 +8,8 @@
 
 #include "rc_world_common.slangh"
 
+static const uint RCW_PROBE_TTL = 16; // frames a probe missing from insertion stays alive
+
 [shader("compute")]
 [numthreads(RCW_LINEAR_WG, 1, 1)]
 void compMain(uint3 thread_id: SV_DispatchThreadID) {
@@ -40,8 +42,7 @@ void compMain(uint3 thread_id: SV_DispatchThreadID) {
 		return; // Already inserted this frame
 
 	uint age = slot_age[desc.slot_base + slot] + 1u;
-	uint ttl = uint(max(push.anchor0_prev.w, 0));
-	if (age > ttl) {
+	if (age > RCW_PROBE_TTL) {
 		rcwFreeSlot(desc, slot);
 		return;
 	}

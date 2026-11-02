@@ -11,9 +11,10 @@
 // {0,0,0,1} / count 0, which merge reads as "pass the parent through"; a
 // seeded slot already holds donor history. Under RCW_FLAG_SINGLE_FRAME every
 // bin behaves like a fresh one, so the store shows one frame of rays with no
-// accumulation. The scratch words consumed here
-// are re-zeroed, so scratch stays zero outside the trace-to-resolve window
-// without a per-frame fill.
+// accumulation. Mass is read first and radiance only where a hit deposited
+// it: most bins get no rays. The scratch words consumed here are re-zeroed,
+// so scratch stays zero outside the trace-to-resolve window without a
+// per-frame fill.
 
 #include "rc_world_common.slangh"
 
@@ -30,13 +31,9 @@ void compMain(uint3 group_id: SV_GroupID, uint3 local_id: SV_GroupThreadID) {
 	uint probe_index = probe_pair / direction_count;
 	uint bin = probe_pair % direction_count;
 
-	uint scratch_base = (desc.pair_base + probe_pair) * RCW_SCRATCH_WORDS;
-	uint radiance_r = scratch[scratch_base + 0];
-	uint radiance_g = scratch[scratch_base + 1];
-	uint radiance_b = scratch[scratch_base + 2];
-	uint hit_mass = scratch[scratch_base + 3];
-	uint clear_mass = scratch[scratch_base + 4];
-	uint total_mass = hit_mass + clear_mass;
+	uint scratch_pair = desc.pair_base + probe_pair;
+	uint2 mass = scratch_mass[scratch_pair]; // {hit, clear}
+	uint total_mass = mass.x + mass.y;
 
 	uint slot_word = probes[desc.probe_base + parity * push.probes_per_parity + probe_index].y;
 	if (slot_word == RCW_INVALID)
@@ -44,6 +41,7 @@ void compMain(uint3 group_id: SV_GroupID, uint3 local_id: SV_GroupThreadID) {
 	uint slot = slot_word & RCW_SLOT_MASK;
 	if (slot >= desc.probe_cap)
 		return;
+
 	// A seeded fresh slot carries a neighbouring-lod donor payload
 	bool fresh = (slot_word & RCW_SLOT_FRESH) != 0u && (slot_word & RCW_SLOT_SEEDED) == 0u;
 	uint slot_pair = desc.pair_base + slot * direction_count + bin;
@@ -51,27 +49,36 @@ void compMain(uint3 group_id: SV_GroupID, uint3 local_id: SV_GroupThreadID) {
 	bool single_frame = (push.flags & RCW_FLAG_SINGLE_FRAME) != 0u;
 	if (total_mass == 0u) {
 		if (fresh || single_frame) {
-			persist_j[slot_pair] = rcwPackHalf4(float4(0.0, 0.0, 0.0, 1.0));
+			persist_j[slot_pair] = rcwPackJBeta(float4(0.0, 0.0, 0.0, 1.0));
 			persist_count[slot_pair] = 0u;
 		}
 		return; // scratch already 0
 	}
 
-	scratch[scratch_base + 0] = 0u;
-	scratch[scratch_base + 1] = 0u;
-	scratch[scratch_base + 2] = 0u;
-	scratch[scratch_base + 3] = 0u;
-	scratch[scratch_base + 4] = 0u;
-
-	float inverse_total = 1.0 / float(total_mass);
-	float3 j_frame = float3(float(radiance_r), float(radiance_g), float(radiance_b)) * inverse_total;
-	float beta_frame = float(clear_mass) * inverse_total;
-
+	// Every load goes ahead of the stores: a load cannot move past a store to a
+	// buffer that may alias it, so radiance would otherwise serialise with the
+	// history reads. A clear-only bin never received radiance; its words are 0.
+	uint radiance_base = scratch_pair * RCW_SCRATCH_RADIANCE_WORDS;
+	uint3 radiance = uint3(0u);
+	if (mass.x > 0u)
+		radiance = uint3(scratch_radiance[radiance_base + 0], scratch_radiance[radiance_base + 1],
+			scratch_radiance[radiance_base + 2]);
 	uint sample_count = (fresh || single_frame) ? 0u : persist_count[slot_pair];
-	float alpha = 1.0 / float(min(sample_count + 1u, 64u));
 	float4 history = float4(0.0, 0.0, 0.0, 1.0);
 	if (sample_count > 0u)
-		history = rcwUnpackHalf4(persist_j[slot_pair]);
-	persist_j[slot_pair] = rcwPackHalf4(lerp(history, float4(j_frame, beta_frame), alpha));
+		history = rcwUnpackJBeta(persist_j[slot_pair]);
+
+	scratch_mass[scratch_pair] = uint2(0u);
+	if (mass.x > 0u) {
+		scratch_radiance[radiance_base + 0] = 0u;
+		scratch_radiance[radiance_base + 1] = 0u;
+		scratch_radiance[radiance_base + 2] = 0u;
+	}
+
+	float inverse_total = 1.0 / float(total_mass);
+	float3 j_frame = float3(radiance) * inverse_total;
+	float beta_frame = float(mass.y) * inverse_total;
+	float alpha = 1.0 / float(min(sample_count + 1u, 64u));
+	persist_j[slot_pair] = rcwPackJBeta(lerp(history, float4(j_frame, beta_frame), alpha));
 	persist_count[slot_pair] = min(sample_count + 1u, 64u);
 }

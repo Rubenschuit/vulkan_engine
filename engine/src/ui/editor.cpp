@@ -203,9 +203,11 @@ void Editor::setContext(const EditorContext& ctx, const RenderServices& services
 		m_debug_panel->setShadowRenderSystem(services.shadow);
 		m_debug_panel->setFlyCamera(&m_cameras.flyCamera());
 		m_debug_panel->setRcSystem(services.rc);
+		m_debug_panel->setRayTracingScene(services.ray_tracing);
 	}
 	if (m_graphics_panel) {
 		m_graphics_panel->setParticleBackend(services.particles);
+		m_graphics_panel->setRayQuerySupported(services.ray_tracing != nullptr);
 		if (ctx.engine_config)
 			m_graphics_panel->setMaxParticleCapacity(ctx.engine_config->max_particle_capacity);
 	}

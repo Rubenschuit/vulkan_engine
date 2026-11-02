@@ -22,9 +22,11 @@ struct VENGINE_API FrameStats {
 	float gpu_scene_render = 0.0f;
 	float gpu_ssr = 0.0f;
 	float gpu_rc = 0.0f;
+	float gpu_rc_as = 0.0f;
 	float gpu_rc_build = 0.0f;
 	float gpu_rc_shade = 0.0f;
 	float gpu_rc_map = 0.0f;
+	float gpu_rc_raygen = 0.0f;
 	float gpu_rc_trace = 0.0f;
 	float gpu_rc_resolve = 0.0f;
 	float gpu_rc_merge = 0.0f;
@@ -47,6 +49,7 @@ struct VENGINE_API FrameStats {
 	float cpu_scene_render = 0.0f;
 	float cpu_ssr = 0.0f;
 	float cpu_rc = 0.0f;
+	float cpu_rc_as = 0.0f;
 	float cpu_bloom = 0.0f;
 	float cpu_post_process = 0.0f;
 	float cpu_hiz = 0.0f;
@@ -80,11 +83,7 @@ struct VENGINE_API FrameStats {
 	float rc_rays_hit = 0.0f;
 	float rc_rays_clear = 0.0f;
 	float rc_rays_sky = 0.0f;
-	float rc_rays_sky_gated = 0.0f;
-	float rc_rays_unk_occluded = 0.0f;
-	float rc_rays_unk_stepcap = 0.0f;
-	float rc_rays_unk_edge = 0.0f;
-	float rc_rays_unk_clip = 0.0f;
+	float rc_rays_unknown = 0.0f;
 };
 
 }

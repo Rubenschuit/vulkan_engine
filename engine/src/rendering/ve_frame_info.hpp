@@ -159,17 +159,15 @@ struct UniformBufferObject {
 
 	// RC
 	alignas(16) glm::vec4 sky_radiance_scale{0.0f};
-	alignas(4) float rc_short_range_ao = 0.0f;
-	alignas(4) float rc_spec_occlusion = 0.0f;
-	alignas(4) uint32_t rc_rough_spec = 0;
-	alignas(4) float rc_spec_handoff_roughness = 0.0f; // = RcSettings::spec_handoff_roughness
+
+	alignas(4) uint32_t num_point_lights = 0;
 };
 // Layout must match UniformBuffer in ve_common.slangh
 static_assert(sizeof(UniformBufferObject) == 7536);
 static_assert(offsetof(UniformBufferObject, sh_coefficients) == 3248);
 static_assert(offsetof(UniformBufferObject, rect_lights) == 3392);
 static_assert(offsetof(UniformBufferObject, sky_radiance_scale) == 7504);
-static_assert(offsetof(UniformBufferObject, rc_spec_handoff_roughness) == 7532);
+static_assert(offsetof(UniformBufferObject, num_point_lights) == 7520);
 
 // --- Push constants ---
 
@@ -265,6 +263,7 @@ struct VeFrameInfo {
 	bool     area_lights_active = false;  // any active rect area light this frame (AREA_LIGHTS_SPEC variant)
 	bool     debug_shading = false;       // render_mode != BRDF_MICROFACET
 	bool     rc_composite_active = true;  // RC enabled
+	bool     ibl_active = false;          // = UniformBufferObject::ibl_active
 
 	// Post-processing
 	PostProcessPushConstant post_process_push;

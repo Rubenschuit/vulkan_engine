@@ -81,13 +81,15 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		m_cpu_breakdown_sum[i] += cpu_src[i];
 	}
 	const float rc_src[] = {
+		context.stats.gpu_rc_as,
 		context.stats.gpu_rc_build, context.stats.gpu_rc_map,
-		context.stats.gpu_rc_trace, context.stats.gpu_rc_resolve,
+		context.stats.gpu_rc_raygen, context.stats.gpu_rc_trace, context.stats.gpu_rc_resolve,
 		context.stats.gpu_rc_shade, context.stats.gpu_rc_merge,
 		context.stats.gpu_rc_irradiance, context.stats.gpu_rc_gather
 	};
 	for (int i = 0; i < RC_BREAKDOWN_COUNT; i++)
 		m_rc_breakdown_sum[i] += rc_src[i];
+	m_rc_as_cpu_sum += context.stats.cpu_rc_as;
 
 	if (m_frame_count >= 60) {
 		m_fps = (m_accumulated_dt > 0.0f) ? (60.0f / m_accumulated_dt) : 0.0f;
@@ -108,6 +110,8 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 			m_rc_breakdown_ms[i] = m_rc_breakdown_sum[i] / 60.0f;
 			m_rc_breakdown_sum[i] = 0.0f;
 		}
+		m_rc_as_cpu_ms = m_rc_as_cpu_sum / 60.0f;
+		m_rc_as_cpu_sum = 0.0f;
 
 		m_frame_count = 0;
 		m_cpu_time_sum = 0.0f;
@@ -315,10 +319,13 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		"UI", "Skinning", "Cluster Lights", "Particles"
 	};
 	constexpr int RC_ROW = 8;
+	constexpr int RC_AS_ROW = 0;
 	static const struct { const char* label; bool group; } rc_rows[] = {
-		{"Build", true}, {"Map", false}, {"Trace", false}, {"Resolve", false},
+		{"Accel. Structures", true},
+		{"Build", true}, {"Map", false}, {"Raygen", false}, {"Trace", false}, {"Resolve", false},
 		{"Shade", true}, {"Merge", false}, {"Irradiance", false}, {"Gather", false},
 	};
+	static_assert(std::size(rc_rows) == RC_BREAKDOWN_COUNT);
 
 	if (ImGui::BeginTable("##Breakdown", 3, ImGuiTableFlags_RowBg)) {
 		ImGui::TableSetupColumn("System", ImGuiTableColumnFlags_WidthStretch);
@@ -363,6 +370,8 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 						ImGui::TextDisabled("%s", rc_rows[k].label);
 					ImGui::Unindent(indent);
 					ImGui::TableNextColumn();
+					if (k == RC_AS_ROW)
+						ImGui::Text("%.2f", m_rc_as_cpu_ms);
 					ImGui::TableNextColumn();
 					if (rc_rows[k].group)
 						ImGui::Text("%.2f", m_rc_breakdown_ms[k]);

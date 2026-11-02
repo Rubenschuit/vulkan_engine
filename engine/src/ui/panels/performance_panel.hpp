@@ -50,10 +50,13 @@ private:
 	float m_gpu_breakdown_sum[BREAKDOWN_COUNT] = {};
 	float m_cpu_breakdown_ms[BREAKDOWN_COUNT] = {};
 	float m_cpu_breakdown_sum[BREAKDOWN_COUNT] = {};
-	// RC GI sub-passes, GPU only: build (map, trace, resolve), shade (merge, irradiance, gather)
-	static constexpr int RC_BREAKDOWN_COUNT = 8;
+	// RC GI sub-passes, GPU: acceleration structures, build (map, raygen, trace, resolve), shade (merge, irradiance, gather)
+	static constexpr int RC_BREAKDOWN_COUNT = 10;
 	float m_rc_breakdown_ms[RC_BREAKDOWN_COUNT] = {};
 	float m_rc_breakdown_sum[RC_BREAKDOWN_COUNT] = {};
+	// The one RC sub-pass with CPU work of its own: acceleration structure upkeep
+	float m_rc_as_cpu_ms = 0.0f;
+	float m_rc_as_cpu_sum = 0.0f;
 
 	// VRAM stats
 	VmaAllocator m_allocator;

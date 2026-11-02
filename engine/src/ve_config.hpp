@@ -149,6 +149,7 @@ namespace ObjectFlag {
 	constexpr uint32_t DYNAMIC        = 0x4;
 	constexpr uint32_t DEFORMED        = 0x8;
 	constexpr uint32_t INACTIVE       = 0x10;
+	constexpr uint32_t RT_EXCLUDED    = DEFORMED | IS_TRANSPARENT;
 }
 
 // GPU-driven culling
@@ -187,11 +188,6 @@ static_assert(MAX_GPU_OBJECTS <= 65536,
 	"MAX_GPU_OBJECTS exceeds 16-bit range; meshlet firstInstance packing would corrupt gpu_id");
 
 constexpr bool MSAA_ENABLED = true;
-#ifdef __APPLE__
-	constexpr bool ENABLE_RAY_TRACING = false; // not supported on moltenVK
-#else
-	constexpr bool ENABLE_RAY_TRACING = false;
-#endif
 
 // Central list of required Vulkan device extensions
 inline const std::vector<const char*> REQUIRED_DEVICE_EXTENSIONS = {
@@ -200,17 +196,6 @@ inline const std::vector<const char*> REQUIRED_DEVICE_EXTENSIONS = {
 	//VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, promoted to core in Vulkan 1.3
 	//VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, promoted to core in Vulkan 1.3
 	// VK_KHR_portability_subset is added at runtime if required (MoltenVK)
-#if ENABLE_RAY_TRACING
-	VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-	VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-	VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-	VK_KHR_RAY_QUERY_EXTENSION_NAME,
-#endif
-	// Ray tracing extensions (not on moltenvk yet)
-	//VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-	//VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-	//VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME
-	//VK_KHR_RAY_QUERY_EXTENSION_NAME
 };
 
 // Central list of required Vulkan instance extensions (GLFW-required are added at runtime)

@@ -72,8 +72,8 @@ if (VE_BUILD_TESTS)
 	include(${CMAKE_SOURCE_DIR}/cmake/Tests.cmake)
 endif()
 
-# Configure optimization levels for release builds
 if (MSVC)
+	string(APPEND CMAKE_CXX_FLAGS " /MP")
 	string(APPEND CMAKE_CXX_FLAGS_RELEASE " /O2 /Ob2 /GL")
 	string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " /LTCG")
 	string(APPEND CMAKE_SHARED_LINKER_FLAGS_RELEASE " /LTCG")

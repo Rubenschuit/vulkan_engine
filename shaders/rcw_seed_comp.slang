@@ -11,7 +11,7 @@
 // The donor's interval cutoffs differ by the lod spacing factor, so per-bin
 // radiance is attributed to the wrong distance range until resplitting.
 //
-// Runs after keepalive but before resolve.
+// Runs after ray generation, unordered with the trace, and before resolve.
 
 #include "rc_world_common.slangh"
 

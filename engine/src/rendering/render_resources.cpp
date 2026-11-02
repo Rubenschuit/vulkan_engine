@@ -28,14 +28,15 @@ void RenderResources::createDescriptors() {
 	m_global_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eAllGraphics | vk::ShaderStageFlagBits::eCompute)
 		.addBinding(1, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eVertex)
-		.addBinding(2, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment)
+		.addBinding(2, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eVertex
+			| vk::ShaderStageFlagBits::eFragment | vk::ShaderStageFlagBits::eCompute)
 		.build();
 
 	m_material_set_layout = VeDescriptorSetLayout::Builder(m_ve_device)
 		.addBinding(0, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment)
 		.build();
 
-	m_global_pool = VeDescriptorPool::Builder(m_ve_device)
+	auto pool_builder = VeDescriptorPool::Builder(m_ve_device)
 		.setMaxSets(8192)
 		.addPoolSize(vk::DescriptorType::eUniformBuffer, 1024)
 		.addPoolSize(vk::DescriptorType::eCombinedImageSampler, 4096)
@@ -44,8 +45,10 @@ void RenderResources::createDescriptors() {
 		.addPoolSize(vk::DescriptorType::eStorageBuffer, 8192)
 		.addPoolSize(vk::DescriptorType::eStorageImage, 128)
 		.setPoolFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet
-			| vk::DescriptorPoolCreateFlagBits::eUpdateAfterBind)
-		.buildShared();
+			| vk::DescriptorPoolCreateFlagBits::eUpdateAfterBind);
+	if (m_ve_device.supportsRayQuery())
+		pool_builder.addPoolSize(vk::DescriptorType::eAccelerationStructureKHR, 16);
+	m_global_pool = pool_builder.buildShared();
 
 	m_default_particle_texture_handle = m_resource_manager.load<VeTexture>("default_particle");
 }

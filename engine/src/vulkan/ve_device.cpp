@@ -431,6 +431,26 @@ void VeDevice::createLogicalDevice() {
 			VE_LOGW("shaderInt16 not supported: RC GI unavailable on this device");
 	}
 
+	auto available_extensions = m_physical_device.enumerateDeviceExtensionProperties();
+	auto hasExtension = [&](const char* name) {
+		return std::ranges::any_of(available_extensions, [name](const auto& ext) {
+			return strcmp(ext.extensionName, name) == 0;
+		});
+	};
+	m_supports_ray_query = hasExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME)
+		&& hasExtension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)
+		&& hasExtension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+	if (m_supports_ray_query) {
+		auto rt_chain = m_physical_device.getFeatures2<vk::PhysicalDeviceFeatures2,
+			vk::PhysicalDeviceVulkan12Features,
+			vk::PhysicalDeviceAccelerationStructureFeaturesKHR,
+			vk::PhysicalDeviceRayQueryFeaturesKHR>();
+		m_supports_ray_query =
+			rt_chain.get<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>().accelerationStructure
+			&& rt_chain.get<vk::PhysicalDeviceRayQueryFeaturesKHR>().rayQuery
+			&& rt_chain.get<vk::PhysicalDeviceVulkan12Features>().bufferDeviceAddress;
+	}
+
 	// Setup a chain of structures to enable required Vulkan features
 	// Note: Slang-generated SPIR-V for VS uses DrawParameters (BaseVertex/VertexIndex),
 	// so we must enable shaderDrawParameters from Vulkan 1.1 features.
@@ -438,14 +458,16 @@ void VeDevice::createLogicalDevice() {
 					vk::PhysicalDeviceVulkan11Features,
 					vk::PhysicalDeviceVulkan12Features,
 					vk::PhysicalDeviceVulkan13Features,
+					vk::PhysicalDeviceAccelerationStructureFeaturesKHR,
+					vk::PhysicalDeviceRayQueryFeaturesKHR,
 					vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> feature_chain = {
-		{.features = {.independentBlend = true, 
-					  .multiDrawIndirect = true, 
-					  .drawIndirectFirstInstance = true, 
-					  .depthClamp = true, 
-					  .depthBiasClamp = true, 
-					  .samplerAnisotropy = true, 
-					  .shaderStorageImageExtendedFormats = true, 
+		{.features = {.independentBlend = true,
+					  .multiDrawIndirect = true,
+					  .drawIndirectFirstInstance = true,
+					  .depthClamp = true,
+					  .depthBiasClamp = true,
+					  .samplerAnisotropy = true,
+					  .shaderStorageImageExtendedFormats = true,
 					  .shaderInt16 = m_supports_shader_int16}},
 		{.multiview = true, .shaderDrawParameters = true},
 		{	// Vulkan 1.2 features (descriptor indexing + timeline semaphore)
@@ -458,10 +480,17 @@ void VeDevice::createLogicalDevice() {
 			.descriptorBindingVariableDescriptorCount = true,
 			.runtimeDescriptorArray = true,
 			.timelineSemaphore = true,
+			.bufferDeviceAddress = m_supports_ray_query,
 		},
 		{.synchronization2 = true, .dynamicRendering = true},
+		{.accelerationStructure = true},
+		{.rayQuery = true},
 		{.extendedDynamicState = true },
 	};
+	if (!m_supports_ray_query) {
+		feature_chain.unlink<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>();
+		feature_chain.unlink<vk::PhysicalDeviceRayQueryFeaturesKHR>();
+	}
 
 	assert(m_required_device_extensions.size() > 0 && "At least one device extension must be enabled");
 
@@ -480,16 +509,19 @@ void VeDevice::createLogicalDevice() {
 	std::vector<const char*> enabled_extensions = m_required_device_extensions;
 
 	// Enable optional extensions if supported
-	auto available_extensions = m_physical_device.enumerateDeviceExtensionProperties();
-	auto hasExtension = [&](const char* name) {
-		return std::ranges::any_of(available_extensions, [name](const auto& ext) {
-			return strcmp(ext.extensionName, name) == 0;
-		});
-	};
 	if (hasExtension(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME)) {
 		enabled_extensions.push_back(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME);
 		m_supports_calibrated_timestamps = true;
 		VE_LOGI("Enabled optional extension: " << VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME);
+	}
+	if (m_supports_ray_query) {
+		enabled_extensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+		enabled_extensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+		enabled_extensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+		VE_LOGI("Enabled optional extension: " << VK_KHR_RAY_QUERY_EXTENSION_NAME
+			<< " (+ acceleration structure, buffer device address)");
+	} else {
+		VE_LOGI("Ray query unavailable");
 	}
 
 	// MoltenVK exposes VK_KHR_portability_subset, KosmicKrisp does not (fully compliant)
@@ -653,6 +685,7 @@ vk::SampleCountFlagBits VeDevice::queryMaxUsableSampleCount() const {
 
 void VeDevice::createAllocator() {
 	VmaAllocatorCreateInfo alloc_info {
+		.flags            = m_supports_ray_query ? VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT : 0u,
 		.physicalDevice   = *m_physical_device,
 		.device           = *m_device,
 		.instance         = *m_instance,

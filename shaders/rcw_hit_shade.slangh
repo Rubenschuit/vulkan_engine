@@ -1,0 +1,248 @@
+// Shading a ray hit: what the surface a ray found sends back down that ray.
+//
+// L_o = emissive + albedo * E_probe + (albedo / pi) * sum over lights of L * (n . l) * V
+//
+// albedo is the diffuse share of base colour, E_probe the cascade-0 irradiance
+// already stored around the hit (the second bounce) and V a shadow ray.
+// Lambertian only: the specular lobe is not computed at hits.
+
+#pragma once
+
+// A bounce wants the average colour over the footprint, not one texel of it,
+// and the ray carries no derivatives to pick a mip with. A fixed coarse level
+// is both cheaper and closer to right than mip 0 would be.
+static const float RCW_HIT_ALBEDO_MIP = 4.0;
+// An alpha test is a per-texel decision: an averaged alpha erodes or fills the
+// cut-outs, so masks are read at full resolution.
+static const float RCW_ALPHA_TEST_MIP = 0.0;
+// Shadow rays stop at the first thing they meet, so they leave from a point
+// pushed off the surface along its normal, ignore their first
+// RCW_SHADOW_BIAS, and stop that far short of a point or spot light.
+static const float RCW_SHADOW_BIAS = 0.02;
+static const float RCW_SHADOW_NORMAL_BIAS = 0.04;
+// Shadow ray length toward a directional light, which is at infinity.
+static const float RCW_SHADOW_RAY_MAX = 1e4;
+
+struct RcwHitSurface {
+	float3 position;
+	float3 normal;   // geometric, turned to face the ray
+	float3 albedo;
+	float3 emissive;
+};
+
+// A triangle's vertices in the mega buffer. Its indices are mesh-local, so
+// vertex_offset is added exactly as the draw path's firstVertex adds it.
+uint3 rcwTriangleIndices(RcwInstanceGeometry geometry, uint primitive_index) {
+	uint index_base = (geometry.first_index + primitive_index * 3u) * 4u;
+	return mega_indices.Load3(index_base) + geometry.vertex_offset;
+}
+
+// The triangle behind a committed hit.
+void rcwHitTriangle(RcwInstanceGeometry geometry, uint primitive_index,
+	out float3 p[3], out float2 uv[3], out float3 color[3]) {
+	uint3 indices = rcwTriangleIndices(geometry, primitive_index);
+	[unroll]
+	for (uint corner = 0; corner < 3; corner++) {
+		uint vertex_base = indices[corner] * RCW_VERTEX_STRIDE;
+		p[corner] = asfloat(mega_vertices.Load3(vertex_base));
+		uv[corner] = asfloat(mega_vertices.Load2(vertex_base + RCW_VERTEX_UV_OFFSET));
+		color[corner] = asfloat(mega_vertices.Load3(vertex_base + RCW_VERTEX_COLOR_OFFSET));
+	}
+}
+
+// The coordinates a material's textures are sampled at, before each slot's
+// KHR_texture_transform. The flip is a shader step on the raster path too;
+// the stored UVs are as the asset had them.
+float2 rcwMaterialTexCoord(MaterialGPU material, float2 tex_coord) {
+	if ((material.material_flags & MAT_FLAG_FLIP_TEX_V) != 0u)
+		tex_coord.y = 1.0 - tex_coord.y;
+	return tex_coord;
+}
+
+// Surface at a committed hit. The normal is the cross product of two
+// world-space edges rather than the interpolated vertex normal: that is exact
+// under any affine instance transform, where transforming a stored normal
+// would need the inverse transpose, and a faceted normal costs a diffuse
+// bounce nothing.
+RcwHitSurface rcwHitSurfaceOf(uint instance_index, uint primitive_index, float2 barycentrics,
+	float3x4 object_to_world, float3 hit_position, float3 ray_direction) {
+	RcwHitSurface surface;
+	surface.position = hit_position;
+	surface.normal = -ray_direction;
+	surface.albedo = float3(0.0, 0.0, 0.0);
+	surface.emissive = float3(0.0, 0.0, 0.0);
+
+	RcwInstanceGeometry geometry = instance_geometry[instance_index];
+	float3 p[3];
+	float2 uv[3];
+	float3 color[3];
+	rcwHitTriangle(geometry, primitive_index, p, uv, color);
+
+	float3 world_p0 = mul(object_to_world, float4(p[0], 1.0));
+	float3 edge_1 = mul(object_to_world, float4(p[1], 1.0)) - world_p0;
+	float3 edge_2 = mul(object_to_world, float4(p[2], 1.0)) - world_p0;
+	float3 face = cross(edge_1, edge_2);
+	if (dot(face, face) > 1e-20)
+		surface.normal = normalize(face);
+	// A ray legitimately reaches single-sided geometry from behind, and the
+	// engine draws plenty of it; shade whichever side the ray arrived on.
+	if (dot(surface.normal, ray_direction) > 0.0)
+		surface.normal = -surface.normal;
+
+	float3 weights = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
+	float2 tex_coord = uv[0] * weights.x + uv[1] * weights.y + uv[2] * weights.z;
+	float3 vertex_color = color[0] * weights.x + color[1] * weights.y + color[2] * weights.z;
+
+	MaterialGPU material = materials[geometry.material_index];
+	tex_coord = rcwMaterialTexCoord(material, tex_coord);
+	float2 uv_albedo = applyUvTransform(tex_coord, material.uv_albedo, material.uv_rot_a.x);
+	// Every slot has a default texture, so these sample unconditionally, as
+	// the graphics path does; base colour is texture * factor * COLOR_0 there.
+	surface.albedo = bindless_textures[NonUniformResourceIndex(material.albedo_index)]
+		.SampleLevel(bindless_sampler, uv_albedo, RCW_HIT_ALBEDO_MIP).rgb
+		* material.base_color_factor.rgb * vertex_color;
+	// An unlit material shows its base colour and takes no lighting: the
+	// raster path returns before its emissive texture is read, so it is not
+	// read here either. No albedo keeps the light loop from adding any on top.
+	if ((material.material_flags & MAT_FLAG_UNLIT) != 0u) {
+		surface.emissive = surface.albedo;
+		surface.albedo = float3(0.0, 0.0, 0.0);
+		return surface;
+	}
+	if (material.pbr_params.z > 0.0) {
+		float2 uv_emissive = applyUvTransform(tex_coord, material.uv_emissive, material.uv_rot_b.x);
+		surface.emissive = bindless_textures[NonUniformResourceIndex(material.emissive_index)]
+			.SampleLevel(bindless_sampler, uv_emissive, RCW_HIT_ALBEDO_MIP).rgb
+			* material.emissive_factor.xyz * material.pbr_params.z;
+	}
+	// The raster diffuse weight: a metal reflects only in the specular lobe,
+	// which is not computed here, so it bounces no diffuse light. Spec-gloss
+	// materials have metallic 0 there, their diffuse texture already holding
+	// the split, and transmissive geometry never reaches the BLAS.
+	if ((material.material_flags & MAT_FLAG_SPEC_GLOSS) == 0u) {
+		float2 uv_mr = applyUvTransform(tex_coord, material.uv_metal_rough, material.uv_rot_a.y);
+		float metallic = bindless_textures[NonUniformResourceIndex(material.metallic_roughness_index)]
+			.SampleLevel(bindless_sampler, uv_mr, RCW_HIT_ALBEDO_MIP).b * material.pbr_params.x;
+		surface.albedo *= 1.0 - metallic;
+	}
+	return surface;
+}
+
+// Whether a candidate on an alpha-masked instance is solid where the ray
+// crossed it, by the raster discard's test: texture alpha * factor * COLOR_0
+// alpha against the cutoff, at the same UVs. Only masked instances are forced
+// non-opaque, so nothing else ever reaches this.
+bool rcwAlphaPasses(uint instance_index, uint primitive_index, float2 barycentrics) {
+	RcwInstanceGeometry geometry = instance_geometry[instance_index];
+	uint3 indices = rcwTriangleIndices(geometry, primitive_index);
+	float3 weights = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
+	float2 tex_coord = float2(0.0, 0.0);
+	float vertex_alpha = 0.0;
+	[unroll]
+	for (uint corner = 0; corner < 3; corner++) {
+		uint vertex_base = indices[corner] * RCW_VERTEX_STRIDE;
+		tex_coord += asfloat(mega_vertices.Load2(vertex_base + RCW_VERTEX_UV_OFFSET)) * weights[corner];
+		vertex_alpha += asfloat(mega_vertices.Load(vertex_base + RCW_VERTEX_COLOR_OFFSET + 12u)) * weights[corner];
+	}
+
+	MaterialGPU material = materials[geometry.material_index];
+	float2 uv_albedo = applyUvTransform(rcwMaterialTexCoord(material, tex_coord),
+		material.uv_albedo, material.uv_rot_a.x);
+	float tex_alpha = bindless_textures[NonUniformResourceIndex(material.albedo_index)]
+		.SampleLevel(bindless_sampler, uv_albedo, RCW_ALPHA_TEST_MIP).a;
+	return !alphaMaskCutoff(material, tex_alpha, vertex_alpha);
+}
+
+// Whether anything blocks the segment from origin along direction up to t_max.
+// Emitters do not: a light made from an emissive mesh sits inside that mesh,
+// which would otherwise shadow it from every hit.
+bool rcwShadowed(float3 origin, float3 direction, float t_max) {
+	RayDesc ray;
+	ray.Origin = origin;
+	ray.Direction = direction;
+	ray.TMin = RCW_SHADOW_BIAS;
+	ray.TMax = max(t_max, RCW_SHADOW_BIAS);
+
+	// Any hit blocks, so the search can stop at the first one found rather
+	// than at the nearest; committing a masked candidate ends it as well.
+	RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
+	query.TraceRayInline(rcw_tlas, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, RCW_INSTANCE_MASK_SURFACE, ray);
+	while (query.Proceed()) {
+		if (query.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE
+			&& rcwAlphaPasses(query.CandidateInstanceIndex(), query.CandidatePrimitiveIndex(),
+				query.CandidateTriangleBarycentrics()))
+			query.CommitNonOpaqueTriangleHit();
+	}
+	return query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+}
+
+// A point or spot light's shadow ray, aimed from the pushed-off origin: a
+// direction taken from the hit itself runs parallel to the true line and
+// passes beside the light.
+bool rcwShadowedFrom(float3 origin, float3 light_position) {
+	float3 to_light = light_position - origin;
+	float light_distance = length(to_light);
+	return rcwShadowed(origin, to_light / max(light_distance, 1e-6), light_distance - RCW_SHADOW_BIAS);
+}
+
+// Outgoing radiance of a shaded hit, toward wherever the ray came from.
+float3 rcwShadeHit(RcwHitSurface surface) {
+	float3 radiance = surface.emissive;
+	float3 diffuse = surface.albedo * (1.0 / PI);
+	if (all(diffuse <= 0.0))
+		return radiance;
+
+	// Second bounce: what the probes already know is arriving here. Their
+	// tiles hold cosine-weighted incident radiance, so albedo times that is
+	// the outgoing share, the same product the composite forms on screen.
+	// Read from last frame's atlas, so each further bounce lags one frame.
+	float3 incident;
+	if (rcwProbeIrradiance(surface.position, surface.normal, incident))
+		radiance += surface.albedo * incident;
+
+	float3 shadow_origin = surface.position + surface.normal * RCW_SHADOW_NORMAL_BIAS;
+	for (uint i = 0; i < ubo.num_dir_lights; i++) {
+		float3 light_direction = normalize(-ubo.dir_lights[i].direction.xyz);
+		float n_dot_l = dot(surface.normal, light_direction);
+		if (n_dot_l <= 0.0)
+			continue;
+		if (rcwShadowed(shadow_origin, light_direction, RCW_SHADOW_RAY_MAX))
+			continue;
+		radiance += diffuse * ubo.dir_lights[i].color.xyz * n_dot_l;
+	}
+
+	// Point lights first, then spot lights, matching ClusterLightSystem's
+	// order; the spot cone parameters live beside them in the UBO. The UBO's
+	// spot count comes from another walk of the scene than the list in
+	// rcw_point_lights, so the list's own count bounds the loop.
+	uint punctual_count = min(ubo.num_point_lights + ubo.num_spot_lights, push.light_count);
+	for (uint light_index = 0; light_index < punctual_count; light_index++) {
+		PointLight light = rcw_point_lights[light_index];
+		float3 to_light = light.position.xyz - surface.position;
+		float distance_sq = dot(to_light, to_light);
+		float range = light.position.w;
+		if (range > 0.0 && distance_sq >= range * range)
+			continue;
+		float3 light_direction = to_light * rsqrt(max(distance_sq, 1e-8));
+		float n_dot_l = dot(surface.normal, light_direction);
+		if (n_dot_l <= 0.0)
+			continue;
+		float attenuation = calculateAttenuation(distance_sq, range);
+		if (light_index >= ubo.num_point_lights) {
+			uint spot_index = light_index - ubo.num_point_lights;
+			attenuation *= calculateSpotAttenuation(light_direction,
+				ubo.spot_lights[spot_index].direction.xyz,
+				ubo.spot_lights[spot_index].direction.w,
+				ubo.spot_lights[spot_index].color.w);
+		}
+		float3 incident = light.color.xyz * attenuation;
+		// Skip the shadow ray for a light too dim to matter here; it is the
+		// expensive half of the light.
+		if (max(max(incident.r, incident.g), incident.b) * n_dot_l < LIGHT_RADIANCE_CUTOFF)
+			continue;
+		if (rcwShadowedFrom(shadow_origin, light.position.xyz))
+			continue;
+		radiance += diffuse * incident * n_dot_l;
+	}
+	return radiance;
+}

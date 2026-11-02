@@ -132,6 +132,7 @@ public:
 	bool supportsDrawIndirectCount() const {return m_supports_draw_indirect_count; }
 	bool supportsShaderInt16() const { return m_supports_shader_int16; } // the rcw shaders need it
 	bool supportsCalibratedTimestamps() const { return m_supports_calibrated_timestamps; }
+	bool supportsRayQuery() const { return m_supports_ray_query; }
 	// Single-time command buffer helpers (select queue/pool)
 	std::unique_ptr<vk::raii::CommandBuffer> beginSingleTimeCommands(QueueKind kind = QueueKind::Graphics);
 	void endSingleTimeCommands(vk::raii::CommandBuffer& cmd, QueueKind kind = QueueKind::Graphics);
@@ -182,6 +183,7 @@ private:
 	bool m_supports_draw_indirect_count = false;
 	bool m_supports_shader_int16 = false;
 	bool m_supports_calibrated_timestamps = false;
+	bool m_supports_ray_query = false;
 	bool m_has_dedicated_compute = false;
 
 	VmaAllocator m_allocator = nullptr;

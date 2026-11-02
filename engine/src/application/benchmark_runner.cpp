@@ -39,9 +39,11 @@ constexpr FloatMetric FLOAT_METRICS[] = {
 	{"gpu_scene_render", &FrameStats::gpu_scene_render},
 	{"gpu_ssr", &FrameStats::gpu_ssr},
 	{"gpu_rc", &FrameStats::gpu_rc},
+	{"gpu_rc_as", &FrameStats::gpu_rc_as},
 	{"gpu_rc_build", &FrameStats::gpu_rc_build},
 	{"gpu_rc_shade", &FrameStats::gpu_rc_shade},
 	{"gpu_rc_map", &FrameStats::gpu_rc_map},
+	{"gpu_rc_raygen", &FrameStats::gpu_rc_raygen},
 	{"gpu_rc_trace", &FrameStats::gpu_rc_trace},
 	{"gpu_rc_resolve", &FrameStats::gpu_rc_resolve},
 	{"gpu_rc_merge", &FrameStats::gpu_rc_merge},
@@ -62,6 +64,7 @@ constexpr FloatMetric FLOAT_METRICS[] = {
 	{"cpu_scene_render", &FrameStats::cpu_scene_render},
 	{"cpu_ssr", &FrameStats::cpu_ssr},
 	{"cpu_rc", &FrameStats::cpu_rc},
+	{"cpu_rc_as", &FrameStats::cpu_rc_as},
 	{"cpu_bloom", &FrameStats::cpu_bloom},
 	{"cpu_post_process", &FrameStats::cpu_post_process},
 	{"cpu_hiz", &FrameStats::cpu_hiz},
@@ -79,11 +82,7 @@ constexpr FloatMetric RAY_METRICS[] = {
 	{"rc_rays_hit", &FrameStats::rc_rays_hit},
 	{"rc_rays_clear", &FrameStats::rc_rays_clear},
 	{"rc_rays_sky", &FrameStats::rc_rays_sky},
-	{"rc_rays_sky_gated", &FrameStats::rc_rays_sky_gated},
-	{"rc_rays_unk_occluded", &FrameStats::rc_rays_unk_occluded},
-	{"rc_rays_unk_stepcap", &FrameStats::rc_rays_unk_stepcap},
-	{"rc_rays_unk_edge", &FrameStats::rc_rays_unk_edge},
-	{"rc_rays_unk_clip", &FrameStats::rc_rays_unk_clip},
+	{"rc_rays_unknown", &FrameStats::rc_rays_unknown},
 };
 
 struct CounterMetric {
@@ -139,15 +138,44 @@ std::string jsonEscape(const std::string& s) {
 
 std::string utcTimestamp() {
 	std::time_t now = std::time(nullptr);
+	std::tm utc{};
+#ifdef _WIN32
+	if (gmtime_s(&utc, &now) != 0)
+		return "unknown";
+#else
+	if (gmtime_r(&now, &utc) == nullptr)
+		return "unknown";
+#endif
 	char buf[32];
-	if (std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&now)) == 0)
+	if (std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utc) == 0)
 		return "unknown";
 	return buf;
 }
 
+const char* skipSpace(const char* s) {
+	while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n')
+		s++;
+	return s;
+}
+
 bool parseKeypoint(const char* s, CameraKeypoint& kp) {
-	return std::sscanf(s, "%f,%f,%f:%f,%f,%f",
-		&kp.pos.x, &kp.pos.y, &kp.pos.z, &kp.look.x, &kp.look.y, &kp.look.z) == 6;
+	float* out[6] = {&kp.pos.x, &kp.pos.y, &kp.pos.z, &kp.look.x, &kp.look.y, &kp.look.z};
+	const char separator[5] = {',', ',', ':', ',', ','};
+	const char* cursor = s;
+	for (int i = 0; i < 6; i++) {
+		char* end = nullptr;
+		float v = std::strtof(cursor, &end);
+		if (end == cursor || !std::isfinite(v))
+			return false;
+		*out[i] = v;
+		cursor = end;
+		if (i < 5) {
+			if (*cursor != separator[i])
+				return false;
+			cursor++;
+		}
+	}
+	return *skipSpace(cursor) == '\0';
 }
 
 float parseFloat(std::string_view text, const std::string& flag) {
@@ -169,31 +197,15 @@ uint32_t parseUnsigned(std::string_view text, const std::string& flag) {
 using S = RenderSettings;
 constexpr BenchSetKey BENCH_SET_KEYS[] = {
 	{.name = "rc_enabled", .apply = [](S& s, float v) { s.rc.enabled = v != 0.0f; }},
-	{.name = "rc_thickness", .apply = [](S& s, float v) { s.rc.thickness = v; }},
-	{.name = "rc_intensity", .apply = [](S& s, float v) { s.rc.intensity = v; }},
 	{.name = "rc_luma_clamp", .apply = [](S& s, float v) { s.rc.luma_clamp = v; }},
 	{.name = "rc_resolution_div", .apply = [](S& s, float v) { s.rc.resolution_div = static_cast<int>(v); }},
-	{.name = "rc_short_range_ao", .apply = [](S& s, float v) { s.rc.short_range_ao = v; }},
-	{.name = "rc_spec_occlusion", .apply = [](S& s, float v) { s.rc.spec_occlusion = v; }},
 	{.name = "ssr_max_roughness", .apply = [](S& s, float v) { s.ssr_max_roughness = v; }},
 	{.name = "rc_rays_per_pixel", .apply = [](S& s, float v) { s.rc.rays_per_pixel = static_cast<int>(v); }},
 	{.name = "rc_ds0", .apply = [](S& s, float v) { s.rc.ds0 = v; }},
 	{.name = "rc_lod0_dist", .apply = [](S& s, float v) { s.rc.lod0_dist = v; }},
-	{.name = "rc_sky_min_frac", .apply = [](S& s, float v) { s.rc.sky_min_frac = v; }},
-	{.name = "rc_probe_ttl", .apply = [](S& s, float v) { s.rc.probe_ttl = static_cast<int>(v); }},
-	{.name = "rc_sky_visibility", .apply = [](S& s, float v) { s.rc.sky_visibility = v; }},
-	{.name = "rc_blend_zone", .apply = [](S& s, float v) { s.rc.blend_zone = v; }},
 	{.name = "rc_cascades", .apply = [](S& s, float v) { s.rc.cascades = static_cast<int>(v); }},
-	{.name = "rc_c0_polar_bins", .apply = [](S& s, float v) { s.rc.c0_polar_bins = static_cast<int>(v); }},
-	{.name = "rc_c0_ray_length", .apply = [](S& s, float v) { s.rc.c0_ray_length = v; }},
 	{.name = "rc_memory_mb", .apply = [](S& s, float v) { s.rc.memory_mb = static_cast<int>(v); }},
-	{.name = "rc_hist_depth_check", .apply = [](S& s, float v) { s.rc.hist_depth_check = v != 0.0f; }},
-	{.name = "rc_rough_specular", .apply = [](S& s, float v) { s.rc.rough_specular = v != 0.0f; }},
-	{.name = "rc_spec_handoff_roughness", .apply = [](S& s, float v) { s.rc.spec_handoff_roughness = v; }},
-	{.name = "rc_parent_mode", .apply = [](S& s, float v) { s.rc.parent_mode = static_cast<int>(v); }},
-	{.name = "rc_deposit_mode", .apply = [](S& s, float v) { s.rc.deposit_mode = static_cast<int>(v); }},
-	{.name = "rc_count_weighted_read", .apply = [](S& s, float v) { s.rc.count_weighted_read = v != 0.0f; }},
-	{.name = "rc_freeze_probes", .apply = [](S& s, float v) { s.rc.freeze_probes = v != 0.0f; }},
+	{.name = "rc_ray_query", .apply = [](S& s, float v) { s.rc.ray_query = v != 0.0f; }},
 	{.name = "rc_single_frame", .apply = [](S& s, float v) { s.rc.single_frame = v != 0.0f; }},
 	{.name = "rc_probe_j_cascade", .apply = [](S& s, float v) { s.rc.probe_j_cascade = static_cast<int>(v); }},
 	{.name = "ibl_enabled", .apply = [](S& s, float v) { s.ibl_enabled = v != 0.0f; }},
@@ -347,8 +359,17 @@ std::optional<BenchmarkConfig> BenchmarkConfig::parseArgs(int argc, char** argv)
 			config.set_values.emplace_back(std::move(key), v);
 			enabled = true;
 		} else if (arg == "--bench-res") {
-			unsigned w = 0, h = 0;
-			if (std::sscanf(value(i, "--bench-res"), "%ux%u", &w, &h) != 2 || w == 0 || h == 0)
+			const char* text = value(i, "--bench-res");
+			char* end = nullptr;
+			unsigned long w = std::strtoul(text, &end, 10);
+			unsigned long h = 0;
+			if (end != text && (*end == 'x' || *end == 'X')) {
+				const char* second = end + 1;
+				h = std::strtoul(second, &end, 10);
+				if (end == second || *skipSpace(end) != '\0')
+					h = 0;
+			}
+			if (w == 0 || h == 0)
 				throw std::runtime_error("--bench-res expects WxH (e.g. 1920x1080)");
 			config.width = w;
 			config.height = h;
@@ -472,8 +493,8 @@ int BenchmarkRunner::finish(const BenchmarkRunInfo& info) {
 		info.culling_backend, info.hiz_occlusion, info.draw_indirect_count);
 	json += std::format("  \"camera\": {{\"keypoints\": {}, \"moving\": {}}},\n",
 		m_config.keypoints.size(), m_config.keypoints.size() > 1);
-	json += std::format("  \"rc\": {{\"enabled\": {}, \"cold_start\": {}}},\n",
-		info.rc_enabled, m_config.rc_cold_start);
+	json += std::format("  \"rc\": {{\"enabled\": {}, \"cold_start\": {}, \"ray_query\": {}, \"device_ray_query\": {}}},\n",
+		info.rc_enabled, m_config.rc_cold_start, info.rc_ray_query, info.supports_ray_query);
 
 	std::map<std::string, float> overrides;
 	for (const auto& [key, v] : m_config.set_values)

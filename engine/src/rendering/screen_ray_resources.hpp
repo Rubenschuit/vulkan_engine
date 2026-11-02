@@ -2,9 +2,9 @@
  * ScreenRayResources: what every screen-space ray march reads. The previous
  * frame's HDR radiance with its mip chain (the history) and the current
  * frame's min/max depth pyramid. SSR and RC bind both. RenderPipeline
- * recreates this before it broadcasts a ResolutionChangedEvent, generates
- * the pyramid once per frame before the first trace, and copies the history
- * after the transparent pass.
+ * recreates this before it broadcasts a ResolutionChangedEvent. On frames a
+ * march runs, it generates the pyramid once before the first one and copies
+ * the history after the transparent pass.
  */
 
 #pragma once

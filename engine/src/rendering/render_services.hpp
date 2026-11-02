@@ -7,6 +7,7 @@ class ParticleBackend;
 class ShadowRenderSystem;
 class SkyboxRenderSystem;
 class RcSystem;
+class RayTracingScene;
 
 // Bundle of editor- and app-facing render systems owned by RenderPipeline.
 
@@ -15,6 +16,7 @@ struct VENGINE_API RenderServices {
 	ShadowRenderSystem* shadow    = nullptr;
 	ParticleBackend*    particles = nullptr;
 	RcSystem*           rc        = nullptr;
+	RayTracingScene*    ray_tracing = nullptr;
 };
 
 }

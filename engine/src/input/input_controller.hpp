@@ -52,7 +52,7 @@ public:
 		InputController* m_owner = nullptr;
 	};
 
-	InputController(VeWindow& window, EventBus& event_bus);
+	InputController(VeWindow& window, EventBus& event_bus, bool free_cursor_on_start = false);
 	~InputController();
 
 	InputController(const InputController&) = delete;

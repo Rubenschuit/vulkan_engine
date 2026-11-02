@@ -91,6 +91,7 @@ GpuSceneManager::GpuSceneManager(VeDevice& device) : m_ve_device(device) {
 		m_obj_id_in_dirty_set[f].assign(MAX_GPU_OBJECTS, false);
 		m_obj_dirty_ids[f].reserve(1024);
 	}
+	m_moved_traceable_queued.assign(MAX_GPU_OBJECTS, false);
 	m_object_lod_group_ids.resize(MAX_GPU_OBJECTS);
 	m_cpu_object_data.resize(MAX_GPU_OBJECTS);
 	m_meshlet_object_info_cpu.resize(MAX_GPU_OBJECTS);
@@ -228,6 +229,8 @@ uint32_t GpuSceneManager::registerObject(Entity entity, const MeshComponent& mes
 	m_entity_to_gpu_id[entity.index()] = gpu_id;
 	m_gpu_id_to_entity[gpu_id] = entity;
 	m_active_count++;
+	m_geometry_set_generation++;
+	m_instance_generation++;
 
 	writeObjectData(gpu_id, mesh, mega_buffer, mat_mgr);
 
@@ -279,6 +282,8 @@ void GpuSceneManager::unregisterObject(Entity entity) {
 	m_gpu_id_to_entity.erase(gpu_id);
 	m_entity_to_gpu_id.erase(it);
 	m_active_count--;
+	m_geometry_set_generation++;
+	m_instance_generation++;
 
 	m_cpu_object_data[gpu_id] = {};
 	m_meshlet_object_info_cpu[gpu_id] = {};
@@ -293,12 +298,24 @@ void GpuSceneManager::markTransformDirty(Entity entity) {
 	if (it == m_entity_to_gpu_id.end())
 		return;
 	uint32_t gpu_id = it->second;
+	// Deformed objects are never in the TLAS, so their motion leaves it alone.
+	if ((m_cpu_object_data[gpu_id].object_flags & ObjectFlag::DEFORMED) == 0 && !m_moved_traceable_queued[gpu_id]) {
+		m_moved_traceable_queued[gpu_id] = true;
+		m_moved_traceable.push_back(gpu_id);
+	}
 	for (uint32_t f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
 		if (!m_id_in_dirty_set[f][gpu_id]) {
 			m_id_in_dirty_set[f][gpu_id] = true;
 			m_dirty_ids[f].push_back(gpu_id);
 		}
 	}
+}
+
+void GpuSceneManager::takeMovedTraceable(std::vector<uint32_t>& out) {
+	out.swap(m_moved_traceable);
+	m_moved_traceable.clear();
+	for (uint32_t gpu_id : out)
+		m_moved_traceable_queued[gpu_id] = false;
 }
 
 void GpuSceneManager::markObjectContentDirty(uint32_t gpu_id) {
@@ -372,6 +389,7 @@ void GpuSceneManager::setActive(Entity entity, bool active) {
 		obj_flags &= ~ObjectFlag::INACTIVE;
 	else
 		obj_flags |= ObjectFlag::INACTIVE;
+	m_instance_generation++;
 	markObjectContentDirty(it->second);
 }
 
@@ -660,6 +678,8 @@ void GpuSceneManager::reset() {
 		m_obj_dirty_ids[f].clear();
 		std::fill(m_obj_id_in_dirty_set[f].begin(), m_obj_id_in_dirty_set[f].end(), false);
 	}
+	m_moved_traceable.clear();
+	std::fill(m_moved_traceable_queued.begin(), m_moved_traceable_queued.end(), false);
 	for (auto& arr : m_object_lod_group_ids)
 		arr.fill(0);
 	for (auto& cpu : m_cpu_object_data)
@@ -886,12 +906,17 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 	uint32_t mat_flags = 0;
 	uint32_t obj_flags = 0;
 	bool is_transparent = false;
+	bool is_emissive = false;
 	if (mesh.hasMaterial()) {
 		mat_index = mat_mgr.indexFor(mesh.getMaterial());
 		mat_mgr.updateMaterial(mat_index, mesh.getMaterial());
 		auto alpha = mesh.getMaterial()->getAlphaProps();
-		float transmission = mesh.getMaterial()->getMaterialFactors().transmission_factor;
-		is_transparent = (alpha.alpha_mode == AlphaMode::BLEND) || (transmission > 0.0f);
+		const MaterialFactors factors = mesh.getMaterial()->getMaterialFactors();
+		is_transparent = (alpha.alpha_mode == AlphaMode::BLEND) || (factors.transmission_factor > 0.0f);
+		// The raster path's test: an unlit material returns before its emissive
+		// term, and a zero strength or factor makes that term zero.
+		is_emissive = !alpha.unlit && factors.emissive_strength > 0.0f
+			&& std::max({factors.emissive_factor.x, factors.emissive_factor.y, factors.emissive_factor.z}) > 0.0f;
 		mat_flags = static_cast<uint32_t>(alpha.alpha_mode)
 			| (alpha.double_sided ? MaterialFlag::DOUBLE_SIDED : 0u)
 			| (mesh.getMaterial()->getFlipTexCoordV() ? MaterialFlag::FLIP_TEX_V : 0u)
@@ -920,12 +945,14 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 	}
 
 	CpuObjectData& cpu = m_cpu_object_data[gpu_id];
+	const CpuObjectData previous = cpu;
 	cpu.aabb_min = aabb.min;
 	cpu.aabb_max = aabb.max;
 	cpu.vertex_offset = entry->vertex_offset;
 	cpu.material_flags = mat_flags;
 	cpu.object_flags = obj_flags;
 	cpu.material_index = mat_index;
+	cpu.emissive = is_emissive;
 	cpu.lod_count = is_deformed ? 1u : static_cast<uint32_t>(entry->lod_entries.size());
 	for (uint32_t l = 0; l < MAX_LOD_LEVELS; l++) {
 		uint32_t src = (l < entry->lod_entries.size()) ? l
@@ -933,6 +960,17 @@ void GpuSceneManager::writeObjectData(uint32_t gpu_id, const MeshComponent& mesh
 		cpu.first_index[l] = entry->lod_entries[src].first_index;
 		cpu.index_count[l] = entry->lod_entries[src].index_count;
 	}
+	// The geometry set is what RayTracingScene keys its BLAS on, so a material
+	// edit, which only reaches the TLAS instances (mask, flags, side table),
+	// must not move it.
+	const bool traced_geometry_changed = cpu.vertex_offset != previous.vertex_offset
+		|| cpu.lod_count != previous.lod_count
+		|| cpu.first_index[0] != previous.first_index[0]
+		|| cpu.index_count[0] != previous.index_count[0]
+		|| ((cpu.object_flags ^ previous.object_flags) & ObjectFlag::RT_EXCLUDED) != 0;
+	if (traced_geometry_changed)
+		m_geometry_set_generation++;
+	m_instance_generation++;
 
 	MeshletObjectInfo& moi = m_meshlet_object_info_cpu[gpu_id];
 	moi = {};

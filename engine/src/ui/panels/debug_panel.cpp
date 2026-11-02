@@ -7,6 +7,7 @@
 #include "ui/texture_inspector.hpp"
 #include "rendering/shadow_render_system.hpp"
 #include "rendering/rc_system.hpp"
+#include "rendering/ray_tracing_scene.hpp"
 #include "rendering/rc_world_mirrors.hpp"
 #include <imgui.h>
 #include <format>
@@ -57,10 +58,9 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 			"The gather's sky-visibility output, white = open sky");
 		rc_view_radio("Upsample Match", RcDebugView::UPSAMPLE_MATCH,
 			"How well the four nearest GI samples' surfaces match each pixel; black = none, plain bilinear");
-		rc_view_radio("Evidence", RcDebugView::EVIDENCE, "The fraction of directions any ray resolved");
+		rc_view_radio("Evidence", RcDebugView::EVIDENCE, "The known share of directions");
 		rc_view_radio("Stored J (nearest probe)", RcDebugView::PROBE_J,
 			"Nearest probe's mean stored radiance at the chosen cascade");
-		rc_view_radio("Coverage c0/c1/c2", RcDebugView::COVERAGE, "r/g/b = c0/c1/c2 corner presence");
 		rc_view_radio("Trace Outcome", RcDebugView::TRACE_KIND,
 			"First ray, r=hit g=clear/sky b=unknown");
 		rc_view_radio("Convergence", RcDebugView::CONVERGENCE,
@@ -107,10 +107,16 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 
 	if (m_rc_system) {
 		ImGui::SeparatorText("Radiance Cascades");
+		ImGui::Checkbox("Single Frame", &ctx.settings.rc.single_frame);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Show one frame of rays, with no accumulation");
+		ImGui::SameLine();
+		if (ImGui::Button("Reset Store"))
+			m_rc_system->invalidateStore();
 		if (ctx.settings.rc.debug_view == RcDebugView::PROBE_J || ctx.settings.rc.debug_view == RcDebugView::PROBE_GRID)
 			ImGui::SliderInt("Probe cascade", &ctx.settings.rc.probe_j_cascade, 0,
 				static_cast<int>(m_rc_system->activeCascades() - 1));
-		ImGui::Text("Probe store: %.0f MB%s%s", double(m_rc_system->storeBytes()) / (1024.0 * 1024.0),
+		ImGui::Text("Probe store: %.0f MiB%s%s", double(m_rc_system->storeBytes()) / (1024.0 * 1024.0),
 			m_rc_system->storeClampedByDevice() ? " (capped by device limits)" : "",
 			m_rc_system->isAllocated() ? "" : " (not allocated)");
 		for (uint32_t n = 0; n < m_rc_system->activeCascades(); n++) {
@@ -120,22 +126,34 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 			ImGui::SameLine();
 			ImGui::ProgressBar(cap ? float(used) / float(cap) : 0.0f, ImVec2(-1.0f, 0.0f), "");
 		}
+		// Which tracer actually ran, and what is missing when it is not the one asked for.
+		if (!m_rc_system->isAllocated()) {
+			ImGui::Text("Tracer: none (RC off)");
+		} else if (m_rc_system->usingRayQuery()) {
+			ImGui::TextColored(ImVec4(0.5f, 0.9f, 0.5f, 1.0f), "Tracer: ray query");
+			ImGui::Text("  %u BLAS, %u instances, %.0f MiB", m_ray_tracing_scene->getBlasCount(),
+				m_ray_tracing_scene->getInstanceCount(),
+				double(m_ray_tracing_scene->getStoreBytes()) / (1024.0 * 1024.0));
+		} else if (!m_ray_tracing_scene) {
+			ImGui::Text("Tracer: screen-space (device has no ray query)");
+		} else if (!ctx.settings.rc.ray_query) {
+			ImGui::Text("Tracer: screen-space (Ray Query Tracing off)");
+		} else {
+			ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f),
+				"Tracer: screen-space (no TLAS: %u BLAS, %u instances)",
+				m_ray_tracing_scene->getBlasCount(), m_ray_tracing_scene->getInstanceCount());
+		}
 		if (m_rc_system->overflowCount() > 0)
 			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.3f, 1.0f),
 				"overflow %u (probes dropped)", m_rc_system->overflowCount());
-		std::array<uint32_t, rcw::RAY_STAT_WORDS> rays{};
 		uint32_t ray_total = 0;
-		for (uint32_t i = 0; i < rcw::RAY_STAT_WORDS; i++) {
-			rays[i] = m_rc_system->rayStat(i);
-			ray_total += rays[i];
-		}
+		for (uint32_t code = 0; code < rcw::RAY_EXIT_CODES; code++)
+			ray_total += m_rc_system->rayExitCount(code);
 		if (ray_total > 0) {
 			const float k = 100.0f / static_cast<float>(ray_total);
-			ImGui::Text("rays: hit %.1f%%  clear %.1f%%  sky %.1f%%  gated %.1f%%",
-				rays[rcw::RAY_HIT] * k, rays[rcw::RAY_CLEAR] * k, rays[rcw::RAY_SKY] * k, rays[rcw::RAY_SKY_GATED] * k);
-			ImGui::Text("unk: occl %.1f%%  cap %.1f%%  edge %.1f%%  clip %.1f%%",
-				rays[rcw::RAY_UNK_OCCLUDED] * k, rays[rcw::RAY_UNK_STEPCAP] * k, rays[rcw::RAY_UNK_EDGE] * k,
-				rays[rcw::RAY_UNK_CLIP] * k);
+			ImGui::Text("rays: hit %.1f%%  clear %.1f%%  sky %.1f%%  unknown %.1f%%",
+				m_rc_system->rayExitCount(rcw::RAY_HIT) * k, m_rc_system->rayExitCount(rcw::RAY_CLEAR) * k,
+				m_rc_system->rayExitCount(rcw::RAY_SKY) * k, m_rc_system->rayExitCount(rcw::RAY_UNKNOWN) * k);
 		}
 	}
 
