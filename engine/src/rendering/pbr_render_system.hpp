@@ -105,10 +105,12 @@ public:
 		MeshComponent* mesh = nullptr;
 		VeMesh* mesh_ptr = nullptr;
 		VeMaterial* material_ptr = nullptr;
+		const PbrMegaBuffer::MeshEntry* mega_entry = nullptr; // null until the mesh is uploaded
 		float dist_sq = 0.0f;
 		AlphaMode alpha_mode = AlphaMode::ALPHA_OPAQUE;
 		bool double_sided = false;
 		uint32_t ssbo_index = 0;
+		uint32_t material_index = 0; // material SSBO slot
 		uint32_t lod_level = 0;
 		bool is_deformed = false;
 	};

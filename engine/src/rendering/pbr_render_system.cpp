@@ -25,7 +25,7 @@
 namespace ve {
 
 // Relative-to-z depth slack so masked forward fragments pass GEqual against
-// prepass depth 
+// prepass depth
 static constexpr float MASK_DEPTH_OFFSET = 0.00001f;
 static constexpr uint32_t INITIAL_INDIRECT_CAPACITY = 4096;
 
@@ -267,10 +267,12 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 			.mesh = mesh,
 			.mesh_ptr = mesh_ptr,
 			.material_ptr = mat,
+			.mega_entry = m_mega_buffer.getEntry(mesh_ptr),
 			.dist_sq = dist,
 			.alpha_mode = alpha_props.alpha_mode,
 			.double_sided = alpha_props.double_sided,
 			.ssbo_index = 0,
+			.material_index = mat_mgr.indexFor(mat),
 			.lod_level = lod_level,
 			.is_deformed = is_deformed,
 		};
@@ -280,19 +282,28 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 			m_opaque_drawables.push_back(d);
 	}
 
-	// Sort opaques: (is_mask, double_sided, material, mesh_ptr, lod_level).
+	// Sort opaques: (is_mask, double_sided, deformed, material, mesh, lod_level, entity).
 	// Static drawables come before skinned within each bucket so the
 	// indirect-cmd build can batch statics first then emit one cmd per skinned entity.
 	std::sort(m_opaque_drawables.begin(), m_opaque_drawables.end(),
 		[](const Drawable& a, const Drawable& b) {
 			bool a_mask = (a.alpha_mode == AlphaMode::MASK);
 			bool b_mask = (b.alpha_mode == AlphaMode::MASK);
-			if (a_mask != b_mask) return !a_mask;
-			if (a.double_sided != b.double_sided) return !a.double_sided;
-			if (a.is_deformed != b.is_deformed) return !a.is_deformed;
-			if (a.material_ptr != b.material_ptr) return a.material_ptr < b.material_ptr;
-			if (a.mesh_ptr != b.mesh_ptr) return a.mesh_ptr < b.mesh_ptr;
-			return a.lod_level < b.lod_level;
+			if (a_mask != b_mask)
+				return !a_mask;
+			if (a.double_sided != b.double_sided)
+				return !a.double_sided;
+			if (a.is_deformed != b.is_deformed)
+				return !a.is_deformed;
+			if (a.material_index != b.material_index)
+				return a.material_index < b.material_index;
+			uint32_t a_mesh = a.mega_entry ? a.mega_entry->vertex_offset : UINT32_MAX;
+			uint32_t b_mesh = b.mega_entry ? b.mega_entry->vertex_offset : UINT32_MAX;
+			if (a_mesh != b_mesh)
+				return a_mesh < b_mesh;
+			if (a.lod_level != b.lod_level)
+				return a.lod_level < b.lod_level;
+			return a.entity.index() < b.entity.index();
 		});
 
 	// Write instance data with material_index
@@ -312,7 +323,7 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 		inst.normal_transform[0] = glm::vec4(nrm[0], 0.0f);
 		inst.normal_transform[1] = glm::vec4(nrm[1], 0.0f);
 		inst.normal_transform[2] = glm::vec4(nrm[2], 0.0f);
-		inst.material_index = mat_mgr.indexFor(d.material_ptr);
+		inst.material_index = d.material_index;
 		inst.lod_level = d.lod_level;
 		inst.depth_offset = (d.alpha_mode == AlphaMode::MASK) ? MASK_DEPTH_OFFSET : 0.0f;
 		MaterialAlphaProps alpha = d.material_ptr ? d.material_ptr->getAlphaProps() : MaterialAlphaProps{};
@@ -332,7 +343,7 @@ void PbrRenderSystem::prepareFrame(VeFrameInfo& frame_info, MaterialSSBOManager&
 
 	for (size_t i = 0; i < m_opaque_drawables.size(); ) {
 		auto& d = m_opaque_drawables[i];
-		const auto* entry = m_mega_buffer.getEntry(d.mesh_ptr);
+		const auto* entry = d.mega_entry;
 		if (!entry || d.lod_level >= entry->lod_entries.size()) {
 			i++;
 			continue;
