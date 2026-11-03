@@ -6,8 +6,10 @@
 // geometry. Rays are built from the prepass G-buffer normal; radiance comes
 // from the previous frame's HDR history, reprojected via
 // ubo.prev_projection_view (camera-only, so moving objects ghost slightly).
-// Output: rgb radiance + confidence in alpha; confidence 0 falls back to the
-// IBL cubemap in the composite.
+// Output: rgb radiance + confidence in alpha, rgb premultiplied by confidence
+// when push.premultiply is set (full res, where the composite samples this
+// image directly instead of the resolve's). The composite gives the remaining
+// 1 - confidence to RC rough specular and the environment.
 
 // The traversal works in "pyr0 space": xy = continuous mip-0 pyramid texel
 // coordinates (full-res depth pixel (x,y) maps to texel (x/2, y/2); mip-L
@@ -45,7 +47,7 @@ struct SsrPush {
 	float max_distance;   // world-space ray length
 	int max_steps;        // traversal iteration cap
 	uint hiz_mip_count;
-	float _pad;
+	uint premultiply;     // 1 when the composite reads this output directly (no resolve)
 };
 [[vk::push_constant]] SsrPush push;
 
@@ -278,5 +280,7 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	float rough_fade = 1.0 - smoothstep(push.max_roughness * SPEC_HANDOFF_FADE_START, max(push.max_roughness, 1e-4), roughness);
 	float confidence = edge_fade * history_fade * dist_fade * rough_fade;
 
-	ssr_out[id.xy] = float4(color, confidence);
+	// The composite takes rgb premultiplied by confidence; the resolve
+	// premultiplies its own output and weights these taps unpremultiplied
+	ssr_out[id.xy] = float4(push.premultiply != 0u ? color * confidence : color, confidence);
 }

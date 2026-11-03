@@ -23,7 +23,7 @@ struct SsrPushConstant {
 	float max_distance;    // world-space ray length
 	int max_steps;         // traversal iteration cap
 	uint32_t hiz_mip_count;
-	float _pad;
+	uint32_t premultiply;  // 1 when the composite reads the raw output (no resolve)
 };
 
 struct SsrResolvePush {
@@ -401,7 +401,7 @@ void SsrSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, 
 		.max_distance = m_max_distance,
 		.max_steps = m_max_steps,
 		.hiz_mip_count = m_screen_rays.pyramidMipLevels(),
-		._pad = 0.0f,
+		.premultiply = m_resolve_active ? 0u : 1u,
 	};
 	cmd.pushConstants(
 		*m_pipeline_layout,

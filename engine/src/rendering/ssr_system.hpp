@@ -1,8 +1,8 @@
 // Screen-space reflections: Hi-Z traversal of the ScreenRayResources min/max
 // depth pyramid along reflection rays from the prepass normals, fetching
 // radiance from its previous-frame HDR history (reprojected via
-// prev_projection_view). Output is rgb radiance + confidence in alpha,
-// composited into the IBL specular term by the PBR shader
+// prev_projection_view). Output is rgb radiance (premultiplied) + confidence
+// in alpha, composited into the ambient specular term by the PBR shader
 #pragma once
 #include "ve_export.hpp"
 #include "vulkan/ve_device.hpp"
@@ -47,7 +47,7 @@ public:
 		return m_output_set_layout->getDescriptorSetLayout();
 	}
 	vk::raii::DescriptorSet& getOutputDescriptorSet() { return m_output_descriptor_set; }
-	// Zero radiance + zero confidence: the IBL composite lerp becomes an identity
+	// Zero radiance + zero confidence: an identity in the specular composite
 	vk::raii::DescriptorSet& getDummyOutputDescriptorSet() { return m_dummy_output_descriptor_set; }
 
 private:
