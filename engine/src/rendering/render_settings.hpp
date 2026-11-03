@@ -50,7 +50,7 @@ struct VENGINE_API RenderSettings {
 	bool gtao_enabled = true;
 	bool gtao_half_res = true;
 	float gtao_radius = 0.25f;
-	float gtao_intensity = 0.5f;
+	float gtao_intensity = 1.0f;
 
 	bool ssr_enabled = true;
 	bool ssr_half_res = true;

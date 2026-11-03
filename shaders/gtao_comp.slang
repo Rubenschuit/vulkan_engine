@@ -54,6 +54,22 @@ float fetchDepth(int2 coord) {
 static const uint NUM_SLICES = 4;
 static const uint NUM_STEPS  = 4;
 
+// Cosine between the view vector and the direction to the surface at coord,
+// faded toward low_cos (the hemisphere boundary, no occlusion) as the sample
+// leaves the radius. Sky and out-of-radius samples occlude nothing.
+float horizonCos(int2 coord, float3 view_pos, float3 view_vec, float low_cos) {
+	coord = clamp(coord, int2(0), int2(push.depth_size) - 1);
+	float sample_depth = fetchDepth(coord);
+	if (sample_depth <= 0.0)
+		return low_cos;
+	float3 delta = getViewPos(coord, sample_depth) - view_pos;
+	float len = length(delta);
+	if (len < 0.001)
+		return low_cos;
+	float falloff = saturate(1.0 - len / (push.radius * 2.0));
+	return lerp(low_cos, dot(delta / len, view_vec), falloff);
+}
+
 [numthreads(16, 16, 1)]
 void compMain(uint3 id : SV_DispatchThreadID) {
 	if (id.x >= uint(push.ao_size.x) || id.y >= uint(push.ao_size.y)) return;
@@ -71,6 +87,7 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	float3 view_pos = getViewPos(depth_coord, depth);
 	float3 world_normal = normal_roughness_texture.Load(int3(depth_coord, 0)).xyz;
 	float3 view_normal = normalize(mul((float3x3)ubo.view, world_normal));
+	float3 view_vec = normalize(-view_pos);
 
 	// Screen-space radius from world-space radius
 	float ss_radius = push.proj_scale * push.radius / abs(view_pos.z);
@@ -78,80 +95,53 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	ss_radius = min(ss_radius, min(push.ao_size.x, push.ao_size.y) * 0.5);
 
 	float noise = spatialNoise(id.xy);
-	float ao = 0.0;
+	float visibility = 0.0;
 
 	for (uint slice = 0; slice < NUM_SLICES; slice++) {
 		// Evenly distributed angle + noise offset
 		float phi = (GTAO_PI / float(NUM_SLICES)) * (float(slice) + noise);
 		float2 dir = float2(cos(phi), sin(phi));
+		// The step direction in view space: proj[1][1] < 0 (Vulkan Y-flip), so
+		// screen y runs opposite to view y
+		float3 dir_view = float3(dir.x, -dir.y, 0.0);
 
-		float horizon_cos_pos = -1.0;
-		float horizon_cos_neg = -1.0;
+		// The slice plane holds the view vector and the step direction; the
+		// normal enters projected into it, its angle n measured from the view vector
+		float3 ortho_dir = dir_view - dot(dir_view, view_vec) * view_vec;
+		float3 axis = normalize(cross(ortho_dir, view_vec));
+		float3 proj_normal = view_normal - axis * dot(view_normal, axis);
+		float proj_normal_len = length(proj_normal);
+		float cos_n = saturate(dot(proj_normal, view_vec) / max(proj_normal_len, 1e-4));
+		float n = sign(dot(ortho_dir, proj_normal)) * acos(cos_n);
+
+		// Both horizons start on the hemisphere boundary around the normal
+		float low_cos_pos = cos(n + GTAO_PI * 0.5);
+		float low_cos_neg = cos(n - GTAO_PI * 0.5);
+		float horizon_cos_pos = low_cos_pos;
+		float horizon_cos_neg = low_cos_neg;
 
 		for (uint step = 1; step <= NUM_STEPS; step++) {
 			float t = (float(step) + noise * 0.5) / float(NUM_STEPS);
-			float2 offset = dir * ss_radius * t;
-
-			// Positive direction
-			{
-				int2 sample_coord = depth_coord + int2(offset * (push.depth_size / push.ao_size));
-				sample_coord = clamp(sample_coord, int2(0), int2(push.depth_size) - 1);
-				float sample_depth = fetchDepth(sample_coord);
-				if (sample_depth > 0.0) {
-					float3 sample_pos = getViewPos(sample_coord, sample_depth);
-					float3 horizon_vec = sample_pos - view_pos;
-					float len = length(horizon_vec);
-					if (len > 0.001 && len < push.radius * 2.0) {
-						float cos_h = dot(horizon_vec / len, view_normal);
-						// Distance falloff
-						float falloff = saturate(1.0 - len / (push.radius * 2.0));
-						cos_h = lerp(-1.0, cos_h, falloff);
-						horizon_cos_pos = max(horizon_cos_pos, cos_h);
-					}
-				}
-			}
-
-			// Negative direction
-			{
-				int2 sample_coord = depth_coord - int2(offset * (push.depth_size / push.ao_size));
-				sample_coord = clamp(sample_coord, int2(0), int2(push.depth_size) - 1);
-				float sample_depth = fetchDepth(sample_coord);
-				if (sample_depth > 0.0) {
-					float3 sample_pos = getViewPos(sample_coord, sample_depth);
-					float3 horizon_vec = sample_pos - view_pos;
-					float len = length(horizon_vec);
-					if (len > 0.001 && len < push.radius * 2.0) {
-						float cos_h = dot(horizon_vec / len, view_normal);
-						float falloff = saturate(1.0 - len / (push.radius * 2.0));
-						cos_h = lerp(-1.0, cos_h, falloff);
-						horizon_cos_neg = max(horizon_cos_neg, cos_h);
-					}
-				}
-			}
+			int2 offset = int2(dir * ss_radius * t * (push.depth_size / push.ao_size));
+			horizon_cos_pos = max(horizon_cos_pos, horizonCos(depth_coord + offset, view_pos, view_vec, low_cos_pos));
+			horizon_cos_neg = max(horizon_cos_neg, horizonCos(depth_coord - offset, view_pos, view_vec, low_cos_neg));
 		}
 
-		// GTAO analytical integration:
-		// For each half-slice, integrate visibility = 0.25 * (-cos(2h-n) + cos(n) + 2h*sin(n))
-		// where h = acos(horizon_cos), n = angle between normal and slice plane
-		float n_dot_dir = dot(view_normal, float3(dir, 0.0));
-		float n_angle = acos(clamp(n_dot_dir, -1.0, 1.0)) - GTAO_PI * 0.5;
-
+		// Signed horizon angles from the view vector, kept within the hemisphere
 		float h_pos = acos(clamp(horizon_cos_pos, -1.0, 1.0));
-		float h_neg = acos(clamp(horizon_cos_neg, -1.0, 1.0));
+		float h_neg = -acos(clamp(horizon_cos_neg, -1.0, 1.0));
+		h_pos = n + clamp(h_pos - n, -GTAO_PI * 0.5, GTAO_PI * 0.5);
+		h_neg = n + clamp(h_neg - n, -GTAO_PI * 0.5, GTAO_PI * 0.5);
 
-		// Clamp horizon to normal hemisphere
-		h_pos = max(h_pos, n_angle);
-		h_neg = max(h_neg, -n_angle);
-
-		// Integrate per half
-		float vis_pos = 0.25 * (-cos(2.0 * h_pos - n_angle) + cos(n_angle) + 2.0 * h_pos * sin(n_angle));
-		float vis_neg = 0.25 * (-cos(2.0 * h_neg + n_angle) + cos(n_angle) + 2.0 * h_neg * sin(-n_angle));
-
-		ao += vis_pos + vis_neg;
+		// Cosine-weighted visibility of each half-slice (Jimenez 2016, eq. 10),
+		// weighted by how much of the normal lies in the slice
+		float sin_n = sin(n);
+		float arc_pos = 0.25 * (cos_n + 2.0 * h_pos * sin_n - cos(2.0 * h_pos - n));
+		float arc_neg = 0.25 * (cos_n + 2.0 * h_neg * sin_n - cos(2.0 * h_neg - n));
+		visibility += proj_normal_len * (arc_pos + arc_neg);
 	}
 
-	ao /= float(NUM_SLICES);
-	ao = saturate(ao);
+	float ao = saturate(visibility / float(NUM_SLICES));
 	ao = pow(ao, push.intensity);
 
 	ao_out[id.xy] = ao;

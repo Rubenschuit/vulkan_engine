@@ -326,9 +326,10 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			ImGui::Checkbox("Half Resolution##gtao", &ctx.settings.gtao_half_res);
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("4x fewer compute invocations, bilinear upsampled.");
-			bool radius_changed = ImGui::SliderFloat("AO Radius", &ctx.settings.gtao_radius, 0.1f, 3.0f, "%.2f");
+			bool radius_changed = ImGui::SliderFloat("AO Radius", &ctx.settings.gtao_radius, 0.01f, 3.0f, "%.3f m",
+				ImGuiSliderFlags_Logarithmic);
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("World-space sampling radius for AO.");
+				ImGui::SetTooltip("World-space sampling radius.\nOccluders fade out by twice this distance.");
 			bool intensity_changed = ImGui::SliderFloat("AO Intensity", &ctx.settings.gtao_intensity, 0.5f, 5.0f, "%.2f");
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Power curve applied to AO.\nHigher = darker/stronger occlusion effect.");

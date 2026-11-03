@@ -78,7 +78,7 @@ private:
 	vk::Extent2D m_depth_extent{};   // depth buffer resolution
 
 	float m_radius = 0.25f;
-	float m_intensity = 0.5f;
+	float m_intensity = 1.0f;
 
 	// Per-frame AO images: raw GTAO output + blur intermediate.
 	// After H+V blur, final result lives in m_ao_raw_images[frame].
