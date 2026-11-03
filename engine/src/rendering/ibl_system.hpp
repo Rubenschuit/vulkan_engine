@@ -34,7 +34,7 @@ public:
 
 	const vk::raii::DescriptorSetLayout& getIblSetLayout() const;
 
-	// Returns active IBL set when available, dummy (black) otherwise
+	// Returns active IBL set when available, otherwise a dummy: black cubemap + the BRDF LUT
 	vk::raii::DescriptorSet& getOutputDescriptorSet(uint32_t frame_index);
 
 	uint32_t getPrefilteredMipLevels() const { return m_prefiltered_mip_levels; }
@@ -47,6 +47,8 @@ private:
 	void createSamplers();
 	void createDummyResources();
 	void createLtcLuts();
+	// The loaded BRDF LUT, or a neutral stand-in (scale 1, bias 0) when it failed to load
+	const vk::raii::ImageView& brdfLutView() const;
 	void writeDescriptorSet(vk::raii::DescriptorSet& set,
 	                        const vk::raii::ImageView& prefiltered_view,
 	                        const vk::raii::ImageView& brdf_lut_view);
@@ -65,7 +67,7 @@ private:
 
 	// Dummy resources for valid descriptors when IBL unavailable
 	std::unique_ptr<VeImage> m_dummy_cubemap;
-	std::unique_ptr<VeImage> m_dummy_2d;
+	std::unique_ptr<VeImage> m_fallback_brdf_lut;
 
 	// LTC area light lookup tables
 	std::unique_ptr<VeImage> m_ltc_mat;

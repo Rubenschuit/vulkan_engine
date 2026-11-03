@@ -29,15 +29,15 @@ IblSystem::IblSystem(VeDevice& device, VeDescriptorPool& descriptor_pool,
 	createSetLayout();
 	createSamplers();
 	createLtcLuts();
-	createDummyResources();
 
-	// Load shared BRDF LUT if available
-	if (std::filesystem::exists(brdf_lut_path)) {
+	// Shared BRDF LUT
+	if (std::filesystem::exists(brdf_lut_path))
 		m_brdf_lut_handle = m_resource_manager.load<VeTexture>(pathToUtf8Generic(brdf_lut_path.lexically_normal()));
+	if (m_brdf_lut_handle.get())
 		VE_LOGI("IBL: loaded BRDF LUT from " << pathToUtf8Generic(brdf_lut_path));
-	} else {
-		VE_LOGW("IBL: BRDF LUT not found at " << pathToUtf8Generic(brdf_lut_path));
-	}
+	else
+		VE_LOGE("IBL: no BRDF LUT at " << pathToUtf8Generic(brdf_lut_path) << ", ambient specular uses plain Fresnel");
+	createDummyResources();
 }
 
 IblSystem::~IblSystem() = default;
@@ -99,7 +99,7 @@ void IblSystem::createDummyResources() {
 		vk::ImageAspectFlagBits::eColor,
 		true, 6, 1);
 
-	m_dummy_2d = std::make_unique<VeImage>(
+	m_fallback_brdf_lut = std::make_unique<VeImage>(
 		m_ve_device, 4, 4,
 		vk::SampleCountFlagBits::e1, vk::Format::eR8G8B8A8Unorm,
 		vk::ImageTiling::eOptimal,
@@ -111,6 +111,10 @@ void IblSystem::createDummyResources() {
 	constexpr uint32_t face_bytes = 4 * 4 * 4;
 	constexpr uint32_t total_bytes = face_bytes * 6;
 	std::vector<uint8_t> black(total_bytes, 0);
+	// Scale 1, bias 0:
+	std::vector<uint8_t> lut_fallback(face_bytes, 0);
+	for (uint32_t i = 0; i < face_bytes; i += 4)
+		lut_fallback[i] = 255;
 
 	VeBuffer staging_cube(m_ve_device, total_bytes, 1,
 		vk::BufferUsageFlagBits::eTransferSrc,
@@ -122,7 +126,7 @@ void IblSystem::createDummyResources() {
 		vk::BufferUsageFlagBits::eTransferSrc,
 		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
 	staging_2d.map();
-	staging_2d.writeToBuffer(black.data(), face_bytes);
+	staging_2d.writeToBuffer(lut_fallback.data(), face_bytes);
 
 	auto cmd = m_ve_device.beginSingleTimeCommands(QueueKind::Graphics);
 
@@ -130,19 +134,19 @@ void IblSystem::createDummyResources() {
 		vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
 		{}, vk::AccessFlagBits2::eTransferWrite,
 		vk::PipelineStageFlagBits2::eTopOfPipe, vk::PipelineStageFlagBits2::eTransfer);
-	m_dummy_2d->transitionImageLayout(*cmd,
+	m_fallback_brdf_lut->transitionImageLayout(*cmd,
 		vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
 		{}, vk::AccessFlagBits2::eTransferWrite,
 		vk::PipelineStageFlagBits2::eTopOfPipe, vk::PipelineStageFlagBits2::eTransfer);
 
 	VeDevice::copyBufferToImage(*cmd, staging_cube.getBuffer(), m_dummy_cubemap->getImage(), 4, 4, 6);
-	VeDevice::copyBufferToImage(*cmd, staging_2d.getBuffer(), m_dummy_2d->getImage(), 4, 4, 1);
+	VeDevice::copyBufferToImage(*cmd, staging_2d.getBuffer(), m_fallback_brdf_lut->getImage(), 4, 4, 1);
 
 	m_dummy_cubemap->transitionImageLayout(*cmd,
 		vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
 		vk::AccessFlagBits2::eTransferWrite, vk::AccessFlagBits2::eShaderRead,
 		vk::PipelineStageFlagBits2::eTransfer, vk::PipelineStageFlagBits2::eFragmentShader);
-	m_dummy_2d->transitionImageLayout(*cmd,
+	m_fallback_brdf_lut->transitionImageLayout(*cmd,
 		vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
 		vk::AccessFlagBits2::eTransferWrite, vk::AccessFlagBits2::eShaderRead,
 		vk::PipelineStageFlagBits2::eTransfer, vk::PipelineStageFlagBits2::eFragmentShader);
@@ -150,12 +154,16 @@ void IblSystem::createDummyResources() {
 	m_ve_device.endSingleTimeCommands(*cmd, QueueKind::Graphics);
 
 	m_dummy_cubemap->setDebugName("IBL Dummy Cubemap");
-	m_dummy_2d->setDebugName("IBL Dummy BRDF LUT");
+	m_fallback_brdf_lut->setDebugName("IBL Fallback BRDF LUT");
 
-	// Build dummy descriptor set
-	writeDescriptorSet(m_dummy_descriptor_set,
-		m_dummy_cubemap->getImageView(), m_dummy_2d->getImageView());
+	// The cubemap is never sampled while this set is bound (ubo.ibl_active is 0),
+	// the BRDF LUT always is: it also used for SSR and RC specular
+	writeDescriptorSet(m_dummy_descriptor_set, m_dummy_cubemap->getImageView(), brdfLutView());
 	m_has_dummy_set = true;
+}
+
+const vk::raii::ImageView& IblSystem::brdfLutView() const {
+	return m_brdf_lut_handle.get() ? m_brdf_lut_handle.get()->getImageView() : m_fallback_brdf_lut->getImageView();
 }
 
 void IblSystem::createLtcLuts() {
@@ -322,16 +330,11 @@ bool IblSystem::loadForSkybox(const std::filesystem::path& skybox_path) {
 	if (m_prefiltered_mip_levels == 0)
 		m_prefiltered_mip_levels = 1;
 
-	// use loaded LUT or dummy
-	const vk::raii::ImageView& brdf_view = m_brdf_lut_handle.get()
-		? m_brdf_lut_handle.get()->getImageView()
-		: m_dummy_2d->getImageView();
-
 	// Wait for all in-flight frames before overwriting descriptor sets.
 	m_ve_device.getDevice().waitIdle();
 
 	for (auto& set : m_active_descriptor_sets)
-		writeDescriptorSet(set, m_prefiltered_handle.get()->getImageView(), brdf_view);
+		writeDescriptorSet(set, m_prefiltered_handle.get()->getImageView(), brdfLutView());
 	m_has_active_sets = true;
 	m_ibl_available = true;
 

@@ -342,7 +342,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 	if (ImGui::CollapsingHeader("Reflections")) {
 		ImGui::Checkbox("SSR", &ctx.settings.ssr_enabled);
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Traces the depth buffer and reflects last frame's image.\nRequires geometry pre-pass and IBL enabled.");
+			ImGui::SetTooltip("Traces the depth buffer and reflects last frame's image.\nRequires geometry pre-pass.");
 		if (ctx.settings.ssr_enabled) {
 			ImGui::Indent();
 			ImGui::Checkbox("Half Resolution##ssr", &ctx.settings.ssr_half_res);

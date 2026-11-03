@@ -796,8 +796,7 @@ void RenderPipeline::populateUBO(VeFrameInfo& fi) {
 	ubo.csm_normal_bias = m_settings.csm_normal_bias;
 	ubo.csm_blend_dithered = static_cast<uint32_t>(m_settings.csm_blend_mode);
 	ubo.ambient_light_color = glm::vec4(m_settings.ambient_light_color, m_settings.ambient_light_intensity);
-	fi.ibl_active = m_settings.ibl_enabled && m_ibl_system->isAvailable();
-	ubo.ibl_active = fi.ibl_active ? 1u : 0u;
+	ubo.ibl_active = m_settings.ibl_enabled && m_ibl_system->isAvailable() ? 1u : 0u;
 	ubo.ibl_min_ambient = m_settings.ibl_min_ambient;
 	ubo.prefiltered_mip_levels = m_ibl_system->getPrefilteredMipLevels();
 	auto& sh = m_ibl_system->getSHCoefficients();

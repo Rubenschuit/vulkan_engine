@@ -216,7 +216,7 @@ struct VeFrameInfo {
 	vk::raii::DescriptorSet* shadow_mask_descriptor_set = nullptr;   // set 3 (null when mask unavailable)
 	vk::raii::DescriptorSet* cluster_descriptor_set = nullptr;       // set 4 (null when clustering disabled)
 	vk::raii::DescriptorSet* ao_descriptor_set = nullptr;            // set 5 (dummy white when AO disabled)
-	vk::raii::DescriptorSet* ibl_descriptor_set = nullptr;           // set 6 (dummy black when IBL unavailable)
+	vk::raii::DescriptorSet* ibl_descriptor_set = nullptr;           // set 6 (black cubemap when IBL unavailable)
 	vk::raii::DescriptorSet* ssr_descriptor_set = nullptr;           // set 7 (dummy zero-confidence when SSR inactive)
 	vk::raii::DescriptorSet& cubemap_descriptor_set;
 	vk::raii::DescriptorSet& shadow_descriptor_set;
@@ -263,7 +263,6 @@ struct VeFrameInfo {
 	bool     area_lights_active = false;  // any active rect area light this frame (AREA_LIGHTS_SPEC variant)
 	bool     debug_shading = false;       // render_mode != BRDF_MICROFACET
 	bool     rc_composite_active = true;  // RC enabled
-	bool     ibl_active = false;          // = UniformBufferObject::ibl_active
 
 	// Post-processing
 	PostProcessPushConstant post_process_push;

@@ -219,7 +219,7 @@ private:
 	std::array<std::unique_ptr<VeImage>, MAX_FRAMES_IN_FLIGHT> m_output_images;
 	// Sky visibility, same lifecycle as m_output_images in every respect.
 	std::array<std::unique_ptr<VeImage>, MAX_FRAMES_IN_FLIGHT> m_visibility_images;
-	// Rough-spec radiance + confidence, same lifecycle; written only under FLAG_ROUGH_SPEC
+	// Rough-spec radiance + confidence, same lifecycle
 	std::array<std::unique_ptr<VeImage>, MAX_FRAMES_IN_FLIGHT> m_spec_images;
 	// Per-texel surface (normal, depth) for the edge-aware upsample
 	std::array<std::unique_ptr<VeImage>, MAX_FRAMES_IN_FLIGHT> m_geometry_images;

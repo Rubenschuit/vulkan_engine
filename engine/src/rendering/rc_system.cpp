@@ -959,7 +959,6 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 		.frame_counter = m_frame_counter,
 		.rays_per_pixel = static_cast<uint32_t>(std::clamp(m_rc.rays_per_pixel, 1, 16)),
 		.flags = (m_rc.debug_view == RcDebugView::EVIDENCE ? FLAG_VISIBILITY_EVIDENCE : 0u)
-			| (frame_info.ibl_active || m_rc.debug_view == RcDebugView::SPEC ? FLAG_ROUGH_SPEC : 0u)
 			| (m_prev_depth_primed ? FLAG_HIST_DEPTH : 0u)
 			| (m_rc.single_frame ? FLAG_SINGLE_FRAME : 0u),
 		.hiz_mip_count = m_screen_rays.pyramidMipLevels(),
@@ -1106,8 +1105,7 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 	// The visibility, spec and geometry outputs share the radiance output's lifecycle
 	// exactly: same transition here, same acquire in acquireForRead. They must
 	// not diverge or the layout the descriptors declare stops matching one of
-	// them (the spec image's content is only written under FLAG_ROUGH_SPEC,
-	// but its layout ping-pongs unconditionally).
+	// them.
 	vk::ImageMemoryBarrier2 visibility_to_general = to_general;
 	visibility_to_general.image = m_visibility_images[frame]->getImage();
 	vk::ImageMemoryBarrier2 spec_to_general = to_general;

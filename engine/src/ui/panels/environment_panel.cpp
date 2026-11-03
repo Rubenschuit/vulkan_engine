@@ -53,14 +53,14 @@ void EnvironmentPanel::render(Registry* /*registry*/, EditorState& state, UICont
 	labeledWidget("Enabled", [&]() {
 		ImGui::Checkbox("##ibl_enabled", &ctx.settings.ibl_enabled);
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Use skybox environment for diffuse and specular ambient lighting\n(requires IBL data). SSR and RC Rough Specular only apply while on.");
+			ImGui::SetTooltip("Use skybox environment for diffuse and specular ambient lighting\n(requires IBL data). When off, the ambient light below is the environment.");
+	});
+	labeledWidget("Min Ambient", [&]() {
+		ImGui::SliderFloat("##ibl_min_ambient", &ctx.settings.ibl_min_ambient, 0.0f, 0.05f, "%.4f");
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Minimum ambient floor, scaled by albedo.");
 	});
 	if (ctx.settings.ibl_enabled) {
-		labeledWidget("Min Ambient", [&]() {
-			ImGui::SliderFloat("##ibl_min_ambient", &ctx.settings.ibl_min_ambient, 0.0f, 0.05f, "%.4f");
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Minimum ambient floor, scaled by albedo.");
-		});
 		if (m_skybox) {
 			const auto& available = m_skybox->getAvailableSkyboxes();
 			size_t idx = m_skybox->getCurrentSkyboxIndex();
@@ -76,7 +76,7 @@ void EnvironmentPanel::render(Registry* /*registry*/, EditorState& state, UICont
 	labeledWidget("Intensity", [&]() {
 		ImGui::SliderFloat("##ambient_intensity", &ctx.settings.ambient_light_intensity, 0.0f, 0.5f, "%.4f");
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Flat ambient (used when IBL is off or unavailable).");
+			ImGui::SetTooltip("Uniform sky radiance for diffuse and specular ambient\n(used when IBL is off or unavailable).");
 	});
 
 	ImGui::End();

@@ -8,7 +8,7 @@
 // 		   a = the tiles' a, averaged.
 //
 // Sky pixels and pixels with no probes around them write a = 0, so the
-// composite knows to use the ibl there.
+// composite knows to use the environment there.
 
 #include "rc_world_common.slangh"
 
@@ -16,7 +16,7 @@
 // between two lods. Missing probes add nothing; the caller divides by the
 // weight that was found across both lods.
 void rcwGatherLod(float3 world, float3 normal, uint lod, uint parity, uint tiles_per_row,
-	float2 atlas_size, float2 oct_normal, float2 oct_reflection, bool spec_taps, float lod_weight,
+	float2 atlas_size, float2 oct_normal, float2 oct_reflection, float lod_weight,
 	inout float4 radiance_sum, inout float visibility_sum, inout float4 spec_sum,
 	inout float weight_sum) {
 
@@ -42,8 +42,7 @@ void rcwGatherLod(float3 world, float3 normal, uint lod, uint parity, uint tiles
 		float4 tile_sample = irradiance_atlas_in.SampleLevel(linear_sampler, (tile_origin + oct_normal) / atlas_size, 0);
 		radiance_sum += tile_sample * weight;
 		visibility_sum += visibility_atlas_in.SampleLevel(linear_sampler, (tile_origin + oct_normal) / atlas_size, 0).x * weight;
-		if (spec_taps)
-			spec_sum += irradiance_atlas_in.SampleLevel(linear_sampler, (tile_origin + oct_reflection) / atlas_size, 0) * weight;
+		spec_sum += irradiance_atlas_in.SampleLevel(linear_sampler, (tile_origin + oct_reflection) / atlas_size, 0) * weight;
 		weight_sum += weight;
 	}
 }
@@ -65,9 +64,7 @@ void compMain(uint3 thread_id: SV_DispatchThreadID) {
 		return;
 
 	rc_visibility_output[pixel] = 1.0;
-	bool spec_on = (push.flags & RCW_FLAG_ROUGH_SPEC) != 0u;
-	if (spec_on)
-		rc_spec_output[pixel] = float4(0.0);
+	rc_spec_output[pixel] = float4(0.0);
 
 	// The surface at the full-res pixel under this texel's centre, for the
 	// composite's edge-aware upsample
@@ -105,20 +102,17 @@ void compMain(uint3 thread_id: SV_DispatchThreadID) {
 		float2 atlas_size;
 		irradiance_atlas_in.GetDimensions(atlas_size.x, atlas_size.y);
 		float2 oct_normal = rcwOctEncode(normal) * float(RCW_TILE_INNER) + 1.0;
-		float2 oct_reflection = float2(0.0, 0.0);
-		if (spec_on) {
-			float3 reflection = reflect(-normalize(ubo.camera_position.xyz - world), normal);
-			oct_reflection = rcwOctEncode(reflection) * float(RCW_TILE_INNER) + 1.0;
-		}
+		float3 reflection = reflect(-normalize(ubo.camera_position.xyz - world), normal);
+		float2 oct_reflection = rcwOctEncode(reflection) * float(RCW_TILE_INNER) + 1.0;
 
 		float4 radiance_sum = float4(0.0, 0.0, 0.0, 0.0);
 		float visibility_sum = 0.0;
 		float4 spec_sum = float4(0.0, 0.0, 0.0, 0.0);
 		float weight_sum = 0.0;
-		rcwGatherLod(world, normal, lod, parity, tiles_per_row, atlas_size, oct_normal, oct_reflection, spec_on,
+		rcwGatherLod(world, normal, lod, parity, tiles_per_row, atlas_size, oct_normal, oct_reflection,
 			1.0 - lod_blend, radiance_sum, visibility_sum, spec_sum, weight_sum);
 		if (lod_blend > 0.0 && lod < RCW_MAX_LOD)
-			rcwGatherLod(world, normal, lod + 1u, parity, tiles_per_row, atlas_size, oct_normal, oct_reflection, spec_on,
+			rcwGatherLod(world, normal, lod + 1u, parity, tiles_per_row, atlas_size, oct_normal, oct_reflection,
 				lod_blend, radiance_sum, visibility_sum, spec_sum, weight_sum);
 		if (mode == RCW_GATHER_SPEC) {
 			rc_output[pixel] = float4(rcwSpecOutput(spec_sum, weight_sum).rgb, 0.0);
@@ -131,8 +125,7 @@ void compMain(uint3 thread_id: SV_DispatchThreadID) {
 		radiance_sum /= weight_sum;
 		rc_output[pixel] = float4(radiance_sum.rgb, saturate(radiance_sum.a));
 		rc_visibility_output[pixel] = saturate(visibility_sum / weight_sum);
-		if (spec_on)
-			rc_spec_output[pixel] = rcwSpecOutput(spec_sum, weight_sum);
+		rc_spec_output[pixel] = rcwSpecOutput(spec_sum, weight_sum);
 		return;
 	}
 	if (mode == RCW_GATHER_PROBE_J) {

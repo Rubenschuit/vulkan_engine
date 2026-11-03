@@ -10,8 +10,7 @@
 
 namespace ve::rcw {
 
-// RcwPush.flags layout, in rc_world_common.slangh's order. Bits 4-31 free.
-inline constexpr uint32_t FLAG_ROUGH_SPEC = 1u << 0;
+// RcwPush.flags layout, in rc_world_common.slangh's order. Bit 0 and bits 4-31 free.
 inline constexpr uint32_t FLAG_VISIBILITY_EVIDENCE = 1u << 1;
 inline constexpr uint32_t FLAG_HIST_DEPTH = 1u << 2;
 inline constexpr uint32_t FLAG_SINGLE_FRAME = 1u << 3;
