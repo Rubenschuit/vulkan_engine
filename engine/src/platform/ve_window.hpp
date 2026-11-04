@@ -13,7 +13,7 @@ namespace ve {
 
 class VENGINE_API VeWindow {
 public:
-	VeWindow(int width, int height, std::string name);
+	VeWindow(int width, int height, std::string name, bool decorated = true);
 	~VeWindow();
 
 	// Prevent copying, ensuring unique ownership of GLFWwindow
@@ -72,7 +72,7 @@ public:
 	void setVideoMode(VideoMode mode);
 
 private:
-	void initWindow();
+	void initWindow(bool decorated);
 	static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
 	GLFWmonitor* getCurrentMonitor() const;
 	GLFWmonitor* resolveTargetMonitor() const;

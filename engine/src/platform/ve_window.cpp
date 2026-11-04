@@ -7,8 +7,8 @@
 
 namespace ve {
 
-VeWindow::VeWindow(int width, int height, std::string name) : m_window_name(name), m_width(width), m_height(height)  {
-	initWindow();
+VeWindow::VeWindow(int width, int height, std::string name, bool decorated) : m_window_name(name), m_width(width), m_height(height)  {
+	initWindow(decorated);
 }
 
 VeWindow::~VeWindow() {
@@ -24,10 +24,11 @@ void VeWindow::framebufferResizeCallback(GLFWwindow* glfw_window, int width, int
 	VE_LOGI("Framebuffer resized to " + std::to_string(width) + "x" + std::to_string(height));
 }
 
-void VeWindow::initWindow() {
+void VeWindow::initWindow(bool decorated) {
 	glfwInit();
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // No OpenGL context creation
 	glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+	glfwWindowHint(GLFW_DECORATED, decorated ? GLFW_TRUE : GLFW_FALSE);
 	// Ensure GLFW scales window sizes appropriately on HiDPI/Retina displays
 	glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
 

@@ -35,6 +35,11 @@ namespace {
 	uint32_t benchWindowHeight(uint32_t fallback) {
 		return (s_pending_benchmark && s_pending_benchmark->height) ? s_pending_benchmark->height : fallback;
 	}
+	// Windows caps a window with a title bar at about the desktop size, which would
+	// shrink a large --bench-res; an undecorated one keeps the requested size
+	bool decorateWindow() {
+		return !s_pending_benchmark;
+	}
 }
 
 void VeApplication::setPendingBenchmark(BenchmarkConfig config) {
@@ -42,7 +47,7 @@ void VeApplication::setPendingBenchmark(BenchmarkConfig config) {
 }
 
 VeApplication::VeApplication(const EngineConfig& config)
-	: m_ve_window(static_cast<int>(benchWindowWidth(config.window_width)), static_cast<int>(benchWindowHeight(config.window_height)), config.app_name.c_str()),
+	: m_ve_window(static_cast<int>(benchWindowWidth(config.window_width)), static_cast<int>(benchWindowHeight(config.window_height)), config.app_name.c_str(), decorateWindow()),
 	  m_ve_device(m_ve_window),
 	  m_resource_manager(m_ve_device, m_event_bus),
 	  m_ve_renderer(m_ve_device, m_ve_window, m_resource_manager, m_event_bus),
@@ -297,6 +302,12 @@ void VeApplication::applyBenchmarkSkybox() {
 
 void VeApplication::setupBenchmark() {
 	const BenchmarkConfig& bc = m_benchmark->config();
+	const vk::Extent2D extent = m_ve_renderer.getSwapChainExtent();
+	if (bc.width && (extent.width != bc.width || extent.height != bc.height)) {
+		VE_LOGE("[bench] --bench-res " << bc.width << "x" << bc.height << " but the swapchain is "
+			<< extent.width << "x" << extent.height);
+		m_benchmark_config_error = true;
+	}
 	if (auto pose = m_benchmark->cameraPose()) {
 		auto& cam = m_cameras.flyCamera();
 		cam.setPosition(pose->pos);
