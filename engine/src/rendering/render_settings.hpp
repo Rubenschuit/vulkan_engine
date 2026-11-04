@@ -20,10 +20,10 @@ struct VENGINE_API RenderSettings {
 	float fov = 75.0f;
 	ShadowMode shadow_mode = ShadowMode::PCF;
 	ShadowResolutionPreset shadow_resolution_preset = ShadowResolutionPreset::MEDIUM;
-	float pcss_light_size = 0.04f;
+	float pcss_light_size = 0.04f; // spot/point lights
 	int pcf_samples = 8;
 	int pcss_filter_samples = 16;
-	int csm_blend_mode = 2; // 0=off, 1=linear, 2=dithered
+	int csm_blend_mode = 1; // 0=off, 1=linear, 2=dithered
 	float shadow_bias = ve::SHADOW_BIAS;
 	float csm_normal_bias = ve::CSM_NORMAL_BIAS;
 	float depth_bias_constant = ve::SHADOW_DEPTH_BIAS_CONSTANT;

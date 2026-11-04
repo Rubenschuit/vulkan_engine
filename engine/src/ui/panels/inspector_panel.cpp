@@ -405,6 +405,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 				cdl.direction = dl->getDirection();
 				cdl.color = dl->getColor();
 				cdl.intensity = dl->getIntensity();
+				cdl.angular_radius = dl->getAngularRadius();
 				cdl.casts_shadow = dl->getCastsShadow();
 				cdl.celestial_type = static_cast<uint8_t>(dl->getCelestialType());
 				state.component_clipboard = cdl;
@@ -416,6 +417,7 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 					dl->setDirection(cdl.direction);
 					dl->setColor(cdl.color);
 					dl->setIntensity(cdl.intensity);
+					dl->setAngularRadius(cdl.angular_radius);
 					dl->setCastsShadow(cdl.casts_shadow);
 					dl->setCelestialType(static_cast<CelestialType>(cdl.celestial_type));
 				}
@@ -1062,6 +1064,14 @@ void InspectorPanel::renderDirectionalLight(DirectionalLightComponent& light) {
 		if (ImGui::DragFloat("##Intensity", &intensity, 0.1f, 0.0f, 100.0f))
 			light.setIntensity(intensity);
 	}, [&]() { light.setIntensity(1.f); });
+
+	float angular_radius = light.getAngularRadius();
+	labeledWidget(light_label_w, "Angular Radius", [&]() {
+		if (ImGui::DragFloat("##AngularRadius", &angular_radius, 0.01f, 0.0f, 5.0f, "%.2f deg"))
+			light.setAngularRadius(angular_radius);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Apparent radius of the light's disk (the real sun is ~0.27 deg).\nWith PCSS: penumbra = caster distance x tan(angle).");
+	}, [&]() { light.setAngularRadius(DIR_LIGHT_ANGULAR_RADIUS); });
 
 	bool casts_shadow = light.getCastsShadow();
 	if (ImGui::Checkbox("Casts Shadow", &casts_shadow))

@@ -361,14 +361,18 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	uint csm_cascade_idx = 0;
 	float csm_blend_t = 0.0;
 	if (SHADOW_MODE_SPEC != ShadowMode::DISABLED && ubo.csm_cascade_count > 0) {
+		// Back faces of double-sided geometry must offset toward the visible side
+		float3 shadow_normal = flipDoubleSided(N, view_dir, mat.material_flags);
 		bool use_mask = SHADOW_MASK_SPEC != 0 && alpha_mode != 1;
 		if (use_mask) {
 			float2 mask_uv = in_vert.pos.xy / ubo.screen_size;
 			csm_shadow = upsampleShadowMask(mask_uv, frag_view_z);
 			if (DEBUG_SHADING_SPEC != 0 && ubo.render_mode == RenderMode::CSM_CASCADE)
-				calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, N, csm_cascade_idx, csm_blend_t);
+				calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, shadow_normal, in_vert.pos.xy,
+					csm_cascade_idx, csm_blend_t);
 		} else {
-			csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, N, csm_cascade_idx, csm_blend_t);
+			csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, shadow_normal, in_vert.pos.xy,
+				csm_cascade_idx, csm_blend_t);
 		}
 	}
 
@@ -378,7 +382,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	// Point light shadow terms
 	float shadow_terms[MAX_SHADOW_LIGHTS];
 	uint32_t shadow_for_light[MAX_SHADOW_LIGHTS];
-	calculatePointShadowTerms(in_vert.shadow_coord, shadow_terms, shadow_for_light);
+	calculatePointShadowTerms(in_vert.shadow_coord, in_vert.pos.xy, shadow_terms, shadow_for_light);
 
 	// Cluster heatmap debug
 	if (DEBUG_SHADING_SPEC != 0

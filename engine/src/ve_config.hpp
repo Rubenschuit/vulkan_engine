@@ -55,6 +55,7 @@ constexpr float SHADOW_DEPTH_BIAS_CONSTANT  = 0.5f;
 constexpr float SHADOW_DEPTH_BIAS_SLOPE     = 1.0f;
 constexpr float SHADOW_DEPTH_BIAS_CLAMP     = 0.005f;
 constexpr float DIR_SHADOW_MAX_DISTANCE     = 300.0f;
+constexpr float DIR_LIGHT_ANGULAR_RADIUS    = 0.27f; // degrees; the real sun is ~0.27
 
 // Cascaded Shadow Maps
 constexpr uint32_t NUM_CSM_CASCADES                       = 3; // keep in sync with shader

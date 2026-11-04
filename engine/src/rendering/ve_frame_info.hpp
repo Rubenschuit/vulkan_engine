@@ -131,12 +131,15 @@ struct UniformBufferObject {
 	alignas(16) glm::vec4 csm_split_distances{};   // view-space far-Z per cascade
 	alignas(4)  uint32_t csm_cascade_count = 0;
 	alignas(4)  uint32_t csm_base_layer = 0;
-	alignas(4)  float    csm_shadow_map_size = 4096.0f; // atlas width (set by LightSystem)
 	alignas(4)  uint32_t csm_dir_light_index = 0xFFFFFFFF; // dir_lights[] index that owns CSM (0xFFFFFFFF = none)
-	alignas(4)  float    pcss_light_size = 0.04f;  // world-space light radius for PCSS penumbra
+	alignas(4)  float    pcss_light_size = 0.04f;  // spot/point PCSS light size
 	alignas(4)  uint32_t csm_blend_dithered = 0;   // 0 = off, 1 = linear, 2 = dithered
 	alignas(4)  float    csm_normal_bias = ve::CSM_NORMAL_BIAS;
 	alignas(16) glm::vec4 csm_world_texel_size{}; // per-cascade world units per shadow texel
+	alignas(16) glm::vec4 csm_atlas_rect[ve::NUM_CSM_CASCADES]{}; // per-cascade atlas UV region: xy = min, zw = max
+	alignas(16) glm::vec4 csm_depth_range{};      // per-cascade light-space depth range in world units
+	alignas(16) glm::vec2 shadow_texel_size{};    // 1 / shadow atlas size
+	alignas(4)  float    csm_tan_angular_radius = 0.0f; // CSM light, drives the PCSS penumbra
 
 	// Screen-space shadow mask reprojection
 	alignas(16) glm::mat4 inverse_projection_view{1.0f};
@@ -163,11 +166,11 @@ struct UniformBufferObject {
 	alignas(4) uint32_t num_point_lights = 0;
 };
 // Layout must match UniformBuffer in ve_common.slangh
-static_assert(sizeof(UniformBufferObject) == 7536);
-static_assert(offsetof(UniformBufferObject, sh_coefficients) == 3248);
-static_assert(offsetof(UniformBufferObject, rect_lights) == 3392);
-static_assert(offsetof(UniformBufferObject, sky_radiance_scale) == 7504);
-static_assert(offsetof(UniformBufferObject, num_point_lights) == 7520);
+static_assert(sizeof(UniformBufferObject) == 7616);
+static_assert(offsetof(UniformBufferObject, sh_coefficients) == 3328);
+static_assert(offsetof(UniformBufferObject, rect_lights) == 3472);
+static_assert(offsetof(UniformBufferObject, sky_radiance_scale) == 7584);
+static_assert(offsetof(UniformBufferObject, num_point_lights) == 7600);
 
 // --- Push constants ---
 

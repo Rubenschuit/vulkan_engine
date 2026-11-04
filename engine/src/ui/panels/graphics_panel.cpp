@@ -247,7 +247,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		if (ctx.settings.shadow_mode == ShadowMode::PCSS) {
 			ImGui::SliderFloat("Light Size", &ctx.settings.pcss_light_size, 0.001f, 0.2f, "%.3f");
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Virtual light size for PCSS penumbra.\nLarger = softer shadows farther from caster.");
+				ImGui::SetTooltip("Virtual light size for spot/point PCSS penumbra.\nLarger = softer shadows farther from caster.");
 		}
 		if (ctx.settings.shadow_mode == ShadowMode::PCF || ctx.settings.shadow_mode == ShadowMode::PCSS) {
 			static constexpr int pcf_values[] = {4, 8, 16, 32};
@@ -255,10 +255,13 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			for (int j = 0; j < 4; j++)
 				if (ctx.settings.pcf_samples == pcf_values[j])
 					pcf_idx = j;
-			if (ImGui::Combo("PCF Samples", &pcf_idx, "4\0" "8\0" "16\0" "32\0"))
+			bool pcf = ctx.settings.shadow_mode == ShadowMode::PCF;
+			const char* items = pcf ? "3x3 tent\0" "5x5 tent\0" "7x7 tent\0" "9x9 tent\0" : "4\0" "8\0" "16\0" "32\0";
+			if (ImGui::Combo(pcf ? "PCF Filter" : "Blocker Samples", &pcf_idx, items))
 				ctx.settings.pcf_samples = pcf_values[pcf_idx];
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Poisson disk samples for PCF filtering.\nAlso used for PCSS blocker search.");
+				ImGui::SetTooltip(pcf ? "Tent filter size in shadow texels (4/9/16/25 bilinear taps)."
+				                      : "PCSS blocker search taps, each gathering 2x2 texels.");
 		}
 		if (ctx.settings.shadow_mode == ShadowMode::PCSS) {
 			static constexpr int pcss_values[] = {8, 16, 32};

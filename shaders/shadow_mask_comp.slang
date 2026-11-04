@@ -55,6 +55,6 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	// Evaluate CSM shadow
 	uint cascade_unused;
 	float blend_unused;
-	float visibility = calculateCSMShadow(world_pos, view_z, world_normal, cascade_unused, blend_unused);
+	float visibility = calculateCSMShadow(world_pos, view_z, world_normal, float2(id.xy), cascade_unused, blend_unused);
 	shadow_mask_out[id.xy] = float2(visibility, view_z);
 }

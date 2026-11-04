@@ -93,12 +93,16 @@ struct UniformBuffer {
 	float4   csm_split_distances;  // view-space far-Z per cascade
 	uint32_t csm_cascade_count;
 	uint32_t csm_base_layer;
-	float    csm_shadow_map_size;
 	uint32_t csm_dir_light_index;
 	float    pcss_light_size;
 	uint32_t csm_blend_dithered;
 	float    csm_normal_bias;
 	float4   csm_world_texel_size;
+	float4   csm_atlas_rect[NUM_CSM_CASCADES]; // xy = min UV, zw = max UV
+	float4   csm_depth_range;                  // light-space depth range per cascade, world units
+	float2   shadow_texel_size;                // 1 / shadow atlas size
+	float    csm_tan_angular_radius;
+	float    _pad_csm_0;
 
 	// Screen-space shadow mask
 	float4x4 inverse_projection_view;
@@ -189,7 +193,7 @@ SamplerComparisonState shadow_cmp_sampler;
 [vk::binding(1, 2)]
 Texture2D shadow_atlas;
 [vk::binding(2, 2)]
-SamplerState shadow_sampler;  // Regular sampler for raw depth reads (PCSS blocker search)
+SamplerState shadow_sampler;  // Raw depth reads
 
 // ============================================================================
 // Screen-space shadow mask bindings (set 3)
@@ -430,163 +434,269 @@ float2 pcssFilterDiskSample(uint i) {
 	return POISSON_DISK_32[i];
 }
 
-// Rotated Poisson disk PCF, each sample gets free 2x2 bilinear from comparison sampler
-float calculateShadowPCF(float4 shadow_coord, float texel_size) {
+static const float PCSS_MAX_SPREAD_TEXELS = 25.0;
+
+// Interleaved gradient noise (Jimenez 2014) in [0,1)
+float interleavedGradientNoise(float2 pixel) {
+	return frac(52.9829189 * frac(dot(floor(pixel), float2(0.06711056, 0.00583715))));
+}
+
+// Per-pixel Poisson disk rotation
+float2 shadowDiskRotation(float2 pixel) {
+	float angle = interleavedGradientNoise(pixel) * 2.0 * PI;
+	return float2(sin(angle), cos(angle));
+}
+
+// Rotated disk sample scaled to radius_texels, in atlas UV
+float2 shadowDiskOffset(float2 disk, float2 rot, float radius_texels) {
+	return float2(rot.y * disk.x - rot.x * disk.y, rot.x * disk.x + rot.y * disk.y)
+		* radius_texels * ubo.shadow_texel_size;
+}
+
+// Bilinear taps per axis of the PCF tent
+uint pcfTentTapsPerAxis() {
+	if (PCF_SAMPLES_SPEC <= 4)  return 2;
+	if (PCF_SAMPLES_SPEC <= 8)  return 3;
+	if (PCF_SAMPLES_SPEC <= 16) return 4;
+	return 5;
+}
+
+// Tap k of the 1D tent over texels (2k - taps + 1) and the next one, relative to the texel at or
+// below the lookup; f = sub-texel position. Returns (summed weight, tap position between the two)
+float2 pcfTentTap(uint k, uint taps, float f) {
+	float half_width = float(taps) - 0.5;
+	float i0 = float(2 * k) - float(taps - 1);
+	float w0 = max(0.0, half_width - abs(i0 - f));
+	float w1 = max(0.0, half_width - abs(i0 + 1.0 - f));
+	return float2(w0 + w1, i0 + w1 / (w0 + w1));
+}
+
+// Tent-filtered PCF (Castano, "Shadow Mapping Summary")
+float calculateShadowPCF(float4 shadow_coord) {
 	if (shadow_coord.z <= -1.0 || shadow_coord.z >= 1.0 || shadow_coord.w <= 0.0)
 		return 1.0;
 
-	float spread = 2.5f * texel_size;
+	uint taps = pcfTentTapsPerAxis();
+	float2 texel = shadow_coord.xy / ubo.shadow_texel_size - 0.5;
+	float2 base = floor(texel);
+	float2 f = texel - base;
 	float ref_depth = shadow_coord.z - ubo.shadow_bias;
 
-	// Per-fragment rotation angle from screen-space position to break banding
-	float angle = frac(sin(dot(shadow_coord.xy, float2(12.9898, 78.233))) * 43758.5453) * 2.0 * PI;
-	float sa = sin(angle);
-	float ca = cos(angle);
-
 	float shadow = 0.0;
-	for (uint i = 0; i < PCF_SAMPLES_SPEC; i++) {
-		float2 disk = pcfDiskSample(i);
-		float2 offset = float2(
-			ca * disk.x - sa * disk.y,
-			sa * disk.x + ca * disk.y
-		) * spread;
-		shadow += shadow_atlas.SampleCmpLevelZero(shadow_cmp_sampler,
-			shadow_coord.xy + offset, ref_depth);
+	float weight_sum = 0.0;
+	for (uint ty = 0; ty < taps; ty++) {
+		float2 tap_y = pcfTentTap(ty, taps, f.y);
+		for (uint tx = 0; tx < taps; tx++) {
+			float2 tap_x = pcfTentTap(tx, taps, f.x);
+			float2 uv = (base + float2(tap_x.y, tap_y.y) + 0.5) * ubo.shadow_texel_size;
+			float w = tap_x.x * tap_y.x;
+			shadow += w * shadow_atlas.SampleCmpLevelZero(shadow_cmp_sampler, uv, ref_depth);
+			weight_sum += w;
+		}
 	}
-	return shadow / float(PCF_SAMPLES_SPEC);
+	return shadow / weight_sum;
 }
 
-float calculatePCSS(float4 shadow_coord, float texel_size) {
+// Average depth of the blockers in a rotated Poisson disk; false when there are none.
+// Each tap gathers its 2x2 texel quad: the disk spans up to 25 texels, and with single
+// texels a few taps miss small occluders often enough to leave lit pixels in the umbra.
+bool pcssBlockerSearch(float2 uv, float receiver, float radius_texels, float2 rot, out float avg_blocker) {
+	float blocker_sum = 0.0;
+	float blocker_count = 0.0;
+	for (uint i = 0; i < PCF_SAMPLES_SPEC; i++) {
+		float2 offset = shadowDiskOffset(pcfDiskSample(i), rot, radius_texels);
+		float4 depths = shadow_atlas.GatherRed(shadow_sampler, uv + offset);
+		float4 is_blocker = step(depths + ubo.shadow_bias, float4(receiver));
+		blocker_sum += dot(is_blocker, depths);
+		blocker_count += dot(is_blocker, float4(1.0));
+	}
+	avg_blocker = blocker_count > 0.0 ? blocker_sum / blocker_count : 0.0;
+	return blocker_count > 0.0;
+}
+
+float pcssFilter(float2 uv, float ref_depth, float spread_texels, float2 rot) {
+	float shadow = 0.0;
+	for (uint i = 0; i < PCSS_FILTER_SAMPLES_SPEC; i++)
+		shadow += shadow_atlas.SampleCmpLevelZero(shadow_cmp_sampler,
+			uv + shadowDiskOffset(pcssFilterDiskSample(i), rot, spread_texels), ref_depth);
+	return shadow / float(PCSS_FILTER_SAMPLES_SPEC);
+}
+
+float calculatePCSS(float4 shadow_coord, float2 rot) {
 	if (shadow_coord.z <= -1.0 || shadow_coord.z >= 1.0 || shadow_coord.w <= 0.0)
 		return 1.0;
 
 	float receiver = shadow_coord.z;
 	float light_size = ubo.pcss_light_size;
 
-	float angle = frac(sin(dot(shadow_coord.xy, float2(12.9898, 78.233))) * 43758.5453) * 2.0 * PI;
-	float sa = sin(angle);
-	float ca = cos(angle);
-
-	float search_radius = light_size * texel_size * 600.0;
-	float blocker_sum = 0.0;
-	uint blocker_count = 0;
-	for (uint i = 0; i < PCF_SAMPLES_SPEC; i++) {
-		float2 disk = pcfDiskSample(i);
-		float2 offset = float2(
-			ca * disk.x - sa * disk.y,
-			sa * disk.x + ca * disk.y
-		) * search_radius;
-		float depth = shadow_atlas.SampleLevel(shadow_sampler,
-			shadow_coord.xy + offset, 0.0).r;
-		if (depth + ubo.shadow_bias < receiver) {
-			blocker_sum += depth;
-			blocker_count++;
-		}
-	}
-	if (blocker_count == 0)
-		return 1.0;  // no blockers = fully lit
-	float avg_blocker = blocker_sum / float(blocker_count);
-
-	float penumbra = (receiver - avg_blocker) / avg_blocker * light_size;
-
-	float spread = clamp(penumbra, texel_size, 25.0 * texel_size);
-	float ref_depth = receiver - ubo.shadow_bias;
-	float shadow = 0.0;
-	for (uint i = 0; i < PCSS_FILTER_SAMPLES_SPEC; i++) {
-		float2 disk = pcssFilterDiskSample(i);
-		float2 offset = float2(
-			ca * disk.x - sa * disk.y,
-			sa * disk.x + ca * disk.y
-		) * spread;
-		shadow += shadow_atlas.SampleCmpLevelZero(shadow_cmp_sampler,
-			shadow_coord.xy + offset, ref_depth);
-	}
-	return shadow / float(PCSS_FILTER_SAMPLES_SPEC);
-}
-
-float sampleCascadeShadow(uint cascade, float3 frag_pos_world, float3 normal_offset) {
-	float3 biased_pos = frag_pos_world + normal_offset;
-	float4 shadow_coord = mul(ubo.csm_shadow_matrices[cascade], float4(biased_pos, 1.0));
-	shadow_coord /= shadow_coord.w;
-
-	float texel_size = 1.0 / ubo.csm_shadow_map_size;
-	if (SHADOW_MODE_SPEC == ShadowMode::PCSS)
-		return calculatePCSS(shadow_coord, texel_size);
-	else if (SHADOW_MODE_SPEC == ShadowMode::PCF)
-		return calculateShadowPCF(shadow_coord, texel_size);
-	else
+	// A search that finds nothing can still have missed an occluder: fall back to a hard test
+	float avg_blocker;
+	if (!pcssBlockerSearch(shadow_coord.xy, receiver, light_size * 600.0, rot, avg_blocker))
 		return calculateShadowTerm(shadow_coord, float2(0.0, 0.0));
+
+	// light_size scales the penumbra in atlas UV; measured in horizontal texels
+	float penumbra_texels = (receiver - avg_blocker) / avg_blocker * light_size / ubo.shadow_texel_size.x;
+	float spread_texels = clamp(penumbra_texels, 1.0, PCSS_MAX_SPREAD_TEXELS);
+	return pcssFilter(shadow_coord.xy, receiver - ubo.shadow_bias, spread_texels, rot);
 }
 
-float calculateCSMShadow(float3 frag_pos_world, float frag_view_z, float3 geo_normal,
+// Orthographic cascade: NDC depth is linear in light-space distance, so the penumbra radius is the
+// receiver-to-blocker distance in world units times the tangent of the light's angular radius.
+// min_spread_texels raises the floor so contact shadows match the next cascade in the blend band.
+float calculateCascadePCSS(uint cascade, float4 shadow_coord, float2 rot, float min_spread_texels) {
+	if (shadow_coord.z <= 0.0 || shadow_coord.z >= 1.0)
+		return 1.0;
+
+	float receiver = shadow_coord.z;
+	float avg_blocker;
+	if (!pcssBlockerSearch(shadow_coord.xy, receiver, PCSS_MAX_SPREAD_TEXELS, rot, avg_blocker))
+		return calculateShadowTerm(shadow_coord, float2(0.0, 0.0));
+
+	float penumbra_texels = (receiver - avg_blocker) * ubo.csm_depth_range[cascade]
+		* ubo.csm_tan_angular_radius / ubo.csm_world_texel_size[cascade];
+	float spread_texels = clamp(penumbra_texels, min(min_spread_texels, PCSS_MAX_SPREAD_TEXELS), PCSS_MAX_SPREAD_TEXELS);
+	return pcssFilter(shadow_coord.xy, receiver - ubo.shadow_bias, spread_texels, rot);
+}
+
+// pcss_min_spread: PCSS penumbra floor in this cascade's texels
+float sampleCascadeShadow(uint cascade, float3 shadow_coord, float2 rot, float pcss_min_spread) {
+	float4 sc = float4(shadow_coord, 1.0);
+	if (SHADOW_MODE_SPEC == ShadowMode::PCSS)
+		return calculateCascadePCSS(cascade, sc, rot, pcss_min_spread);
+	else if (SHADOW_MODE_SPEC == ShadowMode::PCF)
+		return calculateShadowPCF(sc);
+	else
+		return calculateShadowTerm(sc, float2(0.0, 0.0));
+}
+
+float3 cascadeShadowCoord(uint cascade, float3 frag_pos_world, float3 normal_offset_texels) {
+	float3 biased_pos = frag_pos_world + normal_offset_texels * ubo.csm_world_texel_size[cascade];
+	float4 sc = mul(ubo.csm_shadow_matrices[cascade], float4(biased_pos, 1.0));
+	return sc.xyz / sc.w;
+}
+
+float cascadeResolution(uint cascade) {
+	return (ubo.csm_atlas_rect[cascade].z - ubo.csm_atlas_rect[cascade].x) / ubo.shadow_texel_size.x;
+}
+
+// Texels from a shadow coord to the nearest edge of the cascade's atlas region, negative outside
+float cascadeEdgeTexels(uint cascade, float3 shadow_coord) {
+	float4 rect = ubo.csm_atlas_rect[cascade];
+	float2 edge = min(shadow_coord.xy - rect.xy, rect.zw - shadow_coord.xy) / (rect.zw - rect.xy);
+	return min(edge.x, edge.y) * cascadeResolution(cascade);
+}
+
+// Texels the shadow filter reads beyond the lookup position
+float cascadeFilterReach() {
+	if (SHADOW_MODE_SPEC == ShadowMode::PCSS)
+		return PCSS_MAX_SPREAD_TEXELS + 1.0;
+	if (SHADOW_MODE_SPEC == ShadowMode::PCF)
+		return float(pcfTentTapsPerAxis()) + 0.5;
+	return 1.0;
+}
+
+// The next cascade's texel size in this cascade's texels
+float cascadeNextTexelRatio(uint cascade) {
+	return ubo.csm_world_texel_size[cascade + 1] / ubo.csm_world_texel_size[cascade];
+}
+
+// pixel: screen (or shadow mask) pixel, seeds the filter rotation and the dither
+float calculateCSMShadow(float3 frag_pos_world, float frag_view_z, float3 geo_normal, float2 pixel,
                           out uint out_cascade, out float out_blend) {
 	out_cascade = 0;
 	out_blend = 0.0;
 	if (ubo.csm_cascade_count == 0)
 		return 1.0;
-	if (frag_view_z > ubo.csm_split_distances[ubo.csm_cascade_count - 1])
+	uint last = ubo.csm_cascade_count - 1;
+	float max_distance = ubo.csm_split_distances[last];
+	if (frag_view_z > max_distance)
 		return 1.0;
 
-	// Select cascade
-	uint cascade = ubo.csm_cascade_count - 1;
-	for (uint i = 0; i < ubo.csm_cascade_count; i++) {
-		if (frag_view_z < ubo.csm_split_distances[i]) {
-			cascade = i;
-			break;
-		}
-	}
-
-	// csm_blend_dithered: 0=off, 1=linear, 2=dithered
-	const float BLEND_FRACTION = 0.15;
-	if (ubo.csm_blend_dithered == 2 && cascade < ubo.csm_cascade_count - 1) {
-		// Dithered: pick ONE cascade upfront via noise, avoiding any second sample.
-		float split = ubo.csm_split_distances[cascade];
-		float cascade_start = (cascade == 0) ? 0.0 : ubo.csm_split_distances[cascade - 1];
-		float blend_zone = (split - cascade_start) * BLEND_FRACTION;
-
-		if (frag_view_z > split - blend_zone) {
-			float t = (frag_view_z - (split - blend_zone)) / blend_zone;
-			float noise = frac(sin(dot(frag_pos_world.xz, float2(12.9898, 78.233))) * 43758.5453);
-			if (noise < t)
-				cascade = cascade + 1;
-		}
-	}
-
-	out_cascade = cascade;
-
 	// Normal-offset bias: push the sample along the surface normal by csm_normal_bias shadow
-	// texels (in world space)
+	// texels of the sampled cascade (in world space)
 	float slope_scale = 1.0;
 	if (ubo.csm_dir_light_index != 0xFFFFFFFF) {
 		float3 light_dir = normalize(-ubo.dir_lights[ubo.csm_dir_light_index].direction.xyz);
 		float ndotl = saturate(dot(geo_normal, light_dir));
 		slope_scale = sqrt(max(0.0, 1.0 - ndotl * ndotl));
 	}
-	float3 normal_offset = geo_normal * ubo.csm_normal_bias
-		* ubo.csm_world_texel_size[cascade] * slope_scale;
+	float3 normal_offset_texels = geo_normal * ubo.csm_normal_bias * slope_scale;
 
-	float shadow = sampleCascadeShadow(cascade, frag_pos_world, normal_offset);
+	// csm_blend_dithered: 0=off, 1=linear, 2=dithered
+	bool blend = ubo.csm_blend_dithered != 0;
 
-	// Linear blend: smooth lerp with next cascade in blend zone (2x sample cost)
-	if (ubo.csm_blend_dithered == 1 && cascade < ubo.csm_cascade_count - 1) {
-		float split = ubo.csm_split_distances[cascade];
-		float cascade_start = (cascade == 0) ? 0.0 : ubo.csm_split_distances[cascade - 1];
-		float blend_zone = (split - cascade_start) * BLEND_FRACTION;
+	// A cascade also hands off once one screen pixel spans more than this many of its texels:
+	// depth maps can't be prefiltered, so a map denser than the pixel aliases into moire bands,
+	// and its texel-sized bias no longer covers the pixel
+	const float MAX_TEXELS_PER_PIXEL = 2.0;
+	float pixel_world = frag_view_z * 2.0 / (abs(ubo.proj[1][1]) * ubo.screen_size.y);
 
-		if (frag_view_z > split - blend_zone) {
-			float3 next_offset = geo_normal * ubo.csm_normal_bias
-				* ubo.csm_world_texel_size[cascade + 1] * slope_scale;
-			float next_shadow = sampleCascadeShadow(cascade + 1, frag_pos_world, next_offset);
-			float t = (frag_view_z - (split - blend_zone)) / blend_zone;
-			shadow = lerp(shadow, next_shadow, t);
-			out_blend = t;
+	// Map-based selection: the first cascade whose atlas region holds the whole filter footprint.
+	// The fit spheres nest, so each map also covers fragments well past its view-depth split.
+	uint cascade = last;
+	float3 sc = float3(0.0);
+	float edge = 0.0;
+	float texels_per_pixel = 0.0;
+	for (uint i = 0; i <= last; i++) {
+		sc = cascadeShadowCoord(i, frag_pos_world, normal_offset_texels);
+		if (i == last)
+			break;
+		edge = cascadeEdgeTexels(i, sc) - cascadeFilterReach();
+		texels_per_pixel = pixel_world / ubo.csm_world_texel_size[i];
+		if (edge > 0.0 && sc.z > 0.0 && sc.z < 1.0 && texels_per_pixel < MAX_TEXELS_PER_PIXEL) {
+			cascade = i;
+			break;
 		}
 	}
 
-	return shadow;
+	// Blend band: the outer BLEND_FRACTION of the region's half-width inside the margin, or of the
+	// texel density range below MAX_TEXELS_PER_PIXEL
+	const float BLEND_FRACTION = 0.15;
+	float t = 0.0;
+	float3 next_sc = sc;
+	if (blend && cascade < last) {
+		float t_edge = saturate(1.0 - edge / (BLEND_FRACTION * 0.5 * cascadeResolution(cascade)));
+		float t_density = saturate((texels_per_pixel / MAX_TEXELS_PER_PIXEL - (1.0 - BLEND_FRACTION)) / BLEND_FRACTION);
+		t = max(t_edge, t_density);
+		if (t > 0.0) {
+			next_sc = cascadeShadowCoord(cascade + 1, frag_pos_world, normal_offset_texels);
+			if (cascadeEdgeTexels(cascade + 1, next_sc) <= cascadeFilterReach()
+				|| next_sc.z <= 0.0 || next_sc.z >= 1.0)
+				t = 0.0;
+		}
+	}
+
+	// The PCSS penumbra floor ramps to the next cascade's texel size
+	float pcss_min_spread = t > 0.0 ? lerp(1.0, cascadeNextTexelRatio(cascade), t) : 1.0;
+
+	if (ubo.csm_blend_dithered == 2 && t > 0.0) {
+		// Dithered: pick ONE cascade via noise, avoiding any second sample. Transposed so it
+		// does not correlate with the PCSS disk rotation
+		if (interleavedGradientNoise(pixel.yx) < t) {
+			cascade = cascade + 1;
+			sc = next_sc;
+			pcss_min_spread = 1.0;
+		}
+		t = 0.0;
+	}
+
+	out_cascade = cascade;
+	float2 rot = shadowDiskRotation(pixel);
+	float shadow = sampleCascadeShadow(cascade, sc, rot, pcss_min_spread);
+
+	// Linear blend: lerp with the next cascade in the band (2x sample cost)
+	if (t > 0.0) {
+		shadow = lerp(shadow, sampleCascadeShadow(cascade + 1, next_sc, rot, 1.0), t);
+		out_blend = t;
+	}
+
+	// Fade out over the last stretch of the shadow distance
+	const float FADE_FRACTION = 0.1;
+	float fade = saturate((max_distance - frag_view_z) / (FADE_FRACTION * max_distance));
+	return lerp(1.0, shadow, fade);
 }
 
-void calculatePointShadowTerms(float4 shadow_coords[MAX_SHADOW_LIGHTS],
+void calculatePointShadowTerms(float4 shadow_coords[MAX_SHADOW_LIGHTS], float2 pixel,
                                 out float shadow_terms[MAX_SHADOW_LIGHTS],
                                 out uint32_t shadow_for_light[MAX_SHADOW_LIGHTS]) {
 	for (uint32_t s = 0; s < MAX_SHADOW_LIGHTS; s++) {
@@ -596,7 +706,7 @@ void calculatePointShadowTerms(float4 shadow_coords[MAX_SHADOW_LIGHTS],
 
 	if (SHADOW_MODE_SPEC == ShadowMode::DISABLED) return;
 
-	float texel_size = 1.0 / ubo.csm_shadow_map_size;
+	float2 rot = shadowDiskRotation(pixel);
 	for (uint32_t shadow_idx = 0; shadow_idx < ubo.num_shadow_lights; shadow_idx++) {
 		shadow_for_light[shadow_idx] = uint32_t(ubo.shadow_lights[shadow_idx].light_index_padding.x);
 
@@ -608,11 +718,11 @@ void calculatePointShadowTerms(float4 shadow_coords[MAX_SHADOW_LIGHTS],
 			continue;
 
 		if (SHADOW_MODE_SPEC == ShadowMode::PCSS)
-			shadow_terms[shadow_idx] = calculatePCSS(sc, texel_size);
+			shadow_terms[shadow_idx] = calculatePCSS(sc, rot);
 		else if (SHADOW_MODE_SPEC == ShadowMode::REGULAR)
 			shadow_terms[shadow_idx] = calculateShadowTerm(sc, float2(0.0, 0.0));
 		else
-			shadow_terms[shadow_idx] = calculateShadowPCF(sc, texel_size);
+			shadow_terms[shadow_idx] = calculateShadowPCF(sc);
 	}
 }
 

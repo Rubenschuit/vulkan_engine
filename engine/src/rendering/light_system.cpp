@@ -232,6 +232,9 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 	ubo.ambient_light_color.y *= ubo.ambient_light_color.w;
 	ubo.ambient_light_color.z *= ubo.ambient_light_color.w;
 
+	if (frame_info.shadow_atlas_width > 0 && frame_info.shadow_atlas_height > 0)
+		ubo.shadow_texel_size = 1.0f / glm::vec2(frame_info.shadow_atlas_width, frame_info.shadow_atlas_height);
+
 	auto& registry = *frame_info.registry;
 	for (auto [entity, pl, tc] : registry.view<PointLightComponent, TransformComponent>()) {
 		glm::vec3 world_pos = glm::vec3(registry.getWorldTransform(entity)[3]);
@@ -391,6 +394,7 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 
 				// Atlas bias matrix: maps clip [-1,1] to this cascade's UV region in the atlas
 				glm::mat4 atlas_bias = s_bias_matrix;
+				glm::vec4 atlas_rect{0.0f, 0.0f, 1.0f, 1.0f};
 				if (frame_info.shadow_atlas_regions && frame_info.shadow_atlas_width > 0) {
 					auto& r = frame_info.shadow_atlas_regions[cascade];
 					float aw = static_cast<float>(frame_info.shadow_atlas_width);
@@ -406,12 +410,15 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 						0.0f,      0.0f,       1.0f, 0.0f,
 						ox + sx * 0.5f, oy + sy * 0.5f, 0.0f, 1.0f
 					);
+					atlas_rect = glm::vec4(ox, oy, ox + sx, oy + sy);
 				}
 
 				ubo.csm_shadow_matrices[cascade] = atlas_bias * light_proj * light_view;
+				ubo.csm_atlas_rect[cascade] = atlas_rect;
 				ubo.csm_split_distances[static_cast<int>(cascade)] = far_split;
 				// World units per shadow texel for this cascade
 				ubo.csm_world_texel_size[static_cast<int>(cascade)] = (2.0f * radius) / cascade_res;
+				ubo.csm_depth_range[static_cast<int>(cascade)] = total_depth_range;
 
 				// Store raw view/proj for shadow render pass
 				frame_info.csm_data.light_view[cascade] = light_view;
@@ -419,8 +426,8 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 			}
 			ubo.csm_cascade_count = NUM_CSM_CASCADES;
 			ubo.csm_base_layer = 0;
-			ubo.csm_shadow_map_size = static_cast<float>(frame_info.shadow_atlas_width);
 			ubo.csm_dir_light_index = num_dir_lights;
+			ubo.csm_tan_angular_radius = std::tan(glm::radians(dl.getAngularRadius()));
 			frame_info.csm_data.active_cascade_count = NUM_CSM_CASCADES;
 			csm_assigned = true;
 		}

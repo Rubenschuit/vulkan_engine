@@ -3,6 +3,7 @@
  */
 #pragma once
 #include "ve_export.hpp"
+#include "ve_config.hpp"
 #include "ve_entity.hpp"
 #include "resources/ve_resource_manager.hpp"
 #include "resources/ve_mesh.hpp"
@@ -191,6 +192,7 @@ public:
 	const glm::vec3& getDirection() const { return m_direction; }
 	const glm::vec3& getColor() const { return m_color; }
 	float getIntensity() const { return m_intensity; }
+	float getAngularRadius() const { return m_angular_radius; }
 	bool getCastsShadow() const { return m_casts_shadow; }
 	bool getShowBillboard() const { return m_show_billboard; }
 	CelestialType getCelestialType() const { return m_celestial_type; }
@@ -198,6 +200,7 @@ public:
 	void setDirection(const glm::vec3& v);
 	void setColor(const glm::vec3& v);
 	void setIntensity(float v);
+	void setAngularRadius(float degrees);
 	void setCastsShadow(bool v);
 	void setShowBillboard(bool v) { m_show_billboard = v; }
 	void setCelestialType(CelestialType t);
@@ -206,6 +209,7 @@ private:
 	glm::vec3 m_direction{0.f, -1.f, -1.f};  // world-space light direction (toward surface)
 	glm::vec3 m_color{1.f};
 	float m_intensity{1.f};
+	float m_angular_radius{DIR_LIGHT_ANGULAR_RADIUS}; // apparent disk radius in degrees, sets the PCSS penumbra
 	bool m_casts_shadow{false};
 	bool m_show_billboard{true};
 	CelestialType m_celestial_type{CelestialType::Sun};

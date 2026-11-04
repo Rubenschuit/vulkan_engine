@@ -212,6 +212,9 @@ constexpr BenchSetKey BENCH_SET_KEYS[] = {
 	{.name = "ibl_min_ambient", .apply = [](S& s, float v) { s.ibl_min_ambient = v; }},
 	{.name = "ambient_light_intensity", .apply = [](S& s, float v) { s.ambient_light_intensity = v; }},
 	{.name = "gtao_enabled", .apply = [](S& s, float v) { s.gtao_enabled = v != 0.0f; }},
+	{.name = "shadow_mode", .apply = [](S& s, float v) { s.shadow_mode = static_cast<ShadowMode>(static_cast<uint32_t>(v)); },
+		.unsigned_only = true},
+	{.name = "csm_blend_mode", .apply = [](S& s, float v) { s.csm_blend_mode = static_cast<int>(v); }}, // 0 = off, 1 = linear, 2 = dithered
 	{.name = "exposure", .apply = [](S& s, float v) { s.exposure = v; }},
 	{.name = "bloom_enabled", .apply = [](S& s, float v) { s.bloom_enabled = v != 0.0f; }},
 	{.name = "ssr_enabled", .apply = [](S& s, float v) { s.ssr_enabled = v != 0.0f; }},

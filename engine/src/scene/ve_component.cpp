@@ -252,6 +252,12 @@ void DirectionalLightComponent::setIntensity(float v) {
 		m_registry->events().emit(LightDataChangedEvent{m_entity});
 }
 
+void DirectionalLightComponent::setAngularRadius(float degrees) {
+	m_angular_radius = degrees;
+	if (m_registry)
+		m_registry->events().emit(LightDataChangedEvent{m_entity});
+}
+
 void DirectionalLightComponent::setCastsShadow(bool v) {
 	m_casts_shadow = v;
 	if (m_registry)
