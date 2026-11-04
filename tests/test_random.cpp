@@ -2,6 +2,7 @@
 #include <utils/ve_random.hpp>
 #include <glm/glm.hpp>
 #include <cmath>
+#include <vector>
 
 static constexpr int NUM_SAMPLES = 200;
 
@@ -96,4 +97,22 @@ TEST_CASE("Random::colorHSV returns valid rgba", "[utils][random]") {
 		REQUIRE(c.b <= 1.0f);
 		REQUIRE(c.a == 1.0f);
 	}
+}
+
+TEST_CASE("Random::seed makes the stream reproducible", "[utils][random]") {
+	auto draw = []() {
+		std::vector<float> out;
+		for (int i = 0; i < 16; ++i) {
+			out.push_back(ve::Random::floatRange(-1.0f, 1.0f));
+			out.push_back(ve::Random::floatNormal(0.0f, 2.0f));
+			out.push_back(static_cast<float>(ve::Random::intRange(0, 1000)));
+		}
+		return out;
+	};
+	ve::Random::seed(42);
+	std::vector<float> first = draw();
+	ve::Random::seed(42);
+	REQUIRE(draw() == first);
+	ve::Random::seed(43);
+	REQUIRE(draw() != first);
 }

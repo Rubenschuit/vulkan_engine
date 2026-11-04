@@ -1,22 +1,26 @@
 #pragma once
+#include "ve_export.hpp"
+
+#include <cstdint>
 #include <random>
 #include <glm/glm.hpp>
 
 namespace ve {
 
-class Random {
+class VENGINE_API Random {
 public:
+	static void seed(uint32_t value) { generator().seed(value); }
+
 	static float float01() {
-        static thread_local std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-        return dist(generator());
-    }
+		return std::uniform_real_distribution<float>(0.0f, 1.0f)(generator());
+	}
 
 	static float floatRange(float min, float max) {
 		return min + (max - min) * float01();
 	}
 
 	static int intRange(int min, int max) {
-		return min + static_cast<int>(rand() % (max - min + 1));
+		return std::uniform_int_distribution<int>(min, max)(generator());
 	}
 
 	static glm::vec3 vec3Range(float min, float max) {
@@ -28,8 +32,7 @@ public:
 	}
 
 	static float floatNormal(float mean, float stddev) {
-		static thread_local std::normal_distribution<float> dist;
-		return dist(generator(), std::normal_distribution<float>::param_type{mean, stddev});
+		return std::normal_distribution<float>(mean, stddev)(generator());
 	}
 
 	static glm::vec3 vec3Normal(float stddev) {
@@ -62,11 +65,7 @@ public:
 	}
 
 private:
-	static std::mt19937& generator() {
-		static thread_local std::mt19937 gen(std::random_device{}());
-		return gen;
-}
+	static std::mt19937& generator();
 };
 
 }
-
