@@ -54,6 +54,10 @@ vk::Extent2D atlasExtent(uint32_t capacity) {
 	return vk::Extent2D{tiles_per_row * TILE, rows * TILE};
 }
 constexpr vk::DeviceSize WORD = sizeof(uint32_t);
+// Per-cascade capacity as a share of cascade 0's
+constexpr double CASCADE_SHAPE[MAX_CASCADES] = {1.0, 0.2769, 0.0731, 0.0197, 0.0053, 0.0014};
+// Scratch radiance + mass, persistent J + count
+constexpr uint32_t BYTES_PER_PAIR = (SCRATCH_RADIANCE_WORDS + 2) * WORD + 2 * WORD + WORD;
 
 // Directions per probe in cascade n: 2 * THETA0^2 * 4^n (32, 128, 512, ...).
 // Mirrors rcwDirCount.
@@ -333,23 +337,27 @@ void RcSystem::createPrevDepthImage() {
 }
 
 void RcSystem::computeLayout() {
-	// Per-cascade capacity as a share of cascade 0's
-	constexpr double SHAPE[MAX_CASCADES] = {1.0, 0.2769, 0.0731, 0.0197, 0.0053, 0.0014};
-	// Scratch radiance + mass, persistent J + count
-	constexpr uint32_t BYTES_PER_PAIR = (SCRATCH_RADIANCE_WORDS + 2) * WORD + 2 * WORD + WORD;
-	double unit_cost = 0.0;
-	for (uint32_t n = 0; n < m_cascades; n++)
-		unit_cost += SHAPE[n] * dirCount(n) * BYTES_PER_PAIR;
-	double budget = static_cast<double>(m_memory_mb) * 1024.0 * 1024.0;
-	// 65,535 * LINEAR_WG: keeps the per-probe indirect (ceil(probe_cap /
-	// LINEAR_WG) groups) within limits
-	uint32_t cap0 = static_cast<uint32_t>(
-		std::clamp(budget / unit_cost, 1024.0, 65535.0 * LINEAR_WG));
+	// The budget covers the whole store: the largest c0 capacity whose store
+	// fits. 65,535 * LINEAR_WG keeps the per-probe indirect (ceil(probe_cap /
+	// LINEAR_WG) groups) within limits.
+	const vk::DeviceSize budget = static_cast<vk::DeviceSize>(m_memory_mb) << 20;
+	uint32_t cap0 = 1024;
+	uint32_t cap0_max = 65535 * LINEAR_WG;
+	while (cap0 < cap0_max) {
+		uint32_t mid = cap0 + (cap0_max - cap0 + 1) / 2;
+		if (layOutStore(mid) <= budget)
+			cap0 = mid;
+		else
+			cap0_max = mid - 1;
+	}
 	// Device limits: the radiance scratch, the largest buffer at
 	// SCRATCH_RADIANCE_WORDS words per pair, must fit one allocation and one
 	// whole storage binding, and the c0 tile atlases one image.
+	double pairs_per_cap0 = 0.0;
+	for (uint32_t n = 0; n < m_cascades; n++)
+		pairs_per_cap0 += CASCADE_SHAPE[n] * dirCount(n);
 	double buffer_cap0 = static_cast<double>(m_max_buffer_bytes)
-		/ (SCRATCH_RADIANCE_WORDS * WORD * (unit_cost / BYTES_PER_PAIR));
+		/ (SCRATCH_RADIANCE_WORDS * WORD * pairs_per_cap0);
 	uint32_t tiles_per_side = m_max_image_dimension / TILE;
 	uint32_t tiles_per_row = std::bit_floor(tiles_per_side);
 	double atlas_cap0 = std::min(2.0 * tiles_per_row * tiles_per_row - 1.0,
@@ -358,6 +366,12 @@ void RcSystem::computeLayout() {
 	m_device_clamped = cap0 > device_cap0;
 	if (m_device_clamped)
 		cap0 = static_cast<uint32_t>(device_cap0);
+	layOutStore(cap0);
+	if (static_cast<vk::DeviceSize>(m_pair_total) * SCRATCH_RADIANCE_WORDS * WORD > m_max_buffer_bytes)
+		VE_LOGE("RC store: the per-cascade probe floors exceed the device buffer limit; lower Cascades");
+}
+
+vk::DeviceSize RcSystem::layOutStore(uint32_t cap0) {
 	uint32_t hash_off = 0;
 	uint32_t probe_off = 0;
 	uint32_t slot_off = 0;
@@ -366,7 +380,7 @@ void RcSystem::computeLayout() {
 	m_descs = {};
 	std::array<uint32_t, 2> dirmip_regions{};
 	for (uint32_t n = 0; n < m_cascades; n++) {
-		uint32_t cap = std::max(256u, static_cast<uint32_t>(std::llround(cap0 * SHAPE[n])));
+		uint32_t cap = std::max(256u, static_cast<uint32_t>(std::llround(cap0 * CASCADE_SHAPE[n])));
 		m_descs[n] = CascadeDesc{
 			.hash_base = hash_off,
 			.hash_cap = std::bit_ceil(cap * 2),
@@ -395,10 +409,7 @@ void RcSystem::computeLayout() {
 	m_slot_total = slot_off;
 	m_free_total = free_off;
 	m_pair_total = pair_off;
-	if (static_cast<vk::DeviceSize>(m_pair_total) * SCRATCH_RADIANCE_WORDS * WORD > m_max_buffer_bytes)
-		VE_LOGE("RC store: the per-cascade probe floors exceed the device buffer limit; lower Cascades");
 
-	// Debug-panel readout
 	vk::Extent2D atlas = atlasExtent(m_descs[0].probe_cap);
 	m_store_bytes = static_cast<vk::DeviceSize>(m_pair_total) * BYTES_PER_PAIR
 		+ static_cast<vk::DeviceSize>(m_merged_cap + m_dirmip_cap) * 2 * WORD
@@ -409,6 +420,7 @@ void RcSystem::computeLayout() {
 		+ static_cast<vk::DeviceSize>(m_cascades) * 2 * sizeof(CountersGpu)
 		// RGBA16F irradiance + R16F sky-visibility tile atlases.
 		+ static_cast<vk::DeviceSize>(atlas.width) * atlas.height * (8 + 2);
+	return m_store_bytes;
 }
 
 void RcSystem::releaseStore() {

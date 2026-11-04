@@ -50,7 +50,7 @@ struct RcSettings {
 	float lod0_dist = 3.0f;
 	bool ray_query = true; // trace the acceleration structures, where the device has ray query
 	int cascades = 4;
-	int memory_mb = 448;
+	int memory_mb = 578;     // the whole probe store
 	bool single_frame = false;
 	RcDebugView debug_view = RcDebugView::NONE;
 	int probe_j_cascade = 0; // cascade shown in PROBE_J / PROBE_GRID views

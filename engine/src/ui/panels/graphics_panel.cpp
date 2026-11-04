@@ -419,11 +419,11 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 				[](const char* label, int* v) { ImGui::SliderInt(label, v, 1, 6); });
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Each level out reaches four times further.\nBeyond the last level, distant bounce is replaced by a plain sky\nestimate.");
-			sliderAppliedOnRelease("Direction Data Budget (MiB)", ctx.settings.rc.memory_mb, m_rc_held.memory_mb,
+			sliderAppliedOnRelease("Probe Store (MiB)", ctx.settings.rc.memory_mb, m_rc_held.memory_mb,
 				[](const char* label, int* v) { ImGui::SliderInt(label, v, 32, 4096); });
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Memory for per-direction probe data, which sets how many probes fit."
-					"\nThe whole probe store is larger; Debug > Probe store shows its size.");
+				ImGui::SetTooltip("Memory for the probes, which sets how many fit."
+					"\nDebug > Radiance Cascades shows how full each cascade is.");
 			ImGui::SliderFloat("Bounce Luma Clamp", &ctx.settings.rc.luma_clamp, 1.0f, 200.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Caps how bright a single bounce can be.");

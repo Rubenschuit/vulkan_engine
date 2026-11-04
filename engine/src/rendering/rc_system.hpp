@@ -181,6 +181,8 @@ private:
 	void createSampler();
 	void createPrevDepthImage();
 	void computeLayout();
+	// Lays the store out for a c0 capacity and returns its size in bytes
+	vk::DeviceSize layOutStore(uint32_t cap0);
 	void createBuffers();
 	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout,
 		const vk::raii::DescriptorSetLayout& bindless_set_layout);
@@ -204,11 +206,11 @@ private:
 
 	uint32_t m_resolution_div = 4;
 	uint32_t m_cascades = 4;
-	uint32_t m_memory_mb = 448;
+	uint32_t m_memory_mb = 578;
 	struct Quality {
 		uint32_t resolution_div = 4;
 		uint32_t cascades = 4;
-		uint32_t memory_mb = 448;
+		uint32_t memory_mb = 578;
 		bool operator==(const Quality&) const = default;
 	} m_pending;
 
