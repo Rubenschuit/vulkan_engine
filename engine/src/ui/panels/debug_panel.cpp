@@ -64,7 +64,7 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 		rc_view_radio("Trace Outcome", RcDebugView::TRACE_KIND,
 			"First ray, r=hit g=clear/sky b=unknown");
 		rc_view_radio("Convergence", RcDebugView::CONVERGENCE,
-			"Sample count of the probes the pixel gathers from, over the 64-frame EMA window");
+			"Sample count of the probes the pixel gathers from, over the History Length");
 		rc_view_radio("Probe Grid", RcDebugView::PROBE_GRID,
 			"Hash-colored by the pixel's nearest probe at the chosen cascade; black = no probe there");
 		rc_view_radio("Rough Specular", RcDebugView::SPEC, "The irradiance tile sampled at the reflection direction");

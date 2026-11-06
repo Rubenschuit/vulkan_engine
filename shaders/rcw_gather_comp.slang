@@ -193,8 +193,9 @@ void compMain(uint3 thread_id: SV_DispatchThreadID) {
 				uint pair_base = desc.pair_base + slot * direction_count;
 				uint count_sum = 0u;
 				for (uint bin = 0; bin < direction_count; bin++)
-					count_sum += min(persist_count[pair_base + bin], 64u);
-				convergence[pass] += trilinear_weight * float(count_sum) / (float(direction_count) * 64.0);
+					count_sum += min(persist_count[pair_base + bin], push.history_length);
+				convergence[pass] += trilinear_weight * float(count_sum)
+					/ (float(direction_count) * float(push.history_length));
 			}
 		}
 		// The two lods mixed as the gather mixes them

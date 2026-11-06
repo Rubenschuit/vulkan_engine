@@ -84,6 +84,7 @@ struct RcwPush {
 	uint flags;             // RCW_FLAG_*, see below
 	uint hiz_mip_count;     // min/max pyramid mip count
 	uint light_count;       // point + spot lights at the head of rcw_point_lights
+	uint history_length;    // a bin's sample count saturates here; the EMA weight floors at its inverse
 };
 
 [[vk::push_constant]] RcwPush push;
@@ -850,7 +851,7 @@ float4 rcwUnpackHalf4(uint2 p) {
 
 // persist_j's {J.rgb, beta}: J as half, beta as unorm16 in the top 16 bits.
 // As a half, beta would stop rising once within 2^-6 of 1, where the 1/64
-// EMA step is smaller than half a half-precision step.
+// EMA step of the longest history is smaller than half a half-precision step.
 uint2 rcwPackJBeta(float4 v) {
 	uint2 packed = rcwPackHalf4(float4(v.rgb, 0.0));
 	packed.y |= uint(saturate(v.a) * 65535.0 + 0.5) << 16;

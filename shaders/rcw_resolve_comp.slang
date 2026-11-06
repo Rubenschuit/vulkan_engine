@@ -4,17 +4,17 @@
 // slot; probes[].y links the two. Each pair has a single writer, so the
 // update needs no atomics and the EMA is deterministic.
 //
-// Per bin: J = radiance sum / total mass, beta = clear mass / total mass (a
-// clear is a sample with J = 0, beta = 1), blended into the store with
-// alpha = 1 / min(sample_count + 1, 64); a sample is a frame with mass. A bin
-// without mass keeps its history. Unsampled bins of a fresh slot are set to
-// {0,0,0,1} / count 0, which merge reads as "pass the parent through"; a
-// seeded slot already holds donor history. Under RCW_FLAG_SINGLE_FRAME every
+// Per bin:
+// 		J = radiance sum / total mass,
+//		beta = clear mass / total mass
+// A clear is a sample with J = 0, beta = 1), blended into the store with
+// alpha = 1 / min(sample_count + 1, push.history_length).
+// A sample is a frame with mass. A bin without mass keeps its history.
+// Unsampled bins of a fresh slot are set to
+// {0,0,0,1} / count 0, which merge reads as "pass the parent through";
+// Under RCW_FLAG_SINGLE_FRAME every
 // bin behaves like a fresh one, so the store shows one frame of rays with no
-// accumulation. Mass is read first and radiance only where a hit deposited
-// it: most bins get no rays. The scratch words consumed here are re-zeroed,
-// so scratch stays zero outside the trace-to-resolve window without a
-// per-frame fill.
+// accumulation.
 
 #include "rc_world_common.slangh"
 
@@ -78,7 +78,8 @@ void compMain(uint3 group_id: SV_GroupID, uint3 local_id: SV_GroupThreadID) {
 	float inverse_total = 1.0 / float(total_mass);
 	float3 j_frame = float3(radiance) * inverse_total;
 	float beta_frame = float(mass.y) * inverse_total;
-	float alpha = 1.0 / float(min(sample_count + 1u, 64u));
+	uint count = min(sample_count + 1u, push.history_length);
+	float alpha = 1.0 / float(count);
 	persist_j[slot_pair] = rcwPackJBeta(lerp(history, float4(j_frame, beta_frame), alpha));
-	persist_count[slot_pair] = min(sample_count + 1u, 64u);
+	persist_count[slot_pair] = count;
 }

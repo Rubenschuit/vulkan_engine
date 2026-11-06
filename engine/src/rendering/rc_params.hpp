@@ -53,11 +53,14 @@ enum class RcSkyOcclusion : uint32_t {
 	UNKNOWN_OBSTRUCTED = 4, // they count as blocked
 };
 
+constexpr int RC_MAX_HISTORY_LENGTH = 64;
+
 struct RcSettings {
 	bool enabled = true;
 	float luma_clamp = 20.0f;
 	int resolution_div = 4; // the paper's density is 1: a ray and a gather per pixel
 	int rays_per_pixel = 1;
+	int history_length = 64; // sampled frames a bin averages before its EMA weight floors at 1 / history_length
 	float ds0 = 0.075f;      // c0 probe spacing at LOD 0
 	float lod0_dist = 3.0f;
 	bool ray_query = true; // trace the acceleration structures, where the device has ray query

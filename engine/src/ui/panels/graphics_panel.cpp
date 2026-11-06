@@ -448,6 +448,10 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			ImGui::SliderFloat("Bounce Luma Clamp", &ctx.settings.rc.luma_clamp, 1.0f, 200.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Caps how bright a single bounce can be.");
+			ImGui::SliderInt("History Length", &ctx.settings.rc.history_length, 4, RC_MAX_HISTORY_LENGTH);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Sampled frames each probe direction averages over."
+					"\nLower follows moving lights and objects sooner, with more noise.");
 
 			ImGui::Unindent();
 		}

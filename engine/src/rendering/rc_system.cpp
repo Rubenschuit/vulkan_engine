@@ -44,8 +44,9 @@ struct RcwPushConstant {
 	uint32_t flags;
 	uint32_t hiz_mip_count;
 	uint32_t light_count;
+	uint32_t history_length;
 };
-static_assert(sizeof(RcwPushConstant) == 112, "must match RcwPush in rc_world_common.slangh");
+static_assert(sizeof(RcwPushConstant) == 116, "must match RcwPush in rc_world_common.slangh");
 
 // Tile-atlas extent from capacity; mirrors rcwTilesPerRow. See shader comments.
 vk::Extent2D atlasExtent(uint32_t capacity) {
@@ -992,6 +993,7 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 			| skyModeBits(m_rc.sky_occlusion, ray_query),
 		.hiz_mip_count = m_screen_rays.pyramidMipLevels(),
 		.light_count = m_scene.lights ? m_scene.light_count : 0u,
+		.history_length = static_cast<uint32_t>(std::clamp(m_rc.history_length, 1, RC_MAX_HISTORY_LENGTH)),
 	};
 	auto push_constants = [&] {
 		cmd.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0,
