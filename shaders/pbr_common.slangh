@@ -135,6 +135,17 @@ float geometrySmith(float NdotV, float NdotL, float roughness) {
 	return ggx1 * ggx2;
 }
 
+// Directional albedo of a specular lobe under uniform lighting: the split-sum
+// single scatter plus multiscatter energy compensation (Fdez-Aguera 2019,
+// Fms * Ems = FssEss * Ems * F_avg / (1 - Ems * F_avg)). env_brdf is
+// precomputed assuming F90=1, so scale by F90. A white lobe returns 1
+float3 specularAlbedo(float3 F0, float3 F90, float2 env_brdf) {
+	float3 FssEss = F0 * env_brdf.x + F90 * env_brdf.y;
+	float Ems = 1.0 - env_brdf.x - env_brdf.y;
+	float3 F_avg = F0 + (F90 - F0) / 21.0;
+	return FssEss + FssEss * Ems * F_avg / max(1.0 - Ems * F_avg, 0.001);
+}
+
 // Depth-aware bilinear upsample of the (possibly half-res) screen-space shadow mask.
 // The mask stores (visibility, view-space depth); weighting the 4 nearest texels by both
 // bilinear position AND view-depth similarity stops lit background texels from bleeding
@@ -311,12 +322,12 @@ float4 computePbrLighting(VertexOutput in_vert) {
 
 	float metallic;
 	float roughness;
-	float3 F0;
+	float3 dielectric_F0;
 	float specular_weight;  // KHR_materials_specular dielectric Fresnel scaling
 	if ((mat.material_flags & MAT_FLAG_SPEC_GLOSS) != 0u) {
 		metallic = 0.0;
 		roughness = 1.0 - mr.a * mat.pbr_params.y;
-		F0 = mat.specular_color_ior.xyz * mr.rgb;
+		dielectric_F0 = mat.specular_color_ior.xyz * mr.rgb;
 		specular_weight = 1.0;
 	} else {
 		metallic = mr.b * mat.pbr_params.x;
@@ -333,9 +344,9 @@ float4 computePbrLighting(VertexOutput in_vert) {
 				.Sample(bindless_sampler, tex_coord).a;
 		}
 		specular_weight = mat.specular_strength * spec_tex_alpha;
-		float3 dielectric_F0 = min(f0_dielectric * mat.specular_color_ior.xyz * spec_col_tex, float3(1.0)) * specular_weight;
-		F0 = lerp(dielectric_F0, albedo.rgb, metallic);
+		dielectric_F0 = min(f0_dielectric * mat.specular_color_ior.xyz * spec_col_tex, float3(1.0)) * specular_weight;
 	}
+	float3 F0 = lerp(dielectric_F0, albedo.rgb, metallic);
 	roughness = max(roughness, 0.045);
 	float transmission = mat.pbr_params.w;
 	float3 F90 = float3(lerp(specular_weight, 1.0, metallic));
@@ -355,23 +366,24 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	float frag_view_z = -(mul(ubo.view, float4(in_vert.frag_pos_world, 1.0))).z;
 
 	world_normal = flipDoubleSided(world_normal, view_dir, mat.material_flags);
+	float3 geometric_normal = flipDoubleSided(N, view_dir, mat.material_flags);
 
 	// CSM shadow for directional light
 	float csm_shadow = 1.0;
 	uint csm_cascade_idx = 0;
 	float csm_blend_t = 0.0;
 	if (SHADOW_MODE_SPEC != ShadowMode::DISABLED && ubo.csm_cascade_count > 0) {
-		// Back faces of double-sided geometry must offset toward the visible side
-		float3 shadow_normal = flipDoubleSided(N, view_dir, mat.material_flags);
+		// Back faces of double-sided geometry must offset toward the visible side,
+		// hence the flipped geometric normal
 		bool use_mask = SHADOW_MASK_SPEC != 0 && alpha_mode != 1;
 		if (use_mask) {
 			float2 mask_uv = in_vert.pos.xy / ubo.screen_size;
 			csm_shadow = upsampleShadowMask(mask_uv, frag_view_z);
 			if (DEBUG_SHADING_SPEC != 0 && ubo.render_mode == RenderMode::CSM_CASCADE)
-				calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, shadow_normal, in_vert.pos.xy,
+				calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, geometric_normal, in_vert.pos.xy,
 					csm_cascade_idx, csm_blend_t);
 		} else {
-			csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, shadow_normal, in_vert.pos.xy,
+			csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, geometric_normal, in_vert.pos.xy,
 				csm_cascade_idx, csm_blend_t);
 		}
 	}
@@ -501,25 +513,30 @@ float4 computePbrLighting(VertexOutput in_vert) {
 			return float4(rc_taps.match, rc_taps.match, rc_taps.match, 1.0);
 		rc = rcUpsample(rc_texture, rc_taps);
 	}
-	float3 kD_ibl = (1.0 - F0) * (1.0 - metallic);
+	// glTF metallic blends a dielectric and a metal lobe, each reflecting its own
+	// specular albedo. The diffuse gets what the dielectric lobe does not reflect
+	float2 env_brdf = ibl_brdf_lut.SampleLevel(float2(NdotV, 1.0 - roughness), 0).rg;
+	float3 E_dielectric = specularAlbedo(dielectric_F0, float3(specular_weight), env_brdf);
+	float3 E_metal = specularAlbedo(albedo.rgb, float3(1.0), env_brdf);
+	float3 kD_ibl = (1.0 - E_dielectric) * (1.0 - metallic);
+
 	// The environment is the IBL sky, or with IBL off the ambient colour as a
 	// uniform sky radiance, which is also what RC rays see when they escape
 	float3 sky_irradiance = ubo.ambient_light_color.xyz;
 	float3 env_radiance = ubo.ambient_light_color.xyz;
+	float3 R = reflect(-view_dir, world_normal);
 	if (ubo.ibl_active != 0u) {
 		// Convert engine Z-up to cubemap Y-up
 		float3 n_yup = float3(world_normal.x, world_normal.z, world_normal.y);
 		float3 sh_raw = evaluateSH(n_yup, ubo.sh_coefficients);
 		sky_irradiance = sh_raw * ubo.sky_radiance_scale.rgb;
 
-		float3 R = reflect(-view_dir, world_normal);
 		float3 R_yup = float3(R.x, R.z, R.y);
 		float lod = float(ubo.prefiltered_mip_levels - 1) * roughness * (2.0 - roughness);
 		env_radiance = ibl_prefiltered.SampleLevel(R_yup, lod).rgb * ubo.sky_radiance_scale.rgb;
 	}
 	float3 irradiance = (sky_irradiance * (1.0 - rc.a) + rc.rgb) * diffuse_ao;
 	float3 diffuse_ibl = kD_ibl * irradiance * albedo.rgb;
-	float2 env_brdf = ibl_brdf_lut.SampleLevel(float2(NdotV, 1.0 - roughness), 0).rg;
 
 	// The environment has no scene visibility,
 	// so it leaks sky indoors. This mitigates that
@@ -543,12 +560,11 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	}
 	spec_env += env_radiance * env_occl * env_share;
 
-	// Multiscatter energy compensation (Fdez-Aguera 2019). env_brdf precomputed assuming F90=1, so scale by F90.
-	float3 Fr = max(F0 * env_brdf.x + F90 * env_brdf.y, 0.0);
-	float3 F_avg = F0 + (F90 - F0) / 21.0;
-	float3 FmsEms = (1.0 - Fr) * F_avg / max(1.0 - F_avg * (1.0 - env_brdf.x - env_brdf.y), 0.001);
-	float3 specular_ibl = spec_env * (Fr + FmsEms);
-	specular_ibl *= saturate(NdotV * 4.0);
+	float3 specular_ibl = spec_env * lerp(E_dielectric, E_metal, metallic);
+	// Horizon occlusion: a normal map can bend R below the geometric surface,
+	// whose environment that surface itself hides
+	float horizon = saturate(1.0 + dot(R, geometric_normal));
+	specular_ibl *= horizon * horizon;
 
 	float spec_ao = specularAO(NdotV, diffuse_ao, roughness);
 	ambient = diffuse_ibl // GTAO already applied to irradiance
