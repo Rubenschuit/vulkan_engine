@@ -6,8 +6,9 @@
  *
  * Only constructed when VeDevice::supportsRayQuery()
  *
- * Deformed geometry (skinned / morphed) is absent.
- * So is blended and transmissive geometry.
+ * Deformed geometry (skinned / morphed) gets a BLAS per instance instead,
+ * refitted every frame to the vertices DeformPrePass wrote for that frame.
+ * Blended and transmissive geometry is absent.
  * Alpha-masked instances are forced non-opaque instead
  */
 
@@ -27,6 +28,7 @@ class VeDevice;
 class VeBuffer;
 class PbrMegaBuffer;
 class GpuSceneManager;
+class DeformPrePass;
 class Registry;
 
 // What a ray query needs to read from the surface it hit.
@@ -56,15 +58,18 @@ public:
 	// set did, the instance set when an instance appeared, went, or was hidden
 	// or rewritten (the GpuSceneManager generations). Instances that only
 	// moved (GpuSceneManager::takeMovedTraceable) get their transforms patched
-	// and the TLAS refitted. Records the builds into cmd but not the barrier
-	// behind them: whatever queries the TLAS waits on
+	// and the TLAS refitted. Deformed instances are refitted and patched every
+	// frame from vertices an earlier submission wrote, which the frame's
+	// semaphore waits order ahead of cmd. Records the builds into cmd but not
+	// the barrier behind them: whatever queries the TLAS waits on
 	// eAccelerationStructureBuildKHR / eAccelerationStructureWriteKHR itself,
 	// leaving the builds free to overlap the work recorded in between. The
 	// barriers ahead of the TLAS build wait only on earlier builds (see
 	// buildTlas). False once an allocation has failed, the empty TLAS build at
 	// construction included: everything is retired and the scene stays empty.
+	// trace_deformed false leaves deformed instances out, as if RT_EXCLUDED.
 	bool update(vk::raii::CommandBuffer& cmd, uint32_t frame_index, const PbrMegaBuffer& mega_buffer,
-		GpuSceneManager& gpu_scene, const Registry& registry);
+		GpuSceneManager& gpu_scene, const DeformPrePass& deform, bool trace_deformed, const Registry& registry);
 
 	// Frees every structure and buffer at once, all but the empty TLAS.
 	// Device idle: frames in flight may still be querying them.
@@ -83,7 +88,7 @@ public:
 	}
 	uint32_t getBlasCount() const { return static_cast<uint32_t>(m_blas.size()); }
 	uint32_t getInstanceCount() const { return m_instance_count; }
-	vk::DeviceSize getStoreBytes() const { return m_store_bytes; }
+	vk::DeviceSize getStoreBytes() const { return m_store_bytes + m_deformed_bytes; }
 	// Per-instance surface lookup for the shading side of a hit. Null until the
 	// first TLAS build; its elements line up with the TLAS instance array.
 	// Written on the host every build, so it is per frame in flight.
@@ -111,11 +116,33 @@ private:
 	struct GeometryKeyHash {
 		size_t operator()(const GeometryKey& k) const;
 	};
+	// Its own BLAS rather than a GeometryKey one: multiple instances of the same mesh can
+	// be in different poses.
+	struct DeformedInstance {
+		vk::DeviceSize blas_size;
+		vk::DeviceSize scratch_offset; // into m_deformed_scratch
+		uint32_t instance; // into m_instances
+		uint32_t bind_vertex_offset; // traced when DeformPrePass wrote no offset this frame
+		uint32_t vertex_count;
+		uint32_t first_index;
+		uint32_t index_count;
+		uint32_t latest_slot = ~0u; // the blas slot written last, none yet
+		uint32_t refits = 0; // since the last full build
+		// One per frame in flight, written from that frame's vertex subspace
+		std::array<Structure, MAX_FRAMES_IN_FLIGHT> blas{};
+	};
 
 	void buildBlas(vk::raii::CommandBuffer& cmd, const PbrMegaBuffer& mega_buffer,
 		const GpuSceneManager& gpu_scene);
 	// Rebuilds the instance array and side table from every registered object.
-	void gatherInstances(const GpuSceneManager& gpu_scene, const Registry& registry);
+	// Deformed instances go last, after every static one.
+	void gatherInstances(const GpuSceneManager& gpu_scene, const Registry& registry, bool trace_deformed);
+	// Refits (or every so often builds) this frame's BLAS of every deformed
+	// instance and points its TLAS instance and side-table entry at this
+	// frame's vertices.
+	void buildDeformedBlas(vk::raii::CommandBuffer& cmd, uint32_t frame_index,
+		const PbrMegaBuffer& mega_buffer, const DeformPrePass& deform, const Registry& registry);
+	void retireDeformed();
 	// Rewrites the transforms of the instances in m_moved; false when none of
 	// them is in the TLAS.
 	bool patchMovedInstances(const Registry& registry);
@@ -140,6 +167,13 @@ private:
 	std::vector<Structure> m_blas;
 	// GeometryKey -> index into m_blas.
 	std::unordered_map<GeometryKey, uint32_t, GeometryKeyHash> m_geometry_to_blas;
+
+	std::vector<DeformedInstance> m_deformed;
+	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_deformed_scratch;
+	vk::DeviceSize m_deformed_scratch_size = 0; // what one frame's builds need together
+	uint32_t m_static_instance_count = 0; // m_instances[i] is deformed from here on
+	vk::DeviceSize m_deformed_bytes = 0;
+	bool m_gathered_deformed = false; // the trace_deformed the instance set was gathered with
 
 	// Built round robin, each with its own scratch, so a build never writes what a frame in flight traces
 	std::array<Structure, MAX_FRAMES_IN_FLIGHT> m_tlas;

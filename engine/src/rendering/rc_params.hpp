@@ -61,6 +61,7 @@ struct RcSettings {
 	float ds0 = 0.075f;      // c0 probe spacing at LOD 0
 	float lod0_dist = 3.0f;
 	bool ray_query = true; // trace the acceleration structures, where the device has ray query
+	bool trace_deformed = true; // skinned / morphed meshes in those structures, refitted every frame
 	RcSkyOcclusion sky_occlusion = RcSkyOcclusion::AUTO;
 	int cascades = 4;
 	int memory_mb = 578;     // the whole probe store

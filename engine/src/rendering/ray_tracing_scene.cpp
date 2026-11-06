@@ -2,6 +2,7 @@
 #include "rendering/ray_tracing_scene.hpp"
 #include "rendering/managers/pbr_mega_buffer.hpp"
 #include "rendering/managers/gpu_scene_manager.hpp"
+#include "rendering/deform_pre_pass.hpp"
 #include "resources/ve_material_properties.hpp"
 #include "scene/ve_registry.hpp"
 #include "vulkan/ve_device.hpp"
@@ -77,21 +78,9 @@ vk::AccelerationStructureGeometryKHR instancesFrom(vk::DeviceAddress instances) 
 	return geometry;
 }
 
-// Objects that belong in the structures, and the lod 0 range each traces.
-// Unlike the GPU culling active list this walks every registered object, so it
-// has to reject what that list would have filtered: deformed objects (their
-// vertices live in the mega buffer dynamic region and are rewritten every
-// frame), blended and transmissive ones (every BLAS is opaque, so they would
-// seal off whatever is behind them), and any range that does not sit inside
-// the buffers. Hidden objects keep their BLAS and only leave the TLAS, so
-// showing one again is an instance rebuild, not a geometry rebuild.
-bool tracedGeometry(const CpuObjectData& data, uint32_t vertex_capacity, uint32_t index_capacity,
-	bool include_inactive, uint32_t& first_index, uint32_t& index_count) {
-	uint32_t rejected = ObjectFlag::RT_EXCLUDED;
-	if (!include_inactive)
-		rejected |= ObjectFlag::INACTIVE;
-	if ((data.object_flags & rejected) != 0)
-		return false;
+// The lod 0 range an object traces, when it sits inside the buffers.
+bool lod0Range(const CpuObjectData& data, uint32_t vertex_capacity, uint32_t index_capacity,
+	uint32_t& first_index, uint32_t& index_count) {
 	if (data.lod_count == 0 || data.index_count[0] == 0)
 		return false;
 	if (data.vertex_offset >= vertex_capacity)
@@ -102,6 +91,35 @@ bool tracedGeometry(const CpuObjectData& data, uint32_t vertex_capacity, uint32_
 	index_count = data.index_count[0];
 	return true;
 }
+
+// Objects that belong in the geometry-keyed BLAS set, and the lod 0 range each
+// traces.
+bool tracedGeometry(const CpuObjectData& data, uint32_t vertex_capacity, uint32_t index_capacity,
+	bool include_inactive, uint32_t& first_index, uint32_t& index_count) {
+	uint32_t rejected = ObjectFlag::RT_EXCLUDED;
+	if (!include_inactive)
+		rejected |= ObjectFlag::INACTIVE;
+	if ((data.object_flags & rejected) != 0)
+		return false;
+	return lod0Range(data, vertex_capacity, index_capacity, first_index, index_count);
+}
+
+// Deformed objects that get a BLAS of their own, refitted every frame.
+bool deformedGeometry(const CpuObjectData& data, uint32_t vertex_capacity, uint32_t index_capacity,
+	uint32_t& first_index, uint32_t& index_count) {
+	if ((data.object_flags & ObjectFlag::DEFORMED) == 0)
+		return false;
+	if ((data.object_flags & (ObjectFlag::IS_TRANSPARENT | ObjectFlag::INACTIVE)) != 0)
+		return false;
+	return lod0Range(data, vertex_capacity, index_capacity, first_index, index_count);
+}
+
+// Refitted every frame, so the full builds the refits start from favour the trace
+constexpr vk::BuildAccelerationStructureFlagsKHR DEFORMED_BLAS_FLAGS =
+	vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace
+	| vk::BuildAccelerationStructureFlagBitsKHR::eAllowUpdate;
+constexpr uint32_t DEFORMED_REFITS_PER_BUILD = 64;
+constexpr uint32_t NO_SLOT = ~0u;
 } // namespace
 
 size_t RayTracingScene::GeometryKeyHash::operator()(const GeometryKey& k) const {
@@ -157,6 +175,12 @@ void RayTracingScene::buildEmptyTlas() {
 void RayTracingScene::reset() {
 	m_blas.clear();
 	m_geometry_to_blas.clear();
+	m_deformed.clear();
+	for (auto& buffer : m_deformed_scratch)
+		buffer.reset();
+	m_deformed_scratch_size = 0;
+	m_static_instance_count = 0;
+	m_deformed_bytes = 0;
 	m_retired.clear();
 	m_retired_buffers.clear();
 	m_tlas = {};
@@ -183,12 +207,22 @@ void RayTracingScene::reset() {
 }
 
 bool RayTracingScene::holdsResources() const {
-	if (!m_blas.empty())
+	if (!m_blas.empty() || !m_deformed.empty())
 		return true;
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-		if (m_tlas[i].handle || m_tlas[i].storage || m_tlas_scratch[i] || m_instance_buffers[i] || m_geometry_buffers[i])
+		if (m_tlas[i].handle || m_tlas[i].storage || m_tlas_scratch[i] || m_instance_buffers[i] || m_geometry_buffers[i]
+			|| m_deformed_scratch[i])
 			return true;
 	return !m_retired.empty() || !m_retired_buffers.empty();
+}
+
+void RayTracingScene::retireDeformed() {
+	for (DeformedInstance& deformed : m_deformed)
+		for (Structure& blas : deformed.blas)
+			if (blas.handle)
+				m_retired.emplace_back(m_frame_counter, std::move(blas));
+	m_deformed.clear();
+	m_deformed_bytes = 0;
 }
 
 void RayTracingScene::retireAll() {
@@ -196,7 +230,12 @@ void RayTracingScene::retireAll() {
 		m_retired.emplace_back(m_frame_counter, std::move(blas));
 	m_blas.clear();
 	m_geometry_to_blas.clear();
+	retireDeformed();
+	m_deformed_scratch_size = 0;
+	m_static_instance_count = 0;
 	for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		if (m_deformed_scratch[i])
+			m_retired_buffers.emplace_back(m_frame_counter, std::move(m_deformed_scratch[i]));
 		if (m_tlas[i].handle || m_tlas[i].storage)
 			m_retired.emplace_back(m_frame_counter, std::move(m_tlas[i]));
 		m_tlas[i] = {};
@@ -250,7 +289,8 @@ void RayTracingScene::uploadGeometryTable(uint32_t frame_index) {
 }
 
 bool RayTracingScene::update(vk::raii::CommandBuffer& cmd, uint32_t frame_index,
-	const PbrMegaBuffer& mega_buffer, GpuSceneManager& gpu_scene, const Registry& registry) {
+	const PbrMegaBuffer& mega_buffer, GpuSceneManager& gpu_scene, const DeformPrePass& deform,
+	bool trace_deformed, const Registry& registry) {
 	// Free what an earlier update retired
 	m_frame_counter++;
 	auto expired = [this](const auto& entry) {
@@ -272,19 +312,16 @@ bool RayTracingScene::update(vk::raii::CommandBuffer& cmd, uint32_t frame_index,
 	const bool rebuild_blas = mega_buffer.generation() != m_built_generation
 		|| gpu_scene.geometrySetGeneration() != m_built_geometry_generation;
 	const bool regather = rebuild_blas
-		|| gpu_scene.instanceGeneration() != m_built_instance_generation;
+		|| gpu_scene.instanceGeneration() != m_built_instance_generation
+		|| trace_deformed != m_gathered_deformed;
 	gpu_scene.takeMovedTraceable(m_moved);
 	const bool moved = !regather && patchMovedInstances(registry);
-	if (!regather && !moved) {
+	if (!regather && !moved && m_deformed.empty()) {
 		// A frame that skipped the build still needs its own copy of whatever
 		// the last build produced.
 		uploadGeometryTable(frame_index);
 		return true;
 	}
-	// A BLAS rebuild writes fresh structures and a fresh scratch, so nothing
-	// ahead of it needs a barrier. The TLAS build orders itself after earlier
-	// builds (buildTlas) and otherwise reads only host-written instances and
-	// BLAS that sit behind buildBlas's barriers.
 	try {
 		if (rebuild_blas) {
 			buildBlas(cmd, mega_buffer, gpu_scene);
@@ -292,9 +329,10 @@ bool RayTracingScene::update(vk::raii::CommandBuffer& cmd, uint32_t frame_index,
 			m_built_geometry_generation = gpu_scene.geometrySetGeneration();
 		}
 		if (regather) {
-			gatherInstances(gpu_scene, registry);
+			gatherInstances(gpu_scene, registry, trace_deformed);
 			m_built_instance_generation = gpu_scene.instanceGeneration();
 		}
+		buildDeformedBlas(cmd, frame_index, mega_buffer, deform, registry);
 		buildTlas(cmd, frame_index, !regather);
 	} catch (const std::exception& e) {
 		// Builds already recorded into cmd still name what is retired here,
@@ -416,29 +454,22 @@ void RayTracingScene::buildBlas(vk::raii::CommandBuffer& cmd, const PbrMegaBuffe
 		<< " objects (" << (m_store_bytes / (1024 * 1024)) << " MB)");
 }
 
-void RayTracingScene::gatherInstances(const GpuSceneManager& gpu_scene, const Registry& registry) {
+void RayTracingScene::gatherInstances(const GpuSceneManager& gpu_scene, const Registry& registry,
+	bool trace_deformed) {
 	const auto& object_data = gpu_scene.getCpuObjectData();
 	m_instances.clear();
 	m_instance_entities.clear();
 	m_instance_of_gpu_id.assign(object_data.size(), NO_INSTANCE);
 	m_instance_count = 0;
-	if (m_blas.empty())
-		return;
+	retireDeformed();
+	m_gathered_deformed = trace_deformed;
 	std::vector<RtInstanceGeometry> geometry_table;
 	m_instances.reserve(gpu_scene.getRegisteredObjects().size());
 	m_instance_entities.reserve(gpu_scene.getRegisteredObjects().size());
 	geometry_table.reserve(gpu_scene.getRegisteredObjects().size());
-	for (const auto& [gpu_id, entity] : gpu_scene.getRegisteredObjects()) {
-		if (gpu_id >= object_data.size() || entity.isNull())
-			continue;
+
+	auto add_instance = [&](uint32_t gpu_id, Entity entity, uint32_t first_index, vk::DeviceAddress blas_address) {
 		const CpuObjectData& data = object_data[gpu_id];
-		uint32_t first_index;
-		uint32_t index_count;
-		if (!tracedGeometry(data, m_vertex_capacity, m_index_capacity, false, first_index, index_count))
-			continue;
-		auto it = m_geometry_to_blas.find(GeometryKey{data.vertex_offset, first_index, index_count});
-		if (it == m_geometry_to_blas.end())
-			continue;
 		m_instance_of_gpu_id[gpu_id] = static_cast<uint32_t>(m_instances.size());
 		m_instance_entities.push_back(entity);
 		geometry_table.push_back(RtInstanceGeometry{
@@ -459,9 +490,78 @@ void RayTracingScene::gatherInstances(const GpuSceneManager& gpu_scene, const Re
 			.mask = data.emissive ? RT_INSTANCE_MASK_EMITTER : RT_INSTANCE_MASK_SURFACE,
 			.instanceShaderBindingTableRecordOffset = 0,
 			.flags = static_cast<VkGeometryInstanceFlagsKHR>(instance_flags),
-			.accelerationStructureReference = m_blas[it->second].address,
+			.accelerationStructureReference = blas_address,
 		});
+	};
+
+	struct DeformedSource {
+		uint32_t gpu_id;
+		Entity entity;
+		uint32_t vertex_count;
+		uint32_t first_index;
+		uint32_t index_count;
+	};
+	std::vector<DeformedSource> deformed;
+	for (const auto& [gpu_id, entity] : gpu_scene.getRegisteredObjects()) {
+		if (gpu_id >= object_data.size() || entity.isNull())
+			continue;
+		const CpuObjectData& data = object_data[gpu_id];
+		uint32_t first_index;
+		uint32_t index_count;
+		if (deformedGeometry(data, m_vertex_capacity, m_index_capacity, first_index, index_count)) {
+			if (!trace_deformed)
+				continue;
+			const auto* mesh = registry.getComponent<MeshComponent>(entity);
+			const uint32_t vertex_count = mesh && mesh->getMesh() ? mesh->getMesh()->getVertexCount() : 0;
+			if (vertex_count > 0 && static_cast<uint64_t>(data.vertex_offset) + vertex_count <= m_vertex_capacity)
+				deformed.push_back({gpu_id, entity, vertex_count, first_index, index_count});
+			continue;
+		}
+		if (!tracedGeometry(data, m_vertex_capacity, m_index_capacity, false, first_index, index_count))
+			continue;
+		auto it = m_geometry_to_blas.find(GeometryKey{data.vertex_offset, first_index, index_count});
+		if (it == m_geometry_to_blas.end())
+			continue;
+		add_instance(gpu_id, entity, first_index, m_blas[it->second].address);
 	}
+	m_static_instance_count = static_cast<uint32_t>(m_instances.size());
+
+	// Their BLAS are allocated on first build, and their BLAS references and
+	// side-table vertex offsets are written every frame (buildDeformedBlas).
+	// The host table keeps the bind-pose offset, so a regather that changed
+	// nothing still compares equal and uploads nothing.
+	vk::DeviceSize scratch_size = 0;
+	m_deformed.reserve(deformed.size());
+	for (const DeformedSource& source : deformed) {
+		vk::AccelerationStructureGeometryKHR geometry = trianglesFrom(0, 0, source.vertex_count);
+		vk::AccelerationStructureBuildGeometryInfoKHR build_info{
+			.type = vk::AccelerationStructureTypeKHR::eBottomLevel,
+			.flags = DEFORMED_BLAS_FLAGS,
+			.mode = vk::BuildAccelerationStructureModeKHR::eBuild,
+			.geometryCount = 1,
+			.pGeometries = &geometry,
+		};
+		const auto sizes = m_ve_device.getDevice().getAccelerationStructureBuildSizesKHR(
+			vk::AccelerationStructureBuildTypeKHR::eDevice, build_info, source.index_count / 3);
+		m_deformed.push_back(DeformedInstance{
+			.blas_size = sizes.accelerationStructureSize,
+			.scratch_offset = scratch_size,
+			.instance = static_cast<uint32_t>(m_instances.size()),
+			.bind_vertex_offset = object_data[source.gpu_id].vertex_offset,
+			.vertex_count = source.vertex_count,
+			.first_index = source.first_index,
+			.index_count = source.index_count,
+		});
+		// One build call runs them all at once, so their scratch must not overlap.
+		scratch_size = alignUp(scratch_size + std::max(sizes.buildScratchSize, sizes.updateScratchSize),
+			m_scratch_alignment);
+		add_instance(source.gpu_id, source.entity, source.first_index, 0);
+	}
+	m_deformed_scratch_size = scratch_size;
+	if (m_deformed.empty())
+		for (auto& buffer : m_deformed_scratch)
+			if (buffer)
+				m_retired_buffers.emplace_back(m_frame_counter, std::move(buffer));
 	m_instance_count = static_cast<uint32_t>(m_instances.size());
 	m_instances_stale.fill(true);
 	for (auto& patches : m_instance_patches)
@@ -514,6 +614,107 @@ void RayTracingScene::gatherInstances(const GpuSceneManager& gpu_scene, const Re
 	};
 	m_tlas_sizes = m_ve_device.getDevice().getAccelerationStructureBuildSizesKHR(
 		vk::AccelerationStructureBuildTypeKHR::eDevice, build_info, m_instance_count);
+}
+
+void RayTracingScene::buildDeformedBlas(vk::raii::CommandBuffer& cmd, uint32_t frame_index,
+	const PbrMegaBuffer& mega_buffer, const DeformPrePass& deform, const Registry& registry) {
+	if (m_deformed.empty())
+		return;
+	// The bind pose unless DeformPrePass wrote an
+	// offset for the object this frame.
+	std::vector<uint32_t> vertex_offsets(m_deformed.size());
+	for (size_t i = 0; i < m_deformed.size(); i++)
+		vertex_offsets[i] = m_deformed[i].bind_vertex_offset;
+	for (const DeformPrePass::DeformedOffset& written : deform.getDeformedOffsets(frame_index)) {
+		const uint32_t instance = written.gpu_id < m_instance_of_gpu_id.size()
+			? m_instance_of_gpu_id[written.gpu_id] : NO_INSTANCE;
+		if (instance != NO_INSTANCE && instance >= m_static_instance_count)
+			vertex_offsets[instance - m_static_instance_count] = written.vertex_offset;
+	}
+
+	auto& scratch = m_deformed_scratch[frame_index];
+	if (!scratch || scratch->getBufferSize() < m_deformed_scratch_size + m_scratch_alignment) {
+		if (scratch)
+			m_retired_buffers.emplace_back(m_frame_counter, std::move(scratch));
+		scratch = std::make_unique<VeBuffer>(m_ve_device, m_deformed_scratch_size + m_scratch_alignment, 1,
+			vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eShaderDeviceAddress,
+			vk::MemoryPropertyFlagBits::eDeviceLocal);
+		scratch->setDebugName("RT Deformed BLAS Scratch");
+	}
+	const vk::DeviceAddress scratch_address = alignUp(scratch->getDeviceAddress(), m_scratch_alignment);
+	const vk::DeviceAddress vertex_address = mega_buffer.getMegaShadowVbo()->getDeviceAddress();
+	const vk::DeviceAddress index_address = mega_buffer.getMegaIbo()->getDeviceAddress();
+
+	const size_t count = m_deformed.size();
+	std::vector<vk::AccelerationStructureGeometryKHR> geometries(count);
+	std::vector<vk::AccelerationStructureBuildGeometryInfoKHR> build_infos(count);
+	std::vector<vk::AccelerationStructureBuildRangeInfoKHR> ranges(count);
+	std::vector<const vk::AccelerationStructureBuildRangeInfoKHR*> range_pointers(count);
+	for (size_t i = 0; i < count; i++) {
+		DeformedInstance& deformed = m_deformed[i];
+		Structure& blas = deformed.blas[frame_index];
+		if (!blas.handle) {
+			blas = createStructure(deformed.blas_size, vk::AccelerationStructureTypeKHR::eBottomLevel,
+				"RT Deformed BLAS");
+			m_deformed_bytes += deformed.blas_size;
+		}
+		// The frame's vertices are addressed directly rather than through
+		// firstVertex, which a refit has to keep from the build it starts from;
+		// maxVertex then bounds the mesh, not the whole buffer.
+		geometries[i] = trianglesFrom(vertex_address + vertex_offsets[i] * sizeof(glm::vec3), index_address,
+			deformed.vertex_count);
+		build_infos[i] = vk::AccelerationStructureBuildGeometryInfoKHR{
+			.type = vk::AccelerationStructureTypeKHR::eBottomLevel,
+			.flags = DEFORMED_BLAS_FLAGS,
+			.mode = vk::BuildAccelerationStructureModeKHR::eBuild,
+			.dstAccelerationStructure = **blas.handle,
+			.geometryCount = 1,
+			.pGeometries = &geometries[i],
+		};
+		// Refitted from whichever slot was written last, which is this one
+		// only when the frame between skipped the update.
+		const bool refit = deformed.latest_slot != NO_SLOT && deformed.refits < DEFORMED_REFITS_PER_BUILD;
+		if (refit) {
+			build_infos[i].mode = vk::BuildAccelerationStructureModeKHR::eUpdate;
+			build_infos[i].srcAccelerationStructure = **deformed.blas[deformed.latest_slot].handle;
+		}
+		deformed.refits = refit ? deformed.refits + 1 : 0;
+		deformed.latest_slot = frame_index;
+		build_infos[i].scratchData.deviceAddress = scratch_address + deformed.scratch_offset;
+		ranges[i] = vk::AccelerationStructureBuildRangeInfoKHR{
+			.primitiveCount = deformed.index_count / 3,
+			.primitiveOffset = deformed.first_index * static_cast<uint32_t>(sizeof(uint32_t)),
+			.firstVertex = 0,
+			.transformOffset = 0,
+		};
+		range_pointers[i] = &ranges[i];
+
+		// Deformed objects never reach m_moved, so the transform is rewritten here too.
+		vk::AccelerationStructureInstanceKHR& instance = m_instances[deformed.instance];
+		instance.transform = toTransformMatrix(registry.getWorldTransform(m_instance_entities[deformed.instance]));
+		instance.accelerationStructureReference = blas.address;
+		if (!m_instances_stale[frame_index])
+			m_instance_patches[frame_index].push_back(deformed.instance);
+	}
+	// A refit reads the slot the previous frame wrote, in an earlier
+	// submission to the same queue, as the TLAS refit does.
+	vk::MemoryBarrier2 previous_builds{
+		.srcStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
+		.srcAccessMask = vk::AccessFlagBits2::eAccelerationStructureWriteKHR,
+		.dstStageMask = vk::PipelineStageFlagBits2::eAccelerationStructureBuildKHR,
+		.dstAccessMask = vk::AccessFlagBits2::eAccelerationStructureReadKHR,
+	};
+	cmd.pipelineBarrier2(vk::DependencyInfo{.memoryBarrierCount = 1, .pMemoryBarriers = &previous_builds});
+	cmd.buildAccelerationStructuresKHR(build_infos, range_pointers);
+
+	uploadGeometryTable(frame_index);
+	VeBuffer& geometry_buffer = *m_geometry_buffers[frame_index];
+	for (size_t i = 0; i < count; i++) {
+		const uint32_t instance = m_deformed[i].instance;
+		RtInstanceGeometry entry = m_geometry_table[instance];
+		entry.vertex_offset = vertex_offsets[i];
+		geometry_buffer.writeToBuffer(&entry, sizeof(entry), instance * sizeof(RtInstanceGeometry));
+	}
 }
 
 bool RayTracingScene::patchMovedInstances(const Registry& registry) {

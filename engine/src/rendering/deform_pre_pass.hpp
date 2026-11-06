@@ -67,6 +67,16 @@ public:
 		return *m_deformed_offset_ssbos[frame_index];
 	}
 
+	struct DeformedOffset {
+		uint32_t gpu_id;
+		uint32_t vertex_offset; // absolute, in the frame's dynamic subspace
+	};
+	// The nonzero entries updateDeformedOffsets wrote into this frame's table.
+	// A registered deformed object with no entry draws its bind pose.
+	const std::vector<DeformedOffset>& getDeformedOffsets(uint32_t frame_index) const {
+		return m_written_offsets[frame_index];
+	}
+
 private:
 	struct SubspaceSlot {
 		uint32_t offset;        // in [0, MAX_DEFORMED_VERTICES_PER_FRAME)
@@ -108,7 +118,7 @@ private:
 	// gpu_id -> absolute vertex offset in the mega VBO dynamic region; 0 means "no
 	// live slot, cull shader falls back to the object's bind-pose vertex_offset".
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_deformed_offset_ssbos;
-	std::array<std::vector<uint32_t>, MAX_FRAMES_IN_FLIGHT> m_last_written_gpu_ids;
+	std::array<std::vector<DeformedOffset>, MAX_FRAMES_IN_FLIGHT> m_written_offsets;
 
 	std::unique_ptr<VeDescriptorSetLayout> m_set_layout;
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};

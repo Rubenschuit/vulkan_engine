@@ -409,11 +409,11 @@ void DeformPrePass::updateDeformedOffsets(const GpuSceneManager& gpu_scene,
 		return;
 
 	auto* table = static_cast<uint32_t*>(m_deformed_offset_ssbos[frame_index]->getMappedMemory());
-	auto& last_written = m_last_written_gpu_ids[frame_index];
+	auto& written = m_written_offsets[frame_index];
 
-	for (uint32_t prev_id : last_written)
-		table[prev_id] = 0;
-	last_written.clear();
+	for (const DeformedOffset& prev : written)
+		table[prev.gpu_id] = 0;
+	written.clear();
 
 	const uint32_t dynamic_base = mega_buffer.getDynamicRegionBase();
 	const uint32_t dynamic_capacity = mega_buffer.getDynamicRegionCapacity();
@@ -428,8 +428,9 @@ void DeformPrePass::updateDeformedOffsets(const GpuSceneManager& gpu_scene,
 		auto slot_it = m_slots.find(d.entity.index());
 		if (slot_it == m_slots.end())
 			continue;
-		table[gpu_id] = frame_subspace_offset + slot_it->second.offset;
-		last_written.push_back(gpu_id);
+		const uint32_t offset = frame_subspace_offset + slot_it->second.offset;
+		table[gpu_id] = offset;
+		written.push_back({.gpu_id = gpu_id, .vertex_offset = offset});
 	}
 }
 

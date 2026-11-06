@@ -102,11 +102,18 @@ void VeSwapChain::submitCompute(vk::CommandBuffer command_buffer) {
 // + ui_cb in one submit.
 vk::Result VeSwapChain::submitSceneAndPresent(
 	vk::CommandBuffer scene_cb, vk::CommandBuffer ui_cb, uint32_t* image_index) {
+	vk::PipelineStageFlags compute_consumers = vk::PipelineStageFlagBits::eDrawIndirect
+		| vk::PipelineStageFlagBits::eVertexInput
+		| vk::PipelineStageFlagBits::eFragmentShader;
+	// Without a dedicated compute queue the RC dispatch is recorded into
+	// scene_cb, and under ray query it builds BLAS from the vertices the
+	// compute submission deformed and shades hits with them.
+	if (!m_ve_device.hasDedicatedComputeQueue() && m_ve_device.supportsRayQuery())
+		compute_consumers |= vk::PipelineStageFlagBits::eComputeShader
+			| vk::PipelineStageFlagBits::eAccelerationStructureBuildKHR;
 	vk::PipelineStageFlags wait_stages[2] = {
 		vk::PipelineStageFlagBits::eColorAttachmentOutput,
-		vk::PipelineStageFlagBits::eDrawIndirect
-			| vk::PipelineStageFlagBits::eVertexInput
-			| vk::PipelineStageFlagBits::eFragmentShader,
+		compute_consumers,
 	};
 
 	std::array<uint64_t, 2> wait_values{ uint64_t{0}, m_compute_signal_value };

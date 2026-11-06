@@ -391,6 +391,15 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 				ImGui::SameLine();
 				ImGui::TextDisabled("(Not supported by device)");
 			}
+			ImGui::Indent();
+			ImGui::BeginDisabled(!ray_query);
+			ImGui::Checkbox("Trace Deformed Meshes", &ctx.settings.rc.trace_deformed);
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+				ImGui::SetTooltip("Put skinned and morphed meshes in the acceleration structures,"
+					"\nrefitted to their pose every frame."
+					"\nOff: rays pass through them.");
+			ImGui::EndDisabled();
+			ImGui::Unindent();
 
 			const char* sky_labels[] = {ray_query ? "Auto (Probe estimate)" : "Auto (Off)", "Off", "Unknown rays: sky",
 				"Probe estimate", "Unknown rays: obstructed"};

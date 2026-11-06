@@ -1291,7 +1291,8 @@ bool RenderPipeline::recordRcDispatch(VeFrameInfo& fi, vk::raii::CommandBuffer& 
 			// A failed allocation hands this and every later frame to the
 			// screen-space tracer.
 			if (!m_ray_tracing_scene->update(cmd, fi.current_frame, m_scene_resources->getMegaBuffer(),
-					m_scene_resources->getGpuSceneManager(), *fi.registry))
+					m_scene_resources->getGpuSceneManager(), *m_deform_pre_pass, m_settings.rc.trace_deformed,
+					*fi.registry))
 				m_settings.rc.ray_query = false;
 			else if (m_ray_tracing_scene->isReady())
 				rt_ready = m_ray_tracing_scene.get();
