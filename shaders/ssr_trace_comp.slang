@@ -267,6 +267,12 @@ void compMain(uint3 id : SV_DispatchThreadID) {
 	float cone = travel + hit_dist * roughness * ROUGH_CONE_SCALE;
 	float footprint = cone / max(-linearViewZ(scene_d), 1e-3) * (push.depth_size.y / push.out_size.y);
 	float3 color = history_texture.SampleLevel(history_sampler, prev_uv, log2(max(footprint, 1.0))).rgb;
+	// One non-finite history texel (fp16 overflow) fills its block at every
+	// coarser mip, and the firefly clamp below would turn Inf into NaN
+	if (!all(isfinite(color))) {
+		ssr_out[id.xy] = float4(0, 0, 0, 0);
+		return;
+	}
 
 	// Soft firefly clamp
 	float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
