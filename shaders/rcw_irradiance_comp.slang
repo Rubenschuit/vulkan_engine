@@ -3,19 +3,21 @@
 // that direction as a surface normal, the texel sums the merged c0 bins
 //
 //   rgb = sum_all I * w / sum_all w
-//   a   = 1
+//   a   = 1, or 0 under RCW_SKY_MODE_OFF
 //
 // with w = max(dot(bin direction, texel direction), 0).
 //
 // rgb is the cosine-weighted mean radiance of the bounce plus the sky. The
 // composite blends its own sky, times 1 - a, with rgb, so where the gather
 // finds probes (a = 1) their estimate replaces the environment; the gather
-// writes a = 0 where it finds none.
+// writes a = 0 where it finds none. Under RCW_SKY_MODE_OFF rgb is the bounce alone
+// and a = 0, so the environment is applied as with GI off.
 //
-// Every bin gets its sky estimate times the sky radiance added to its
-// radiance before the sum: the proven sky fraction, plus the probe's prior
-// for the unknown remainder. The prior is the proven-open share of what the
-// probe knows, scaled by how much it knows (nothing known = nothing assumed).
+// Outside RCW_SKY_MODE_OFF, every bin gets its sky estimate times the sky
+// radiance added to its radiance before the sum: the proven sky fraction, plus a fill for the
+// unknown remainder. The fill is the probe's prior, or 1 or 0 under the
+// UNKNOWN_SKY / UNKNOWN_OBSTRUCTED modes. The prior is the proven-open share
+// of what the probe knows, scaled by how much it knows.
 // Border texels use the direction on the far side of the octahedral seam, so
 // the gather's bilinear tap wraps.
 
@@ -42,6 +44,7 @@ void compMain(uint3 group_id: SV_GroupID, uint3 local_id: SV_GroupThreadID) {
 		return;
 	static_assert(RCW_C0_BINS <= RCW_TILE * RCW_TILE, "one c0 bin per thread");
 	uint direction_count = rcwDirCount(0);
+	uint sky_mode = rcwSkyMode();
 
 	uint azimuth_bins = 2u * rcwThetaBins(0);
 	uint texel_index = local_id.y * RCW_TILE + local_id.x;
@@ -85,9 +88,10 @@ void compMain(uint3 group_id: SV_GroupID, uint3 local_id: SV_GroupThreadID) {
 		}
 		float own_share = saturate(sky_total / max(known_total, 1e-4));
 		float prior = own_share * known_total / (known_total + 1.0);
-		float sky = proven + prior * (1.0 - evidence);
+		float fill = sky_mode == RCW_SKY_MODE_UNKNOWN_SKY ? 1.0 : (sky_mode == RCW_SKY_MODE_UNKNOWN_OBSTRUCTED ? 0.0 : prior);
+		float sky = proven + fill * (1.0 - evidence);
 		s_sky[texel_index] = (push.flags & RCW_FLAG_VISIBILITY_EVIDENCE) != 0u ? evidence : sky;
-		s_radiance[texel_index] = bin_radiance + sky_radiance * sky;
+		s_radiance[texel_index] = sky_mode == RCW_SKY_MODE_OFF ? bin_radiance : bin_radiance + sky_radiance * sky;
 	}
 	GroupMemoryBarrierWithGroupSync();
 
@@ -106,6 +110,6 @@ void compMain(uint3 group_id: SV_GroupID, uint3 local_id: SV_GroupThreadID) {
 
 	uint tiles_per_row = rcwTilesPerRow(desc.probe_cap);
 	uint2 atlas_texel = uint2(probe_index % tiles_per_row, probe_index / tiles_per_row) * RCW_TILE + local_id.xy;
-	irradiance_atlas[atlas_texel] = float4(radiance * inverse_weight_all, 1.0);
+	irradiance_atlas[atlas_texel] = float4(radiance * inverse_weight_all, sky_mode == RCW_SKY_MODE_OFF ? 0.0 : 1.0);
 	visibility_atlas[atlas_texel] = sky_visibility * inverse_weight_all;
 }

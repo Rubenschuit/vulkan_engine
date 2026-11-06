@@ -392,6 +392,18 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 				ImGui::TextDisabled("(Not supported by device)");
 			}
 
+			const char* sky_labels[] = {ray_query ? "Auto (Probe estimate)" : "Auto (Off)", "Off", "Unknown rays: sky",
+				"Probe estimate", "Unknown rays: obstructed"};
+			int sky_mode = static_cast<int>(ctx.settings.rc.sky_occlusion);
+			if (ImGui::Combo("Sky Occlusion", &sky_mode, sky_labels, IM_ARRAYSIZE(sky_labels)))
+				ctx.settings.rc.sky_occlusion = static_cast<RcSkyOcclusion>(sky_mode);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("How the probes' view of the sky darkens the environment (IBL, or the flat ambient)."
+					"\nOff: the environment as with GI off; GI adds bounced light only."
+					"\nProbe estimate: directions no ray resolved take the probe's proven-sky share."
+					"\nUnknown rays: sky / obstructed: those directions count as open sky / as blocked."
+					"\nThe screen-space tracer leaves many rays unresolved, so Auto turns it off there.");
+
 			ImGui::SeparatorText("Probe grid");
 			ImGui::SliderFloat("Probe Spacing", &ctx.settings.rc.ds0, 0.01f, 2.0f, "%.3f m",
 				ImGuiSliderFlags_Logarithmic);

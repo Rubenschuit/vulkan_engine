@@ -1,9 +1,10 @@
 // Shading a ray hit: what the surface a ray found sends back down that ray.
 //
-// L_o = emissive + albedo * E_probe + (albedo / pi) * sum over lights of L * (n . l) * V
+// L_o = emissive + albedo * (E_probe + E_env) + (albedo / pi) * sum over lights of L * (n . l) * V
 //
 // albedo is the diffuse share of base colour, E_probe the cascade-0 irradiance
-// already stored around the hit (the second bounce) and V a shadow ray.
+// already stored around the hit (the second bounce), E_env the environment
+// (only under RCW_SKY_MODE_OFF, where E_probe excludes it) and V a shadow ray.
 // Lambertian only: the specular lobe is not computed at hits.
 
 #pragma once
@@ -199,6 +200,11 @@ float3 rcwShadeHit(RcwHitSurface surface) {
 	float3 incident;
 	if (rcwProbeIrradiance(surface.position, surface.normal, incident))
 		radiance += surface.albedo * incident;
+	// Under RCW_SKY_MODE_OFF the atlas holds the bounce alone
+	if (rcwSkyMode() == RCW_SKY_MODE_OFF)
+		radiance += surface.albedo * (ubo.ibl_active != 0u
+			? evaluateSH(float3(surface.normal.x, surface.normal.z, surface.normal.y), ubo.sh_coefficients) * ubo.sky_radiance_scale.rgb
+			: ubo.ambient_light_color.xyz);
 
 	float3 shadow_origin = surface.position + surface.normal * RCW_SHADOW_NORMAL_BIAS;
 	for (uint i = 0; i < ubo.num_dir_lights; i++) {

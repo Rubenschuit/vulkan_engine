@@ -88,7 +88,8 @@ struct RcwPush {
 
 [[vk::push_constant]] RcwPush push;
 
-// push.flags: bits 1-3 single-bit switches, bit 0 and bits 4-31 free.
+// push.flags: bits 1-3 single-bit switches, bits 4-5 the sky mode, bit 0 and
+// bits 6-31 free.
 
 // Debug: store the evidence in the visibility atlas instead.
 static const uint RCW_FLAG_VISIBILITY_EVIDENCE = 1u << 1;
@@ -97,6 +98,18 @@ static const uint RCW_FLAG_VISIBILITY_EVIDENCE = 1u << 1;
 // something else).
 static const uint RCW_FLAG_HIST_DEPTH = 1u << 2;
 static const uint RCW_FLAG_SINGLE_FRAME = 1u << 3;
+
+// Bits 4-5: how the probes' sky estimate meets the environment, resolved from
+// RcSkyOcclusion by the host. PROBE is 0: the ray-query default sets no bits.
+static const uint RCW_SKY_MODE_SHIFT = 4;
+static const uint RCW_SKY_MODE_PROBE = 0;              // unresolved directions take the probe prior
+static const uint RCW_SKY_MODE_OFF = 1;                // the atlas holds bounce only, alpha 0
+static const uint RCW_SKY_MODE_UNKNOWN_SKY = 2;        // unresolved directions count as sky
+static const uint RCW_SKY_MODE_UNKNOWN_OBSTRUCTED = 3; // unresolved directions count as blocked
+
+uint rcwSkyMode() {
+	return (push.flags >> RCW_SKY_MODE_SHIFT) & 3u;
+}
 
 // ============================================================================
 // Constants
@@ -266,14 +279,16 @@ RWStructuredBuffer<uint2> persist_j;
 [vk::binding(15, 1)]
 RWStructuredBuffer<uint> persist_count;
 // Irradiance tiles: rgb = cosine-weighted mean radiance (bounce plus sky,
-// proven or assumed) for the texel's direction, a = 1. One tile per probe,
-// rebuilt every frame.
+// proven or assumed; bounce only under RCW_SKY_MODE_OFF) for the texel's
+// direction, a = 1 (0 under RCW_SKY_MODE_OFF). One tile per probe, rebuilt
+// every frame.
 [vk::binding(16, 1)]
 RWTexture2D<float4> irradiance_atlas;
 [vk::binding(17, 1)]
 Texture2D<float4> irradiance_atlas_in;
 // Sky-visibility tiles: per texel direction, the cosine mean of the c0 bins'
-// sky estimate (proven fraction plus the prior for the unknown remainder).
+// sky estimate (proven fraction plus the sky mode's fill for the unknown
+// remainder).
 [vk::binding(20, 1)]
 RWTexture2D<float> visibility_atlas;
 [vk::binding(21, 1)]

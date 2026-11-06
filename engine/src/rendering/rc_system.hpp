@@ -19,8 +19,9 @@
  * Deposits resolve into the persistent store, merge top-down, and are gathered
  * into per-frame outputs at render extent / resolution_div: diffuse
  * irradiance, sky visibility and rough-spec radiance, each with an alpha that
- * is 1 where the gather found probes and 0 where not. The PBR composite blends
- * its environment terms toward them by that alpha.
+ * is 1 where the gather found probes and 0 where not (0 everywhere under
+ * RcSkyOcclusion OFF, where the outputs carry bounce only). The PBR composite
+ * blends its environment terms toward them by that alpha.
  *
  * Owns the hashmaps, the deposit scratch and persistent radiance pools, the
  * merge outputs, the per-probe irradiance and sky visibility tile

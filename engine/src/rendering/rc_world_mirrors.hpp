@@ -10,10 +10,15 @@
 
 namespace ve::rcw {
 
-// RcwPush.flags layout, in rc_world_common.slangh's order. Bit 0 and bits 4-31 free.
+// RcwPush.flags layout, in rc_world_common.slangh's order. Bit 0 and bits 6-31 free.
 inline constexpr uint32_t FLAG_VISIBILITY_EVIDENCE = 1u << 1;
 inline constexpr uint32_t FLAG_HIST_DEPTH = 1u << 2;
 inline constexpr uint32_t FLAG_SINGLE_FRAME = 1u << 3;
+inline constexpr uint32_t SKY_MODE_SHIFT = 4; // bits 4-5: the resolved sky mode
+inline constexpr uint32_t SKY_MODE_PROBE = 0;
+inline constexpr uint32_t SKY_MODE_OFF = 1;
+inline constexpr uint32_t SKY_MODE_UNKNOWN_SKY = 2;
+inline constexpr uint32_t SKY_MODE_UNKNOWN_OBSTRUCTED = 3;
 
 // Store layout
 inline constexpr uint32_t MAX_CASCADES = 6;

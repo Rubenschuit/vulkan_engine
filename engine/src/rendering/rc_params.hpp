@@ -41,6 +41,18 @@ constexpr bool isRcDebugView(uint32_t id) {
 	return false;
 }
 
+// How the probes' sky estimate meets the environment (IBL, or the flat
+// ambient), ordered from the most sky kept to the least. AUTO is
+// PROBE_ESTIMATE under ray query and OFF under the screen-space tracer, whose
+// unresolved rays leave the estimate too dark wherever the sky is off screen.
+enum class RcSkyOcclusion : uint32_t {
+	AUTO = 0,
+	OFF = 1,                // the environment as with GI off; RC adds bounce only
+	UNKNOWN_SKY = 2,        // directions no ray resolved count as sky
+	PROBE_ESTIMATE = 3,     // they take the probe's proven-sky share
+	UNKNOWN_OBSTRUCTED = 4, // they count as blocked
+};
+
 struct RcSettings {
 	bool enabled = true;
 	float luma_clamp = 20.0f;
@@ -49,6 +61,7 @@ struct RcSettings {
 	float ds0 = 0.075f;      // c0 probe spacing at LOD 0
 	float lod0_dist = 3.0f;
 	bool ray_query = true; // trace the acceleration structures, where the device has ray query
+	RcSkyOcclusion sky_occlusion = RcSkyOcclusion::AUTO;
 	int cascades = 4;
 	int memory_mb = 578;     // the whole probe store
 	bool single_frame = false;

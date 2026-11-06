@@ -79,6 +79,22 @@ uint32_t gatherMode(RcDebugView view) {
 	}
 }
 
+// The push.flags sky-mode bits for the tracer that runs
+uint32_t skyModeBits(RcSkyOcclusion mode, bool ray_query) {
+	switch (mode) {
+		case RcSkyOcclusion::AUTO:
+			return (ray_query ? SKY_MODE_PROBE : SKY_MODE_OFF) << SKY_MODE_SHIFT;
+		case RcSkyOcclusion::OFF:
+			return SKY_MODE_OFF << SKY_MODE_SHIFT;
+		case RcSkyOcclusion::UNKNOWN_SKY:
+			return SKY_MODE_UNKNOWN_SKY << SKY_MODE_SHIFT;
+		case RcSkyOcclusion::UNKNOWN_OBSTRUCTED:
+			return SKY_MODE_UNKNOWN_OBSTRUCTED << SKY_MODE_SHIFT;
+		default:
+			return SKY_MODE_PROBE << SKY_MODE_SHIFT;
+	}
+}
+
 } // namespace
 
 RcSystem::RcSystem(
@@ -972,7 +988,8 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 		.rays_per_pixel = static_cast<uint32_t>(std::clamp(m_rc.rays_per_pixel, 1, 16)),
 		.flags = (m_rc.debug_view == RcDebugView::EVIDENCE ? FLAG_VISIBILITY_EVIDENCE : 0u)
 			| (m_prev_depth_primed ? FLAG_HIST_DEPTH : 0u)
-			| (m_rc.single_frame ? FLAG_SINGLE_FRAME : 0u),
+			| (m_rc.single_frame ? FLAG_SINGLE_FRAME : 0u)
+			| skyModeBits(m_rc.sky_occlusion, ray_query),
 		.hiz_mip_count = m_screen_rays.pyramidMipLevels(),
 		.light_count = m_scene.lights ? m_scene.light_count : 0u,
 	};
