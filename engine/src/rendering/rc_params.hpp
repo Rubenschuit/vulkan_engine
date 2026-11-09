@@ -61,6 +61,7 @@ struct RcSettings {
 	int resolution_div = 4;
 	int rays_per_pixel = 1;
 	int history_length = 64; // sampled frames a bin averages before its EMA weight floors at 1 / history_length
+	int probe_ttl = 16;      // frames a probe missing from insertion stays alive
 	float ds0 = 0.075f;      // c0 probe spacing at LOD 0
 	float lod0_dist = 3.0f;
 	bool ray_query = true; // trace the acceleration structures, where the device has ray query

@@ -209,6 +209,8 @@ constexpr BenchSetKey BENCH_SET_KEYS[] = {
 	{.name = "rc_trace_deformed", .apply = [](S& s, float v) { s.rc.trace_deformed = v != 0.0f; }},
 	{.name = "rc_history_length", .apply = [](S& s, float v) { s.rc.history_length = static_cast<int>(v); },
 		.unsigned_only = true},
+	{.name = "rc_probe_ttl", .apply = [](S& s, float v) { s.rc.probe_ttl = static_cast<int>(v); },
+		.unsigned_only = true},
 	{.name = "rc_specular", .apply = [](S& s, float v) { s.rc.specular = v != 0.0f; }},
 	{.name = "rc_sky_occlusion", .apply = [](S& s, float v) { s.rc.sky_occlusion = static_cast<RcSkyOcclusion>(static_cast<uint32_t>(std::min(v, static_cast<float>(RcSkyOcclusion::UNKNOWN_OBSTRUCTED)))); },
 		.unsigned_only = true},

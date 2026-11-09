@@ -25,7 +25,7 @@ namespace {
 // Mirrors RcwPush in rc_world_common.slangh
 struct RcwPushConstant {
 	glm::ivec4 anchor0_curr; // xyz: floor(camera / ds0); w: frame parity
-	glm::ivec4 anchor0_prev; // xyz: anchor of the prev map's dispatch; w: unused
+	glm::ivec4 anchor0_prev; // xyz: anchor of the prev map's dispatch; w: probe TTL
 	glm::vec2 out_size;
 	glm::vec2 depth_size;
 	float ds0;
@@ -978,7 +978,7 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 	const auto& proj = frame_info.camera_view.proj;
 	RcwPushConstant push{
 		.anchor0_curr = glm::ivec4(anchor_curr, static_cast<int>(parity)),
-		.anchor0_prev = glm::ivec4(anchor_prev, 0),
+		.anchor0_prev = glm::ivec4(anchor_prev, std::max(m_rc.probe_ttl, 0)),
 		.out_size = glm::vec2(static_cast<float>(m_extent.width), static_cast<float>(m_extent.height)),
 		.depth_size = glm::vec2(static_cast<float>(m_depth_extent.width), static_cast<float>(m_depth_extent.height)),
 		.ds0 = ds0,

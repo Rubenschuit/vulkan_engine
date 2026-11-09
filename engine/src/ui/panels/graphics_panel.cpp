@@ -457,6 +457,11 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Sampled frames each probe direction averages over."
 					"\nLower follows moving lights and objects sooner, with more noise.");
+			ImGui::SliderInt("Probe TTL", &ctx.settings.rc.probe_ttl, 0, 1024, "%d", ImGuiSliderFlags_Logarithmic);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Frames a probe is kept after no visible surface needs it."
+					"\nLower keeps fewer probes alive, but an area you look away from and back at"
+					"\nloses its lighting and takes a moment to build it up again.");
 
 			ImGui::Unindent();
 		}

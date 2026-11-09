@@ -65,7 +65,7 @@
 // ============================================================================
 struct RcwPush {
 	int4 anchor0_curr;      // xyz: floor(camera / ds0); w: frame parity (0/1)
-	int4 anchor0_prev;      // xyz: anchor of the prev map's dispatch; w: unused
+	int4 anchor0_prev;      // xyz: anchor of the prev map's dispatch; w: probe TTL
 	float2 out_size;        // RC output resolution
 	float2 depth_size;      // full-res depth resolution
 	float ds0;              // c0 probe spacing at LOD 0, metres
