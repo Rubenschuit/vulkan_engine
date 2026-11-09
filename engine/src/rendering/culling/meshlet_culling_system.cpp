@@ -46,7 +46,7 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 		m_meshlet_object_map[i] = std::make_unique<VeBuffer>(m_ve_device,
-			sizeof(uint32_t), MAX_MESHLET_DRAWS,
+			sizeof(glm::uvec2), MAX_MESHLET_DRAWS,
 			vk::BufferUsageFlagBits::eStorageBuffer,
 			vk::MemoryPropertyFlagBits::eDeviceLocal);
 
@@ -102,7 +102,7 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
 				vk::MemoryPropertyFlagBits::eDeviceLocal);
 
 			m_shadow_meshlet_object_map[i][slot] = std::make_unique<VeBuffer>(m_ve_device,
-				sizeof(uint32_t), MAX_MESHLET_SHADOW_DRAWS,
+				sizeof(glm::uvec2), MAX_MESHLET_SHADOW_DRAWS,
 				vk::BufferUsageFlagBits::eStorageBuffer,
 				vk::MemoryPropertyFlagBits::eDeviceLocal);
 

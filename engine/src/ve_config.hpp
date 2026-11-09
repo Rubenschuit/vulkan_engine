@@ -184,9 +184,6 @@ constexpr uint32_t MESHLET_SHADOW_BUCKET_COUNT     = 4;        // shadows skip t
 constexpr uint32_t MAX_MESHLET_SHADOW_DRAWS        = 262144*4;   // total indirect commands across all shadow buckets per layer
 constexpr uint32_t MAX_MESHLET_DRAWS_PER_BUCKET        = MAX_MESHLET_DRAWS / MESHLET_BUCKET_COUNT;
 constexpr uint32_t MAX_MESHLET_SHADOW_DRAWS_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
-// gpu_id and local meshlet index are packed into VkDrawIndexedIndirectCommand::firstInstance as two 16-bit fields.
-static_assert(MAX_GPU_OBJECTS <= 65536,
-	"MAX_GPU_OBJECTS exceeds 16-bit range; meshlet firstInstance packing would corrupt gpu_id");
 
 constexpr bool MSAA_ENABLED = true;
 

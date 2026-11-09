@@ -34,9 +34,7 @@ struct VertexOutput {
 VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID) {
 	VertexOutput output;
 
-	// Meshlet path packs (gpu_id | meshlet_local << 16) into firstInstance.
-	uint gpu_id = instance_id & 0xFFFFu;
-	InstanceData inst = instances[gpu_id];
+	InstanceData inst = instances[instance_id];
 
 	float4 world_pos = mul(inst.transform, float4(input.in_pos, 1.0));
 	output.pos = mul(ubo.projection_view, world_pos);

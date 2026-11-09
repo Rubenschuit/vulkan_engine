@@ -23,8 +23,8 @@
 [[vk::binding(8,  0)]] Texture2D<float>  hiz_pyramid;
 [[vk::binding(9,  0)]] SamplerState      hiz_sampler;
 
-// Meshlet indirection map for pass 2: packed (vis_idx << 16 | local_meshlet_idx)
-[[vk::binding(10, 0)]] RWStructuredBuffer<uint>  meshlet_object_map;
+// Meshlet indirection map for pass 2: (vis_idx, local_meshlet_idx)
+[[vk::binding(10, 0)]] RWStructuredBuffer<uint2> meshlet_object_map;
 // Pass-2 dispatch indirect command (groups_x written via InterlockedMax)
 [[vk::binding(11, 0)]] RWByteAddressBuffer       dispatch_indirect;
 
@@ -107,9 +107,8 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 	entry.meshlet_count  = meshlet_count;
 	visible_objects[vis_idx] = entry;
 
-	// Fill meshlet-to-object indirection: pack (vis_idx, local_meshlet_idx)
 	for (uint m = 0; m < actual_count; m++)
-		meshlet_object_map[prefix + m] = (vis_idx << 16) | m;
+		meshlet_object_map[prefix + m] = uint2(vis_idx, m);
 
 	// Update pass-2 dispatch group count via InterlockedMax
 	if (actual_count > 0) {

@@ -9,7 +9,7 @@
 #include "cull_common.slangh"
 
 [[vk::binding(0,  0)]] StructuredBuffer<VisibleObjectEntry> visible_objects;
-[[vk::binding(1,  0)]] StructuredBuffer<uint>               meshlet_object_map; // packed (vis_idx << 16 | local_idx)
+[[vk::binding(1,  0)]] StructuredBuffer<uint2>              meshlet_object_map; // (vis_idx, local_idx)
 [[vk::binding(2,  0)]] RWByteAddressBuffer                  counts;        // [0]=visible_count, [1]=total_meshlets
 [[vk::binding(3,  0)]] StructuredBuffer<MeshletGPU>         meshlet_ssbo;
 [[vk::binding(4,  0)]] StructuredBuffer<ObjectDataGPU>      objects;
@@ -32,9 +32,9 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 		return;
 
 	// Direct lookup from indirection map written by pass 1
-	uint packed    = meshlet_object_map[tid.x];
-	uint obj_idx   = packed >> 16;
-	uint local_idx = packed & 0xFFFF;
+	uint2 entry    = meshlet_object_map[tid.x];
+	uint obj_idx   = entry.x;
+	uint local_idx = entry.y;
 
 	VisibleObjectEntry vis = visible_objects[obj_idx];
 
@@ -104,7 +104,7 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 	indirect_cmds.Store(byte_off + 4,  1u);
 	indirect_cmds.Store(byte_off + 8,  m.index_offset);
 	indirect_cmds.Store(byte_off + 12, vertex_offset_to_write);
-	// Pack gpu_id (low 16) and meshlet local index (high 16) into firstInstance.
-	// Vertex shader unpacks: gpu_id = firstInstance & 0xFFFF, meshlet_id = firstInstance >> 16.
-	indirect_cmds.Store(byte_off + 16, (vis.gpu_id & 0xFFFFu) | ((local_idx & 0xFFFFu) << 16));
+	// Instance data lives at gpu_id (pass 1), and instanceCount is 1, so the vertex shader's
+	// SV_VulkanInstanceID is gpu_id.
+	indirect_cmds.Store(byte_off + 16, vis.gpu_id);
 }
