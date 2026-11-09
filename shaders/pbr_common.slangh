@@ -50,9 +50,10 @@ struct VertexOutput {
 };
 
 // ============================================================================
-// Vertex shader
+// Vertex shader (PBR_COMMON_NO_VERTEX_MAIN: the includer brings its own)
 // ============================================================================
 
+#ifndef PBR_COMMON_NO_VERTEX_MAIN
 [shader("vertex")]
 VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID, uint draw_index : SV_DrawIndex) {
 	VertexOutput output;
@@ -90,6 +91,7 @@ VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID,
 
     return output;
 }
+#endif
 
 // ============================================================================
 // PBR Helper Functions
@@ -242,127 +244,44 @@ float rcUpsample(Texture2D<float> source, RcUpsampleTaps taps) {
 }
 
 // ============================================================================
-// PBR Lighting Computation
-// Returns the fully-lit fragment color (rgb = HDR color, a = alpha).
+// PBR shading
 // ============================================================================
 
-float4 computePbrLighting(VertexOutput in_vert) {
-	float4 c;
-	float2 depth_slope = float2(ddx(in_vert.pos.z), ddy(in_vert.pos.z));
-	MaterialGPU mat = materials[in_vert.material_index];
+struct PbrFragment {
+	float4 frag_coord;  // xy = pixel centre, z = device depth
+	float2 depth_slope; // screen-space derivatives of frag_coord.z
+	float3 world_pos;
+	float4 shadow_coord[MAX_SHADOW_LIGHTS];
+};
 
-	float2 tex_coord = in_vert.frag_tex_coord;
-	float2 uv_albedo    = applyUvTransform(tex_coord, mat.uv_albedo,      mat.uv_rot_a.x);
-	float2 uv_mr        = applyUvTransform(tex_coord, mat.uv_metal_rough, mat.uv_rot_a.y);
-	float2 uv_normal    = applyUvTransform(tex_coord, mat.uv_normal,      mat.uv_rot_a.z);
-	float2 uv_occlusion = applyUvTransform(tex_coord, mat.uv_occlusion,   mat.uv_rot_a.w);
-	float2 uv_emissive  = applyUvTransform(tex_coord, mat.uv_emissive,    mat.uv_rot_b.x);
-	float4 albedo = bindless_textures[NonUniformResourceIndex(mat.albedo_index)]
-		.Sample(bindless_sampler, uv_albedo);
-	float albedo_tex_alpha = albedo.a;
-
-	// glTF base color = baseColorTexture * baseColorFactor * COLOR_0
-	albedo *= mat.base_color_factor;
-	albedo *= in_vert.frag_color;
-
-	// glTF alphaMode: OPAQUE(0)=force alpha 1, MASK(1)=discard below cutoff, BLEND(2)=use texture alpha.
-	// The discard is spec-gated
-	uint32_t alpha_mode = mat.material_flags & MAT_FLAG_ALPHA_MODE_MASK;
-	if (alpha_mode == 0) {
-		albedo.a = 1.0;
-	} else if (alpha_mode == 1) {
-		if (ALPHA_MASK_SPEC != 0 && alphaMaskCutoff(mat, albedo_tex_alpha, in_vert.frag_color.a))
-			discard;
-		albedo.a = 1.0;
-	}
-
-	// Debug modes that only need vertex attributes
-	float3 N = normalize(in_vert.frag_normal_world);
-	float3 T = normalize(in_vert.frag_tangent_world);
-	float3 B = normalize(in_vert.frag_bitangent_world);
-	if (DEBUG_SHADING_SPEC != 0) {
-		if (ubo.render_mode == RenderMode::NORMAL_VECTOR)
-			return float4(0.5 * N + 0.5, 1.0f);
-		else if (ubo.render_mode == RenderMode::TANGENT_VECTOR)
-			return float4(0.5 * T + 0.5, 1.0f);
-		else if (ubo.render_mode == RenderMode::BITANGENT_VECTOR)
-			return float4(0.5 * B + 0.5, 1.0f);
-		else if (ubo.render_mode == RenderMode::LOD_LEVEL)
-			return float4(lodDebugColor(albedo.rgb, in_vert.lod_level), albedo.a);
-		else if (ubo.render_mode == RenderMode::MESHLET_ID)
-			return float4(meshletDebugColor(albedo.rgb, in_vert.meshlet_id), albedo.a);
-		else if (ubo.render_mode == RenderMode::RC_IRRADIANCE) {
-			float2 rc_uv = in_vert.pos.xy / ubo.screen_size;
-			return float4(rc_texture.SampleLevel(rc_sampler, rc_uv, 0).rgb, 1.0);
-		} else if (ubo.render_mode == RenderMode::RC_SKY_VISIBILITY) {
-			float2 rc_uv = in_vert.pos.xy / ubo.screen_size;
-			float v = rc_sky_visibility.SampleLevel(rc_sampler, rc_uv, 0.0);
-			return float4(v, v, v, 1.0);
-		}
-	}
-
-	if ((mat.material_flags & MAT_FLAG_UNLIT) != 0u)
-		return albedo;
-
-	float4 mr = bindless_textures[NonUniformResourceIndex(mat.metallic_roughness_index)]
-		.Sample(bindless_sampler, uv_mr);
-	float4 normal_map = bindless_textures[NonUniformResourceIndex(mat.normal_index)]
-		.Sample(bindless_sampler, uv_normal);
-	float4 occlusion_sample = bindless_textures[NonUniformResourceIndex(mat.occlusion_index)]
-		.Sample(bindless_sampler, uv_occlusion);
-	float occlusion = lerp(1.0, occlusion_sample.r, mat.occlusion_strength);
-	float3 emissive_sample = float3(0.0);
-	if (mat.pbr_params.z > 0.0)
-		emissive_sample = bindless_textures[NonUniformResourceIndex(mat.emissive_index)]
-			.Sample(bindless_sampler, uv_emissive).rgb * mat.emissive_factor.xyz * mat.pbr_params.z;
-
-	float metallic;
-	float roughness;
+struct PbrSurface {
+	float4 albedo;           // linear base colour, a = alpha
+	float3 normal;           // world, normal-mapped, faced toward the viewer when double-sided
+	float3 geometric_normal; // world
+	float  metallic;
+	float  roughness;
 	float3 dielectric_F0;
-	float specular_weight;  // KHR_materials_specular dielectric Fresnel scaling
-	if ((mat.material_flags & MAT_FLAG_SPEC_GLOSS) != 0u) {
-		metallic = 0.0;
-		roughness = 1.0 - mr.a * mat.pbr_params.y;
-		dielectric_F0 = mat.specular_color_ior.xyz * mr.rgb;
-		specular_weight = 1.0;
-	} else {
-		metallic = mr.b * mat.pbr_params.x;
-		roughness = mr.g * mat.pbr_params.y;
-		float ior = mat.specular_color_ior.w;
-		float f0_dielectric = ((ior - 1.0) / (ior + 1.0)) * ((ior - 1.0) / (ior + 1.0));
-		// KHR_materials_specular dielectric: F0 = min(f0_ior * specColor, 1) * specular, F90 = specular
-		float3 spec_col_tex = float3(1.0);
-		float spec_tex_alpha = 1.0;
-		if ((mat.material_flags & MAT_FLAG_SPECULAR_TEX) != 0u) {
-			spec_col_tex = bindless_textures[NonUniformResourceIndex(mat.specular_color_index)]
-				.Sample(bindless_sampler, tex_coord).rgb;
-			spec_tex_alpha = bindless_textures[NonUniformResourceIndex(mat.specular_index)]
-				.Sample(bindless_sampler, tex_coord).a;
-		}
-		specular_weight = mat.specular_strength * spec_tex_alpha;
-		dielectric_F0 = min(f0_dielectric * mat.specular_color_ior.xyz * spec_col_tex, float3(1.0)) * specular_weight;
-	}
-	float3 F0 = lerp(dielectric_F0, albedo.rgb, metallic);
-	roughness = max(roughness, 0.045);
-	float transmission = mat.pbr_params.w;
-	float3 F90 = float3(lerp(specular_weight, 1.0, metallic));
+	float  specular_weight;  // KHR_materials_specular dielectric Fresnel scaling
+	float  occlusion;
+	float3 emissive;
+	float  transmission;
+	uint   alpha_mode;       // masked surfaces evaluate the CSM directly instead of the shadow mask
+};
 
-	// Without debug shading the render mode is always BRDF_MICROFACET
-	float3 world_normal = N;
-	if (DEBUG_SHADING_SPEC == 0
-		|| ubo.render_mode == RenderMode::BRDF_MICROFACET || ubo.render_mode == RenderMode::NORMAL_MAP
-		|| ubo.render_mode == RenderMode::RC_UPSAMPLE_MATCH) {
-		world_normal = applyNormalMap(normal_map.xyz, T, B, N);
-	}
+// Returns the fully-lit fragment color (rgb = HDR color, a = alpha)
+float4 shadePbrSurface(PbrFragment frag, PbrSurface s) {
+	float4 c;
+	float4 albedo = s.albedo;
+	float3 world_normal = s.normal;
+	float3 geometric_normal = s.geometric_normal;
+	float metallic = s.metallic;
+	float roughness = max(s.roughness, 0.045);
+	float3 F0 = lerp(s.dielectric_F0, albedo.rgb, metallic);
+	float3 F90 = float3(lerp(s.specular_weight, 1.0, metallic));
+	float transmission = s.transmission;
 
-	if (DEBUG_SHADING_SPEC != 0 && ubo.render_mode == RenderMode::NORMAL_MAP)
-		return float4(0.5 * world_normal + 0.5, 1.0f);
-
-	float3 view_dir = normalize(ubo.camera_position.xyz - in_vert.frag_pos_world);
-	float frag_view_z = -(mul(ubo.view, float4(in_vert.frag_pos_world, 1.0))).z;
-
-	world_normal = flipDoubleSided(world_normal, view_dir, mat.material_flags);
-	float3 geometric_normal = flipDoubleSided(N, view_dir, mat.material_flags);
+	float3 view_dir = normalize(ubo.camera_position.xyz - frag.world_pos);
+	float frag_view_z = -(mul(ubo.view, float4(frag.world_pos, 1.0))).z;
 
 	// CSM shadow for directional light
 	float csm_shadow = 1.0;
@@ -371,15 +290,15 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	if (SHADOW_MODE_SPEC != ShadowMode::DISABLED && ubo.csm_cascade_count > 0) {
 		// Back faces of double-sided geometry must offset toward the visible side,
 		// hence the flipped geometric normal
-		bool use_mask = SHADOW_MASK_SPEC != 0 && alpha_mode != 1;
+		bool use_mask = SHADOW_MASK_SPEC != 0 && s.alpha_mode != 1;
 		if (use_mask) {
-			float2 mask_uv = in_vert.pos.xy / ubo.screen_size;
+			float2 mask_uv = frag.frag_coord.xy / ubo.screen_size;
 			csm_shadow = upsampleShadowMask(mask_uv, frag_view_z);
 			if (DEBUG_SHADING_SPEC != 0 && ubo.render_mode == RenderMode::CSM_CASCADE)
-				calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, geometric_normal, in_vert.pos.xy,
+				calculateCSMShadow(frag.world_pos, frag_view_z, geometric_normal, frag.frag_coord.xy,
 					csm_cascade_idx, csm_blend_t);
 		} else {
-			csm_shadow = calculateCSMShadow(in_vert.frag_pos_world, frag_view_z, geometric_normal, in_vert.pos.xy,
+			csm_shadow = calculateCSMShadow(frag.world_pos, frag_view_z, geometric_normal, frag.frag_coord.xy,
 				csm_cascade_idx, csm_blend_t);
 		}
 	}
@@ -390,14 +309,14 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	// Point light shadow terms
 	float shadow_terms[MAX_SHADOW_LIGHTS];
 	uint32_t shadow_for_light[MAX_SHADOW_LIGHTS];
-	calculatePointShadowTerms(in_vert.shadow_coord, in_vert.pos.xy, shadow_terms, shadow_for_light);
+	calculatePointShadowTerms(frag.shadow_coord, frag.frag_coord.xy, shadow_terms, shadow_for_light);
 
 	// Cluster heatmap debug
 	if (DEBUG_SHADING_SPEC != 0
 		&& ubo.render_mode == RenderMode::CLUSTER_HEATMAP && cluster_params.cluster_enabled != 0) {
-		uint cid = getClusterIndex(in_vert.pos.xy, frag_view_z, cluster_params);
+		uint cid = getClusterIndex(frag.frag_coord.xy, frag_view_z, cluster_params);
 		uint count = cluster_light_counts[cid].y;
-		float3 heat = clusterHeatmapColor(in_vert.pos.xy, frag_view_z, count, cluster_params);
+		float3 heat = clusterHeatmapColor(frag.frag_coord.xy, frag_view_z, count, cluster_params);
 		return float4(heat * albedo.rgb, albedo.a);
 	}
 
@@ -411,7 +330,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	float3 Lo = float3(0.0);
 	LtcTerms ltc_terms = (LtcTerms)0;
 	if (cluster_params.cluster_enabled != 0) {
-		uint cid = getClusterIndex(in_vert.pos.xy, frag_view_z, cluster_params);
+		uint cid = getClusterIndex(frag.frag_coord.xy, frag_view_z, cluster_params);
 		uint2 counts = cluster_light_counts[cid];
 		// Area lights are appended after point+spot
 		uint rect_base = cluster_params.num_point_lights + cluster_params.num_spot_lights;
@@ -421,7 +340,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 			if (light_idx >= rect_base) {
 				if (AREA_LIGHTS_SPEC != 0) {
 					uint rect_idx = light_idx - rect_base;
-					Lo += ltcRectLight(ubo.rect_lights[rect_idx], world_normal, view_dir, in_vert.frag_pos_world,
+					Lo += ltcRectLight(ubo.rect_lights[rect_idx], world_normal, view_dir, frag.world_pos,
 						roughness, F0, albedo.rgb * kD_factor, ltc_terms);
 				}
 				continue;
@@ -429,7 +348,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 
 			PointLight light = cluster_lights[light_idx];
 
-			float3 light_dir = light.position.xyz - in_vert.frag_pos_world;
+			float3 light_dir = light.position.xyz - frag.world_pos;
 			float distance_sq = dot(light_dir, light_dir);
 			float range = light.position.w;
 			if (range > 0.0 && distance_sq >= range * range) continue;
@@ -493,18 +412,18 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	}
 
 	// SSAO
-	float2 screen_uv = in_vert.pos.xy / ubo.screen_size;
+	float2 screen_uv = frag.frag_coord.xy / ubo.screen_size;
 	float ssao = ao_texture.SampleLevel(ao_sampler, screen_uv, 0);
 
 	// Ambient / IBL
 	float3 ambient;
-	float diffuse_ao = occlusion * ssao;
+	float diffuse_ao = s.occlusion * ssao;
 
 	// GI
 	float4 rc = float4(0.0);
 	RcUpsampleTaps rc_taps = (RcUpsampleTaps)0;
 	if (RC_COMPOSITE_SPEC != 0) {
-		rc_taps = rcUpsampleTaps(in_vert.pos.xy, in_vert.pos.z, depth_slope, world_normal);
+		rc_taps = rcUpsampleTaps(frag.frag_coord.xy, frag.frag_coord.z, frag.depth_slope, world_normal);
 		if (DEBUG_SHADING_SPEC != 0 && ubo.render_mode == RenderMode::RC_UPSAMPLE_MATCH)
 			return float4(rc_taps.match, rc_taps.match, rc_taps.match, 1.0);
 		rc = rcUpsample(rc_texture, rc_taps);
@@ -512,7 +431,7 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	// glTF metallic blends a dielectric and a metal lobe, each reflecting its own
 	// specular albedo. The diffuse gets what the dielectric lobe does not reflect
 	float2 env_brdf = ibl_brdf_lut.SampleLevel(float2(NdotV, 1.0 - roughness), 0).rg;
-	float3 E_dielectric = specularAlbedo(dielectric_F0, float3(specular_weight), env_brdf);
+	float3 E_dielectric = specularAlbedo(s.dielectric_F0, float3(s.specular_weight), env_brdf);
 	float3 E_metal = specularAlbedo(albedo.rgb, float3(1.0), env_brdf);
 	float3 kD_ibl = (1.0 - E_dielectric) * (1.0 - metallic);
 
@@ -572,12 +491,137 @@ float4 computePbrLighting(VertexOutput in_vert) {
 	if (ubo.ibl_min_ambient > 0.0)
 		ambient = max(ambient, ubo.ibl_min_ambient * albedo.rgb);
 
-	c.rgb = Lo + ambient + emissive_sample;
+	c.rgb = Lo + ambient + s.emissive;
 	static const float HIGH_TRANSMISSION_THRESHOLD = 0.5;
 	float raw_alpha = (1.0 - transmission) * albedo.a;
 	c.a = (transmission > HIGH_TRANSMISSION_THRESHOLD) ? max(raw_alpha, 0.45) : raw_alpha;
 
 	return c;
+}
+
+// ============================================================================
+// PBR Lighting Computation: samples the material, then shades it.
+// Returns the fully-lit fragment color (rgb = HDR color, a = alpha).
+// ============================================================================
+
+float4 computePbrLighting(VertexOutput in_vert) {
+	float2 depth_slope = float2(ddx(in_vert.pos.z), ddy(in_vert.pos.z));
+	MaterialGPU mat = materials[in_vert.material_index];
+
+	float2 tex_coord = in_vert.frag_tex_coord;
+	float2 uv_albedo    = applyUvTransform(tex_coord, mat.uv_albedo,      mat.uv_rot_a.x);
+	float2 uv_mr        = applyUvTransform(tex_coord, mat.uv_metal_rough, mat.uv_rot_a.y);
+	float2 uv_normal    = applyUvTransform(tex_coord, mat.uv_normal,      mat.uv_rot_a.z);
+	float2 uv_occlusion = applyUvTransform(tex_coord, mat.uv_occlusion,   mat.uv_rot_a.w);
+	float2 uv_emissive  = applyUvTransform(tex_coord, mat.uv_emissive,    mat.uv_rot_b.x);
+	float4 albedo = bindless_textures[NonUniformResourceIndex(mat.albedo_index)]
+		.Sample(bindless_sampler, uv_albedo);
+	float albedo_tex_alpha = albedo.a;
+
+	// glTF base color = baseColorTexture * baseColorFactor * COLOR_0
+	albedo *= mat.base_color_factor;
+	albedo *= in_vert.frag_color;
+
+	// glTF alphaMode: OPAQUE(0)=force alpha 1, MASK(1)=discard below cutoff, BLEND(2)=use texture alpha.
+	// The discard is spec-gated
+	uint32_t alpha_mode = mat.material_flags & MAT_FLAG_ALPHA_MODE_MASK;
+	if (alpha_mode == 0) {
+		albedo.a = 1.0;
+	} else if (alpha_mode == 1) {
+		if (ALPHA_MASK_SPEC != 0 && alphaMaskCutoff(mat, albedo_tex_alpha, in_vert.frag_color.a))
+			discard;
+		albedo.a = 1.0;
+	}
+
+	// Debug modes that only need vertex attributes
+	float3 N = normalize(in_vert.frag_normal_world);
+	float3 T = normalize(in_vert.frag_tangent_world);
+	float3 B = normalize(in_vert.frag_bitangent_world);
+	if (DEBUG_SHADING_SPEC != 0) {
+		if (ubo.render_mode == RenderMode::NORMAL_VECTOR)
+			return float4(0.5 * N + 0.5, 1.0f);
+		else if (ubo.render_mode == RenderMode::TANGENT_VECTOR)
+			return float4(0.5 * T + 0.5, 1.0f);
+		else if (ubo.render_mode == RenderMode::BITANGENT_VECTOR)
+			return float4(0.5 * B + 0.5, 1.0f);
+		else if (ubo.render_mode == RenderMode::LOD_LEVEL)
+			return float4(lodDebugColor(albedo.rgb, in_vert.lod_level), albedo.a);
+		else if (ubo.render_mode == RenderMode::MESHLET_ID)
+			return float4(meshletDebugColor(albedo.rgb, in_vert.meshlet_id), albedo.a);
+		else if (ubo.render_mode == RenderMode::RC_IRRADIANCE) {
+			float2 rc_uv = in_vert.pos.xy / ubo.screen_size;
+			return float4(rc_texture.SampleLevel(rc_sampler, rc_uv, 0).rgb, 1.0);
+		} else if (ubo.render_mode == RenderMode::RC_SKY_VISIBILITY) {
+			float2 rc_uv = in_vert.pos.xy / ubo.screen_size;
+			float v = rc_sky_visibility.SampleLevel(rc_sampler, rc_uv, 0.0);
+			return float4(v, v, v, 1.0);
+		}
+	}
+
+	if ((mat.material_flags & MAT_FLAG_UNLIT) != 0u)
+		return albedo;
+
+	float4 mr = bindless_textures[NonUniformResourceIndex(mat.metallic_roughness_index)]
+		.Sample(bindless_sampler, uv_mr);
+	float4 normal_map = bindless_textures[NonUniformResourceIndex(mat.normal_index)]
+		.Sample(bindless_sampler, uv_normal);
+	float4 occlusion_sample = bindless_textures[NonUniformResourceIndex(mat.occlusion_index)]
+		.Sample(bindless_sampler, uv_occlusion);
+
+	PbrSurface s;
+	s.albedo = albedo;
+	s.occlusion = lerp(1.0, occlusion_sample.r, mat.occlusion_strength);
+	s.emissive = float3(0.0);
+	if (mat.pbr_params.z > 0.0)
+		s.emissive = bindless_textures[NonUniformResourceIndex(mat.emissive_index)]
+			.Sample(bindless_sampler, uv_emissive).rgb * mat.emissive_factor.xyz * mat.pbr_params.z;
+
+	if ((mat.material_flags & MAT_FLAG_SPEC_GLOSS) != 0u) {
+		s.metallic = 0.0;
+		s.roughness = 1.0 - mr.a * mat.pbr_params.y;
+		s.dielectric_F0 = mat.specular_color_ior.xyz * mr.rgb;
+		s.specular_weight = 1.0;
+	} else {
+		s.metallic = mr.b * mat.pbr_params.x;
+		s.roughness = mr.g * mat.pbr_params.y;
+		float ior = mat.specular_color_ior.w;
+		float f0_dielectric = ((ior - 1.0) / (ior + 1.0)) * ((ior - 1.0) / (ior + 1.0));
+		// KHR_materials_specular dielectric: F0 = min(f0_ior * specColor, 1) * specular, F90 = specular
+		float3 spec_col_tex = float3(1.0);
+		float spec_tex_alpha = 1.0;
+		if ((mat.material_flags & MAT_FLAG_SPECULAR_TEX) != 0u) {
+			spec_col_tex = bindless_textures[NonUniformResourceIndex(mat.specular_color_index)]
+				.Sample(bindless_sampler, tex_coord).rgb;
+			spec_tex_alpha = bindless_textures[NonUniformResourceIndex(mat.specular_index)]
+				.Sample(bindless_sampler, tex_coord).a;
+		}
+		s.specular_weight = mat.specular_strength * spec_tex_alpha;
+		s.dielectric_F0 = min(f0_dielectric * mat.specular_color_ior.xyz * spec_col_tex, float3(1.0)) * s.specular_weight;
+	}
+	s.transmission = mat.pbr_params.w;
+	s.alpha_mode = alpha_mode;
+
+	// Without debug shading the render mode is always BRDF_MICROFACET
+	float3 world_normal = N;
+	if (DEBUG_SHADING_SPEC == 0
+		|| ubo.render_mode == RenderMode::BRDF_MICROFACET || ubo.render_mode == RenderMode::NORMAL_MAP
+		|| ubo.render_mode == RenderMode::RC_UPSAMPLE_MATCH) {
+		world_normal = applyNormalMap(normal_map.xyz, T, B, N);
+	}
+
+	if (DEBUG_SHADING_SPEC != 0 && ubo.render_mode == RenderMode::NORMAL_MAP)
+		return float4(0.5 * world_normal + 0.5, 1.0f);
+
+	float3 view_dir = normalize(ubo.camera_position.xyz - in_vert.frag_pos_world);
+	s.normal = flipDoubleSided(world_normal, view_dir, mat.material_flags);
+	s.geometric_normal = flipDoubleSided(N, view_dir, mat.material_flags);
+
+	PbrFragment frag;
+	frag.frag_coord = in_vert.pos;
+	frag.depth_slope = depth_slope;
+	frag.world_pos = in_vert.frag_pos_world;
+	frag.shadow_coord = in_vert.shadow_coord;
+	return shadePbrSurface(frag, s);
 }
 
 #endif
