@@ -256,7 +256,7 @@ message(STATUS "Using vendored Dear ImGui at: ${IMGUI_DIR}")
 include(FetchContent)
 FetchContent_Declare(meshoptimizer
 	GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git
-	GIT_TAG v1.0
+	GIT_TAG v1.3
 )
 FetchContent_MakeAvailable(meshoptimizer)
 message(STATUS "meshoptimizer: ${meshoptimizer_SOURCE_DIR}")
