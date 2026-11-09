@@ -13,8 +13,8 @@
 // s = RC_SPEC_HANDOFF_ROUGHNESS. The two ends are independent; where they
 // overlap the composite arbitrates by SSR confidence.
 static const float SPEC_HANDOFF_FADE_START = 0.85;
-// Roughness at which RC rough specular fully replaces the environment
-static const float RC_SPEC_HANDOFF_ROUGHNESS = 0.4;
+// Roughness at which RC rough specular fully replaces the environment.
+static const float RC_SPEC_HANDOFF_ROUGHNESS = 0.3;
 
 // ============================================================================
 // Light structs (keep in sync with ve_frame_info.hpp)

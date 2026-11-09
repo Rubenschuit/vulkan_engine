@@ -251,7 +251,7 @@ private:
 	uint32_t m_free_total = 0;
 	uint32_t m_pair_total = 0;      // (probe, dir) pairs across cascades
 	uint32_t m_merged_cap = 0;      // cascade 0 pairs
-	uint32_t m_dirmip_cap = 0;      // both alternating regions, each the largest of its cascades' pairs / 4
+	uint32_t m_dirmip_cap = 0;      // every cascade above 0's pairs / 4, one region each
 
 	std::unique_ptr<VeBuffer> m_hash_keys;
 	std::unique_ptr<VeBuffer> m_hash_vals;
@@ -270,8 +270,9 @@ private:
 	std::unique_ptr<VeBuffer> m_dirmip;
 	std::unique_ptr<VeBuffer> m_merged_lower;
 	std::unique_ptr<VeBuffer> m_dirmip_lower;
+	std::unique_ptr<VeBuffer> m_probe_sky_fill;
 	std::unique_ptr<VeImage> m_irradiance_atlas;
-	std::unique_ptr<VeImage> m_visibility_atlas;
+	std::unique_ptr<VeImage> m_spec_atlas;
 	std::array<std::unique_ptr<VeBuffer>, MAX_FRAMES_IN_FLIGHT> m_readback;
 
 	// Built once in the ctor; only the descriptor sets follow the extent.

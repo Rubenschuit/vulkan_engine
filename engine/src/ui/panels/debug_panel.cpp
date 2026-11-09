@@ -55,10 +55,10 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 		ImGui::TextDisabled("Radiance Cascades");
 		rc_view_radio("Irradiance", RcDebugView::IRRADIANCE, "The gather's rgb output");
 		rc_view_radio("Sky Visibility", RcDebugView::SKY_VISIBILITY,
-			"The gather's sky-visibility output, white = open sky");
+			"The gather's sky visibility along the specular lobe, white = open sky");
 		rc_view_radio("Upsample Match", RcDebugView::UPSAMPLE_MATCH,
 			"How well the four nearest GI samples' surfaces match each pixel; black = none, plain bilinear");
-		rc_view_radio("Evidence", RcDebugView::EVIDENCE, "The known share of directions");
+		rc_view_radio("Evidence", RcDebugView::EVIDENCE, "The known share of directions along the specular lobe");
 		rc_view_radio("Stored J (nearest probe)", RcDebugView::PROBE_J,
 			"Nearest probe's mean stored radiance at the chosen cascade");
 		rc_view_radio("Trace Outcome", RcDebugView::TRACE_KIND,
@@ -67,7 +67,8 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 			"Sample count of the probes the pixel gathers from, over the History Length");
 		rc_view_radio("Probe Grid", RcDebugView::PROBE_GRID,
 			"Hash-colored by the pixel's nearest probe at the chosen cascade; black = no probe there");
-		rc_view_radio("Rough Specular", RcDebugView::SPEC, "The irradiance tile sampled at the reflection direction");
+		rc_view_radio("Rough Specular", RcDebugView::SPEC,
+			"The radiance RC adds along the specular lobe");
 	}
 
 	ImGui::SeparatorText("Overlays");

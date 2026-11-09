@@ -1,13 +1,16 @@
 // One workgroup per c0 probe, one thread per texel of the probe's
-// RCW_TILE^2 octahedral tile. Each texel is one direction. Treating
-// that direction as a surface normal, the texel sums the merged c0 bins
+// RCW_TILE^2 octahedral tiles. Each texel is one direction d and writes a
+// weighted mean of the merged c0 bins I, with bin directions b, to two tiles:
 //
-//   rgb = sum_all I * w / sum_all w
-//   a   = 1, or 0 under RCW_SKY_MODE_OFF
+//   irradiance  rgb = sum I * w / sum w,  w = max(dot(b, d), 0)
+//               a   = 1, or 0 under RCW_SKY_MODE_OFF
+//   specular    rgb = sum I * v / sum v,  v = exp(RCW_SPEC_TILE_SHARPNESS * (dot(b, d) - 1))
+//               a   = the bins' sky estimate (evidence in the EVIDENCE view), weighted by v
 //
-// with w = max(dot(bin direction, texel direction), 0).
+// The irradiance tile reads d as a surface normal (a cosine lobe), the
+// specular tile as a reflection direction (a narrower lobe).
 //
-// rgb is the cosine-weighted mean radiance of the bounce plus the sky. The
+// The irradiance rgb is the cosine-weighted mean radiance of the bounce plus the sky. The
 // composite blends its own sky, times 1 - a, with rgb, so where the gather
 // finds probes (a = 1) their estimate replaces the environment; the gather
 // writes a = 0 where it finds none. Under RCW_SKY_MODE_OFF rgb is the bounce alone
@@ -70,10 +73,7 @@ void compMain(uint3 group_id: SV_GroupID, uint3 local_id: SV_GroupThreadID) {
 		s_prior_terms[bin] = float2(lower, evidence);
 		s_direction[bin] = rcwBinToDir(uint2(bin % azimuth_bins, bin / azimuth_bins), 0);
 		float3 bin_direction = s_direction[bin];
-		sky_radiance = ubo.ibl_active != 0u
-			? rcwEvaluateSkyRadiance(float3(bin_direction.x, bin_direction.z, bin_direction.y), ubo.sh_coefficients)
-				* ubo.sky_radiance_scale.rgb
-			: ubo.ambient_light_color.xyz;
+		sky_radiance = rcwSkyRadiance(bin_direction);
 	}
 	GroupMemoryBarrierWithGroupSync();
 
@@ -89,6 +89,8 @@ void compMain(uint3 group_id: SV_GroupID, uint3 local_id: SV_GroupThreadID) {
 		float own_share = saturate(sky_total / max(known_total, 1e-4));
 		float prior = own_share * known_total / (known_total + 1.0);
 		float fill = sky_mode == RCW_SKY_MODE_UNKNOWN_SKY ? 1.0 : (sky_mode == RCW_SKY_MODE_UNKNOWN_OBSTRUCTED ? 0.0 : prior);
+		if (texel_index == 0u)
+			probe_sky_fill[probe_index] = fill;
 		float sky = proven + fill * (1.0 - evidence);
 		s_sky[texel_index] = (push.flags & RCW_FLAG_VISIBILITY_EVIDENCE) != 0u ? evidence : sky;
 		s_radiance[texel_index] = sky_mode == RCW_SKY_MODE_OFF ? bin_radiance : bin_radiance + sky_radiance * sky;
@@ -96,20 +98,23 @@ void compMain(uint3 group_id: SV_GroupID, uint3 local_id: SV_GroupThreadID) {
 	GroupMemoryBarrierWithGroupSync();
 
 	float3 radiance = float3(0.0, 0.0, 0.0);
-	float sky_visibility = 0.0;
 	float weight_all = 0.0;
+	float4 spec = float4(0.0, 0.0, 0.0, 0.0);
+	float spec_weight_all = 0.0;
 	for (uint bin = 0; bin < direction_count; bin++) {
-		float weight = max(dot(s_direction[bin], texel_direction), 0.0);
-		if (weight <= 0.0)
+		float cosine = dot(s_direction[bin], texel_direction);
+		float spec_weight = exp(RCW_SPEC_TILE_SHARPNESS * (cosine - 1.0));
+		spec_weight_all += spec_weight;
+		spec += float4(s_radiance[bin], s_sky[bin]) * spec_weight;
+		if (cosine <= 0.0)
 			continue;
-		weight_all += weight;
-		radiance += s_radiance[bin] * weight;
-		sky_visibility += s_sky[bin] * weight;
+		weight_all += cosine;
+		radiance += s_radiance[bin] * cosine;
 	}
 	float inverse_weight_all = 1.0 / max(weight_all, 1e-4);
 
 	uint tiles_per_row = rcwTilesPerRow(desc.probe_cap);
 	uint2 atlas_texel = uint2(probe_index % tiles_per_row, probe_index / tiles_per_row) * RCW_TILE + local_id.xy;
 	irradiance_atlas[atlas_texel] = float4(radiance * inverse_weight_all, sky_mode == RCW_SKY_MODE_OFF ? 0.0 : 1.0);
-	visibility_atlas[atlas_texel] = sky_visibility * inverse_weight_all;
+	spec_atlas[atlas_texel] = spec / spec_weight_all;
 }

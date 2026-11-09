@@ -394,8 +394,8 @@ vk::DeviceSize RcSystem::layOutStore(uint32_t cap0) {
 	uint32_t slot_off = 0;
 	uint32_t free_off = 0;
 	uint32_t pair_off = 0;
+	uint32_t dirmip_off = 0;
 	m_descs = {};
-	std::array<uint32_t, 2> dirmip_regions{};
 	for (uint32_t n = 0; n < m_cascades; n++) {
 		uint32_t cap = std::max(256u, static_cast<uint32_t>(std::llround(cap0 * CASCADE_SHAPE[n])));
 		m_descs[n] = CascadeDesc{
@@ -406,21 +406,20 @@ vk::DeviceSize RcSystem::layOutStore(uint32_t cap0) {
 			.slot_base = slot_off,
 			.free_base = free_off,
 			.pair_base = pair_off,
+			.dirmip_base = dirmip_off,
 		};
 		hash_off += m_descs[n].hash_cap;
 		probe_off += cap;
 		slot_off += cap;
 		free_off += 2 + cap;
 		pair_off += cap * dirCount(n);
+		// Every cascade above 0 keeps its own dirmip region: the gather's
+		// specular walk reads them all after the merge.
 		if (n > 0)
-			dirmip_regions[n % 2] = std::max(dirmip_regions[n % 2], cap * dirCount(n) / 4);
+			dirmip_off += cap * dirCount(n) / 4;
 	}
-	// Consecutive cascades alternate between two dirmip regions, so a merge
-	// never overwrites the parents it reads.
-	for (uint32_t n = 1; n < m_cascades; n++)
-		m_descs[n].dirmip_base = (n % 2) * dirmip_regions[0];
 	m_merged_cap = m_descs[0].probe_cap * dirCount(0);
-	m_dirmip_cap = std::max(dirmip_regions[0] + dirmip_regions[1], 1u);
+	m_dirmip_cap = std::max(dirmip_off, 1u);
 	m_hash_words_per_parity = hash_off;
 	m_probes_per_parity = probe_off;
 	m_slot_total = slot_off;
@@ -435,18 +434,20 @@ vk::DeviceSize RcSystem::layOutStore(uint32_t cap0) {
 		+ static_cast<vk::DeviceSize>(m_probes_per_parity) * 2 * 2 * WORD
 		+ static_cast<vk::DeviceSize>(m_slot_total + m_free_total) * WORD
 		+ static_cast<vk::DeviceSize>(m_cascades) * 2 * sizeof(CountersGpu)
-		// RGBA16F irradiance + R16F sky-visibility tile atlases.
-		+ static_cast<vk::DeviceSize>(atlas.width) * atlas.height * (8 + 2);
+		+ static_cast<vk::DeviceSize>(m_descs[0].probe_cap) * WORD
+		// RGBA16F irradiance + RGBA16F specular tile atlases.
+		+ static_cast<vk::DeviceSize>(atlas.width) * atlas.height * (8 + 8);
 	return m_store_bytes;
 }
 
 void RcSystem::releaseStore() {
 	for (auto& slot : m_readback)
 		slot.reset();
-	m_visibility_atlas.reset();
+	m_spec_atlas.reset();
 	m_irradiance_atlas.reset();
 	m_ray_cursor.reset();
 	m_dirmip_lower.reset();
+	m_probe_sky_fill.reset();
 	m_merged_lower.reset();
 	m_dirmip.reset();
 	m_merged.reset();
@@ -521,6 +522,9 @@ void RcSystem::createBuffers() {
 	m_dirmip_lower = std::make_unique<VeBuffer>(m_ve_device, WORD, m_dirmip_cap,
 		vk::BufferUsageFlagBits::eStorageBuffer, device_local);
 	m_dirmip_lower->setDebugName("RCW Dir Mip Lower");
+	m_probe_sky_fill = std::make_unique<VeBuffer>(m_ve_device, WORD, m_descs[0].probe_cap,
+		vk::BufferUsageFlagBits::eStorageBuffer, device_local);
+	m_probe_sky_fill->setDebugName("RCW Probe Sky Fill");
 
 	// Irradiance tile atlas: one TILE^2 tile per c0 probe.
 	vk::Extent2D atlas = atlasExtent(m_descs[0].probe_cap);
@@ -539,20 +543,20 @@ void RcSystem::createBuffers() {
 		vk::PipelineStageFlagBits2::eTopOfPipe, vk::PipelineStageFlagBits2::eComputeShader);
 	m_irradiance_atlas->setDebugName("RCW Irradiance Atlas");
 
-	// Sky visibility: one scalar per irradiance texel, same tile geometry.
-	m_visibility_atlas = std::make_unique<VeImage>(
+	// Specular radiance + sky visibility, same tile geometry.
+	m_spec_atlas = std::make_unique<VeImage>(
 		m_ve_device, atlas.width, atlas.height,
-		vk::SampleCountFlagBits::e1, vk::Format::eR16Sfloat,
+		vk::SampleCountFlagBits::e1, vk::Format::eR16G16B16A16Sfloat,
 		vk::ImageTiling::eOptimal,
 		vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled,
 		vk::MemoryPropertyFlagBits::eDeviceLocal,
 		vk::ImageAspectFlagBits::eColor,
 		false, 1);
-	m_visibility_atlas->transitionImageLayout(
+	m_spec_atlas->transitionImageLayout(
 		vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral,
 		vk::AccessFlagBits2::eNone, vk::AccessFlagBits2::eShaderStorageWrite,
 		vk::PipelineStageFlagBits2::eTopOfPipe, vk::PipelineStageFlagBits2::eComputeShader);
-	m_visibility_atlas->setDebugName("RCW Sky Visibility Atlas");
+	m_spec_atlas->setDebugName("RCW Specular Atlas");
 
 	m_cascade_descs = std::make_unique<VeBuffer>(m_ve_device, sizeof(CascadeDesc), MAX_CASCADES,
 		vk::BufferUsageFlagBits::eStorageBuffer,
@@ -594,8 +598,8 @@ void RcSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_
 		.addBinding(17, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute)  // irradiance atlas sampled
 		.addBinding(18, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // merged I
 		.addBinding(19, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // dir mip
-		.addBinding(20, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute)  // sky visibility atlas RW
-		.addBinding(21, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute)  // sky visibility atlas sampled
+		.addBinding(20, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute)  // specular atlas RW
+		.addBinding(21, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute)  // specular atlas sampled
 		.addBinding(22, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute)  // gathered sky visibility
 		.addBinding(23, vk::DescriptorType::eSampledImage, vk::ShaderStageFlagBits::eCompute) // prev min/max depth
 		.addBinding(24, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute)  // gathered spec
@@ -603,7 +607,8 @@ void RcSystem::createPipelineLayout(const vk::raii::DescriptorSetLayout& global_
 		.addBinding(26, vk::DescriptorType::eStorageImage, vk::ShaderStageFlagBits::eCompute)  // gathered surface
 		.addBinding(27, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // merged lower sky fraction
 		.addBinding(28, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute) // dir mip lower sky fraction
-		.addBinding(29, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute); // ray generation counts/cursors
+		.addBinding(29, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute)  // ray generation counts/cursors
+		.addBinding(30, vk::DescriptorType::eStorageBuffer, vk::ShaderStageFlagBits::eCompute); // c0 probe sky fill
 	// Bindings 31-35 exist only alongside the ray query trace variant that reads them.
 	if (m_ve_device.supportsRayQuery())
 		layout_builder
@@ -710,6 +715,7 @@ void RcSystem::createDescriptorSets() {
 	auto merged_lower_info = m_merged_lower->getDescriptorInfo();
 	auto dirmip_lower_info = m_dirmip_lower->getDescriptorInfo();
 	auto ray_cursor_info = m_ray_cursor->getDescriptorInfo();
+	auto sky_fill_info = m_probe_sky_fill->getDescriptorInfo();
 	vk::DescriptorImageInfo atlas_storage_info{
 		.imageView = *m_irradiance_atlas->getImageView(),
 		.imageLayout = vk::ImageLayout::eGeneral,
@@ -718,12 +724,12 @@ void RcSystem::createDescriptorSets() {
 		.imageView = *m_irradiance_atlas->getImageView(),
 		.imageLayout = vk::ImageLayout::eGeneral,
 	};
-	vk::DescriptorImageInfo visibility_storage_info{
-		.imageView = *m_visibility_atlas->getImageView(),
+	vk::DescriptorImageInfo spec_atlas_storage_info{
+		.imageView = *m_spec_atlas->getImageView(),
 		.imageLayout = vk::ImageLayout::eGeneral,
 	};
-	vk::DescriptorImageInfo visibility_sampled_info{
-		.imageView = *m_visibility_atlas->getImageView(),
+	vk::DescriptorImageInfo spec_atlas_sampled_info{
+		.imageView = *m_spec_atlas->getImageView(),
 		.imageLayout = vk::ImageLayout::eGeneral,
 	};
 
@@ -765,8 +771,8 @@ void RcSystem::createDescriptorSets() {
 			.writeImage(17, &atlas_sampled_info)
 			.writeBuffer(18, &merged_info)
 			.writeBuffer(19, &dirmip_info)
-			.writeImage(20, &visibility_storage_info)
-			.writeImage(21, &visibility_sampled_info)
+			.writeImage(20, &spec_atlas_storage_info)
+			.writeImage(21, &spec_atlas_sampled_info)
 			.writeImage(22, &visibility_out_info)
 			.writeImage(23, &prev_depth_info)
 			.writeImage(24, &spec_out_info)
@@ -775,6 +781,7 @@ void RcSystem::createDescriptorSets() {
 			.writeBuffer(27, &merged_lower_info)
 			.writeBuffer(28, &dirmip_lower_info)
 			.writeBuffer(29, &ray_cursor_info)
+			.writeBuffer(30, &sky_fill_info)
 			.build(m_descriptor_sets[frame]);
 	}
 }
@@ -987,7 +994,8 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 		.probe_j_cascade = static_cast<uint32_t>(std::clamp(m_rc.probe_j_cascade, 0, static_cast<int>(m_cascades) - 1)),
 		.frame_counter = m_frame_counter,
 		.rays_per_pixel = static_cast<uint32_t>(std::clamp(m_rc.rays_per_pixel, 1, 16)),
-		.flags = (m_rc.debug_view == RcDebugView::EVIDENCE ? FLAG_VISIBILITY_EVIDENCE : 0u)
+		.flags = (m_rc.specular ? 0u : FLAG_NO_SPECULAR)
+			| (m_rc.debug_view == RcDebugView::EVIDENCE ? FLAG_VISIBILITY_EVIDENCE : 0u)
 			| (m_prev_depth_primed ? FLAG_HIST_DEPTH : 0u)
 			| (m_rc.single_frame ? FLAG_SINGLE_FRAME : 0u)
 			| skyModeBits(m_rc.sky_occlusion, ray_query),

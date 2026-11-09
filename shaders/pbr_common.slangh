@@ -546,8 +546,9 @@ float4 computePbrLighting(VertexOutput in_vert) {
 		env_occl = lerp(1.0, saturate(sky_visibility), rc.a);
 	}
 
-	// SSR claims its confidence first, RC rough specular
-	// claims its band out of the remainder, the environment fills the rest.
+	// SSR claims its confidence first. RC rough specular adds its bounce over
+	// its band of the remainder and replaces the environment for rc_spec.a of
+	// it (where it carries the sky too); the environment fills the rest.
 	float4 ssr = ssr_texture.SampleLevel(ssr_sampler, screen_uv, 0);
 	float env_share = 1.0 - ssr.a;
 	float3 spec_env = ssr.rgb;

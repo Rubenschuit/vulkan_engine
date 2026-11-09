@@ -410,8 +410,13 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 				ImGui::SetTooltip("How the probes' view of the sky darkens the environment (IBL, or the flat ambient)."
 					"\nOff: the environment as with GI off; GI adds bounced light only."
 					"\nProbe estimate: directions no ray resolved take the probe's proven-sky share."
-					"\nUnknown rays: sky / obstructed: those directions count as open sky / as blocked."
+					"\nUnknown rays: sky / obstructed: directions no ray resolved count as open sky / as blocked."
 					"\nThe screen-space tracer leaves many rays unresolved, so Auto turns it off there.");
+			ImGui::Checkbox("Rough Specular", &ctx.settings.rc.specular);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Rough surfaces (roughness 0.3 and up) reflect their surroundings, not just the sky."
+					"\nOff: they reflect only the sky."
+					"\nSmoother surfaces are not affected.");
 
 			ImGui::SeparatorText("Probe grid");
 			ImGui::SliderFloat("Probe Spacing", &ctx.settings.rc.ds0, 0.01f, 2.0f, "%.3f m",

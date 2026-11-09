@@ -16,7 +16,7 @@ enum class RcDebugView : uint32_t {
 	IRRADIANCE = 1,
 	SKY_VISIBILITY = 2,
 	UPSAMPLE_MATCH = 3,
-	EVIDENCE = 4, // written into the sky-visibility atlas
+	EVIDENCE = 4,
 	PROBE_J = 11,
 	TRACE_KIND = 13,
 	CONVERGENCE = 14,
@@ -58,7 +58,7 @@ constexpr int RC_MAX_HISTORY_LENGTH = 64;
 struct RcSettings {
 	bool enabled = true;
 	float luma_clamp = 20.0f;
-	int resolution_div = 4; // the paper's density is 1: a ray and a gather per pixel
+	int resolution_div = 4;
 	int rays_per_pixel = 1;
 	int history_length = 64; // sampled frames a bin averages before its EMA weight floors at 1 / history_length
 	float ds0 = 0.075f;      // c0 probe spacing at LOD 0
@@ -66,6 +66,7 @@ struct RcSettings {
 	bool ray_query = true; // trace the acceleration structures, where the device has ray query
 	bool trace_deformed = true; // skinned / morphed meshes in those structures, refitted every frame
 	RcSkyOcclusion sky_occlusion = RcSkyOcclusion::AUTO;
+	bool specular = true;
 	int cascades = 4;
 	int memory_mb = 578;     // the whole probe store
 	bool single_frame = false;
