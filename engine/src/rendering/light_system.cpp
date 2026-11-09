@@ -285,8 +285,6 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 			float tan_half_fov = std::tan(cv.fov_y_radians * 0.5f);
 
 			glm::vec3 cam_fwd = cv.forward;
-			glm::vec3 cam_right = cv.right;
-			glm::vec3 cam_up = cv.up;
 
 			// Compute cascade split distances
 			float splits[NUM_CSM_CASCADES];
@@ -303,33 +301,17 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 				float near_split = (cascade == 0) ? shadow_near : splits[cascade - 1];
 				float far_split = splits[cascade];
 
-				// Frustum slice corners
+				// Bounding sphere for rotation-invariant ortho bounds, centred on the slice's corner
+				// centroid (on the view axis).
 				float nh = near_split * tan_half_fov;
 				float nw = nh * cv.aspect;
 				float fh = far_split * tan_half_fov;
 				float fw = fh * cv.aspect;
-				glm::vec3 nc = cv.position + cam_fwd * near_split;
-				glm::vec3 fc = cv.position + cam_fwd * far_split;
-
-				glm::vec3 corners[8] = {
-					nc - cam_up * nh - cam_right * nw,
-					nc - cam_up * nh + cam_right * nw,
-					nc + cam_up * nh + cam_right * nw,
-					nc + cam_up * nh - cam_right * nw,
-					fc - cam_up * fh - cam_right * fw,
-					fc - cam_up * fh + cam_right * fw,
-					fc + cam_up * fh + cam_right * fw,
-					fc + cam_up * fh - cam_right * fw,
-				};
-
-				// Bounding sphere for rotation-invariant ortho bounds
-				glm::vec3 center{0.0f};
-				for (const auto& c : corners) center += c;
-				center /= 8.0f;
-
-				float radius = 0.0f;
-				for (const auto& c : corners)
-					radius = std::max(radius, glm::length(c - center));
+				float mid = 0.5f * (near_split + far_split);
+				glm::vec3 center = cv.position + cam_fwd * mid;
+				float radius = std::max(
+					std::sqrt(nw * nw + nh * nh + (mid - near_split) * (mid - near_split)),
+					std::sqrt(fw * fw + fh * fh + (far_split - mid) * (far_split - mid)));
 
 				// Round radius up to texel boundary for stable sizing (per-cascade resolution)
 				uint32_t cascade_res_u = frame_info.csm_cascade_resolutions
