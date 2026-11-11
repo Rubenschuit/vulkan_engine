@@ -105,6 +105,7 @@ public:
 	void beginFrame(uint32_t frame_index);
 	void beginGpuTimer(vk::raii::CommandBuffer& cmd, ProfileTimer timer);
 	void endGpuTimer(vk::raii::CommandBuffer& cmd, ProfileTimer timer);
+	void resetGpuTimer(vk::raii::CommandBuffer& cmd, ProfileTimer timer);
 	void beginCpuTimer(ProfileTimer timer);
 	void endCpuTimer(ProfileTimer timer);
 	void recordFenceWait(float ms) { m_results.fence_wait_ms = ms; }

@@ -59,7 +59,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		context.stats.gpu_rc,
 		context.stats.gpu_outline,
 		context.stats.gpu_bloom, context.stats.gpu_post_process,
-		0.0f, 0.0f,
+		0.0f, context.stats.gpu_ui,
 		context.stats.gpu_skinning, context.stats.gpu_cluster_lights,
 		context.stats.gpu_particles
 	};

@@ -146,9 +146,13 @@ void ImGuiLayer::endFrame(vk::raii::CommandBuffer& cmd, bool clear_target) {
         .colorAttachmentCount = 1,
         .pColorAttachments = &color_attachment
     };
+    auto& profiler = m_renderer.getProfiler();
+    profiler.resetGpuTimer(cmd, ProfileTimer::UI);
+    profiler.beginGpuTimer(cmd, ProfileTimer::UI);
     cmd.beginRendering(rendering_info);
     ImGui_ImplVulkan_RenderDrawData(draw_data, *cmd);
     cmd.endRendering();
+    profiler.endGpuTimer(cmd, ProfileTimer::UI);
 }
 
 void ImGuiLayer::renderDockSpace() {

@@ -228,6 +228,8 @@ void VeRenderer::endFrame() {
 	}
 
 	auto& ui_cb = getCurrentUICommandBuffer();
+	if (m_pre_swap_submitted_this_frame || m_scene_frame)
+		m_profiler.endGpuTimer(ui_cb, ProfileTimer::FRAME_TOTAL);
 	if (!m_screenshot_path.empty() && m_scene_frame && m_image_acquired_this_frame)
 		recordScreenshotCopy(ui_cb);
 	transitionToPresent(ui_cb);
@@ -244,14 +246,12 @@ void VeRenderer::endFrame() {
 		if (m_pre_swap_submitted_this_frame) {
 			// Split path: pre_swap already submitted, finalize swap_graphics.
 			auto& swap_cb = getSwapGraphicsCommandBuffer();
-			m_profiler.endGpuTimer(swap_cb, ProfileTimer::FRAME_TOTAL);
 			swap_cb.end();
 			m_ve_swap_chain->resetCurrentFence();
 			result = m_ve_swap_chain->submitSwapGraphicsAndPresent(*swap_cb, *ui_cb, &m_current_image_index);
 		} else if (m_scene_frame) {
 			// Single-submit path: everything is in command_buffer.
 			auto& scene_cb = getCurrentCommandBuffer();
-			m_profiler.endGpuTimer(scene_cb, ProfileTimer::FRAME_TOTAL);
 			scene_cb.end();
 			m_ve_swap_chain->resetCurrentFence();
 			result = m_ve_swap_chain->submitSceneAndPresent(*scene_cb, *ui_cb, &m_current_image_index);

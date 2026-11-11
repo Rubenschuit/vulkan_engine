@@ -1431,6 +1431,7 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	m_stats.gpu_skinning = results.gpu(ProfileTimer::SKINNING);
 	m_stats.gpu_cluster_lights = results.gpu(ProfileTimer::CLUSTER_LIGHTS);
 	m_stats.gpu_particles = results.gpu(ProfileTimer::PARTICLES);
+	m_stats.gpu_ui = results.gpu(ProfileTimer::UI);
 
 	m_stats.cpu_culling = results.cpu(ProfileTimer::CULLING);
 	m_stats.cpu_shadow_maps = results.cpu(ProfileTimer::SHADOW_MAPS);
@@ -1446,7 +1447,6 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	m_stats.cpu_shadow_mask = results.cpu(ProfileTimer::SHADOW_MASK);
 	m_stats.cpu_outline = results.cpu(ProfileTimer::OUTLINE);
 	m_stats.cpu_physics = results.cpu(ProfileTimer::PHYSICS);
-	m_stats.cpu_ui = results.cpu(ProfileTimer::UI);
 	m_stats.cpu_skinning = results.cpu(ProfileTimer::SKINNING);
 	m_stats.cpu_cluster_lights = results.cpu(ProfileTimer::CLUSTER_LIGHTS);
 	m_stats.cpu_particles = results.cpu(ProfileTimer::PARTICLES);
@@ -1460,6 +1460,7 @@ void RenderPipeline::finalizeFrameTimings() {
 	m_stats.fence_wait = results.fence_wait_ms;
 	m_stats.acquire_wait = results.acquire_wait_ms;
 	m_stats.cpu_time = results.cpu(ProfileTimer::FRAME_TOTAL) - results.fence_wait_ms - results.acquire_wait_ms;
+	m_stats.cpu_ui = results.cpu(ProfileTimer::UI);
 	m_stats.gpu_time = results.gpu(ProfileTimer::FRAME_TOTAL);
 	m_stats.compute_gpu_time = results.gpu(ProfileTimer::COMPUTE_TOTAL);
 }

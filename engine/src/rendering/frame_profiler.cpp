@@ -86,6 +86,14 @@ void FrameProfiler::endGpuTimer(vk::raii::CommandBuffer& cmd, ProfileTimer timer
 	cmd.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, *m_query_pool, idx);
 }
 
+void FrameProfiler::resetGpuTimer(vk::raii::CommandBuffer& cmd, ProfileTimer timer) {
+	if (!m_timestamps_supported)
+		return;
+	if (!m_gpu_enabled && !isTotalTimer(timer))
+		return;
+	cmd.resetQueryPool(*m_query_pool, queryIndex(m_current_frame, timer, false), 2);
+}
+
 void FrameProfiler::beginCpuTimer(ProfileTimer timer) {
 	m_cpu_starts[static_cast<size_t>(timer)] = clock::now();
 }
