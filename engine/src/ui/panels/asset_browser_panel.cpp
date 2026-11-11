@@ -361,7 +361,7 @@ void AssetBrowserPanel::renderContextMenu(const Entry& e, EditorState& state) {
 		case AssetKind::Model:
 			if (ImGui::MenuItem("Add to Scene"))
 				emitAddModel(e.path, glm::vec3(0.0f), state);
-			if (ImGui::MenuItem("Add in front of camera", nullptr, false, m_camera_view != nullptr))
+			if (ImGui::MenuItem("Add in Front of Camera", nullptr, false, m_camera_view != nullptr))
 				emitAddModel(e.path, placeInFrontOfCamera(), state);
 			break;
 		case AssetKind::Texture:
@@ -373,11 +373,11 @@ void AssetBrowserPanel::renderContextMenu(const Entry& e, EditorState& state) {
 	}
 
 	ImGui::Separator();
-	if (e.kind != AssetKind::Folder && ImGui::MenuItem("Open containing folder"))
+	if (e.kind != AssetKind::Folder && ImGui::MenuItem("Open Containing Folder"))
 		navigateTo(e.path.parent_path());
-	if (ImGui::MenuItem("Reveal in file manager"))
+	if (ImGui::MenuItem("Reveal in File Manager"))
 		VeFileSystem::revealInFileManager(e.path);
-	if (ImGui::MenuItem("Copy path"))
+	if (ImGui::MenuItem("Copy Path"))
 		ImGui::SetClipboardText(pathToUtf8(e.path).c_str());
 
 	ImGui::EndPopup();
@@ -388,7 +388,7 @@ void AssetBrowserPanel::renderBackgroundMenu() {
 		return;
 	if (ImGui::MenuItem("Refresh"))
 		m_dirty = true;
-	if (ImGui::MenuItem("Reveal current folder"))
+	if (ImGui::MenuItem("Reveal Current Folder"))
 		VeFileSystem::revealInFileManager(m_current_dir);
 	ImGui::EndPopup();
 }
@@ -548,7 +548,7 @@ void AssetBrowserPanel::renderMetadata(EditorState& state) {
 		if (it != m_thumbnails.end() && it->second.texture) {
 			const VeTexture* tex = it->second.texture.get();
 			ImGui::Text("Dimensions: %u x %u", tex->getWidth(), tex->getHeight());
-			ImGui::Text("Mip levels: %u", tex->getMipLevels());
+			ImGui::Text("Mip Levels: %u", tex->getMipLevels());
 			if (preview != VK_NULL_HANDLE && tex->getWidth() > 0) {
 				float w = ImGui::GetContentRegionAvail().x;
 				float aspect = static_cast<float>(tex->getHeight()) / static_cast<float>(tex->getWidth());

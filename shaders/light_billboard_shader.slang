@@ -1,7 +1,7 @@
 // Render camera-facing billboard quads for light sources:
 //   type 0: point light
-//   type 1: moon (bluish tint, moderate intensity)
-//   type 2: sun  (warm tint, moderate intensity)
+//   type 1: directional light (warm tint)
+//   type 2: spot light
 static const float2 vertices[6] = float2[](
 	float2( 0.5, -0.5),
 	float2(-0.5, -0.5),
@@ -22,7 +22,7 @@ struct PushConstantData {
 	float4 position;
 	float4 color;          // .w = intensity
 	float scale;           // in camera space units
-	uint billboard_type;   // 0 = point light, 1 = moon, 2 = sun
+	uint billboard_type;   // 0 = point light, 1 = directional light, 2 = spot light
 };
 [push_constant]
 PushConstantData push;
@@ -56,14 +56,8 @@ float4 fragMain(VertexOutput in) : SV_Target {
 
 	float3 color = push.color.rgb;
 
-	// Apply tint for celestial bodies
-	if (push.billboard_type == 1) {
-		// Moon: bluish tint
-		color *= float3(0.5f, 0.55f, 1.0f);
-	} else if (push.billboard_type == 2) {
-		// Sun: warm tint
+	if (push.billboard_type == 1)
 		color *= float3(1.0f, 0.9f, 0.7f);
-	}
 
 	return col * float4(color * intensity, 1.0f);
 }

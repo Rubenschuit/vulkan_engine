@@ -84,10 +84,10 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 						return std::to_string(m.width) + "x" + std::to_string(m.height)
 							+ " @ " + std::to_string(m.refresh_rate) + "Hz";
 					};
-					std::string preview = (current.width > 0) ? label(current) : "Desktop default";
+					std::string preview = (current.width > 0) ? label(current) : "Desktop Default";
 					if (ImGui::BeginCombo("Video Mode", preview.c_str())) {
 						bool desktop_selected = (current.width == 0);
-						if (ImGui::Selectable("Desktop default", desktop_selected))
+						if (ImGui::Selectable("Desktop Default", desktop_selected))
 							m_window.setVideoMode({0, 0, 0});
 						if (desktop_selected)
 							ImGui::SetItemDefaultFocus();
@@ -102,18 +102,9 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 					}
 				}
 			}
-
-			GLFWwindow* gw = m_window.getGLFWwindow();
-			GLFWmonitor* fs_mon = glfwGetWindowMonitor(gw);
-			bool decorated = glfwGetWindowAttrib(gw, GLFW_DECORATED) != 0;
-			int wx = 0, wy = 0, ww = 0, wh = 0;
-			glfwGetWindowPos(gw, &wx, &wy);
-			glfwGetWindowSize(gw, &ww, &wh);
-			const char* glfw_state = fs_mon ? "GLFW fullscreen" : (decorated ? "GLFW windowed" : "GLFW windowed (undecorated)");
-			ImGui::TextDisabled("%s  pos=(%d,%d)  size=%dx%d", glfw_state, wx, wy, ww, wh);
 		}
 
-		if (ImGui::Checkbox("Enable VSync", &ctx.settings.vsync))
+		if (ImGui::Checkbox("VSync", &ctx.settings.vsync))
 			m_renderer.setVSync(ctx.settings.vsync);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Present mode: FIFO when on, IMMEDIATE when off\n(FIFO if IMMEDIATE is unavailable).");
@@ -121,7 +112,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		bool hdr_supported = m_renderer.hasHdrSupport();
 		if (!hdr_supported)
 			ImGui::BeginDisabled();
-		if (ImGui::Checkbox("Enable HDR", &ctx.settings.hdr_enabled))
+		if (ImGui::Checkbox("HDR", &ctx.settings.hdr_enabled))
 			m_renderer.setHdrEnabled(ctx.settings.hdr_enabled);
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 			ImGui::SetTooltip("Swapchain color space: HDR10 PQ, or Extended sRGB Linear on macOS\n(the other if unavailable). SDR if the surface offers neither.");
@@ -145,7 +136,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 
 	// --- Culling ---
 	if (ImGui::CollapsingHeader("Culling", ImGuiTreeNodeFlags_DefaultOpen)) {
-		if (ImGui::Checkbox("Geometry Pre-pass", &ctx.settings.geometry_prepass_enabled))
+		if (ImGui::Checkbox("Geometry Pre-Pass", &ctx.settings.geometry_prepass_enabled))
 			m_event_bus.emitImmediate(GeometryPrePassChangedEvent{ctx.settings.geometry_prepass_enabled});
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Early depth + normal/roughness G-buffer pass.\nRequired by GTAO, shadow mask, SSR, Radiance Cascades, and Hi-Z occlusion culling.");
@@ -174,7 +165,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 				ImGui::SetTooltip("Also spin up the GPU culling system and use its object-level shadow path.\nCosts extra VRAM.");
 			ImGui::Unindent();
 		}
-		ImGui::SeparatorText("Multi-threading");
+		ImGui::SeparatorText("Multi-Threading");
 		ImGui::SliderInt("Min Cull Entities", &ctx.settings.min_parallel_cull_entities, 0, 4096);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Minimum mesh entities to enable parallel cpu frustum culling.\n0 = always parallel");
@@ -193,7 +184,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 				current_index = i;
 		}
 
-		ImGui::Text("MSAA:");
+		ImGui::Text("MSAA");
 		int slider_value = static_cast<int>(current_index);
 		ImGui::PushItemWidth(200.0f);
 		if (ImGui::SliderInt("##msaa_slider", &slider_value, 0, static_cast<int>(available.size()) - 1, "")) {
@@ -256,7 +247,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 				if (ctx.settings.pcf_samples == pcf_values[j])
 					pcf_idx = j;
 			bool pcf = ctx.settings.shadow_mode == ShadowMode::PCF;
-			const char* items = pcf ? "3x3 tent\0" "5x5 tent\0" "7x7 tent\0" "9x9 tent\0" : "4\0" "8\0" "16\0" "32\0";
+			const char* items = pcf ? "3x3 Tent\0" "5x5 Tent\0" "7x7 Tent\0" "9x9 Tent\0" : "4\0" "8\0" "16\0" "32\0";
 			if (ImGui::Combo(pcf ? "PCF Filter" : "Blocker Samples", &pcf_idx, items))
 				ctx.settings.pcf_samples = pcf_values[pcf_idx];
 			if (ImGui::IsItemHovered())
@@ -291,7 +282,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Maximum absolute depth bias. 0 = unclamped.");
 			int cull_idx = static_cast<int>(ctx.settings.shadow_cull_mode);
-			ImGui::Text("Shadow Cull:");
+			ImGui::Text("Shadow Cull");
 			ImGui::SameLine();
 			ImGui::RadioButton("Front##scull", &cull_idx, 0);
 			ImGui::SameLine();
@@ -299,14 +290,14 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			ImGui::SameLine();
 			ImGui::RadioButton("None##scull", &cull_idx, 2);
 			ctx.settings.shadow_cull_mode = static_cast<ShadowCullMode>(cull_idx);
-			ImGui::Text("CSM Blend: ");
+			ImGui::Text("CSM Blend");
 			ImGui::SameLine();
 			ImGui::RadioButton("Off", &ctx.settings.csm_blend_mode, 0);
 			ImGui::SameLine();
 			ImGui::RadioButton("Linear", &ctx.settings.csm_blend_mode, 1);
 			ImGui::SameLine();
 			ImGui::RadioButton("Dithered", &ctx.settings.csm_blend_mode, 2);
-			ImGui::Checkbox("Shadow Mask (async compute)", &ctx.settings.shadow_mask_enabled);
+			ImGui::Checkbox("Shadow Mask (Async Compute)", &ctx.settings.shadow_mask_enabled);
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Evaluates CSM shadows once per pixel.\nRequires geometry pre-pass enabled.");
 			if (ctx.settings.shadow_mask_enabled) {
@@ -401,16 +392,16 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			ImGui::EndDisabled();
 			ImGui::Unindent();
 
-			const char* sky_labels[] = {ray_query ? "Auto (Probe estimate)" : "Auto (Off)", "Off", "Unknown rays: sky",
-				"Probe estimate", "Unknown rays: obstructed"};
+			const char* sky_labels[] = {ray_query ? "Auto (Probe Estimate)" : "Auto (Off)", "Off", "Unknown Rays: Sky",
+				"Probe Estimate", "Unknown Rays: Obstructed"};
 			int sky_mode = static_cast<int>(ctx.settings.rc.sky_occlusion);
 			if (ImGui::Combo("Sky Occlusion", &sky_mode, sky_labels, IM_ARRAYSIZE(sky_labels)))
 				ctx.settings.rc.sky_occlusion = static_cast<RcSkyOcclusion>(sky_mode);
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("How the probes' view of the sky darkens the environment (IBL, or the flat ambient)."
 					"\nOff: the environment as with GI off; GI adds bounced light only."
-					"\nProbe estimate: directions no ray resolved take the probe's proven-sky share."
-					"\nUnknown rays: sky / obstructed: directions no ray resolved count as open sky / as blocked."
+					"\nProbe Estimate: directions no ray resolved take the probe's proven-sky share."
+					"\nUnknown Rays: Sky / Obstructed: directions no ray resolved count as open sky / as blocked."
 					"\nThe screen-space tracer leaves many rays unresolved, so Auto turns it off there.");
 			ImGui::Checkbox("Rough Specular", &ctx.settings.rc.specular);
 			if (ImGui::IsItemHovered())
@@ -418,7 +409,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 					"\nOff: they reflect only the sky."
 					"\nSmoother surfaces are not affected.");
 
-			ImGui::SeparatorText("Probe grid");
+			ImGui::SeparatorText("Probe Grid");
 			ImGui::SliderFloat("Probe Spacing", &ctx.settings.rc.ds0, 0.01f, 2.0f, "%.3f m",
 				ImGuiSliderFlags_Logarithmic);
 			if (ImGui::IsItemHovered())
@@ -427,7 +418,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("How far from the camera the finest probe spacing reaches.\nBeyond it the spacing doubles at each step out.");
 
-			ImGui::SeparatorText("Quality and cost");
+			ImGui::SeparatorText("Quality and Cost");
 			ImGui::SliderInt("Rays / Pixel", &ctx.settings.rc.rays_per_pixel, 1, 16);
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Rays each GI pixel traces per frame.");
@@ -524,7 +515,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		}
 
 		ImGui::Separator();
-		ImGui::Checkbox("Bloom Enabled", &ctx.settings.bloom_enabled);
+		ImGui::Checkbox("Bloom", &ctx.settings.bloom_enabled);
 		ImGui::DragFloat("Bloom Strength", &ctx.settings.bloom_strength, 0.001f, 0.0f, 0.4f);
 	}
 

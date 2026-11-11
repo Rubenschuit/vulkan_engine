@@ -407,7 +407,6 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 				cdl.intensity = dl->getIntensity();
 				cdl.angular_radius = dl->getAngularRadius();
 				cdl.casts_shadow = dl->getCastsShadow();
-				cdl.celestial_type = static_cast<uint8_t>(dl->getCelestialType());
 				state.component_clipboard = cdl;
 			}
 			if (state.component_clipboard && std::holds_alternative<CopiedDirectionalLight>(*state.component_clipboard))
@@ -419,7 +418,6 @@ void InspectorPanel::render(Registry* registry, EditorState& state, UIContext& /
 					dl->setIntensity(cdl.intensity);
 					dl->setAngularRadius(cdl.angular_radius);
 					dl->setCastsShadow(cdl.casts_shadow);
-					dl->setCelestialType(static_cast<CelestialType>(cdl.celestial_type));
 				}
 			ImGui::EndPopup();
 		}
@@ -1080,11 +1078,6 @@ void InspectorPanel::renderDirectionalLight(DirectionalLightComponent& light) {
 	bool show_billboard = light.getShowBillboard();
 	if (ImGui::Checkbox("Show Billboard", &show_billboard))
 		light.setShowBillboard(show_billboard);
-
-	const char* celestial_types[] = { "Moon", "Sun" };
-	int ct = static_cast<int>(light.getCelestialType());
-	if (ImGui::Combo("Celestial Type", &ct, celestial_types, 2))
-		light.setCelestialType(static_cast<CelestialType>(ct));
 }
 
 void InspectorPanel::renderRigidbody(RigidbodyComponent& rb, EditorState& state) {
@@ -1240,7 +1233,7 @@ void InspectorPanel::renderCharacterController(Registry& registry, Entity entity
 			if (isFollowCameraOf(registry, state.viewport_camera, entity))
 				state.viewport_camera = Entity::null();
 		}
-		if (ImGui::Checkbox("Follow camera", &state.follow_possessed_camera)) {
+		if (ImGui::Checkbox("Follow Camera", &state.follow_possessed_camera)) {
 			if (state.follow_possessed_camera)
 				state.viewport_camera = acquireFollowCamera(registry, entity);
 			else if (isFollowCameraOf(registry, state.viewport_camera, entity))
@@ -1345,7 +1338,7 @@ void InspectorPanel::renderAnimator(AnimatorComponent& animator) {
 		ImGui::SetNextItemWidth(-FLT_MIN);
 		if (ImGui::InputTextWithHint("##anim_filter", "Filter by name...", filter_buf, sizeof(filter_buf)))
 			m_animation_filter = filter_buf;
-		ImGui::Checkbox("Playing only", &m_animation_playing_only);
+		ImGui::Checkbox("Playing Only", &m_animation_playing_only);
 		filter_lower = ve::toLower(m_animation_filter);
 	}
 
@@ -1469,7 +1462,7 @@ void InspectorPanel::renderSkin(Registry& registry, SkinComponent& skin, EditorS
 	else
 		ImGui::TextDisabled("Skeleton root: (unset)");
 
-	if (ImGui::TreeNodeEx("Joint list", ImGuiTreeNodeFlags_DefaultOpen)) {
+	if (ImGui::TreeNodeEx("Joint List", ImGuiTreeNodeFlags_DefaultOpen)) {
 		for (size_t j = 0; j < joints.size(); j++) {
 			Entity je = joints[j];
 			char label[128];
@@ -1586,12 +1579,12 @@ void InspectorPanel::renderParticleEmitter(ParticleEmitterComponent& emitter) {
 		}, [&]() { emitter.rate = 0.0f; });
 
 		int bc = static_cast<int>(emitter.burst_count);
-		labeledWidget(label_w, "Burst size", [&]() {
+		labeledWidget(label_w, "Burst Size", [&]() {
 			if (ImGui::DragInt("##BurstCount", &bc, 1.0f, 0, 10000, "%d", ImGuiSliderFlags_AlwaysClamp))
 				emitter.burst_count = static_cast<uint32_t>(std::max(0, bc));
 		}, [&]() { emitter.burst_count = 0u; });
 
-		labeledWidget(label_w, "Burst interval", [&]() {
+		labeledWidget(label_w, "Burst Interval", [&]() {
 			ImGui::DragFloat("##BurstPeriod", &emitter.burst_period, 0.01f, 0.0f, 60.0f, "%.2f s",
 				ImGuiSliderFlags_AlwaysClamp);
 		}, [&]() { emitter.burst_period = 0.0f; });
@@ -1610,11 +1603,11 @@ void InspectorPanel::renderParticleEmitter(ParticleEmitterComponent& emitter) {
 				ImGuiSliderFlags_AlwaysClamp);
 		}, [&]() { emitter.scale = 1.0f; });
 
-		labeledWidget(label_w, "Color start", [&]() {
+		labeledWidget(label_w, "Color Start", [&]() {
 			ImGui::ColorEdit4("##ColorStart", &p.color_start.r);
 		}, [&]() { p.color_start = glm::vec4(1.0f); });
 
-		labeledWidget(label_w, "Color end", [&]() {
+		labeledWidget(label_w, "Color End", [&]() {
 			ImGui::ColorEdit4("##ColorEnd", &p.color_end.r);
 		}, [&]() { p.color_end = glm::vec4(1.0f); });
 
@@ -1628,15 +1621,15 @@ void InspectorPanel::renderParticleEmitter(ParticleEmitterComponent& emitter) {
 	}
 
 	if (ImGui::TreeNodeEx("Lifetime", ImGuiTreeNodeFlags_DefaultOpen)) {
-		labeledWidget(label_w, "Life range (s)", [&]() {
+		labeledWidget(label_w, "Life Range (s)", [&]() {
 			ImGui::DragFloatRange2("##LifeRange", &p.min_life, &p.max_life, 0.1f, 0.01f, 1000.0f,
 				"%.2f", nullptr, ImGuiSliderFlags_AlwaysClamp);
 		});
-		labeledWidget(label_w, "Velocity mean", [&]() {
+		labeledWidget(label_w, "Velocity Mean", [&]() {
 			ImGui::DragFloat("##VelMean", &p.mean, 0.1f, -100.0f, 100.0f, "%.2f",
 				ImGuiSliderFlags_AlwaysClamp);
 		}, [&]() { p.mean = 0.0f; });
-		labeledWidget(label_w, "Velocity stddev", [&]() {
+		labeledWidget(label_w, "Velocity Stddev", [&]() {
 			ImGui::DragFloat("##VelStddev", &p.stddev, 0.1f, 0.0f, 100.0f, "%.2f",
 				ImGuiSliderFlags_AlwaysClamp);
 		}, [&]() { p.stddev = 5.0f; });
@@ -1677,7 +1670,7 @@ void InspectorPanel::renderParticleEmitter(ParticleEmitterComponent& emitter) {
 			}
 		});
 
-		labeledWidget(label_w, "Wind dir", [&]() {
+		labeledWidget(label_w, "Wind Dir", [&]() {
 			if (ImGui::DragFloat3("##WindDir", &p.wind.x, 0.05f, -1.0f, 1.0f, "%.2f")) {
 				float len = glm::length(glm::vec3(p.wind));
 				if (len > 1e-4f) {
@@ -1686,14 +1679,14 @@ void InspectorPanel::renderParticleEmitter(ParticleEmitterComponent& emitter) {
 				}
 			}
 		});
-		labeledWidget(label_w, "Wind strength", [&]() {
+		labeledWidget(label_w, "Wind Strength", [&]() {
 			ImGui::DragFloat("##WindStr", &p.wind.w, 0.1f, 0.0f, 100.0f, "%.2f",
 				ImGuiSliderFlags_AlwaysClamp);
 		}, [&]() { p.wind.w = 0.0f; });
 		ImGui::TreePop();
 	}
 
-	if (ImGui::TreeNodeEx("Atlas (sprite sheet)")) {
+	if (ImGui::TreeNodeEx("Atlas (Sprite Sheet)")) {
 		if (emitter.texture.isValid() && emitter.texture.get()) {
 			if (ImGui::BeginTable("##EmitterTex", 3, ImGuiTableFlags_SizingFixedFit)) {
 				ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 70.0f);
@@ -1715,7 +1708,7 @@ void InspectorPanel::renderParticleEmitter(ParticleEmitterComponent& emitter) {
 		}, [&]() { p.row_count = 8u; });
 
 		bool one_shot = p.atlas_one_shot != 0u;
-		labeledWidget(label_w, "One-shot", [&]() {
+		labeledWidget(label_w, "One-Shot", [&]() {
 			if (ImGui::Checkbox("##OneShot", &one_shot))
 				p.atlas_one_shot = one_shot ? 1u : 0u;
 		});

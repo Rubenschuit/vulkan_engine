@@ -434,15 +434,15 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 		if (ImGui::MenuItem("Create Child Entity"))
 			m_pending_create_child = entity;
 		ImGui::Separator();
-		if (ImGui::MenuItem(many ? "Group selected" : "Group", "Ctrl+G"))
+		if (ImGui::MenuItem(many ? "Group Selected" : "Group", "Ctrl+G"))
 			m_pending_group = in_sel ? state.selected_entities : std::vector<Entity>{entity};
 		if (pk == EntityKind::Group && !registry.firstChild(entity).isNull())
 			if (ImGui::MenuItem("Ungroup"))
 				m_pending_ungroup = {entity};
 		ImGui::Separator();
-		if (ImGui::MenuItem(many ? "Duplicate selected" : "Duplicate"))
+		if (ImGui::MenuItem(many ? "Duplicate Selected" : "Duplicate"))
 			m_pending_duplicates = in_sel ? state.selected_entities : std::vector<Entity>{entity};
-		if (ImGui::MenuItem(many ? "Delete selected" : "Delete"))
+		if (ImGui::MenuItem(many ? "Delete Selected" : "Delete"))
 			m_pending_deletes = in_sel ? state.selected_entities : std::vector<Entity>{entity};
 		ImGui::Separator();
 		if (ImGui::MenuItem("Set Active"))
@@ -478,14 +478,14 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 			{has_anim,                                  ICON_ANIMATOR,    "Animator"},
 			{has_skin && pk != EntityKind::Skin,        ICON_SKIN,        "Skin"},
 			{is_joint && pk != EntityKind::Joint,       ICON_BONE,        "Joint"},
-			{has_pl && pk != EntityKind::PointLight,    ICON_POINT_LIGHT, "Point light"},
-			{has_sl && pk != EntityKind::SpotLight,     ICON_SPOT_LIGHT,  "Spot light"},
-			{has_dl && pk != EntityKind::DirLight,      ICON_DIR_LIGHT,   "Directional light"},
-			{has_al && pk != EntityKind::AreaLight,     ICON_AREA_LIGHT,  "Area light"},
+			{has_pl && pk != EntityKind::PointLight,    ICON_POINT_LIGHT, "Point Light"},
+			{has_sl && pk != EntityKind::SpotLight,     ICON_SPOT_LIGHT,  "Spot Light"},
+			{has_dl && pk != EntityKind::DirLight,      ICON_DIR_LIGHT,   "Directional Light"},
+			{has_al && pk != EntityKind::AreaLight,     ICON_AREA_LIGHT,  "Area Light"},
 			{has_cam && pk != EntityKind::Camera,       ICON_CAMERA,      "Camera"},
 			{has_emitter && pk != EntityKind::Particle, ICON_PARTICLE,    "Emitter"},
 			{has_rb,                                    ICON_RIGIDBODY,   "Rigidbody"},
-			{has_cc,                                    ICON_CHARACTER,   "Character controller"},
+			{has_cc,                                    ICON_CHARACTER,   "Character Controller"},
 		};
 		if (!eff_active)
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
@@ -646,27 +646,27 @@ void HierarchyPanel::renderLightGroups(Registry& registry, EditorState& state) {
 	};
 
 	if (!dir.empty() && ImGui::TreeNodeEx("Directional", ImGuiTreeNodeFlags_DefaultOpen)) {
-		renderEnableCheckbox("Enable all", dir, registry);
+		renderEnableCheckbox("Enable All", dir, registry);
 		renderRows(dir);
 		ImGui::TreePop();
 	}
 
 	if (!spot.empty() && ImGui::TreeNodeEx("Spot", ImGuiTreeNodeFlags_DefaultOpen)) {
-		renderEnableCheckbox("Enable all", spot, registry);
+		renderEnableCheckbox("Enable All", spot, registry);
 		renderGroupControls<SpotLightComponent>("all_sl", spot, registry);
 		renderRows(spot);
 		ImGui::TreePop();
 	}
 
 	if (!area.empty() && ImGui::TreeNodeEx("Area", ImGuiTreeNodeFlags_DefaultOpen)) {
-		renderEnableCheckbox("Enable all", area, registry);
+		renderEnableCheckbox("Enable All", area, registry);
 		renderGroupControls<AreaLightComponent>("all_al", area, registry);
 		renderRows(area);
 		ImGui::TreePop();
 	}
 
 	if (!point.empty() && ImGui::TreeNodeEx("Point", ImGuiTreeNodeFlags_DefaultOpen)) {
-		renderEnableCheckbox("Enable all", point, registry);
+		renderEnableCheckbox("Enable All", point, registry);
 		renderGroupControls<PointLightComponent>("all_pl", point, registry);
 
 		std::vector<Entity> scene_lights, punctual_lights, emissive_lights;
@@ -691,7 +691,7 @@ void HierarchyPanel::renderLightGroups(Registry& registry, EditorState& state) {
 			char group_header[64];
 			snprintf(group_header, sizeof(group_header), "%s (%zu)", group_label, entities.size());
 			if (ImGui::TreeNode(group_header)) {
-				renderEnableCheckbox("Enable all", entities, registry);
+				renderEnableCheckbox("Enable All", entities, registry);
 				renderGroupControls<PointLightComponent>(group_label, entities, registry);
 				renderLightNameGroups(registry, group_label, entities, state);
 				ImGui::TreePop();
@@ -726,7 +726,7 @@ void HierarchyPanel::renderLightNameGroups(Registry& registry, const std::string
 		char sub_header[128];
 		snprintf(sub_header, sizeof(sub_header), "%s (%zu)", sub_name.c_str(), sub_lights.size());
 		if (ImGui::TreeNode(sub_header)) {
-			renderEnableCheckbox("Enable group", sub_lights, registry);
+			renderEnableCheckbox("Enable Group", sub_lights, registry);
 			renderGroupControls<PointLightComponent>(source_key + "/" + sub_name, sub_lights, registry);
 			for (auto e : sub_lights)
 				renderEntityNode(registry, e, state, /*flat=*/true);

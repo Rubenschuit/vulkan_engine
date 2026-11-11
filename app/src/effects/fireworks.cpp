@@ -164,60 +164,60 @@ void Fireworks::drawConfigUI() {
 	FireworksConfig& c = m_config;
 
 	if (ImGui::CollapsingHeader("Launch", ImGuiTreeNodeFlags_DefaultOpen)) {
-		ImGui::SliderFloat("Vel min", &c.launch_vel_min, 0.0f, 200.0f, "%.1f");
-		ImGui::SliderFloat("Vel max", &c.launch_vel_max, 0.0f, 200.0f, "%.1f");
+		ImGui::SliderFloat("Velocity Min", &c.launch_vel_min, 0.0f, 200.0f, "%.1f");
+		ImGui::SliderFloat("Velocity Max", &c.launch_vel_max, 0.0f, 200.0f, "%.1f");
 		if (c.launch_vel_max < c.launch_vel_min) c.launch_vel_max = c.launch_vel_min;
 		ImGui::SliderFloat("Spread XY", &c.launch_spread_xy, 0.0f, 50.0f, "%.1f");
-		ImGui::SliderInt("Rockets per launch", &c.launch_count, 1, 20);
+		ImGui::SliderInt("Rockets per Launch", &c.launch_count, 1, 20);
 	}
 
 	if (ImGui::CollapsingHeader("Color", ImGuiTreeNodeFlags_DefaultOpen)) {
-		ImGui::Checkbox("Random color", &c.use_random_color);
+		ImGui::Checkbox("Random Color", &c.use_random_color);
 		ImGui::BeginDisabled(c.use_random_color);
-		ImGui::ColorEdit3("Particle color", &c.particle_color.x);
+		ImGui::ColorEdit3("Particle Color", &c.particle_color.x);
 		ImGui::EndDisabled();
 	}
 
 	if (ImGui::CollapsingHeader("Explosion", ImGuiTreeNodeFlags_DefaultOpen)) {
-		ImGui::SliderInt("Streamers (min)", &c.explosion_particle_count, 10, 500);
-		ImGui::SliderFloat("Streamer size", &c.explosion_size, 0.1f, 5.0f, "%.2f");
+		ImGui::SliderInt("Streamers (Min)", &c.explosion_particle_count, 10, 500);
+		ImGui::SliderFloat("Streamer Size", &c.explosion_size, 0.1f, 5.0f, "%.2f");
 	}
 
 	if (ImGui::CollapsingHeader("Streamer")) {
 		ImGui::SliderFloat("Drag", &c.streamer_drag, 0.0f, 2.0f, "%.2f");
-		ImGui::SliderFloat("Life min (s)", &c.streamer_life_min, 0.1f, 15.0f, "%.2f");
-		ImGui::SliderFloat("Life max (s)", &c.streamer_life_max, 0.1f, 15.0f, "%.2f");
-		ImGui::SliderFloat("Burst speed", &c.streamer_burst_speed, 0.0f, 200.0f, "%.1f");
-		ImGui::SliderFloat("Burst spread", &c.streamer_burst_spread, 0.0f, 50.0f, "%.1f");
+		ImGui::SliderFloat("Life Min (s)", &c.streamer_life_min, 0.1f, 15.0f, "%.2f");
+		ImGui::SliderFloat("Life Max (s)", &c.streamer_life_max, 0.1f, 15.0f, "%.2f");
+		ImGui::SliderFloat("Burst Speed", &c.streamer_burst_speed, 0.0f, 200.0f, "%.1f");
+		ImGui::SliderFloat("Burst Spread", &c.streamer_burst_spread, 0.0f, 50.0f, "%.1f");
 		ImGui::SliderFloat("Brightness", &c.streamer_brightness, 0.0f, 150.0f, "%.2f");
 	}
 
 	if (ImGui::CollapsingHeader("Trails")) {
-		ImGui::SliderFloat("Trail interval (s)", &c.trail_interval, 0.001f, 0.1f, "%.4f");
-		ImGui::SliderFloat("Trail drag", &c.trail_drag, 0.0f, 2.0f, "%.2f");
-		ImGui::Checkbox("Life proportional to streamer", &c.trail_life_proportional);
+		ImGui::SliderFloat("Trail Interval (s)", &c.trail_interval, 0.001f, 0.1f, "%.4f");
+		ImGui::SliderFloat("Trail Drag", &c.trail_drag, 0.0f, 2.0f, "%.2f");
+		ImGui::Checkbox("Life Proportional to Streamer", &c.trail_life_proportional);
 		if (c.trail_life_proportional) {
-			ImGui::SliderFloat("Trail life fraction", &c.trail_life_fraction, 0.0f, 3.0f, "%.2f");
+			ImGui::SliderFloat("Trail Life Fraction", &c.trail_life_fraction, 0.0f, 3.0f, "%.2f");
 		} else {
-			ImGui::SliderFloat("Trail life min (s)", &c.trail_life_min, 0.1f, 15.0f, "%.2f");
-			ImGui::SliderFloat("Trail life max (s)", &c.trail_life_max, 0.1f, 15.0f, "%.2f");
+			ImGui::SliderFloat("Trail Life Min (s)", &c.trail_life_min, 0.1f, 15.0f, "%.2f");
+			ImGui::SliderFloat("Trail Life Max (s)", &c.trail_life_max, 0.1f, 15.0f, "%.2f");
 			if (c.trail_life_max < c.trail_life_min) c.trail_life_max = c.trail_life_min;
 		}
 	}
 
 	if (ImGui::CollapsingHeader("Smoke")) {
-		ImGui::ColorEdit4("Smoke color", &c.smoke_color.x);
+		ImGui::ColorEdit4("Smoke Color", &c.smoke_color.x);
 	}
 
 	if (ImGui::CollapsingHeader("Flash")) {
-		ImGui::SliderFloat("Peak scale", &c.flash_peak_scale, 0.0f, 500.0f, "%.1f");
-		ImGui::SliderFloat("Peak intensity (light)", &c.flash_peak_intensity, 0.0f, 20000.0f, "%.0f");
-		ImGui::SliderFloat("Light life (s)", &c.flash_life, 0.0f, 2.0f, "%.2f");
+		ImGui::SliderFloat("Peak Scale", &c.flash_peak_scale, 0.0f, 500.0f, "%.1f");
+		ImGui::SliderFloat("Peak Intensity (Light)", &c.flash_peak_intensity, 0.0f, 20000.0f, "%.0f");
+		ImGui::SliderFloat("Light Life (s)", &c.flash_life, 0.0f, 2.0f, "%.2f");
 	}
 
 	if (ImGui::CollapsingHeader("Environment")) {
-		ImGui::DragFloat3("Wind direction", &c.wind_direction.x, 0.05f, -1.0f, 1.0f, "%.2f");
-		ImGui::SliderFloat("Wind strength", &c.wind_strength, 0.0f, 30.0f, "%.2f");
+		ImGui::DragFloat3("Wind Direction", &c.wind_direction.x, 0.05f, -1.0f, 1.0f, "%.2f");
+		ImGui::SliderFloat("Wind Strength", &c.wind_strength, 0.0f, 30.0f, "%.2f");
 		ImGui::SliderFloat("Gravity", &c.gravity, 0.0f, 40.0f, "%.2f");
 	}
 }

@@ -11,8 +11,6 @@
 
 namespace ve {
 
-enum class CelestialType : uint8_t;
-
 // Component clipboard data (snapshots for copy/paste)
 struct CopiedTransform {
 	glm::vec3 translation{0.0f};
@@ -34,7 +32,6 @@ struct CopiedDirectionalLight {
 	float intensity{1.f};
 	float angular_radius{DIR_LIGHT_ANGULAR_RADIUS};
 	bool casts_shadow{false};
-	uint8_t celestial_type{1}; // stored as uint8_t
 };
 
 struct CopiedSpotLight {

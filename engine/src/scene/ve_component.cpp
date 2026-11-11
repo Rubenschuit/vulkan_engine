@@ -264,12 +264,6 @@ void DirectionalLightComponent::setCastsShadow(bool v) {
 		m_registry->events().emit(LightDataChangedEvent{m_entity});
 }
 
-void DirectionalLightComponent::setCelestialType(CelestialType t) {
-	m_celestial_type = t;
-	if (m_registry)
-		m_registry->events().emit(LightDataChangedEvent{m_entity});
-}
-
 // ---------------------------------------------------------------------------
 // SpotLightComponent
 // ---------------------------------------------------------------------------

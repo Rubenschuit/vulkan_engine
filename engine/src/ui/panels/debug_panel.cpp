@@ -39,12 +39,12 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("%s", tooltip);
 	};
-	render_mode_radio("BRDF Microfacets", RenderMode::BRDF_MICROFACET);
-	render_mode_radio("BRDF Smooth", RenderMode::BRDF);
-	render_mode_radio("Normal vector", RenderMode::NORMAL_VECTOR, "World-space vertex normal, RGB = XYZ * 0.5 + 0.5");
-	render_mode_radio("Tangent vector", RenderMode::TANGENT_VECTOR);
-	render_mode_radio("Bitangent vector", RenderMode::BITANGENT_VECTOR);
-	render_mode_radio("Normal map", RenderMode::NORMAL_MAP, "World-space normal-mapped normal, RGB = XYZ * 0.5 + 0.5");
+	render_mode_radio("Lit", RenderMode::BRDF_MICROFACET);
+	render_mode_radio("Lit (No Normal Maps)", RenderMode::BRDF, "Full shading with the vertex normal in place of the normal map");
+	render_mode_radio("Normal Vector", RenderMode::NORMAL_VECTOR, "World-space vertex normal, RGB = XYZ * 0.5 + 0.5");
+	render_mode_radio("Tangent Vector", RenderMode::TANGENT_VECTOR);
+	render_mode_radio("Bitangent Vector", RenderMode::BITANGENT_VECTOR);
+	render_mode_radio("Normal Map", RenderMode::NORMAL_MAP, "World-space normal-mapped normal, RGB = XYZ * 0.5 + 0.5");
 	render_mode_radio("CSM Cascades", RenderMode::CSM_CASCADE, "Red=0, Green=1, Blue=2");
 	render_mode_radio("Cluster Heatmap", RenderMode::CLUSTER_HEATMAP,
 		"Visualize lights-per-cluster as a heat gradient\nBlue=few, Red=many, Dark=zero");
@@ -59,7 +59,7 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 		rc_view_radio("Upsample Match", RcDebugView::UPSAMPLE_MATCH,
 			"How well the four nearest GI samples' surfaces match each pixel; black = none, plain bilinear");
 		rc_view_radio("Evidence", RcDebugView::EVIDENCE, "The known share of directions along the specular lobe");
-		rc_view_radio("Stored J (nearest probe)", RcDebugView::PROBE_J,
+		rc_view_radio("Probe Radiance", RcDebugView::PROBE_J,
 			"Nearest probe's mean stored radiance at the chosen cascade");
 		rc_view_radio("Trace Outcome", RcDebugView::TRACE_KIND,
 			"First ray, r=hit g=clear/sky b=unknown");
@@ -75,13 +75,13 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 	ImGui::Checkbox("Show Axes", &ctx.settings.show_axes);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Red=X, Green=Y, Blue=Z");
-	ImGui::Checkbox("Show AABB outlines", &ctx.settings.show_aabb_debug);
+	ImGui::Checkbox("Show AABB Outlines", &ctx.settings.show_aabb_debug);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Frustum-visible objects; CPU culling backend only.");
-	ImGui::Checkbox("Show skinned points", &ctx.settings.show_skinned_points);
+	ImGui::Checkbox("Show Skinned Points", &ctx.settings.show_skinned_points);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Draw post-skin mesh vertices as a colored point cloud.");
-	ImGui::Checkbox("Show area light gizmos", &ctx.settings.show_area_lights);
+	ImGui::Checkbox("Show Area Light Gizmos", &ctx.settings.show_area_lights);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Draw wireframe quads + facing normal for area lights");
 	ImGui::Text("Topology");
@@ -115,9 +115,9 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 		if (ImGui::Button("Reset Store"))
 			m_rc_system->invalidateStore();
 		if (ctx.settings.rc.debug_view == RcDebugView::PROBE_J || ctx.settings.rc.debug_view == RcDebugView::PROBE_GRID)
-			ImGui::SliderInt("Probe cascade", &ctx.settings.rc.probe_j_cascade, 0,
+			ImGui::SliderInt("Probe Cascade", &ctx.settings.rc.probe_j_cascade, 0,
 				static_cast<int>(m_rc_system->activeCascades() - 1));
-		ImGui::Text("Probe store: %.0f MiB%s%s", double(m_rc_system->storeBytes()) / (1024.0 * 1024.0),
+		ImGui::Text("Probe Store: %.0f MiB%s%s", double(m_rc_system->storeBytes()) / (1024.0 * 1024.0),
 			m_rc_system->storeClampedByDevice() ? " (capped by device limits)" : "",
 			m_rc_system->isAllocated() ? "" : " (not allocated)");
 		for (uint32_t n = 0; n < m_rc_system->activeCascades(); n++) {

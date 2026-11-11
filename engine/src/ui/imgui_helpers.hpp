@@ -26,7 +26,7 @@ inline const ImVec4 COL_AXIS_Y_HOVER{0.2f, 0.75f, 0.2f, 1.0f};
 inline const ImVec4 COL_AXIS_Z_HOVER{0.2f, 0.2f, 0.85f, 1.0f};
 
 // Two-column labeled row: left = fixed-width label, right = full-width widget.
-// When a resetFn is supplied, right-clicking the value opens a "Reset to default"
+// When a resetFn is supplied, right-clicking the value opens a "Reset to Default"
 // context menu, keeping the label column free of buttons.
 template <typename WidgetFn, typename... ResetFn>
 void labeledWidget(float label_w, const char* text, WidgetFn widgetFn, ResetFn... resetFn) {
@@ -40,7 +40,7 @@ void labeledWidget(float label_w, const char* text, WidgetFn widgetFn, ResetFn..
 	if constexpr (sizeof...(resetFn) > 0) {
 		ImGui::PushID(text);
 		if (ImGui::BeginPopupContextItem("reset", ImGuiPopupFlags_MouseButtonRight)) {
-			if (ImGui::MenuItem("Reset to default"))
+			if (ImGui::MenuItem("Reset to Default"))
 				(resetFn(), ...);
 			ImGui::EndPopup();
 		}

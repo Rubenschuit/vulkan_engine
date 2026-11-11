@@ -57,7 +57,7 @@ struct SimplePushConstantData {
 	glm::vec4 position;
 	glm::vec4 color;
 	float scale;
-	uint32_t billboard_type; // 0 = point light, 1 = moon, 2 = sun
+	uint32_t billboard_type; // 0 = point light, 1 = directional light, 2 = spot light
 	uint32_t padding[2];
 };
 
@@ -181,18 +181,18 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 		frame_info.cmd().draw(6, 1, 0, 0);
 	}
 
-	// Celestial billboards for directional lights (sun/moon)
+	// Directional light billboards, placed in the sky along the light direction
 	glm::vec3 cam_pos = frame_info.camera_view.position;
 	for (auto [entity, dl] : registry.view<DirectionalLightComponent>()) {
 		if (!dl.getShowBillboard())
 			continue;
-		glm::vec3 celestial_pos = cam_pos - glm::normalize(dl.getDirection()) * CELESTIAL_DISTANCE;
+		glm::vec3 sky_pos = cam_pos - glm::normalize(dl.getDirection()) * DIR_LIGHT_BILLBOARD_DISTANCE;
 
 		SimplePushConstantData push{};
-		push.position = glm::vec4{celestial_pos, 1.0f};
-		push.color = glm::vec4{dl.getColor(), dl.getIntensity() * CELESTIAL_INTENSITY_BOOST};
-		push.scale = CELESTIAL_SCALE;
-		push.billboard_type = (dl.getCelestialType() == CelestialType::Sun) ? 2 : 1;
+		push.position = glm::vec4{sky_pos, 1.0f};
+		push.color = glm::vec4{dl.getColor(), dl.getIntensity() * DIR_LIGHT_BILLBOARD_INTENSITY_BOOST};
+		push.scale = DIR_LIGHT_BILLBOARD_SCALE;
+		push.billboard_type = 1;
 		frame_info.cmd().pushConstants(
 			*m_pipeline_layout,
 			vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
@@ -210,7 +210,7 @@ void LightSystem::render(VeFrameInfo& frame_info) const {
 			.position = glm::vec4{glm::vec3(registry.getWorldTransform(entity)[3]), 1.0f},
 			.color = glm::vec4{sl.getColor(), sl.getIntensity()},
 			.scale = tc.getScale().x,
-			.billboard_type = 3,
+			.billboard_type = 2,
 		};
 		frame_info.cmd().pushConstants(
 			*m_pipeline_layout,

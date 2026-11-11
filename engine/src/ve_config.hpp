@@ -44,10 +44,10 @@ constexpr uint32_t MAX_POINT_SHADOW_LIGHTS = 2;
 constexpr uint32_t MAX_SPOT_SHADOW_LIGHTS  = 2;
 constexpr uint32_t MAX_SHADOW_LIGHTS       = MAX_POINT_SHADOW_LIGHTS + MAX_SPOT_SHADOW_LIGHTS;
 
-// Sun / Moon billboard for dir light
-constexpr float CELESTIAL_DISTANCE         = 200.0f;
-constexpr float CELESTIAL_SCALE            = 22.0f;
-constexpr float CELESTIAL_INTENSITY_BOOST  = 100.0f;
+// Directional light billboard
+constexpr float DIR_LIGHT_BILLBOARD_DISTANCE         = 200.0f;
+constexpr float DIR_LIGHT_BILLBOARD_SCALE            = 22.0f;
+constexpr float DIR_LIGHT_BILLBOARD_INTENSITY_BOOST  = 100.0f;
 
 constexpr float SHADOW_BIAS                 = 0.0001f;
 constexpr float CSM_NORMAL_BIAS             = 2.0f;  // CSM normal offset in shadow texels, auto-scaled per cascade by world-texel size

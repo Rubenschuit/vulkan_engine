@@ -47,7 +47,6 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	m_fence_wait_sum += context.stats.fence_wait;
 	m_acquire_wait_sum += context.stats.acquire_wait;
 	m_gpu_time_sum += context.stats.gpu_time;
-	m_compute_gpu_time_sum += context.stats.compute_gpu_time;
 	m_accumulated_dt += dt;
 	m_frame_count++;
 
@@ -98,7 +97,6 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		m_fence_wait_ms = m_fence_wait_sum / 60.0f;
 		m_acquire_wait_ms = m_acquire_wait_sum / 60.0f;
 		m_gpu_time_ms = m_gpu_time_sum / 60.0f;
-		m_compute_gpu_time_ms = m_compute_gpu_time_sum / 60.0f;
 
 		for (int i = 0; i < BREAKDOWN_COUNT; i++) {
 			m_gpu_breakdown_ms[i] = m_gpu_breakdown_sum[i] / 60.0f;
@@ -118,7 +116,6 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		m_fence_wait_sum = 0.0f;
 		m_acquire_wait_sum = 0.0f;
 		m_gpu_time_sum = 0.0f;
-		m_compute_gpu_time_sum = 0.0f;
 		m_accumulated_dt = 0.0f;
 	}
 
@@ -150,10 +147,6 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 			auto extent = m_renderer.getExtent();
 			ImGui::Text("%.0f FPS  (%.2f ms)  %u x %u", m_fps, m_frame_time_ms, extent.width, extent.height);
 			ImGui::TextDisabled("CPU %.2f ms | Fence %.2f ms | Acquire %.2f ms | GPU %.2f ms", m_cpu_time_ms, m_fence_wait_ms, m_acquire_wait_ms, m_gpu_time_ms);
-			if (m_compute_gpu_time_ms > 0.01f) {
-				ImGui::SameLine();
-				ImGui::TextDisabled(" | Compute %.2f ms", m_compute_gpu_time_ms);
-			}
 
 			char tri_buf[16];
 			formatCount(tri_buf, sizeof(tri_buf), context.stats.visible_triangles);
@@ -197,11 +190,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 	snprintf(val, sizeof(val), "%.2f ms", m_acquire_wait_ms);
 	row("Acquire Wait", val);
 	snprintf(val, sizeof(val), "%.2f ms", m_gpu_time_ms);
-	row("GPU Graphics", val);
-	if (m_compute_gpu_time_ms > 0.01f) {
-		snprintf(val, sizeof(val), "%.2f ms", m_compute_gpu_time_ms);
-		row("GPU Compute", val);
-	}
+	row("GPU", val);
 
 	ImGui::Spacing();
 	ImGui::Separator();

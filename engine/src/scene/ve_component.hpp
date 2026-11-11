@@ -185,8 +185,6 @@ private:
 // ---------------------------------------------------------------------------
 // DirectionalLightComponent
 // ---------------------------------------------------------------------------
-enum class CelestialType : uint8_t { Moon = 0, Sun = 1 };
-
 class VENGINE_API DirectionalLightComponent : public Component {
 public:
 	const glm::vec3& getDirection() const { return m_direction; }
@@ -195,7 +193,6 @@ public:
 	float getAngularRadius() const { return m_angular_radius; }
 	bool getCastsShadow() const { return m_casts_shadow; }
 	bool getShowBillboard() const { return m_show_billboard; }
-	CelestialType getCelestialType() const { return m_celestial_type; }
 
 	void setDirection(const glm::vec3& v);
 	void setColor(const glm::vec3& v);
@@ -203,7 +200,6 @@ public:
 	void setAngularRadius(float degrees);
 	void setCastsShadow(bool v);
 	void setShowBillboard(bool v) { m_show_billboard = v; }
-	void setCelestialType(CelestialType t);
 
 private:
 	glm::vec3 m_direction{0.f, -1.f, -1.f};  // world-space light direction (toward surface)
@@ -212,7 +208,6 @@ private:
 	float m_angular_radius{DIR_LIGHT_ANGULAR_RADIUS}; // apparent disk radius in degrees, sets the PCSS penumbra
 	bool m_casts_shadow{false};
 	bool m_show_billboard{true};
-	CelestialType m_celestial_type{CelestialType::Sun};
 };
 
 // ---------------------------------------------------------------------------
