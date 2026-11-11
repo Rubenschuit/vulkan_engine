@@ -26,6 +26,7 @@ struct VENGINE_API RenderSettings {
 	int csm_blend_mode = 1; // 0=off, 1=linear, 2=dithered
 	float shadow_bias = ve::SHADOW_BIAS;
 	float csm_normal_bias = ve::CSM_NORMAL_BIAS;
+	float csm_distance = ve::DIR_SHADOW_MAX_DISTANCE;
 	float depth_bias_constant = ve::SHADOW_DEPTH_BIAS_CONSTANT;
 	float depth_bias_slope = ve::SHADOW_DEPTH_BIAS_SLOPE;
 	float depth_bias_clamp = ve::SHADOW_DEPTH_BIAS_CLAMP;

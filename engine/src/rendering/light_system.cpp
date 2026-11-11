@@ -281,7 +281,7 @@ void LightSystem::updateUniformBuffer(VeFrameInfo& frame_info, UniformBufferObje
 		if (dl.getCastsShadow() && !csm_assigned) {
 			const CameraView& cv = frame_info.camera_view;
 			float shadow_near = std::max(cv.z_near, 0.5f); // CSM near floor: avoid wasting cascade 0 on tiny near plane
-			float shadow_far = std::min(cv.z_far, DIR_SHADOW_MAX_DISTANCE);
+			float shadow_far = std::min(cv.z_far, frame_info.csm_distance);
 			float tan_half_fov = std::tan(cv.fov_y_radians * 0.5f);
 
 			glm::vec3 cam_fwd = cv.forward;

@@ -234,6 +234,10 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 					"Changing rebuilds the atlas.");
 				ImGui::EndTooltip();
 			}
+			ImGui::SliderFloat("Shadow Distance", &ctx.settings.csm_distance, 10.0f, 1000.0f, "%.0f m", ImGuiSliderFlags_Logarithmic);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("How far from the camera the sun's cascades reach. Shorter spreads the same\n"
+					"shadow texels over less of the scene: sharper up close. Past it, surfaces are unshadowed.");
 		}
 		if (ctx.settings.shadow_mode == ShadowMode::PCSS) {
 			ImGui::SliderFloat("Light Size", &ctx.settings.pcss_light_size, 0.001f, 0.2f, "%.3f");

@@ -763,6 +763,7 @@ VeFrameInfo RenderPipeline::buildFrameInfo(VeScene& scene,
 		.shadow_atlas_width = m_shadow_render_system->getAtlasWidth(),
 		.shadow_atlas_height = m_shadow_render_system->getAtlasHeight(),
 		.csm_cascade_resolutions = m_shadow_render_system->getCsmCascadeResolutions(),
+		.csm_distance = m_settings.csm_distance,
 		.post_process_push = {
 			m_settings.blur_radius,
 			m_settings.blur_strength,

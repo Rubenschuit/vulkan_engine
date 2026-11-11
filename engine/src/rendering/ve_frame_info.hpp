@@ -260,6 +260,7 @@ struct VeFrameInfo {
 	uint32_t shadow_atlas_width = 0;
 	uint32_t shadow_atlas_height = 0;
 	const uint32_t* csm_cascade_resolutions = nullptr; // NUM_CSM_CASCADES entries
+	float csm_distance = ve::DIR_SHADOW_MAX_DISTANCE;  // view distance the last cascade ends at
 	bool     shadow_mask_active = false;  // true when mask pipeline variant should be used
 
 
