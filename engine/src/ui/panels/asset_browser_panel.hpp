@@ -119,7 +119,6 @@ private:
 
 	std::unordered_map<std::string, Thumbnail> m_thumbnails;
 	std::unordered_set<std::string> m_failed_thumbnails;
-	ResourceHandle<VeTexture> m_inspected_texture;
 	struct PendingDeletion {
 		VkDescriptorSet descriptor = VK_NULL_HANDLE;
 		uint64_t frame_queued = 0;

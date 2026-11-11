@@ -105,6 +105,7 @@ public:
 	uint32_t getAtlasWidth() const { return m_atlas_width; }
 	uint32_t getAtlasHeight() const { return m_atlas_height; }
 	const VeImage* getAtlasImage() const { return m_shadow_atlas.get(); }
+	uint32_t getAtlasGeneration() const { return m_atlas_generation; }
 	const vk::raii::Sampler& getRawSampler() const { return m_shadow_raw_sampler; }
 
 	uint32_t getCsmCascadeResolution(uint32_t cascade) const { return m_csm_cascade_resolutions[cascade]; }
@@ -220,6 +221,7 @@ private:
 	uint32_t m_point_shadow_resolution = POINT_SHADOW_RESOLUTION;
 	uint32_t m_spot_shadow_resolution = SPOT_SHADOW_RESOLUTION;
 	std::unique_ptr<VeImage> m_shadow_atlas;
+	uint32_t m_atlas_generation = 0;
 	vk::raii::Sampler m_shadow_sampler{nullptr};
 	vk::raii::Sampler m_shadow_raw_sampler{nullptr};
 	std::unique_ptr<VeDescriptorSetLayout> m_shadow_set_layout;

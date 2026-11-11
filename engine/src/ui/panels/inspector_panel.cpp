@@ -54,7 +54,8 @@ InspectorPanel::~InspectorPanel() {
 	clearTextureCache();
 }
 
-VkDescriptorSet InspectorPanel::getOrCreateTextureDescriptor(const std::string& id, const VeTexture* texture) {
+VkDescriptorSet InspectorPanel::getOrCreateTextureDescriptor(const ResourceHandle<VeTexture>& texture) {
+	const std::string& id = texture.getId();
 	if (!texture || id.empty())
 		return VK_NULL_HANDLE;
 
@@ -71,7 +72,7 @@ VkDescriptorSet InspectorPanel::getOrCreateTextureDescriptor(const std::string& 
 		static_cast<VkSampler>(*texture->getSampler()),
 		static_cast<VkImageView>(*texture->getImageView()),
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-	m_texture_cache[id] = {ds, m_frame_counter};
+	m_texture_cache[id] = {ds, m_frame_counter, texture};
 	return ds;
 }
 
@@ -93,19 +94,19 @@ void InspectorPanel::clearTextureCache() {
 	m_texture_cache.clear();
 }
 
-void InspectorPanel::renderTextureSlot(const char* label, const std::string& id, const VeTexture* texture, float thumb_size) {
+void InspectorPanel::renderTextureSlot(const char* label, const ResourceHandle<VeTexture>& texture, float thumb_size) {
 	ImGui::TableNextRow();
 	ImGui::TableNextColumn();
 	ImGui::AlignTextToFramePadding();
 	ImGui::Text("%s", label);
 	ImGui::TableNextColumn();
 	if (texture) {
-		VkDescriptorSet ds = getOrCreateTextureDescriptor(id, texture);
+		VkDescriptorSet ds = getOrCreateTextureDescriptor(texture);
 		if (ds != VK_NULL_HANDLE) {
 			ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(ds)),
 			             ImVec2(thumb_size, thumb_size));
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Click to inspect\n%s", id.c_str());
+				ImGui::SetTooltip("Click to inspect\n%s", texture.getId().c_str());
 			if (ImGui::IsItemClicked() && m_texture_inspector)
 				m_texture_inspector->open(texture, label);
 		} else {
@@ -923,13 +924,13 @@ void InspectorPanel::renderMesh(MeshComponent& mesh, const EditorState& state) {
 			ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 70.0f);
 			ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthFixed, 52.0f);
 			ImGui::TableSetupColumn("Info", ImGuiTableColumnFlags_WidthStretch);
-			renderTextureSlot("Albedo",    mat->getAlbedoTexture().getId(), mat->getAlbedoTexture().get());
-			renderTextureSlot("Normal",    mat->getNormalTexture().getId(), mat->getNormalTexture().get());
-			renderTextureSlot(spec_gloss ? "Spec/Gloss" : "Metal/Rgh", mat->getMetallicRoughnessTexture().getId(), mat->getMetallicRoughnessTexture().get());
-			renderTextureSlot("Occlusion", mat->getOcclusionTexture().getId(), mat->getOcclusionTexture().get());
-			renderTextureSlot("Emissive",  mat->getEmissiveTexture().getId(), mat->getEmissiveTexture().get());
-			renderTextureSlot("Specular",  mat->getSpecularTexture().getId(), mat->getSpecularTexture().get());
-			renderTextureSlot("Spec Color", mat->getSpecularColorTexture().getId(), mat->getSpecularColorTexture().get());
+			renderTextureSlot("Albedo",    mat->getAlbedoTexture());
+			renderTextureSlot("Normal",    mat->getNormalTexture());
+			renderTextureSlot(spec_gloss ? "Spec/Gloss" : "Metal/Rgh", mat->getMetallicRoughnessTexture());
+			renderTextureSlot("Occlusion", mat->getOcclusionTexture());
+			renderTextureSlot("Emissive",  mat->getEmissiveTexture());
+			renderTextureSlot("Specular",  mat->getSpecularTexture());
+			renderTextureSlot("Spec Color", mat->getSpecularColorTexture());
 			ImGui::EndTable();
 		}
 		ImGui::TreePop();
@@ -1717,7 +1718,7 @@ void InspectorPanel::renderParticleEmitter(ParticleEmitterComponent& emitter) {
 				ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 70.0f);
 				ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthFixed, 52.0f);
 				ImGui::TableSetupColumn("Info", ImGuiTableColumnFlags_WidthStretch);
-				renderTextureSlot("Sprite", emitter.texture.getId(), emitter.texture.get());
+				renderTextureSlot("Sprite", emitter.texture);
 				ImGui::EndTable();
 			}
 		} else {

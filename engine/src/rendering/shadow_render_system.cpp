@@ -375,6 +375,7 @@ void ShadowRenderSystem::resizeShadowAtlas(ShadowResolutionPreset preset, VeDesc
 
 	computeAtlasLayout();
 	createShadowResources();
+	m_atlas_generation++;
 	createShadowTextureDescriptorSets(descriptor_pool);
 
 	// Force a full re-render.

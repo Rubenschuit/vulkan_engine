@@ -1,6 +1,7 @@
 #pragma once
 #include "ui/editor_panel.hpp"
 #include "ui/editor_state.hpp"
+#include "resources/ve_resource_manager.hpp"
 #include <string>
 #include <unordered_map>
 #include <vulkan/vulkan.h>
@@ -54,6 +55,7 @@ private:
 	struct TextureCacheEntry {
 		VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 		uint32_t last_used_frame = 0;
+		ResourceHandle<VeTexture> texture; // a reloaded texture can reuse the id
 	};
 	std::unordered_map<std::string, TextureCacheEntry> m_texture_cache;
 	uint32_t m_frame_counter = 0;
@@ -62,10 +64,10 @@ private:
 	static constexpr uint32_t MAX_CACHED_TEXTURES = 32;
 	static constexpr uint32_t TEXTURE_CACHE_TTL = 300;
 
-	VkDescriptorSet getOrCreateTextureDescriptor(const std::string& id, const VeTexture* texture);
+	VkDescriptorSet getOrCreateTextureDescriptor(const ResourceHandle<VeTexture>& texture);
 	void evictStaleTextures();
 	void clearTextureCache();
-	void renderTextureSlot(const char* label, const std::string& id, const VeTexture* texture, float thumb_size = 48.0f);
+	void renderTextureSlot(const char* label, const ResourceHandle<VeTexture>& texture, float thumb_size = 48.0f);
 
 	TextureInspector* m_texture_inspector = nullptr;
 

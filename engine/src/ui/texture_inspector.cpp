@@ -19,6 +19,7 @@ TextureInspector::~TextureInspector() {
 }
 
 void TextureInspector::open(const VeImage* image, const vk::raii::Sampler& sampler, const char* name) {
+	m_source = {};
 	if (m_image == image && m_open)
 		return;
 
@@ -33,16 +34,24 @@ void TextureInspector::open(const VeImage* image, const vk::raii::Sampler& sampl
 		rebuildCache();
 }
 
-void TextureInspector::open(const VeTexture* texture, const char* name) {
+void TextureInspector::open(ImageSource source, const vk::raii::Sampler& sampler, const char* name) {
+	open(source.image(), sampler, name);
+	m_source_generation = source.generation();
+	m_source = std::move(source);
+}
+
+void TextureInspector::open(ResourceHandle<VeTexture> texture, const char* name) {
 	if (!texture || !texture->getImage())
 		return;
 	open(texture->getImage(), texture->getSampler(), name);
+	m_texture = std::move(texture);
 }
 
 void TextureInspector::close() {
 	clearCache();
 	m_image = nullptr;
 	m_sampler = nullptr;
+	m_source = {};
 	m_open = false;
 }
 
@@ -95,10 +104,10 @@ void TextureInspector::rebuildCache() {
 }
 
 void TextureInspector::clearCache() {
-	if (!m_layer_cache.empty()) {
-		m_pending_deletions.push_back({std::move(m_layer_cache), m_frame_counter});
-		m_layer_cache.clear();
-	}
+	if (!m_layer_cache.empty() || m_texture)
+		m_pending_deletions.push_back({std::move(m_layer_cache), m_frame_counter, std::move(m_texture)});
+	m_layer_cache.clear();
+	m_texture = {};
 }
 
 void TextureInspector::flushPendingDeletions() {
@@ -117,6 +126,14 @@ void TextureInspector::flushPendingDeletions() {
 void TextureInspector::render() {
 	m_frame_counter++;
 	flushPendingDeletions();
+
+	if (m_open && m_source.generation && m_source.generation() != m_source_generation) {
+		m_source_generation = m_source.generation();
+		clearCache();
+		m_image = m_source.image();
+		if (m_image)
+			rebuildCache();
+	}
 
 	if (!m_open || !m_image || m_layer_cache.empty())
 		return;

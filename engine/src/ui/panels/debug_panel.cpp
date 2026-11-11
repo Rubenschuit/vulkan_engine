@@ -163,7 +163,10 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 		const VeImage* atlas = m_shadow_render_system->getAtlasImage();
 		if (atlas) {
 			if (ImGui::Button("Open Shadow Atlas"))
-				m_texture_inspector.open(atlas, m_shadow_render_system->getRawSampler(), "Shadow Atlas");
+				m_texture_inspector.open({
+					.image = [this] { return m_shadow_render_system->getAtlasImage(); },
+					.generation = [this] { return m_shadow_render_system->getAtlasGeneration(); },
+				}, m_shadow_render_system->getRawSampler(), "Shadow Atlas");
 			ImGui::SameLine();
 			ImGui::TextDisabled("%ux%u", m_shadow_render_system->getAtlasWidth(), m_shadow_render_system->getAtlasHeight());
 		}

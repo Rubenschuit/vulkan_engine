@@ -344,8 +344,7 @@ void AssetBrowserPanel::inspectTexture(const std::filesystem::path& path) {
 	auto it = m_thumbnails.find(pathToUtf8Generic(path));
 	if (it == m_thumbnails.end() || !it->second.texture)
 		return;
-	m_inspected_texture = it->second.texture;  // keep alive while the inspector references it
-	m_texture_inspector->open(m_inspected_texture.get(), pathToUtf8(path.filename()).c_str());
+	m_texture_inspector->open(it->second.texture, pathToUtf8(path.filename()).c_str());
 }
 
 void AssetBrowserPanel::renderContextMenu(const Entry& e, EditorState& state) {
