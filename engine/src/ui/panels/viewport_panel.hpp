@@ -37,6 +37,8 @@ private:
 	EventBus* m_event_bus = nullptr;
 	std::vector<Entity> m_frozen_entities;
 	bool m_was_gizmo_active = false;
+	static constexpr float GIZMO_MIN_SCALE_FACTOR = 0.05f;
+	glm::vec3 m_drag_start_axis_lengths{1.0f};
 	ImVec2 m_image_min{0.f, 0.f};
 	ImVec2 m_image_max{0.f, 0.f};
 };

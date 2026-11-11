@@ -71,6 +71,11 @@ private:
 
 	std::string m_animation_filter;
 	bool m_animation_playing_only = false;
+
+	// Rotation shown for the last inspected transform, and the quaternion it was shown for
+	Entity m_euler_entity = Entity::null();
+	glm::quat m_euler_rotation{1.0f, 0.0f, 0.0f, 0.0f};
+	glm::vec3 m_euler_degrees{0.0f};
 };
 
 } // namespace ve

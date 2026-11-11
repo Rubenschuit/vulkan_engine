@@ -732,14 +732,39 @@ void InspectorPanel::renderEntityHeader(Registry& registry, Entity entity, Edito
 	ImGui::Columns(1);
 }
 
+// Euler angles (degrees, the X, Y, Z of setRotationEuler) for q nearest to prev: of the two
+// triples that give q, (x, y, z) and (x + 180, 180 - y, z + 180), each unwrapped by 360 toward prev
+static glm::vec3 continuousEuler(const glm::quat& q, const glm::vec3& prev) {
+	auto unwrap = [&](glm::vec3 e) {
+		for (int i = 0; i < 3; i++)
+			e[i] += 360.0f * std::round((prev[i] - e[i]) / 360.0f);
+		return e;
+	};
+	glm::vec3 a = glm::degrees(glm::eulerAngles(q));
+	glm::vec3 b = unwrap({a.x + 180.0f, 180.0f - a.y, a.z + 180.0f});
+	a = unwrap(a);
+	return glm::dot(a - prev, a - prev) <= glm::dot(b - prev, b - prev) ? a : b;
+}
+
 void InspectorPanel::renderTransform(TransformComponent& transform) {
 	glm::vec3 pos = transform.getTranslation();
 	if (drawVec3Control("Translation", pos, 0.1f))
 		transform.setTranslation(pos);
 
-	glm::vec3 euler = glm::degrees(glm::eulerAngles(transform.getRotation()));
-	if (drawVec3Control("Rotation", euler, 0.5f))
+	const glm::quat& rotation = transform.getRotation();
+	if (transform.getEntity() != m_euler_entity || rotation != m_euler_rotation) {
+		m_euler_degrees = transform.getEntity() == m_euler_entity
+			? continuousEuler(rotation, m_euler_degrees)
+			: glm::degrees(glm::eulerAngles(rotation));
+		m_euler_entity = transform.getEntity();
+		m_euler_rotation = rotation;
+	}
+	glm::vec3 euler = m_euler_degrees;
+	if (drawVec3Control("Rotation", euler, 0.5f)) {
 		transform.setRotationEuler(glm::radians(euler));
+		m_euler_degrees = euler;
+		m_euler_rotation = transform.getRotation();
+	}
 
 	glm::vec3 scl = transform.getScale();
 	if (drawVec3Control("Scale", scl, 0.01f, 1.0f))

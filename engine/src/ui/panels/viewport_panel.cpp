@@ -12,7 +12,7 @@
 #include <ImGuizmo.h>
 #include <glm/gtc/type_ptr.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
-#include <glm/gtx/matrix_decompose.hpp>
+#include <glm/gtx/orthonormalize.hpp>
 #include <algorithm>
 #include <cmath>
 
@@ -287,53 +287,46 @@ void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float im
 	glm::mat4 gizmo_proj = glm::perspective(m_camera_view->fov_y_radians, m_camera_view->aspect,
 	                                         m_camera_view->z_near, m_camera_view->z_far);
 
+	auto axisLengths = [](const glm::mat4& m) {
+		return glm::vec3(glm::length(glm::vec3(m[0])), glm::length(glm::vec3(m[1])), glm::length(glm::vec3(m[2])));
+	};
 	glm::mat4 model_before = model;
+	if (!m_was_gizmo_active)
+		m_drag_start_axis_lengths = axisLengths(model);
+	const glm::mat3 frame_before(model_before);
 	if (ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(gizmo_proj),
-	                         op, mode, glm::value_ptr(model), nullptr, snap_ptr)) {
-		if (roots.size() == 1 && roots[0] == state.selectedEntity()) {
-			// Single selection
-			// Remove the AABB offset before decomposing back
-			glm::vec3 new_world_offset = glm::vec3(model * glm::vec4(aabb_offset, 1.0f)) - glm::vec3(model[3]);
-			model[3] -= glm::vec4(new_world_offset, 0.0f);
+	                         op, mode, glm::value_ptr(model), nullptr, snap_ptr)
+	    && std::abs(glm::determinant(frame_before)) > 1e-12f) {
+		// The gizmo frame changes about its pivot by a world-space linear delta. Every root's origin
+		// moves with it, so rotation and scale stay centred on the pivot. Rotation and scale update
+		// the TRS components directly; decomposing the local matrix would flip mirrored scale.
+		const glm::vec3 pivot_before(model_before[3]);
+		const glm::vec3 pivot(model[3]);
+		glm::mat3 delta(1.0f);
+		glm::vec3 scale_factor(1.0f);
+		if (op == ImGuizmo::SCALE) {
+			// ImGuizmo scales the frame's axes in place. Each axis keeps a share of its length at drag start
+			glm::vec3 lengths = glm::max(axisLengths(model), m_drag_start_axis_lengths * GIZMO_MIN_SCALE_FACTOR);
+			scale_factor = lengths / axisLengths(model_before);
+			delta = frame_before * glm::mat3(glm::scale(glm::mat4(1.0f), scale_factor)) * glm::inverse(frame_before);
+		} else if (op == ImGuizmo::ROTATE) {
+			delta = glm::mat3(model) * glm::inverse(frame_before);
+		}
 
-			// Convert back to local space if entity has a parent
-			Entity parent = registry->getParent(state.selectedEntity());
-			glm::mat4 local_model = model;
-			if (!parent.isNull()) {
-				const glm::mat4& parent_world = registry->getWorldTransform(parent);
-				local_model = glm::inverse(parent_world) * model;
-			}
-
-			// Decompose into T/R/S
-			glm::vec3 translation, scale, skew;
-			glm::vec4 perspective;
-			glm::quat rotation;
-			glm::decompose(local_model, scale, rotation, translation, skew, perspective);
-
-			if (op == ImGuizmo::TRANSLATE)
-				transform->setTranslation(translation);
-			else if (op == ImGuizmo::ROTATE)
-				transform->setRotation(rotation);
-			else if (op == ImGuizmo::SCALE)
-				transform->setScale(scale);
-		} else {
-			// Multi selection
-			glm::mat4 delta = model * glm::inverse(model_before);
-			for (Entity r : roots) {
-				glm::mat4 world_new = delta * registry->getWorldTransform(r);
-				Entity parent = registry->getParent(r);
-				glm::mat4 local_model = parent.isNull() ? world_new
-					: glm::inverse(registry->getWorldTransform(parent)) * world_new;
-				glm::vec3 translation, scale, skew;
-				glm::vec4 perspective;
-				glm::quat rotation;
-				glm::decompose(local_model, scale, rotation, translation, skew, perspective);
-				auto* tc = registry->getComponent<TransformComponent>(r);
-				tc->setTranslation(translation);
-				if (op == ImGuizmo::ROTATE)
-					tc->setRotation(rotation);
-				else if (op == ImGuizmo::SCALE)
-					tc->setScale(scale);
+		for (Entity r : roots) {
+			auto* tc = registry->getComponent<TransformComponent>(r);
+			Entity parent = registry->getParent(r);
+			const glm::mat4 parent_world = parent.isNull() ? glm::mat4(1.0f) : registry->getWorldTransform(parent);
+			const glm::vec3 origin(registry->getWorldTransform(r)[3]);
+			const glm::vec3 new_origin = pivot + delta * (origin - pivot_before);
+			tc->setTranslation(glm::vec3(glm::inverse(parent_world) * glm::vec4(new_origin, 1.0f)));
+			if (op == ImGuizmo::ROTATE) {
+				// The world rotation expressed in the parent's space; exact unless the parent scales non-uniformly
+				const glm::mat3 parent_frame(parent_world);
+				glm::quat local_delta = glm::quat_cast(glm::orthonormalize(glm::inverse(parent_frame) * delta * parent_frame));
+				tc->setRotation(glm::normalize(local_delta * tc->getRotation()));
+			} else if (op == ImGuizmo::SCALE) {
+				tc->setScale(tc->getScale() * scale_factor);
 			}
 		}
 	}
