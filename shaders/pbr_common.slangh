@@ -317,7 +317,9 @@ float4 shadePbrSurface(PbrFragment frag, PbrSurface s) {
 		uint cid = getClusterIndex(frag.frag_coord.xy, frag_view_z, cluster_params);
 		uint count = cluster_light_counts[cid].y;
 		float3 heat = clusterHeatmapColor(frag.frag_coord.xy, frag_view_z, count, cluster_params);
-		return float4(heat * albedo.rgb, albedo.a);
+		// Shape from the normal only: tinting by albedo would shift the hues
+		float shade = 0.35 + 0.65 * saturate(dot(world_normal, view_dir));
+		return float4(heat * shade, albedo.a);
 	}
 
 	// Precompute light-invariant terms

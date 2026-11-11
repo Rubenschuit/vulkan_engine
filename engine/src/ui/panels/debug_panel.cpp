@@ -47,7 +47,7 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 	render_mode_radio("Normal Map", RenderMode::NORMAL_MAP, "World-space normal-mapped normal, RGB = XYZ * 0.5 + 0.5");
 	render_mode_radio("CSM Cascades", RenderMode::CSM_CASCADE, "Red=0, Green=1, Blue=2");
 	render_mode_radio("Cluster Heatmap", RenderMode::CLUSTER_HEATMAP,
-		"Visualize lights-per-cluster as a heat gradient\nBlue=few, Red=many, Dark=zero");
+		"Lights per cluster, log scale: grey = 0, blue = 1, teal = 4, green = 8,\nyellow = 16, orange = 32, red = 64\nAt the cap: magenta and yellow pixel checkerboard");
 	render_mode_radio("LOD Level", RenderMode::LOD_LEVEL, "Green=lod0, Yellow=1, Orange=2, Red=3");
 	render_mode_radio("Meshlet ID", RenderMode::MESHLET_ID,
 		"Hash-colored by meshlet index within its object.\nRequires the Meshlet culling backend.");
