@@ -968,8 +968,8 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 	const float lod0_max = 252.0f * ds0;
 	const float lod0 = std::clamp(m_rc.lod0_dist, 0.5f, lod0_max);
 	if (m_rc.lod0_dist > lod0_max && !m_lod0_clamp_warned) {
-		VE_LOGW("RC LOD 0 Distance " << m_rc.lod0_dist << " m exceeds the probe key range at Probe Spacing "
-			<< ds0 << " m (limit " << lod0_max << " m); clamped. Raise Probe Spacing or lower LOD 0 Distance.");
+		VE_LOGW("RC LOD 0 Range " << m_rc.lod0_dist << " m exceeds the probe key range at Probe Spacing "
+			<< ds0 << " m (limit " << lod0_max << " m); clamped. Raise Probe Spacing or lower LOD 0 Range.");
 		m_lod0_clamp_warned = true;
 	} else if (m_rc.lod0_dist <= lod0_max) {
 		m_lod0_clamp_warned = false;

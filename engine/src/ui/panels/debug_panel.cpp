@@ -154,7 +154,7 @@ void DebugPanel::render(Registry* /*registry*/, EditorState& state, UIContext& c
 		} else if (!m_ray_tracing_scene) {
 			ImGui::Text("Tracer: screen-space (device has no ray query)");
 		} else if (!rc.ray_query) {
-			ImGui::Text("Tracer: screen-space (Ray Query Tracing off)");
+			ImGui::Text("Tracer: screen-space (Ray Query off)");
 		} else {
 			ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f),
 				"Tracer: screen-space (no TLAS: %u BLAS, %u instances)",

@@ -37,6 +37,8 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		ImGui::End();
 		return;
 	}
+	// Negative: widgets stop this far short of the right edge, so labels keep their room under Indent()
+	ImGui::PushItemWidth(-ImGui::GetFontSize() * 11.0f);
 
 	// --- Display ---
 	if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -143,10 +145,13 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		ImGui::Checkbox("Frustum Culling", &ctx.settings.enable_frustum_culling);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("CPU backend only; GPU and Meshlet always frustum cull.");
-		ImGui::Text("Culling Backend");
+		ImGui::Text("Backend");
+		ImGui::SameLine();
 		int backend = static_cast<int>(ctx.settings.culling_backend);
 		ImGui::RadioButton("CPU", &backend, static_cast<int>(CullingBackendMode::CPU));
+		ImGui::SameLine();
 		ImGui::RadioButton("GPU", &backend, static_cast<int>(CullingBackendMode::GPU));
+		ImGui::SameLine();
 		ImGui::RadioButton("Meshlet", &backend, static_cast<int>(CullingBackendMode::MESHLET));
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Sub-object meshlet culling (frustum + backface cone + Hi-Z).");
@@ -155,7 +160,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		ImGui::BeginDisabled(ctx.settings.culling_backend == CullingBackendMode::CPU);
 		ImGui::Checkbox("Hi-Z Occlusion Culling", &ctx.settings.hiz_occlusion_enabled);
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Skips objects occluded by the depth buffer.\nRequires geometry pre-pass and a GPU/Meshlet backend.");
+			ImGui::SetTooltip("Skips objects occluded by the depth buffer.\nNeeds the geometry pre-pass and a GPU/Meshlet backend.");
 		ImGui::EndDisabled();
 
 		if (ctx.settings.culling_backend == CullingBackendMode::MESHLET) {
@@ -184,28 +189,23 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 				current_index = i;
 		}
 
-		ImGui::Text("MSAA");
-		int slider_value = static_cast<int>(current_index);
-		ImGui::PushItemWidth(200.0f);
-		if (ImGui::SliderInt("##msaa_slider", &slider_value, 0, static_cast<int>(available.size()) - 1, "")) {
-			slider_value = std::clamp(slider_value, 0, static_cast<int>(available.size()) - 1);
-			m_renderer.setSampleCountInt(available[static_cast<size_t>(slider_value)]);
+		if (ImGui::BeginCombo("MSAA", sample_labels[current_index].c_str())) {
+			for (size_t i = 0; i < available.size(); i++) {
+				bool is_selected = (i == current_index);
+				if (ImGui::Selectable(sample_labels[i].c_str(), is_selected) && !is_selected)
+					m_renderer.setSampleCountInt(available[i]);
+				if (is_selected)
+					ImGui::SetItemDefaultFocus();
+			}
+			ImGui::EndCombo();
 		}
-		ImGui::PopItemWidth();
-		ImGui::SameLine();
-		ImGui::Text("%s", sample_labels[current_index].c_str());
 	}
 
 	// --- Shadows ---
 	if (ImGui::CollapsingHeader("Shadows")) {
-		ImGui::PushItemWidth(200.0f);
 		int shadow_mode_int = static_cast<int>(ctx.settings.shadow_mode);
-		if (ImGui::SliderInt("##shadow_slider", &shadow_mode_int, 0, 3, ""))
-			ctx.settings.shadow_mode = static_cast<ShadowMode>(std::clamp(shadow_mode_int, 0, 3));
-		ImGui::PopItemWidth();
-		ImGui::SameLine();
-		const char* shadow_labels[] = {"Off", "Normal", "PCF", "PCSS"};
-		ImGui::Text("%s", shadow_labels[static_cast<uint32_t>(ctx.settings.shadow_mode)]);
+		if (ImGui::Combo("Mode", &shadow_mode_int, "Off\0" "Normal\0" "PCF\0" "PCSS\0"))
+			ctx.settings.shadow_mode = static_cast<ShadowMode>(shadow_mode_int);
 		if (ImGui::IsItemHovered()) {
 			ImGui::BeginTooltip();
 			ImGui::Text("Normal: Hard shadows");
@@ -303,7 +303,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			ImGui::RadioButton("Dithered", &ctx.settings.csm_blend_mode, 2);
 			ImGui::Checkbox("Shadow Mask (Async Compute)", &ctx.settings.shadow_mask_enabled);
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Evaluates CSM shadows once per pixel.\nRequires geometry pre-pass enabled.");
+				ImGui::SetTooltip("Evaluates CSM shadows once per pixel.\nNeeds the geometry pre-pass.");
 			if (ctx.settings.shadow_mask_enabled) {
 				ImGui::Indent();
 				ImGui::Checkbox("Half Resolution", &ctx.settings.shadow_mask_half_res);
@@ -318,7 +318,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 	if (ImGui::CollapsingHeader("Ambient Occlusion")) {
 		ImGui::Checkbox("GTAO", &ctx.settings.gtao_enabled);
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Requires geometry pre-pass enabled.");
+			ImGui::SetTooltip("Needs the geometry pre-pass.");
 		if (ctx.settings.gtao_enabled) {
 			ImGui::Indent();
 			ImGui::Checkbox("Half Resolution##gtao", &ctx.settings.gtao_half_res);
@@ -341,7 +341,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 	if (ImGui::CollapsingHeader("Reflections")) {
 		ImGui::Checkbox("SSR", &ctx.settings.ssr_enabled);
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Traces the depth buffer and reflects last frame's image.\nRequires geometry pre-pass.");
+			ImGui::SetTooltip("Traces the depth buffer and reflects last frame's image.\nNeeds the geometry pre-pass.");
 		if (ctx.settings.ssr_enabled) {
 			ImGui::Indent();
 			ImGui::Checkbox("Half Resolution##ssr", &ctx.settings.ssr_half_res);
@@ -359,11 +359,11 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			if (steps_changed || thickness_changed || dist_changed)
 				m_event_bus.emitImmediate(SsrParametersChangedEvent{ctx.settings.ssr_max_steps,
 					ctx.settings.ssr_thickness, ctx.settings.ssr_max_roughness, ctx.settings.ssr_max_distance});
+			ImGui::SliderFloat("Max Roughness", &ctx.settings.ssr_max_roughness, 0.0f, 1.0f, "%.2f");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("SSR gives up above this roughness.");
 			ImGui::Unindent();
 		}
-		ImGui::SliderFloat("Max Roughness", &ctx.settings.ssr_max_roughness, 0.0f, 1.0f, "%.2f");
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("SSR gives up above this roughness.");
 	}
 
 	// --- Global Illumination ---
@@ -374,9 +374,27 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		if (ctx.settings.rc.enabled) {
 			ImGui::Indent();
 
-			ImGui::BeginDisabled(!m_ray_query_supported);
 			bool ray_query = m_ray_query_supported && ctx.settings.rc.ray_query;
-			if (ImGui::Checkbox("Ray Query Tracing", &ray_query))
+			const char* sky_labels[] = {ray_query ? "Auto (Estimate)" : "Auto (Off)", "Off", "Unknown = Sky",
+				"Probe Estimate", "Unknown = Blocked"};
+			int sky_mode = static_cast<int>(ctx.settings.rc.sky_occlusion);
+			if (ImGui::Combo("Sky Occlusion", &sky_mode, sky_labels, IM_ARRAYSIZE(sky_labels)))
+				ctx.settings.rc.sky_occlusion = static_cast<RcSkyOcclusion>(sky_mode);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("How the probes' view of the sky darkens the environment (IBL, or the flat ambient)."
+					"\nOff: the environment as with GI off; GI adds bounced light only."
+					"\nProbe Estimate: directions no ray resolved take the probe's proven-sky share."
+					"\nUnknown = Sky / Blocked: directions no ray resolved count as open sky / as blocked."
+					"\nThe screen-space tracer leaves many rays unresolved, so Auto turns it off there.");
+			ImGui::Checkbox("Rough Specular", &ctx.settings.rc.specular);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Rough surfaces (roughness 0.3 and up) reflect their surroundings, not just the sky."
+					"\nOff: they reflect only the sky."
+					"\nSmoother surfaces are not affected.");
+
+			ImGui::SeparatorText("Tracing");
+			ImGui::BeginDisabled(!m_ray_query_supported);
+			if (ImGui::Checkbox("Ray Query", &ray_query))
 				ctx.settings.rc.ray_query = ray_query;
 			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 				ImGui::SetTooltip("Trace the scene's acceleration structures, which also see geometry off screen."
@@ -388,7 +406,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			}
 			ImGui::Indent();
 			ImGui::BeginDisabled(!ray_query);
-			ImGui::Checkbox("Trace Deformed Meshes", &ctx.settings.rc.trace_deformed);
+			ImGui::Checkbox("Deformed Meshes", &ctx.settings.rc.trace_deformed);
 			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 				ImGui::SetTooltip("Put skinned and morphed meshes in the acceleration structures,"
 					"\nrefitted to their pose every frame."
@@ -396,67 +414,50 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 			ImGui::EndDisabled();
 			ImGui::Unindent();
 
-			const char* sky_labels[] = {ray_query ? "Auto (Probe Estimate)" : "Auto (Off)", "Off", "Unknown Rays: Sky",
-				"Probe Estimate", "Unknown Rays: Obstructed"};
-			int sky_mode = static_cast<int>(ctx.settings.rc.sky_occlusion);
-			if (ImGui::Combo("Sky Occlusion", &sky_mode, sky_labels, IM_ARRAYSIZE(sky_labels)))
-				ctx.settings.rc.sky_occlusion = static_cast<RcSkyOcclusion>(sky_mode);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("How the probes' view of the sky darkens the environment (IBL, or the flat ambient)."
-					"\nOff: the environment as with GI off; GI adds bounced light only."
-					"\nProbe Estimate: directions no ray resolved take the probe's proven-sky share."
-					"\nUnknown Rays: Sky / Obstructed: directions no ray resolved count as open sky / as blocked."
-					"\nThe screen-space tracer leaves many rays unresolved, so Auto turns it off there.");
-			ImGui::Checkbox("Rough Specular", &ctx.settings.rc.specular);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Rough surfaces (roughness 0.3 and up) reflect their surroundings, not just the sky."
-					"\nOff: they reflect only the sky."
-					"\nSmoother surfaces are not affected.");
-
-			ImGui::SeparatorText("Probe Grid");
-			ImGui::SliderFloat("Probe Spacing", &ctx.settings.rc.ds0, 0.01f, 2.0f, "%.3f m",
-				ImGuiSliderFlags_Logarithmic);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Distance between c0 probes.");
-			ImGui::SliderFloat("LOD 0 Distance", &ctx.settings.rc.lod0_dist, 1.0f, 10.0f, "%.0f m");
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("How far from the camera the finest probe spacing reaches.\nBeyond it the spacing doubles at each step out.");
-
-			ImGui::SeparatorText("Quality and Cost");
-			ImGui::SliderInt("Rays / Pixel", &ctx.settings.rc.rays_per_pixel, 1, 16);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Rays each GI pixel traces per frame.");
-
 			const char* res_labels[] = {"Full", "Half", "Quarter", "Eighth"};
 			const int res_values[] = {1, 2, 4, 8};
 			int res_idx = ctx.settings.rc.resolution_div >= 8 ? 3
 				: (ctx.settings.rc.resolution_div >= 4 ? 2
 				: (ctx.settings.rc.resolution_div >= 2 ? 1 : 0));
-			if (ImGui::Combo("GI Resolution", &res_idx, res_labels, IM_ARRAYSIZE(res_labels)))
+			if (ImGui::Combo("Resolution", &res_idx, res_labels, IM_ARRAYSIZE(res_labels)))
 				ctx.settings.rc.resolution_div = res_values[res_idx];
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Resolution the GI is computed at.\nFewer pixels means fewer probes get discovered.");
+			ImGui::SliderInt("Rays / Pixel", &ctx.settings.rc.rays_per_pixel, 1, 16);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Rays each GI pixel traces per frame.");
+
+			ImGui::SeparatorText("Probes");
+			ImGui::SliderFloat("Spacing", &ctx.settings.rc.ds0, 0.01f, 2.0f, "%.3f m",
+				ImGuiSliderFlags_Logarithmic);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Distance between c0 probes.");
+			ImGui::SliderFloat("LOD 0 Range", &ctx.settings.rc.lod0_dist, 1.0f, 10.0f, "%.0f m");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("How far from the camera the finest probe spacing reaches.\nBeyond it the spacing doubles at each step out.");
 			sliderAppliedOnRelease("Cascades", ctx.settings.rc.cascades, m_rc_held.cascades,
 				[](const char* label, int* v) { ImGui::SliderInt(label, v, 1, 6); });
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Each level out reaches four times further.\nBeyond the last level, distant bounce is replaced by a plain sky\nestimate.");
-			sliderAppliedOnRelease("Probe Store (MiB)", ctx.settings.rc.memory_mb, m_rc_held.memory_mb,
-				[](const char* label, int* v) { ImGui::SliderInt(label, v, 32, 4096); });
+			sliderAppliedOnRelease("Memory", ctx.settings.rc.memory_mb, m_rc_held.memory_mb,
+				[](const char* label, int* v) { ImGui::SliderInt(label, v, 32, 4096, "%d MiB"); });
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Memory for the probes, which sets how many fit."
 					"\nDebug > Radiance Cascades shows how full each cascade is.");
-			ImGui::SliderFloat("Bounce Luma Clamp", &ctx.settings.rc.luma_clamp, 1.0f, 200.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Caps how bright a single bounce can be.");
-			ImGui::SliderInt("History Length", &ctx.settings.rc.history_length, 4, RC_MAX_HISTORY_LENGTH);
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Sampled frames each probe direction averages over."
-					"\nLower follows moving lights and objects sooner, with more noise.");
-			ImGui::SliderInt("Probe TTL", &ctx.settings.rc.probe_ttl, 0, 1024, "%d", ImGuiSliderFlags_Logarithmic);
+			ImGui::SliderInt("Lifetime", &ctx.settings.rc.probe_ttl, 0, 1024, "%d frames", ImGuiSliderFlags_Logarithmic);
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Frames a probe is kept after no visible surface needs it."
 					"\nLower keeps fewer probes alive, but an area you look away from and back at"
 					"\nloses its lighting and takes a moment to build it up again.");
+
+			ImGui::SeparatorText("Filtering");
+			ImGui::SliderInt("History", &ctx.settings.rc.history_length, 4, RC_MAX_HISTORY_LENGTH, "%d frames");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Sampled frames each probe direction averages over."
+					"\nLower follows moving lights and objects sooner, with more noise.");
+			ImGui::SliderFloat("Luma Clamp", &ctx.settings.rc.luma_clamp, 1.0f, 200.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Caps how bright a single bounce can be.");
 
 			ImGui::Unindent();
 		}
@@ -552,6 +553,7 @@ void GraphicsPanel::render(Registry* /*registry*/, EditorState& state, UIContext
 		ImGui::Checkbox("Physics Simulation", &ctx.sim.physics_enabled);
 	}
 
+	ImGui::PopItemWidth();
 	ImGui::End();
 }
 
