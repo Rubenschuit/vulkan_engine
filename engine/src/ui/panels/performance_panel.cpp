@@ -54,6 +54,7 @@ constexpr TimingRow TIMING_ROWS[] = {
 constexpr size_t TIMING_ROW_COUNT = std::size(TIMING_ROWS);
 
 constexpr float IDLE_MS = 0.005f; // reads as 0.00
+constexpr float IDLE_ROW_HIDE_S = 2.0f; // the overlay drops a pass once it has not run for this long
 constexpr ImGuiTreeNodeFlags LEAF_ROW = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen
 	| ImGuiTreeNodeFlags_SpanAllColumns;
 
@@ -62,6 +63,7 @@ constexpr ImGuiTreeNodeFlags LEAF_ROW = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeF
 PerformancePanel::PerformancePanel(VeRenderer& renderer)
 	: m_renderer(renderer), m_gpu_name(renderer.getDeviceName()),
 		m_row_sums(TIMING_ROW_COUNT, glm::vec2(0.0f)), m_row_ms(TIMING_ROW_COUNT, glm::vec2(0.0f)),
+		m_row_idle_s(TIMING_ROW_COUNT, IDLE_ROW_HIDE_S),
 		m_allocator(renderer.getAllocator()), m_heap_count(renderer.getMemoryHeapCount()) {
 	auto mem_props = renderer.getMemoryProperties();
 	for (uint32_t i = 0; i < mem_props.memoryHeapCount; i++) {
@@ -108,6 +110,73 @@ static void pair(const char* label, const char* tooltip, const char* fmt, ...) {
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	ui::textRight("%s", buf);
+}
+
+// The bar behind a GPU time is its share of the GPU frame time
+static void gpuCell(float ms, float frame_ms, bool timed) {
+	ImGui::TableNextColumn();
+	if (!timed) {
+		ui::textRight("-");
+		return;
+	}
+	if (frame_ms > 0.0f && ms > 0.0f) {
+		const ImVec2 p = ImGui::GetCursorScreenPos();
+		const float w = ImGui::GetContentRegionAvail().x * std::min(ms / frame_ms, 1.0f);
+		ImGui::GetWindowDrawList()->AddRectFilled(p, ImVec2(p.x + w, p.y + ImGui::GetTextLineHeight()),
+			ImGui::GetColorU32(ImGuiCol_PlotHistogram, 0.35f));
+	}
+	ui::textRight("%.2f", ms);
+}
+
+void PerformancePanel::overlayPasses(float width, bool gpu_timed) const {
+	if (!ImGui::BeginTable("##OverlayPasses", 3, ImGuiTableFlags_SizingFixedFit, ImVec2(width, 0.0f)))
+		return;
+	const float value_w = ImGui::CalcTextSize("GPU (ms)").x;
+	ImGui::TableSetupColumn("##pass", ImGuiTableColumnFlags_WidthStretch);
+	ImGui::TableSetupColumn("##cpu", ImGuiTableColumnFlags_WidthFixed, value_w);
+	ImGui::TableSetupColumn("##gpu", ImGuiTableColumnFlags_WidthFixed, value_w);
+
+	ImGui::TableNextRow();
+	ImGui::TableSetColumnIndex(1);
+	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+	ui::textRight("CPU (ms)");
+	ImGui::TableNextColumn();
+	ui::textRight("GPU (ms)");
+	ImGui::PopStyleColor();
+
+	glm::vec2 total(0.0f);
+	for (size_t i = 0; i < TIMING_ROW_COUNT; i++) {
+		const TimingRow& timing = TIMING_ROWS[i];
+		if (timing.depth > 0)
+			continue;
+		const glm::vec2 ms = m_row_ms[i];
+		total += ms;
+		if (m_row_idle_s[i] >= IDLE_ROW_HIDE_S)
+			continue;
+		ImGui::TableNextRow();
+		ImGui::TableNextColumn();
+		ImGui::TextDisabled("%s", timing.label);
+		ImGui::TableNextColumn();
+		if (timing.cpu)
+			ui::textRight("%.2f", ms.x);
+		if (timing.gpu)
+			gpuCell(ms.y, m_gpu_time_ms, gpu_timed);
+	}
+
+	ImGui::TableNextRow();
+	ImGui::TableNextColumn();
+	ImGui::Separator();
+	ImGui::TextDisabled("Total");
+	ImGui::TableNextColumn();
+	ImGui::Separator();
+	ui::textRight("%.2f", total.x);
+	ImGui::TableNextColumn();
+	ImGui::Separator();
+	if (gpu_timed)
+		ui::textRight("%.2f", total.y);
+	else
+		ui::textRight("-");
+	ImGui::EndTable();
 }
 
 void PerformancePanel::timingRows(bool waits) const {
@@ -162,9 +231,12 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		m_acquire_wait_ms = m_acquire_wait_sum / 60.0f;
 		m_gpu_time_ms = m_gpu_time_sum / 60.0f;
 
+		const bool gpu_timed = context.settings.gpu_profiling;
 		for (size_t i = 0; i < TIMING_ROW_COUNT; i++) {
 			m_row_ms[i] = m_row_sums[i] / 60.0f;
 			m_row_sums[i] = glm::vec2(0.0f);
+			const bool idle = m_row_ms[i].x == 0.0f && (!gpu_timed || m_row_ms[i].y == 0.0f);
+			m_row_idle_s[i] = idle ? std::min(m_row_idle_s[i] + m_accumulated_dt, IDLE_ROW_HIDE_S) : 0.0f;
 		}
 
 		m_frame_count = 0;
@@ -219,6 +291,11 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 					pair("Meshlets", nullptr, "%s", count_a);
 				}
 				ImGui::EndTable();
+				if (state.performance_overlay_passes) {
+					const float width = ImGui::GetItemRectSize().x;
+					ImGui::Separator();
+					overlayPasses(width, context.settings.gpu_profiling);
+				}
 			}
 		}
 		ImGui::End();
@@ -298,21 +375,6 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 		ImGui::TableSetupColumn("GPU (ms)", ImGuiTableColumnFlags_WidthFixed, 65.0f);
 		ImGui::TableHeadersRow();
 
-		// The bar behind a GPU time is its share of the GPU frame time
-		auto gpuCell = [&](float ms, bool share_bar) {
-			ImGui::TableNextColumn();
-			if (!gpu_timed) {
-				ui::textRight("-");
-				return;
-			}
-			if (share_bar && m_gpu_time_ms > 0.0f && ms > 0.0f) {
-				const ImVec2 p = ImGui::GetCursorScreenPos();
-				const float w = ImGui::GetContentRegionAvail().x * std::min(ms / m_gpu_time_ms, 1.0f);
-				ImGui::GetWindowDrawList()->AddRectFilled(p, ImVec2(p.x + w, p.y + ImGui::GetTextLineHeight()),
-					ImGui::GetColorU32(ImGuiCol_PlotHistogram, 0.35f));
-			}
-			ui::textRight("%.2f", ms);
-		};
 		auto pushTextColor = [](bool dim) {
 			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(dim ? ImGuiCol_TextDisabled : ImGuiCol_Text));
 		};
@@ -336,7 +398,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 			if (timing.cpu)
 				ui::textRight("%.2f", ms.x);
 			if (timing.gpu)
-				gpuCell(ms.y, true);
+				gpuCell(ms.y, m_gpu_time_ms, gpu_timed);
 			else
 				ImGui::TableNextColumn();
 			ImGui::PopStyleColor();
@@ -355,7 +417,7 @@ void PerformancePanel::render(Registry* /*registry*/, EditorState& state, UICont
 					ImGui::TreeNodeEx("Other", LEAF_ROW);
 					ImGui::SetItemTooltip("Clears, resolves and the draws no sub-timer covers");
 					ImGui::TableNextColumn();
-					gpuCell(std::max(ms.y - sub_gpu, 0.0f), true);
+					gpuCell(std::max(ms.y - sub_gpu, 0.0f), m_gpu_time_ms, gpu_timed);
 					ImGui::PopStyleColor();
 				}
 				ImGui::TreePop();

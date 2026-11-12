@@ -20,6 +20,7 @@ public:
 
 private:
 	void timingRows(bool waits) const;
+	void overlayPasses(float width, bool gpu_timed) const;
 
 	VeRenderer& m_renderer;
 	std::string m_gpu_name;
@@ -47,6 +48,7 @@ private:
 	// Breakdown rows, CPU in x and GPU in y, indexed like the row table
 	std::vector<glm::vec2> m_row_sums;
 	std::vector<glm::vec2> m_row_ms;
+	std::vector<float> m_row_idle_s;
 
 	// VRAM stats
 	VmaAllocator m_allocator;

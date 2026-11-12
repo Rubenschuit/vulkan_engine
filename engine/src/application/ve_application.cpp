@@ -406,7 +406,7 @@ void VeApplication::initSystems() {
 		.key = GLFW_KEY_P,
 		.trigger = TriggerType::OnPress,
 		.context = InputContext::Always,
-		.description = "Toggle performance panel"
+		.description = "Toggle performance panel (fullscreen: cycle simple, passes, hidden overlay)"
 	});
 	if (m_config.register_default_window_hotkeys) {
 		m_input_controller.registerAction({
@@ -419,7 +419,15 @@ void VeApplication::initSystems() {
 	}
 	m_input_action_sub = m_event_bus.subscribe<InputActionEvent>([this](const InputActionEvent& e) {
 		if (e.name == "Toggle Performance UI") {
-			m_editor->getState().show_performance = !m_editor->getState().show_performance;
+			EditorState& state = m_editor->getState();
+			if (state.editor_mode) {
+				state.show_performance = !state.show_performance;
+			} else {
+				// Fullscreen cycles the overlay: simple, with passes, hidden
+				const bool show_passes = state.show_performance && !state.performance_overlay_passes;
+				state.show_performance = !state.show_performance || show_passes;
+				state.performance_overlay_passes = show_passes;
+			}
 		} else if (e.name == "Toggle Borderless") {
 			auto current = m_ve_window.getWindowMode();
 			m_ve_window.setWindowMode(current == VeWindow::WindowMode::Borderless

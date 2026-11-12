@@ -143,6 +143,7 @@ struct VENGINE_API EditorState {
 	bool show_asset_browser = true;
 	bool show_viewport = true;
 	bool show_performance = true;
+	bool performance_overlay_passes = false;
 	bool show_settings = true;
 	bool show_environment = true;
 	bool show_debug = true;

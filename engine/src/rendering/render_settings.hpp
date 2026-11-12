@@ -90,7 +90,7 @@ struct VENGINE_API RenderSettings {
 	bool show_skinned_points = false;
 	bool show_area_lights = false;
 
-	bool gpu_profiling = false;
+	bool gpu_profiling = true;
 };
 
 }
