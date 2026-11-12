@@ -754,9 +754,10 @@ void InspectorPanel::renderTransform(TransformComponent& transform) {
 
 	const glm::quat& rotation = transform.getRotation();
 	if (transform.getEntity() != m_euler_entity || rotation != m_euler_rotation) {
+		// + 0 turns the -0 eulerAngles returns for the identity into 0
 		m_euler_degrees = transform.getEntity() == m_euler_entity
 			? continuousEuler(rotation, m_euler_degrees)
-			: glm::degrees(glm::eulerAngles(rotation));
+			: glm::degrees(glm::eulerAngles(rotation)) + 0.0f;
 		m_euler_entity = transform.getEntity();
 		m_euler_rotation = rotation;
 	}
