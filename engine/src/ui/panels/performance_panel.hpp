@@ -19,6 +19,8 @@ public:
 	const char* getName() const override { return "Performance"; }
 
 private:
+	void timingRows(bool waits) const;
+
 	VeRenderer& m_renderer;
 	std::string m_gpu_name;
 
@@ -42,19 +44,9 @@ private:
 	float m_graph_update_timer = 0.0f;
 	int m_graph_frames = 0;
 
-	// Per-system breakdown
-	static constexpr int BREAKDOWN_COUNT = 17;
-	float m_gpu_breakdown_ms[BREAKDOWN_COUNT] = {};
-	float m_gpu_breakdown_sum[BREAKDOWN_COUNT] = {};
-	float m_cpu_breakdown_ms[BREAKDOWN_COUNT] = {};
-	float m_cpu_breakdown_sum[BREAKDOWN_COUNT] = {};
-	// RC GI sub-passes, GPU: acceleration structures, build (map, raygen, trace, resolve), shade (merge, irradiance, gather)
-	static constexpr int RC_BREAKDOWN_COUNT = 10;
-	float m_rc_breakdown_ms[RC_BREAKDOWN_COUNT] = {};
-	float m_rc_breakdown_sum[RC_BREAKDOWN_COUNT] = {};
-	// The one RC sub-pass with CPU work of its own: acceleration structure upkeep
-	float m_rc_as_cpu_ms = 0.0f;
-	float m_rc_as_cpu_sum = 0.0f;
+	// Breakdown rows, CPU in x and GPU in y, indexed like the row table
+	std::vector<glm::vec2> m_row_sums;
+	std::vector<glm::vec2> m_row_ms;
 
 	// VRAM stats
 	VmaAllocator m_allocator;

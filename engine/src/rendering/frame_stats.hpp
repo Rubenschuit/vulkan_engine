@@ -20,6 +20,9 @@ struct VENGINE_API FrameStats {
 	float gpu_geometry_prepass = 0.0f;
 	float gpu_gtao = 0.0f;
 	float gpu_scene_render = 0.0f;
+	float gpu_prepass_objects = 0.0f;
+	float gpu_scene_objects = 0.0f;
+	float gpu_scene_skybox = 0.0f;
 	float gpu_ssr = 0.0f;
 	float gpu_rc = 0.0f;
 	float gpu_rc_as = 0.0f;

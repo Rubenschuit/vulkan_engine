@@ -23,6 +23,10 @@ enum class ProfileTimer : uint32_t {
 	HIZ,
 	SHADOW_MASK,
 	OUTLINE,
+	// Sub-passes of GEOMETRY_PREPASS and SCENE_RENDER, recorded inside their render pass
+	PREPASS_OBJECTS,
+	SCENE_OBJECTS,
+	SCENE_SKYBOX,
 	COMPUTE_TOTAL,
 	PHYSICS,
 	UI,
@@ -57,6 +61,9 @@ inline const char* profileTimerName(ProfileTimer timer) {
 		case ProfileTimer::HIZ:            return "Hi-Z";
 		case ProfileTimer::SHADOW_MASK:    return "Shadow Mask";
 		case ProfileTimer::OUTLINE:        return "Outline";
+		case ProfileTimer::PREPASS_OBJECTS:   return "Geometry Pass Objects";
+		case ProfileTimer::SCENE_OBJECTS:     return "Scene Objects";
+		case ProfileTimer::SCENE_SKYBOX:      return "Scene Skybox";
 		case ProfileTimer::COMPUTE_TOTAL:  return "Compute Total";
 		case ProfileTimer::PHYSICS:        return "Physics";
 		case ProfileTimer::UI:             return "UI";

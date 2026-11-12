@@ -933,8 +933,10 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		profiler.beginCpuTimer(ProfileTimer::GEOMETRY_PREPASS);
 		profiler.beginGpuTimer(command_buffer, ProfileTimer::GEOMETRY_PREPASS);
 		m_ve_renderer.beginGeometryPrePass(command_buffer);
+		profiler.beginGpuTimer(command_buffer, ProfileTimer::PREPASS_OBJECTS);
 		m_active_backend->renderGeometryPrePass(fi, m_scene_resources->getMegaBuffer(),
 			*m_geometry_prepass_system, bindless_set);
+		profiler.endGpuTimer(command_buffer, ProfileTimer::PREPASS_OBJECTS);
 		m_ve_renderer.endGeometryPrePass(command_buffer);
 		profiler.endGpuTimer(command_buffer, ProfileTimer::GEOMETRY_PREPASS);
 		profiler.endCpuTimer(ProfileTimer::GEOMETRY_PREPASS);
@@ -1142,12 +1144,16 @@ void RenderPipeline::renderFrameBody(VeFrameInfo& fi, const EditorState& editor_
 		{
 			ZoneScopedN("Opaque");
 			TracyVkZone(tracy_gfx, *active_cb, "Opaque");
+			profiler.beginGpuTimer(active_cb, ProfileTimer::SCENE_OBJECTS);
 			m_active_backend->renderOpaque(fi, *m_pbr_render_system, bindless_set);
+			profiler.endGpuTimer(active_cb, ProfileTimer::SCENE_OBJECTS);
 		}
 		{
 			ZoneScopedN("Skybox");
 			TracyVkZone(tracy_gfx, *active_cb, "Skybox");
+			profiler.beginGpuTimer(active_cb, ProfileTimer::SCENE_SKYBOX);
 			m_skybox_render_system->render(fi);
+			profiler.endGpuTimer(active_cb, ProfileTimer::SCENE_SKYBOX);
 		}
 		if (!fi.gpu_culling_active) {
 			ZoneScopedN("Transparent (inline)");
@@ -1422,6 +1428,9 @@ void RenderPipeline::collectStats(const VeFrameInfo& fi, Registry& registry) {
 	m_stats.gpu_rc_irradiance = results.gpu(ProfileTimer::RC_IRRADIANCE);
 	m_stats.gpu_rc_gather = results.gpu(ProfileTimer::RC_GATHER);
 	m_stats.gpu_scene_render = results.gpu(ProfileTimer::SCENE_RENDER);
+	m_stats.gpu_prepass_objects = results.gpu(ProfileTimer::PREPASS_OBJECTS);
+	m_stats.gpu_scene_objects = results.gpu(ProfileTimer::SCENE_OBJECTS);
+	m_stats.gpu_scene_skybox = results.gpu(ProfileTimer::SCENE_SKYBOX);
 	m_stats.gpu_ssr = results.gpu(ProfileTimer::SSR);
 	m_stats.gpu_bloom = results.gpu(ProfileTimer::BLOOM);
 	m_stats.gpu_post_process = results.gpu(ProfileTimer::POST_PROCESS);

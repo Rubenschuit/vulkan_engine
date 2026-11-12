@@ -504,7 +504,7 @@ void AssetBrowserPanel::renderMetadata(EditorState& state) {
 	std::error_code ec;
 	auto bytes = std::filesystem::file_size(m_selected, ec);
 	if (!ec)
-		ImGui::Text("Size: %.1f KB", static_cast<double>(bytes) / 1024.0);
+		ImGui::Text("Size: %.1f KiB", static_cast<double>(bytes) / 1024.0);
 
 	AssetKind kind = classify(m_selected);
 	if (kind == AssetKind::Model) {
