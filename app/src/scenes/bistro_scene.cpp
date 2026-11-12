@@ -14,7 +14,7 @@ BistroScene::BistroScene(const SceneContext& ctx, const AssetPaths& paths)
 	m_event_bus.enqueue(SkyboxRequestEvent{
 		.name = "the_sky_is_on_fire_4k", .exposure = 0.5f});
 	m_event_bus.enqueue(RenderSettingsRequestEvent{
-		.exposure = 1.15f, .ambient_light_intensity = 0.02f, .bloom_strength = 0.02f});
+		.exposure = 1.15f, .ambient_light_intensity = 0.02f, .bloom_strength = 0.02f, .csm_distance = 160.0f});
 
 	Entity dl = m_registry.createDirectionalLight(8.0f, glm::vec3(1.0f, 0.62f, 0.4f),
 		glm::normalize(glm::vec3(0.709f, -0.410f, -0.574f)));
@@ -26,7 +26,7 @@ BistroScene::BistroScene(const SceneContext& ctx, const AssetPaths& paths)
 		.scale = {2.0f, 2.0f, 2.0f},
 		.flip_tex_coord_v = true,
 		.on_loaded = [this](Entity wrapper) {
-			m_registry.setName(wrapper, "Bistro Model");
+			m_registry.setName(wrapper, "Bistro");
 			// Curated lighting setup
 			if (auto ov = SceneOverlay::loadFromFile(m_overlay_path))
 				ov->apply(m_registry);
@@ -81,7 +81,7 @@ BistroScene::BistroScene(const SceneContext& ctx, const AssetPaths& paths)
 		.translation = m_birds_orbit_center,
 		.scale = glm::vec3(2.5f),
 		.on_loaded = [this](Entity birds) {
-			m_registry.setName(birds, "birds");
+			m_registry.setName(birds, "Birds");
 			m_birds = birds;
 		}
 	});

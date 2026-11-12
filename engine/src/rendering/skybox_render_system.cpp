@@ -55,10 +55,9 @@ SkyboxRenderSystem::SkyboxRenderSystem(
 	});
 
 	m_event_bus.subscribe<SkyboxRequestEvent>([this](const SkyboxRequestEvent& e) {
-		if (e.exposure)
-			m_settings.exposure = *e.exposure;
-		if (e.is_day)
-			m_settings.is_day = *e.is_day;
+		const SkyboxSettings defaults{};
+		m_settings.exposure = e.exposure.value_or(defaults.exposure);
+		m_settings.is_day = e.is_day.value_or(defaults.is_day);
 		if (e.name.empty())
 			return;
 		for (size_t i = 0; i < m_available_skyboxes.size(); ++i) {

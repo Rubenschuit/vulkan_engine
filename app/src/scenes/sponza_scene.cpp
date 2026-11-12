@@ -8,7 +8,7 @@
 namespace ve {
 
 namespace {
-constexpr float FIRE_INTENSITY = 9.0f;
+constexpr float FIRE_INTENSITY = 2.25f;
 }
 
 SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
@@ -17,27 +17,24 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 	m_event_bus.enqueue(SkyboxRequestEvent{
 		.name = "qwantani_moon_noon_puresky_4k", .exposure = 0.15f, .is_day = false});
 	m_event_bus.enqueue(RenderSettingsRequestEvent{
-		.exposure = 1.05f, .bloom_strength = 0.015f});
+		.exposure = 1.05f, .bloom_strength = 0.015f, .csm_distance = 80.0f});
 
-	const float sponza_scale = 2.0f;
 	const glm::vec3 root_translation = glm::vec3{0.0f, 0.0f, -50.0f};
 	auto sponzaPos = [&](glm::vec3 local) {
-		return local * sponza_scale + root_translation;
+		return local + root_translation;
 	};
 
 	placeModel({
 		.gltf_path = paths.sponza_model().lexically_normal(),
 		.translation = root_translation,
-		.scale = glm::vec3(sponza_scale),
 	});
 
-	m_birds_orbit_center = root_translation + glm::vec3{0.0f, 0.0f, 20.0f} * sponza_scale;
+	m_birds_orbit_center = root_translation + glm::vec3{0.0f, 0.0f, 20.0f};
 	placeModel({
 		.gltf_path = paths.birds_model.lexically_normal(),
 		.translation = m_birds_orbit_center,
-		.scale = glm::vec3(sponza_scale),
 		.on_loaded = [this](Entity birds) {
-			m_registry.setName(birds, "birds");
+			m_registry.setName(birds, "Birds");
 			m_birds = birds;
 		}
 	});
@@ -77,16 +74,16 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 			EmitterParams p{};
 			p.color_start = glm::vec4(1.0f, 0.85f, 0.4f, 1.0f);
 			p.color_end   = glm::vec4(1.0f, 0.2f, 0.02f, 0.0f);
-			p.gravity     = -1.0f;
+			p.gravity     = -0.5f;
 			p.drag        = 4.5f;
-			p.stddev      = 0.4f;
+			p.stddev      = 0.2f;
 			p.min_life    = 0.5f;
 			p.max_life    = 1.2f;
 			auto& ec = m_registry.addComponent<ParticleEmitterComponent>(light);
 			ec.params = p;
 			ec.texture = fire_tex;
 			ec.rate = 45.0f;
-			ec.scale = 0.2f;
+			ec.scale = 0.1f;
 		}
 		{
 			Entity smoke = m_registry.createEntity(m_registry.getName(light) + " Smoke");
@@ -95,9 +92,9 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 			EmitterParams p{};
 			p.color_start = glm::vec4(0.7f, 0.65f, 0.6f, 0.9f);
 			p.color_end   = glm::vec4(0.25f, 0.25f, 0.25f, 0.4f);
-			p.gravity     = -0.3f;
+			p.gravity     = -0.15f;
 			p.drag        = 4.8f;
-			p.stddev      = 0.4f;
+			p.stddev      = 0.2f;
 			p.min_life    = 3.0f;
 			p.max_life    = 5.0f;
 			p.atlas_one_shot = 1u;
@@ -105,6 +102,7 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 			ec.params = p;
 			ec.texture = smoke_tex;
 			ec.rate = 8.0f;
+			ec.scale = 0.5f;
 		}
 	};
 
@@ -116,18 +114,18 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 	};
 	for (int i = 0; i < 4; ++i) {
 		Entity e = makeLight(FIRE_INTENSITY, 1.0f, glm::vec3(1.0f, .45f, .15f),
-			"Fire " + std::to_string(i + 1), fire_positions[i], false, false, glm::vec3(0.1f));
+			"Fire " + std::to_string(i + 1), fire_positions[i], false, false, glm::vec3(0.05f));
 		m_fire_lights.push_back(e);
 		attachFireEmitters(e);
 	}
 
     // lion eyes
-	makeLight(2.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f), "Green eye (left)",
+	makeLight(0.5f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f), "Green Eye (Left)",
 		sponzaPos({10.136f, 0.116f,  1.504f}), false, false,
-		glm::vec3(0.03f));
-	makeLight(2.0f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f), "Green eye (right)",
+		glm::vec3(0.015f));
+	makeLight(0.5f, 1.0f, glm::vec3(0.0f, 1.0f, 0.0f), "Green Eye (Right)",
 		sponzaPos({10.136f, 0.4864f, 1.504f}), false, false,
-		glm::vec3(0.03f));
+		glm::vec3(0.015f));
 
 	// Emissive sphere in the middle
 	if (auto sphere_mesh = m_resource_manager.loadMesh(paths.sphere_model.lexically_normal());
@@ -138,12 +136,12 @@ SponzaScene::SponzaScene(const SceneContext& ctx, const AssetPaths& paths)
 				.base_color_factor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),
 				.emissive_factor = glm::vec3(0.3f, 0.9f, 1.0f),
 				.metallic_factor = 0.0f,
-				.emissive_strength = 50.0f});
+				.emissive_strength = 20.0f});
 
 		Entity sphere = m_registry.createGameObject("Emissive Sphere");
 		auto* tc = m_registry.getComponent<TransformComponent>(sphere);
 		tc->setTranslation(sponzaPos({0.0f, 0.0f, 2.0f}));
-		tc->setScale(glm::vec3(0.5f));
+		tc->setScale(glm::vec3(0.25f));
 		m_registry.addComponent<MeshComponent>(sphere, sphere_mesh, emissive_mat);
 
 		auto& rb = m_registry.addComponent<RigidbodyComponent>(sphere);

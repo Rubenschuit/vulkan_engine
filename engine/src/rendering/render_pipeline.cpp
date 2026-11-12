@@ -136,22 +136,20 @@ RenderPipeline::RenderPipeline(VeDevice& device,
 		m_ao_gi_set_manager->rewrite(e.pool);
 	});
 	m_settings_request_sub = m_event_bus.subscribe<RenderSettingsRequestEvent>([this](const RenderSettingsRequestEvent& e) {
-		if (e.exposure)
-			m_settings.exposure = *e.exposure;
+		const RenderSettings defaults{};
+		m_settings.exposure = e.exposure.value_or(defaults.exposure);
+		m_settings.ambient_light_intensity = e.ambient_light_intensity.value_or(defaults.ambient_light_intensity);
+		m_settings.bloom_strength = e.bloom_strength.value_or(defaults.bloom_strength);
+		m_settings.ibl_min_ambient = e.ibl_min_ambient.value_or(defaults.ibl_min_ambient);
+		m_settings.csm_distance = e.csm_distance.value_or(defaults.csm_distance);
 		if (e.ibl_enabled)
 			m_settings.ibl_enabled = *e.ibl_enabled;
-		if (e.ambient_light_intensity)
-			m_settings.ambient_light_intensity = *e.ambient_light_intensity;
-		if (e.bloom_strength)
-			m_settings.bloom_strength = *e.bloom_strength;
 		if (e.bloom_enabled)
 			m_settings.bloom_enabled = *e.bloom_enabled;
 		if (e.gtao_enabled)
 			m_settings.gtao_enabled = *e.gtao_enabled;
 		if (e.ssr_enabled)
 			m_settings.ssr_enabled = *e.ssr_enabled;
-		if (e.ibl_min_ambient)
-			m_settings.ibl_min_ambient = *e.ibl_min_ambient;
 	});
 }
 

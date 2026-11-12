@@ -1,5 +1,6 @@
 #include "simple_scene.hpp"
 #include "fox.hpp"
+#include "events/engine_events.hpp"
 #include "scene/ve_component.hpp"
 #include "utils/ve_path.hpp"
 #include <string>
@@ -9,6 +10,8 @@ namespace ve {
 
 SimpleScene::SimpleScene(const SceneContext& ctx, const AssetPaths& paths)
 	: VeScene(ctx, "Simple Scene") {
+	m_event_bus.enqueue(SkyboxRequestEvent{.name = "clouds"});
+	m_event_bus.enqueue(RenderSettingsRequestEvent{.csm_distance = 200.0f});
 	loadGameObjects(paths);
 }
 
@@ -51,6 +54,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 		Entity panel = m_registry.createGameObject("Area Light Panel");
 		m_registry.addComponent<MeshComponent>(panel, quad_mesh, emissive_mat).has_shadow = false;
 		m_registry.setParent(panel, al);
+		m_registry.setActive(al, false);
 	}
 
 	// Create some point lights with ranging colors
@@ -74,7 +78,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 
 	for (uint32_t i = 0; i < num_lights; i += 1) {
 		Entity light = m_registry.createPointLight(intensity, radius, colors[i % 10]);
-		m_registry.setName(light, "Light " + std::to_string(i));
+		m_registry.setName(light, "Point Light " + std::to_string(i + 1));
 		glm::vec3 pos = {
 			pos_radius * cos(glm::two_pi<float>() / num_lights * (float)i),
 			pos_radius * sin(glm::two_pi<float>() / num_lights * (float)i),
@@ -119,7 +123,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 				.use_spec_gloss = false},
 			floor_factors);
 
-		Entity e = m_registry.createEntity("floor");
+		Entity e = m_registry.createEntity("Floor");
 		auto& tc = m_registry.addComponent<TransformComponent>(e);
 		tc.setTranslation({0.0f, 0.0f, -0.05f});
 		auto& mc = m_registry.addComponent<MeshComponent>(e, floor_mesh, floor_mat);
@@ -140,7 +144,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 				},
 				MaterialAlphaProps{AlphaMode::MASK, 0.5f, true}, MaterialFactors{});
 
-			Entity quad_entity = m_registry.createEntity("tex_quad");
+			Entity quad_entity = m_registry.createEntity("Textured Quad");
 			auto& tc = m_registry.addComponent<TransformComponent>(quad_entity);
 			tc.setTranslation({0.0f, 70.0f, 20.0f});
 			tc.setScale({18.0f, 18.0f, 18.0f});
@@ -163,7 +167,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 	constexpr float GRID_BODY_MASS = 30.0f;
 
 	// PBR showcase grid: rows vary roughness (bottom=rough, top=smooth), columns vary metallic (left=dielectric, right=metal)
-	auto createPbrGrid = [&](const std::filesystem::path& model_path,
+	auto createPbrGrid = [&](const std::filesystem::path& model_path, const std::string& label,
 	                         int rows, int cols,
 	                         glm::vec3 base_translation, glm::vec3 base_rotation, glm::vec3 base_scale,
 	                         float spacing_x, float spacing_y, float z_offset,
@@ -173,6 +177,7 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 			return;
 
 		std::string name = ve::pathToUtf8(model_path.stem());
+		Entity group = m_registry.createGameObject(label + " Grid");
 		for (int j = 0; j < rows; j++) {
 			for (int i = 0; i < cols; i++) {
 				float roughness = glm::max(1.0f - static_cast<float>(j) / static_cast<float>(rows - 1), 0.05f);
@@ -195,11 +200,12 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 					},
 					factors);
 
-				Entity e = m_registry.createEntity(name + "_r" + std::to_string(j) + "_m" + std::to_string(i));
+				Entity e = m_registry.createEntity(label + " R" + std::to_string(j) + " M" + std::to_string(i));
 				auto& tc = m_registry.addComponent<TransformComponent>(e);
 				tc.setTranslation(base_translation + glm::vec3{(float)i * spacing_x, (float)j * spacing_y, z_offset});
 				tc.setRotationEuler(base_rotation);
 				tc.setScale(base_scale);
+				m_registry.setParent(e, group);
 				auto& mc = m_registry.addComponent<MeshComponent>(e, mesh, mat_handle);
 				mc.has_texture = 1.0f;
 
@@ -213,21 +219,21 @@ void SimpleScene::loadGameObjects(const AssetPaths& paths) {
 	int grid_dim = 5;
 
 	// Spheres in a grid
-	createPbrGrid(paths.sphere_model, grid_dim, grid_dim,
+	createPbrGrid(paths.sphere_model, "Sphere", grid_dim, grid_dim,
 	              {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, 4.0f, 4.0f, 1.0f,
 	              PhysicsShapeType::Sphere);
 
 	// Cubes in a grid
-	createPbrGrid(paths.cube_model, grid_dim, grid_dim,
+	createPbrGrid(paths.cube_model, "Cube", grid_dim, grid_dim,
 	              {-4.0f, 0, 0}, {0, 0, 0}, {1, 1, 1}, -4.0f, 4.0f, 1.0f);
 
 	// Flat vases (bad normals) in a grid
-	createPbrGrid(paths.flat_vase_model, grid_dim, grid_dim,
+	createPbrGrid(paths.flat_vase_model, "Flat Vase", grid_dim, grid_dim,
 	              {-4.0f, -4.0f, 0}, {glm::radians(-180.0f), 0.0f, 0.0f}, {6.0f, 6.0f, 3.0f}, -4.0f, -4.0f, 0,
 	              PhysicsShapeType::ConvexHull);
 
 	// Smooth vases (interpolated normals) in a grid
-	createPbrGrid(paths.smooth_vase_model, grid_dim, grid_dim,
+	createPbrGrid(paths.smooth_vase_model, "Smooth Vase", grid_dim, grid_dim,
 	              {0, -4.0f, 0}, {glm::radians(-180.0f), 0.0f, 0.0f}, {6.0f, 6.0f, 3.0f}, 4.0f, -4.0f, 0,
 	              PhysicsShapeType::ConvexHull);
 

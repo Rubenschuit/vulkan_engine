@@ -118,22 +118,24 @@ struct SkyboxChangedEvent {
 };
 
 // Select a skybox by display name (folder name without the _skybox suffix).
-// The prefiltered cubemap + SH load with it.
+// The prefiltered cubemap + SH load with it. Unset exposure / is_day reset to their defaults.
 struct SkyboxRequestEvent {
 	std::string name;                // empty = keep current skybox
 	std::optional<float> exposure;
 	std::optional<bool> is_day;
 };
 
+// unset values reset to their defaults, unset toggles keep their state.
 struct RenderSettingsRequestEvent {
 	std::optional<float> exposure;
-	std::optional<bool> ibl_enabled;
 	std::optional<float> ambient_light_intensity;
 	std::optional<float> bloom_strength;
+	std::optional<float> ibl_min_ambient;
+	std::optional<float> csm_distance;
+	std::optional<bool> ibl_enabled;
 	std::optional<bool> bloom_enabled;
 	std::optional<bool> gtao_enabled;
 	std::optional<bool> ssr_enabled;
-	std::optional<float> ibl_min_ambient;
 };
 
 } // namespace ve

@@ -15,7 +15,7 @@ public:
 private:
 	Entity m_birds;
 	glm::vec3 m_birds_orbit_center{0.0f};
-	float m_birds_orbit_radius = 80.0f;
+	float m_birds_orbit_radius = 40.0f;
 	float m_birds_orbit_speed = 0.1f;
 	float m_birds_t = 0.0f;
 
