@@ -1,5 +1,7 @@
 #pragma once
 #include "ui/editor_panel.hpp"
+#include <cstdint>
+#include <vector>
 
 namespace ve {
 
@@ -28,6 +30,12 @@ private:
 	const FlyCameraController* m_fly_camera = nullptr;
 	RcSystem* m_rc_system = nullptr;
 	RayTracingScene* m_ray_tracing_scene = nullptr;
+
+	// Ray outcome shares, indexed by rcw ray exit code
+	static constexpr int RAY_SHARE_FRAMES = 30;
+	std::vector<uint64_t> m_ray_sums;
+	std::vector<float> m_ray_shares;
+	int m_ray_frames = 0;
 };
 
 } // namespace ve

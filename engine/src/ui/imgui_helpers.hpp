@@ -1,20 +1,18 @@
 #pragma once
 
 // Shared Dear ImGui layout helpers + semantic colors for the editor panels.
-// Pairs with editor_icons.hpp; both are leaf includes pulled in by panels.
 
 #include <imgui.h>
 #include <cfloat>
+#include <cstdarg>
+#include <cstdio>
 #include <utility>
 
 namespace ve::ui {
 
-// Standard label-column width for two-column rows. Sized for short property
-// names (inspector/environment); long descriptive setting labels (e.g. the
-// graphics/debug panels) should stay single-line to avoid truncation.
+// Standard label-column width for two-column rows.
 inline constexpr float LABEL_COLUMN_W = 110.0f;
 
-// Semantic colors, centralizing scattered ImVec4 literals across panels.
 inline const ImVec4 COL_WARNING{1.0f, 0.8f, 0.2f, 1.0f};
 inline const ImVec4 COL_ERROR{1.0f, 0.4f, 0.4f, 1.0f};
 inline const ImVec4 COL_MUTED{0.7f, 0.7f, 0.7f, 1.0f};
@@ -24,6 +22,20 @@ inline const ImVec4 COL_AXIS_Z{0.15f, 0.15f, 0.7f, 1.0f};
 inline const ImVec4 COL_AXIS_X_HOVER{0.85f, 0.2f, 0.2f, 1.0f};
 inline const ImVec4 COL_AXIS_Y_HOVER{0.2f, 0.75f, 0.2f, 1.0f};
 inline const ImVec4 COL_AXIS_Z_HOVER{0.2f, 0.2f, 0.85f, 1.0f};
+
+// Formatted text right-aligned in the rest of the line or table cell: numbers line up in a column,
+// and a value changing width never shifts what is drawn after it
+inline void textRight(const char* fmt, ...) {
+	char buf[64];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, args);
+	va_end(args);
+	const float offset = ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(buf).x;
+	if (offset > 0.0f)
+		ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offset);
+	ImGui::TextUnformatted(buf);
+}
 
 // Two-column labeled row: left = fixed-width label, right = full-width widget.
 // When a resetFn is supplied, right-clicking the value opens a "Reset to Default"
