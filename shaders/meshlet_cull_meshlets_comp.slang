@@ -8,6 +8,9 @@
 #include "ve_constants.slangh"
 #include "cull_common.slangh"
 
+// 1 in the Meshlet ID view's pipeline: firstInstance also carries the meshlet's colour
+[[vk::constant_id(5)]] const uint VE_MESHLET_COLOR = 0;
+
 [[vk::binding(0,  0)]] StructuredBuffer<VisibleObjectEntry> visible_objects;
 [[vk::binding(1,  0)]] StructuredBuffer<uint2>              meshlet_object_map; // (vis_idx, local_idx)
 [[vk::binding(2,  0)]] RWByteAddressBuffer                  counts;        // [0]=visible_count, [1]=total_meshlets
@@ -106,5 +109,8 @@ void compMain(uint3 tid : SV_DispatchThreadID) {
 	indirect_cmds.Store(byte_off + 12, vertex_offset_to_write);
 	// Instance data lives at gpu_id (pass 1), and instanceCount is 1, so the vertex shader's
 	// SV_VulkanInstanceID is gpu_id.
-	indirect_cmds.Store(byte_off + 16, vis.gpu_id);
+	uint first_instance = vis.gpu_id;
+	if (VE_MESHLET_COLOR != 0)
+		first_instance |= m.debug_color << MESHLET_COLOR_SHIFT;
+	indirect_cmds.Store(byte_off + 16, first_instance);
 }

@@ -118,6 +118,48 @@ void VeMesh::releaseGpuBuffers() {
 		lod.index_buffer.reset();
 }
 
+// Colour classes for the Meshlet ID view: meshlets that share a vertex position get
+// different classes. Greedy in meshlet order. The first eight classes are the view's hues,
+// tried from a start that moves with the meshlet so an object uses all of them.
+static std::vector<uint32_t> colorMeshlets(const std::vector<meshopt_Meshlet>& meshlets,
+                                           const std::vector<unsigned int>& meshlet_vertices,
+                                           const std::vector<unsigned int>& position_remap) {
+	constexpr uint32_t HUES = 8;
+	constexpr uint32_t MAX_CLASS = (1u << (32 - MESHLET_COLOR_SHIFT)) - 1;
+
+	// The meshlets coloured so far at each welded position, as a range of `owners`
+	std::vector<uint32_t> owners_begin(position_remap.size() + 1, 0);
+	for (const auto& m : meshlets)
+		for (uint32_t v = 0; v < m.vertex_count; v++)
+			owners_begin[position_remap[meshlet_vertices[m.vertex_offset + v]] + 1]++;
+	for (size_t i = 1; i < owners_begin.size(); i++)
+		owners_begin[i] += owners_begin[i - 1];
+	std::vector<uint32_t> owners_end(owners_begin.begin(), owners_begin.end() - 1);
+	std::vector<uint32_t> owners(owners_begin.back());
+
+	std::vector<uint32_t> colors(meshlets.size());
+	for (size_t mi = 0; mi < meshlets.size(); mi++) {
+		const auto& m = meshlets[mi];
+		std::array<bool, MAX_CLASS + 1> used{};
+		for (uint32_t v = 0; v < m.vertex_count; v++) {
+			uint32_t position = position_remap[meshlet_vertices[m.vertex_offset + v]];
+			for (uint32_t o = owners_begin[position]; o < owners_end[position]; o++)
+				used[colors[owners[o]]] = true;
+		}
+		uint32_t start = static_cast<uint32_t>(mi) * 3;
+		uint32_t color = HUES;
+		for (uint32_t k = 0; k < HUES && color == HUES; k++)
+			if (!used[(start + k) % HUES])
+				color = (start + k) % HUES;
+		while (color >= HUES && color < MAX_CLASS && used[color])
+			color++;
+		colors[mi] = color;
+		for (uint32_t v = 0; v < m.vertex_count; v++)
+			owners[owners_end[position_remap[meshlet_vertices[m.vertex_offset + v]]]++] = static_cast<uint32_t>(mi);
+	}
+	return colors;
+}
+
 std::unique_ptr<CpuMeshletData> VeMesh::buildMeshletData(
 	const std::vector<Vertex>& vertices,
 	const std::vector<uint32_t>& base_indices,
@@ -129,6 +171,8 @@ std::unique_ptr<CpuMeshletData> VeMesh::buildMeshletData(
 	auto data = std::make_unique<CpuMeshletData>();
 	const float* positions = &vertices[0].pos.x;
 	size_t vertex_count = vertices.size();
+	std::vector<unsigned int> position_remap(vertex_count);
+	meshopt_generatePositionRemap(position_remap.data(), positions, vertex_count, sizeof(Vertex));
 
 	std::vector<const std::vector<uint32_t>*> all_lods;
 	all_lods.push_back(&base_indices);
@@ -149,6 +193,7 @@ std::unique_ptr<CpuMeshletData> VeMesh::buildMeshletData(
 			positions, vertex_count, sizeof(Vertex),
 			MESHLET_MAX_VERTICES, MESHLET_MAX_TRIANGLES, 0.5f);
 		meshlets.resize(m_count);
+		std::vector<uint32_t> colors = colorMeshlets(meshlets, m_verts, position_remap);
 
 		uint32_t local_index_offset = 0;
 		for (size_t mi = 0; mi < m_count; mi++) {
@@ -167,7 +212,7 @@ std::unique_ptr<CpuMeshletData> VeMesh::buildMeshletData(
 				.index_offset     = local_index_offset,
 				.index_count      = tri_index_count,
 				.vertex_offset    = 0,
-				._pad             = 0,
+				.debug_color      = colors[mi],
 			});
 
 			for (uint32_t ti = 0; ti < m.triangle_count; ti++)

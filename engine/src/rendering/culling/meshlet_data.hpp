@@ -14,7 +14,7 @@ struct MeshletGPU {
     uint32_t  index_offset;       // first index in global meshlet IBO
     uint32_t  index_count;        // triangle_count * 3
     uint32_t  vertex_offset;      // start vertex in mega VBO (same as owning object's vertex_offset)
-    uint32_t  _pad = 0;
+    uint32_t  debug_color = 0;    // Meshlet ID view: differs between meshlets that touch (VeMesh::buildMeshletData)
 };
 static_assert(sizeof(MeshletGPU) == 64, "MeshletGPU must be 64 bytes");
 

@@ -336,7 +336,8 @@ void compMain(uint3 thread_id: SV_DispatchThreadID) {
 		float2 oct_normal = rcwOctEncode(normal) * float(RCW_TILE_INNER) + 1.0;
 		float3 reflection = reflect(-normalize(ubo.camera_position.xyz - world), normal);
 		float3 lobe_direction = rcwSpecLobeDirection(reflection, normal, roughness);
-		float2 oct_lobe = rcwOctEncode(lobe_direction) * float(RCW_TILE_INNER) + 1.0;
+		bool cosine_visibility = (push.flags & RCW_FLAG_VISIBILITY_COSINE) != 0u;
+		float2 oct_lobe = cosine_visibility ? oct_normal : rcwOctEncode(lobe_direction) * float(RCW_TILE_INNER) + 1.0;
 
 		float4 radiance_sum = float4(0.0, 0.0, 0.0, 0.0);
 		float4 lobe_wide_sum = float4(0.0, 0.0, 0.0, 0.0);
@@ -371,7 +372,7 @@ void compMain(uint3 thread_id: SV_DispatchThreadID) {
 		bool specular = (push.flags & RCW_FLAG_NO_SPECULAR) == 0u;
 		float level = min(rcwSpecLevel(roughness), float(min(push.n_cascades - 1u, RCW_SPEC_MAX_WALK)));
 		float band_start = RC_SPEC_HANDOFF_ROUGHNESS * SPEC_HANDOFF_FADE_START;
-		if (specular && level > -1.0 && roughness >= band_start) {
+		if (specular && !cosine_visibility && level > -1.0 && roughness >= band_start) {
 			uint walk_level = uint(max(level, 0.0));
 			float next_share = max(level, 0.0) - float(walk_level);
 			// Each lod's walk weighs what its cascade-0 probes weigh in the tiles

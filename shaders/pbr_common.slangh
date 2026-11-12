@@ -55,14 +55,16 @@ struct VertexOutput {
 
 #ifndef PBR_COMMON_NO_VERTEX_MAIN
 [shader("vertex")]
-VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID, uint draw_index : SV_DrawIndex) {
+VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID) {
 	VertexOutput output;
 
+	// Meshlet ID view: the meshlet backend's draws carry their colour above the instance index
+	output.meshlet_id = instance_id;
+	if (DEBUG_SHADING_SPEC != 0 && ubo.render_mode == RenderMode::MESHLET_ID)
+		instance_id &= MESHLET_INSTANCE_MASK;
 	InstanceData inst = instances[instance_id];
 	output.material_index = inst.material_index;
 	output.lod_level = inst.lod_level;
-	// The meshlet backend issues one draw per meshlet, so the draw index identifies it.
-	output.meshlet_id = draw_index;
 
 	float4 pos = float4(input.in_pos, 1.0);
 	float4 world_pos = mul(inst.transform, pos);

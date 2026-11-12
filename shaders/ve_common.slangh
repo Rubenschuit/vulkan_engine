@@ -761,16 +761,20 @@ float3 lodDebugColor(float3 albedo, uint lod_level) {
 	return albedo * LOD_COLORS[min(lod_level, 3u)];
 }
 
+// meshlet_id is the draw's firstInstance: the instance index below MESHLET_COLOR_SHIFT and
+// the meshlet's colour class above. Classes differ between meshlets that touch, so eight
+// hues, alternating in brightness, with a darker tier per eight classes keep neighbours
+// apart. The instance index turns the hue wheel per object.
 float3 meshletDebugColor(float3 albedo, uint meshlet_id) {
-	uint h = meshlet_id;
+	uint color_class = meshlet_id >> MESHLET_COLOR_SHIFT;
+	uint h = meshlet_id & MESHLET_INSTANCE_MASK;
 	h = ((h >> 16) ^ h) * 0x45d9f3bu;
 	h = ((h >> 16) ^ h) * 0x45d9f3bu;
 	h = (h >> 16) ^ h;
-	float hue = float(h & 0xFFFF) / 65536.0;
-	float saturation = 0.65 + 0.35 * float((h >> 16) & 0xFF) / 255.0;
-	float value = 0.7 + 0.3 * float((h >> 24) & 0xFF) / 255.0;
+	float hue = float(color_class & 7u) / 8.0 + float(h & 0xFFFF) / 65536.0;
+	float value = ((color_class & 1u) != 0u ? 0.4 : 0.85) / float(1u + min(color_class >> 3, 3u));
 	float3 rgb = saturate(abs(frac(hue + float3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0);
-	return lerp(float3(1.0), rgb, saturation) * value;
+	return lerp(float3(1.0), rgb, 0.9) * value;
 }
 
 

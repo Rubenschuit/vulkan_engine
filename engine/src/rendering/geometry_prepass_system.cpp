@@ -51,6 +51,14 @@ void GeometryPrePassSystem::createPipelineLayout(
 }
 
 void GeometryPrePassSystem::createPipeline(vk::SampleCountFlagBits sample_count) {
+	m_sample_count = sample_count;
+	m_meshlet_id_pipeline.reset();
+	m_meshlet_id_masked_pipeline.reset();
+	buildPipelines(m_ve_pipeline, m_masked_pipeline, false);
+}
+
+void GeometryPrePassSystem::buildPipelines(std::unique_ptr<VePipeline>& opaque_pipeline,
+                                           std::unique_ptr<VePipeline>& masked_pipeline, bool meshlet_id) const {
 	PipelineConfigInfo pipeline_config{};
 	VePipeline::defaultPipelineConfigInfo(pipeline_config, m_ve_device);
 
@@ -60,7 +68,7 @@ void GeometryPrePassSystem::createPipeline(vk::SampleCountFlagBits sample_count)
 	// All five attributes: tangent feeds the TBN, COLOR_0 the mask cutoff
 	pipeline_config.attribute_descriptions = VeMesh::Vertex::getAttributeDescriptions();
 	pipeline_config.binding_descriptions = VeMesh::Vertex::getBindingDescriptions();
-	pipeline_config.multisample_info.rasterizationSamples = sample_count;
+	pipeline_config.multisample_info.rasterizationSamples = m_sample_count;
 	pipeline_config.rasterization_info.cullMode = vk::CullModeFlagBits::eBack;
 	pipeline_config.dynamic_state_enables.push_back(vk::DynamicState::eCullMode);
 	pipeline_config.dynamic_state_info.dynamicStateCount =
@@ -70,11 +78,13 @@ void GeometryPrePassSystem::createPipeline(vk::SampleCountFlagBits sample_count)
 	pipeline_config.depth_stencil_info.depthWriteEnable = VK_TRUE;
 	pipeline_config.depth_stencil_info.depthCompareOp = vk::CompareOp::eGreater;
 	pipeline_config.pipeline_layout = *m_pipeline_layout;
+	if (meshlet_id)
+		pipeline_config.specialization_constants[5] = 1;
 
-	m_ve_pipeline = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
+	opaque_pipeline = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
 
 	pipeline_config.specialization_constants[6] = 1;
-	m_masked_pipeline = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
+	masked_pipeline = std::make_unique<VePipeline>(m_ve_device, m_shader_path, pipeline_config);
 }
 
 void GeometryPrePassSystem::render(
@@ -178,7 +188,11 @@ void GeometryPrePassSystem::renderGpuCulledMeshlets(
 
 	auto& cmd = frame_info.cmd();
 	auto& global_set = global_set_override ? *global_set_override : frame_info.global_descriptor_set;
-	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_ve_pipeline->getPipeline());
+	if (frame_info.meshlet_id_view && !m_meshlet_id_pipeline)
+		buildPipelines(m_meshlet_id_pipeline, m_meshlet_id_masked_pipeline, true);
+	auto& opaque_pipeline = frame_info.meshlet_id_view ? m_meshlet_id_pipeline : m_ve_pipeline;
+	auto& masked_pipeline = frame_info.meshlet_id_view ? m_meshlet_id_masked_pipeline : m_masked_pipeline;
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, opaque_pipeline->getPipeline());
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
 		0, {*global_set}, {});
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *m_pipeline_layout,
@@ -189,7 +203,7 @@ void GeometryPrePassSystem::renderGpuCulledMeshlets(
 	// Opaque buckets 0-1, then alpha-mask buckets 2-3 with the discard variant
 	for (uint32_t bucket = 0; bucket < 4; bucket++) {
 		if (bucket == 2)
-			cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_masked_pipeline->getPipeline());
+			cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, masked_pipeline->getPipeline());
 		bool is_double_sided = (bucket & 1) != 0;
 		cmd.setCullMode(is_double_sided ? vk::CullModeFlagBits::eNone : vk::CullModeFlagBits::eBack);
 

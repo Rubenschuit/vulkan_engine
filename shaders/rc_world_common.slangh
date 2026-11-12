@@ -96,6 +96,9 @@ static const uint RCW_FLAG_NO_SPECULAR = 1u << 0;
 static const uint RCW_FLAG_VISIBILITY_EVIDENCE = 1u << 1;
 static const uint RCW_FLAG_HIST_DEPTH = 1u << 2;
 static const uint RCW_FLAG_SINGLE_FRAME = 1u << 3;
+// Debug: the specular tile's alpha weighs the sky estimate by the irradiance tile's cosine
+// lobe, and the gather reads it along the normal
+static const uint RCW_FLAG_VISIBILITY_COSINE = 1u << 6;
 
 
 static const uint RCW_SKY_MODE_PROBE = 0;              // unresolved directions take the probe prior

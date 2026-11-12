@@ -29,6 +29,10 @@
 #define MESHLET_BUCKET_COUNT        6
 #define MESHLET_SHADOW_BUCKET_COUNT 4
 #define MAX_MESHLET_SHADOW_DRAWS    1048576
+// Meshlet ID view: the meshlet backend's firstInstance carries MeshletGPU::debug_color
+// above the instance index
+#define MESHLET_COLOR_SHIFT         24
+#define MESHLET_INSTANCE_MASK       0xFFFFFFu
 
 // Skinning (keep in sync with ve_config.hpp)
 #define SKINNING_WORKGROUP_SIZE     64

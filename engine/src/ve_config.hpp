@@ -184,6 +184,10 @@ constexpr uint32_t MESHLET_SHADOW_BUCKET_COUNT     = 4;        // shadows skip t
 constexpr uint32_t MAX_MESHLET_SHADOW_DRAWS        = 262144*4;   // total indirect commands across all shadow buckets per layer
 constexpr uint32_t MAX_MESHLET_DRAWS_PER_BUCKET        = MAX_MESHLET_DRAWS / MESHLET_BUCKET_COUNT;
 constexpr uint32_t MAX_MESHLET_SHADOW_DRAWS_PER_BUCKET = MAX_MESHLET_SHADOW_DRAWS / MESHLET_SHADOW_BUCKET_COUNT;
+// Meshlet ID view: the meshlet backend's firstInstance carries MeshletGPU::debug_color
+// above the instance index
+constexpr uint32_t MESHLET_COLOR_SHIFT                = 24;
+static_assert(MAX_LOD_INSTANCE_SLOTS <= (1u << MESHLET_COLOR_SHIFT));
 
 constexpr bool MSAA_ENABLED = true;
 

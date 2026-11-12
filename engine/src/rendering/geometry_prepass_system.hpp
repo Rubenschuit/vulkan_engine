@@ -65,14 +65,20 @@ private:
 	void createPipelineLayout(const vk::raii::DescriptorSetLayout& global_set_layout,
 	                          const vk::raii::DescriptorSetLayout& bindless_set_layout);
 	void createPipeline(vk::SampleCountFlagBits sample_count);
+	void buildPipelines(std::unique_ptr<VePipeline>& opaque_pipeline, std::unique_ptr<VePipeline>& masked_pipeline,
+	                    bool meshlet_id) const;
 
 	VeDevice& m_ve_device;
 	std::filesystem::path m_shader_path;
 	vk::Format m_normal_roughness_format;
+	vk::SampleCountFlagBits m_sample_count = vk::SampleCountFlagBits::e1;
 
 	vk::raii::PipelineLayout m_pipeline_layout{nullptr};
 	std::unique_ptr<VePipeline> m_ve_pipeline;
 	std::unique_ptr<VePipeline> m_masked_pipeline; // ALPHA_MASK_SPEC=1, buckets 2-3
+	// MESHLET_ID_SPEC=1 pair for the Meshlet ID view, built on first use
+	mutable std::unique_ptr<VePipeline> m_meshlet_id_pipeline;
+	mutable std::unique_ptr<VePipeline> m_meshlet_id_masked_pipeline;
 };
 
 } // namespace ve

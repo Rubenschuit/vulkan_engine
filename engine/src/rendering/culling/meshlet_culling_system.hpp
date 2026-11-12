@@ -156,6 +156,7 @@ private:
 		vk::raii::DescriptorSet& out_pass1, vk::raii::DescriptorSet& out_pass2);
 
 	VeDevice& m_ve_device;
+	std::filesystem::path m_shaders_dir;
 	bool m_hiz_enabled = false;
 	glm::vec2 m_hiz_size{0.0f};
 	glm::vec2 m_hiz_uv_scale{1.0f};
@@ -176,6 +177,7 @@ private:
 	std::unique_ptr<VeComputePipeline> m_pass1_pipeline;         // VE_CULL_IS_SHADOW=0
 	std::unique_ptr<VeComputePipeline> m_pass1_shadow_pipeline;  // VE_CULL_IS_SHADOW=1
 	std::unique_ptr<VeComputePipeline> m_pass2_pipeline;
+	std::unique_ptr<VeComputePipeline> m_pass2_color_pipeline;   // VE_MESHLET_COLOR=1, built on first use
 
 	// Pass 1 descriptor sets (frustum-only and Hi-Z)
 	std::array<vk::raii::DescriptorSet, MAX_FRAMES_IN_FLIGHT> m_pass1_sets =

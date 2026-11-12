@@ -4,6 +4,7 @@
 
 #include "ve_common.slangh"
 
+[vk::constant_id(5)] const uint MESHLET_ID_SPEC = 0; // 1: the draws carry a meshlet colour above the instance index
 [vk::constant_id(6)] const uint ALPHA_MASK_SPEC = 0;
 
 [vk::binding(0, 1)]
@@ -34,6 +35,8 @@ struct VertexOutput {
 VertexOutput vertMain(VertexInput input, uint instance_id : SV_VulkanInstanceID) {
 	VertexOutput output;
 
+	if (MESHLET_ID_SPEC != 0)
+		instance_id &= MESHLET_INSTANCE_MASK;
 	InstanceData inst = instances[instance_id];
 
 	float4 world_pos = mul(inst.transform, float4(input.in_pos, 1.0));

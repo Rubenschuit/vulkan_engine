@@ -820,6 +820,7 @@ void RenderPipeline::populateUBO(VeFrameInfo& fi) {
 	// Pipeline-variant selectors
 	fi.area_lights_active = ubo.num_rect_lights > 0;
 	fi.debug_shading = effectiveRenderMode(m_settings, m_history_bootstrap) != RenderMode::BRDF_MICROFACET;
+	fi.meshlet_id_view = effectiveRenderMode(m_settings, m_history_bootstrap) == RenderMode::MESHLET_ID;
 }
 
 void RenderPipeline::dispatchCompute(VeFrameInfo& fi) {

@@ -83,7 +83,7 @@ struct MeshletGPU {
 	uint   index_offset;     // first index in global meshlet IBO
 	uint   index_count;      // triangle_count * 3
 	uint   vertex_offset;    // start vertex in mega VBO
-	uint   _pad;
+	uint   debug_color;      // Meshlet ID view: differs between meshlets that touch
 };
 
 // Per-object meshlet table indexed by gpu_id (32 bytes)

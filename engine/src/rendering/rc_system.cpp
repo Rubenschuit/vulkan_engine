@@ -996,6 +996,7 @@ void RcSystem::dispatch(VeFrameInfo& frame_info, vk::raii::CommandBuffer& cmd, b
 		.rays_per_pixel = static_cast<uint32_t>(std::clamp(m_rc.rays_per_pixel, 1, 16)),
 		.flags = (m_rc.specular ? 0u : FLAG_NO_SPECULAR)
 			| (m_rc.debug_view == RcDebugView::EVIDENCE ? FLAG_VISIBILITY_EVIDENCE : 0u)
+			| (m_rc.debug_view == RcDebugView::SKY_VISIBILITY ? FLAG_VISIBILITY_COSINE : 0u)
 			| (m_prev_depth_primed ? FLAG_HIST_DEPTH : 0u)
 			| (m_rc.single_frame ? FLAG_SINGLE_FRAME : 0u)
 			| skyModeBits(m_rc.sky_occlusion, ray_query),

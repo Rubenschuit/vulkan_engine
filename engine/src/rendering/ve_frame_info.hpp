@@ -266,6 +266,7 @@ struct VeFrameInfo {
 
 	bool     area_lights_active = false;  // any active rect area light this frame (AREA_LIGHTS_SPEC variant)
 	bool     debug_shading = false;       // render_mode != BRDF_MICROFACET
+	bool     meshlet_id_view = false;     // render_mode == MESHLET_ID: the meshlet backend's draws carry a colour
 	bool     rc_composite_active = true;  // RC enabled
 
 	// Post-processing

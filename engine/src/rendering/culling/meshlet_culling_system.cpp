@@ -21,7 +21,7 @@ MeshletCullingSystem::MeshletCullingSystem(VeDevice& device, const std::filesyst
                                            SceneResourceManager& scene_resources,
                                            PbrMegaBuffer& mega_buffer, HizSystem& hiz,
                                            DeformPrePass& deform_pre_pass)
-	: m_ve_device(device), m_event_bus(&event_bus) {
+	: m_ve_device(device), m_shaders_dir(shaders_dir), m_event_bus(&event_bus) {
 
 	auto rebuild = [this, &pool, &scene_resources, &mega_buffer, &hiz, &deform_pre_pass]() {
 		auto& gpu_scene = scene_resources.getGpuSceneManager();
@@ -500,7 +500,12 @@ void MeshletCullingSystem::dispatch(vk::raii::CommandBuffer& cmd, VeFrameInfo& f
 
 	// Pass 2: per-meshlet frustum + cone + Hi-Z cull, writes draw commands
 	auto& pass2_set = (m_hiz_enabled && *m_pass2_hiz_sets[frame]) ? m_pass2_hiz_sets[frame] : m_pass2_sets[frame];
-	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_pass2_pipeline->getPipeline());
+	if (frame_info.meshlet_id_view && !m_pass2_color_pipeline)
+		m_pass2_color_pipeline = std::make_unique<VeComputePipeline>(
+			m_ve_device, m_shaders_dir / "meshlet_cull_meshlets_comp.spv", m_pass2_pipeline_layout,
+			std::unordered_map<uint32_t, uint32_t>{{5, 1}});
+	auto& pass2_pipeline = frame_info.meshlet_id_view ? m_pass2_color_pipeline : m_pass2_pipeline;
+	cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pass2_pipeline->getPipeline());
 	cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *m_pass2_pipeline_layout,
 		0, {*pass2_set}, {});
 	cmd.dispatchIndirect(m_dispatch_indirect[frame]->getBuffer(), 0);

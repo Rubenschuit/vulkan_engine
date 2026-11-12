@@ -6,6 +6,7 @@
 //               a   = 1, or 0 under RCW_SKY_MODE_OFF
 //   specular    rgb = sum I * v / sum v,  v = exp(RCW_SPEC_TILE_SHARPNESS * (dot(b, d) - 1))
 //               a   = the bins' sky estimate (evidence in the EVIDENCE view), weighted by v
+//                     (by w in the SKY_VISIBILITY view)
 //
 // The irradiance tile reads d as a surface normal (a cosine lobe), the
 // specular tile as a reflection direction (a narrower lobe).
@@ -112,9 +113,16 @@ void compMain(uint3 group_id: SV_GroupID, uint3 local_id: SV_GroupThreadID) {
 		radiance += s_radiance[bin] * cosine;
 	}
 	float inverse_weight_all = 1.0 / max(weight_all, 1e-4);
+	spec /= spec_weight_all;
+	if ((push.flags & RCW_FLAG_VISIBILITY_COSINE) != 0u) {
+		float sky_sum = 0.0;
+		for (uint bin = 0; bin < direction_count; bin++)
+			sky_sum += s_sky[bin] * max(dot(s_direction[bin], texel_direction), 0.0);
+		spec.a = sky_sum * inverse_weight_all;
+	}
 
 	uint tiles_per_row = rcwTilesPerRow(desc.probe_cap);
 	uint2 atlas_texel = uint2(probe_index % tiles_per_row, probe_index / tiles_per_row) * RCW_TILE + local_id.xy;
 	irradiance_atlas[atlas_texel] = float4(radiance * inverse_weight_all, sky_mode == RCW_SKY_MODE_OFF ? 0.0 : 1.0);
-	spec_atlas[atlas_texel] = spec / spec_weight_all;
+	spec_atlas[atlas_texel] = spec;
 }
