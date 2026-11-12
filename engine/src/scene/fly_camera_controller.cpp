@@ -43,7 +43,7 @@ void FlyCameraController::tick(const InputActions& actions, float dt) {
 
 	glm::vec3 fwd   = forwardFromYawPitch(m_yaw_rad, m_pitch_rad);
 	glm::vec3 right = glm::normalize(glm::cross(fwd, WORLD_UP));
-	float speed = (actions.sprint ? m_sprint_speed : m_normal_speed) * dt;
+	float speed = m_move_speed * (actions.sprint ? m_sprint_multiplier : 1.0f) * dt;
 
 	m_position += fwd      * (actions.move_forward * speed);
 	m_position += right    * (actions.move_right   * speed);

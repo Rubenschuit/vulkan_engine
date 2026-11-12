@@ -2,6 +2,7 @@
 #include "ui/panels/hierarchy_panel.hpp"
 #include "ui/imgui_layer.hpp"
 #include "ui/editor_icons.hpp"
+#include "ui/entity_actions.hpp"
 #include "application/ve_application.hpp"
 #include "events/engine_events.hpp"
 #include "resources/asset_loading_system.hpp"
@@ -129,13 +130,10 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 		m_rename_focus = true;
 	}
 
-	// Ctrl+G groups the selection
-	if (ImGui::IsWindowFocused() && !ImGui::GetIO().WantTextInput && !state.selected_entities.empty()
-	    && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_G))
-		m_pending_group = state.selected_entities;
+	state.hierarchy_focused = ImGui::IsWindowFocused();
 
 	if (ImGui::Button("New Entity"))
-		m_pending_create_empty = true;
+		state.entity_requests.push_back({.action = EntityAction::CreateEmpty});
 
 	ImGui::Separator();
 
@@ -170,61 +168,7 @@ void HierarchyPanel::render(Registry* registry, EditorState& state, UIContext& /
 	ms = ImGui::EndMultiSelect();
 	applySelectionRequests(ms, *registry, state);
 
-	// Delete key on the whole selection
-	if (!state.selected_entities.empty() && ImGui::IsWindowFocused()
-	    && (ImGui::IsKeyPressed(ImGuiKey_Delete) || ImGui::IsKeyPressed(ImGuiKey_Backspace)))
-		m_pending_deletes = state.selected_entities;
-
 	m_force_open_entities.clear();
-
-	// Schedule deferred deletion
-	if (!m_pending_deletes.empty() && registry) {
-		for (Entity e : m_pending_deletes) {
-			state.removeFromSelection(e);
-			registry->events().emit(DeleteEntityRequest{e, /*recursive=*/true});
-		}
-		state.selection_changed = true;
-		m_pending_deletes.clear();
-	}
-
-	// Duplicate the selection recursively
-	if (!m_pending_duplicates.empty() && registry) {
-		state.selected_entities.clear();
-		for (Entity e : topMostRoots(*registry, m_pending_duplicates))
-			state.selected_entities.push_back(registry->cloneEntityRecursive(e));
-		state.selection_changed = true;
-		m_pending_duplicates.clear();
-	}
-
-	// Group / ungroup
-	if (!m_pending_group.empty() && registry) {
-		groupEntities(*registry, state, m_pending_group);
-		m_pending_group.clear();
-	}
-	if (!m_pending_ungroup.empty() && registry) {
-		for (Entity g : m_pending_ungroup)
-			ungroupEntity(*registry, state, g);
-		m_pending_ungroup.clear();
-	}
-
-	// Create a child entity (transform only) under the chosen parent and select it
-	if (!m_pending_create_child.isNull() && registry) {
-		Entity child = registry->createGameObject("Entity");
-		registry->setParent(child, m_pending_create_child);
-		state.selected_entities.clear();
-		state.selected_entities.push_back(child);
-		state.selection_changed = true;
-		m_pending_create_child = Entity::null();
-	}
-
-	// Create a top-level empty entity (transform only) and select it
-	if (m_pending_create_empty && registry) {
-		Entity e = registry->createGameObject("Entity");
-		state.selected_entities.clear();
-		state.selected_entities.push_back(e);
-		state.selection_changed = true;
-		m_pending_create_empty = false;
-	}
 
 	ImGui::End();
 }
@@ -300,57 +244,6 @@ void HierarchyPanel::applySelectionRequests(ImGuiMultiSelectIO* ms, Registry& re
 			state.selection_changed = true;
 		}
 	}
-}
-
-// Wrap the selected roots (those with no selected ancestor) in a new empty entity
-// placed at their world centroid, preserving each child's world transform.
-void HierarchyPanel::groupEntities(Registry& registry, EditorState& state, const std::vector<Entity>& targets) {
-	std::vector<Entity> roots = topMostRoots(registry, targets);
-	if (roots.empty())
-		return;
-
-	// Group inherits a shared parent only if every root has the same one
-	Entity common_parent = registry.getParent(roots[0]);
-	for (size_t i = 1; i < roots.size(); ++i)
-		if (registry.getParent(roots[i]) != common_parent) {
-			common_parent = Entity::null();
-			break;
-		}
-
-	glm::vec3 centroid(0.0f);
-	for (Entity e : roots)
-		centroid += glm::vec3(registry.getWorldTransform(e)[3]);
-	centroid /= static_cast<float>(roots.size());
-
-	Entity group = registry.createGameObject("Group");
-	if (auto* tc = registry.getComponent<TransformComponent>(group))
-		tc->setTranslation(centroid);
-
-	for (Entity e : roots)
-		registry.reparent(e, group);
-	if (!common_parent.isNull() && registry.isAlive(common_parent))
-		registry.reparent(group, common_parent);
-
-	state.selectSingle(group);
-}
-
-// Dissolve a group: reparent its children to the group's parent (world preserved), then delete it.
-void HierarchyPanel::ungroupEntity(Registry& registry, EditorState& state, Entity group) {
-	if (!registry.isAlive(group))
-		return;
-	Entity parent = registry.getParent(group);
-
-	std::vector<Entity> children;
-	for (Entity c = registry.firstChild(group); !c.isNull(); c = registry.nextSibling(c))
-		children.push_back(c);
-	for (Entity c : children)
-		registry.reparent(c, parent);
-
-	state.removeFromSelection(group);
-	registry.events().emit(DeleteEntityRequest{group, /*recursive=*/true});
-
-	state.selected_entities = children;
-	state.selection_changed = true;
 }
 
 void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorState& state, bool flat) {
@@ -429,28 +322,7 @@ void HierarchyPanel::renderEntityNode(Registry& registry, Entity entity, EditorS
 	}
 
 	if (ImGui::BeginPopupContextItem()) {
-		bool in_sel = state.isSelected(entity);
-		bool many = in_sel && state.selected_entities.size() > 1;
-		if (ImGui::MenuItem("Create Child Entity"))
-			m_pending_create_child = entity;
-		ImGui::Separator();
-		if (ImGui::MenuItem(many ? "Group Selected" : "Group", "Ctrl+G"))
-			m_pending_group = in_sel ? state.selected_entities : std::vector<Entity>{entity};
-		if (pk == EntityKind::Group && !registry.firstChild(entity).isNull())
-			if (ImGui::MenuItem("Ungroup"))
-				m_pending_ungroup = {entity};
-		ImGui::Separator();
-		if (ImGui::MenuItem(many ? "Duplicate Selected" : "Duplicate"))
-			m_pending_duplicates = in_sel ? state.selected_entities : std::vector<Entity>{entity};
-		if (ImGui::MenuItem(many ? "Delete Selected" : "Delete"))
-			m_pending_deletes = in_sel ? state.selected_entities : std::vector<Entity>{entity};
-		ImGui::Separator();
-		if (ImGui::MenuItem("Set Active"))
-			for (Entity e : (in_sel ? state.selected_entities : std::vector<Entity>{entity}))
-				registry.setActive(e, true);
-		if (ImGui::MenuItem("Set Inactive"))
-			for (Entity e : (in_sel ? state.selected_entities : std::vector<Entity>{entity}))
-				registry.setActive(e, false);
+		entityContextMenuItems(registry, state, entity);
 		ImGui::EndPopup();
 	}
 

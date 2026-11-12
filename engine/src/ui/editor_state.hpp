@@ -82,6 +82,31 @@ enum class GizmoSpace : int {
 	Local = 1,
 };
 
+enum class EntityAction : uint8_t {
+	Duplicate,
+	Delete,
+	Group,
+	Ungroup,
+	SetActive,
+	SetInactive,
+	SelectParent,
+	SelectRoot,
+	Focus,
+	ViewThrough,
+	Possess,
+	Unpossess,
+	CreateEmpty,
+	CreatePointLight,
+	CreateSpotLight,
+};
+
+// Queued by menus and shortcuts mid-frame; the Editor applies it before the next UI frame's panels
+struct EntityRequest {
+	EntityAction action;
+	std::vector<Entity> targets{}; // Create*: the parent, if any
+	glm::vec3 position{0.0f};    // Create* without a parent: world position
+};
+
 struct VENGINE_API EditorState {
 	// Mode
 	bool editor_mode = true; // true = docking editor, false = fullscreen
@@ -154,6 +179,14 @@ struct VENGINE_API EditorState {
 	bool viewport_focused = false;
 	float viewport_width = 0.0f;
 	float viewport_height = 0.0f;
+	bool hierarchy_focused = false;
+
+	// Right-drag mouse look: the viewport requests it, the Editor starts it on the input
+	// controller and mirrors whether it is running
+	bool mouse_look_requested = false;
+	bool mouse_look_active = false;
+
+	std::vector<EntityRequest> entity_requests;
 
 	// Component clipboard
 	std::optional<ComponentClipboard> component_clipboard;

@@ -19,7 +19,7 @@ struct EngineConfig;
 struct VENGINE_API EditorContext {
 	SceneManager*          scene_manager     = nullptr;
 	PhysicsSystem*         physics           = nullptr;
-	const InputController* input_controller  = nullptr;
+	InputController*       input_controller  = nullptr;
 	EventBus*              event_bus         = nullptr;
 	const EngineConfig*    engine_config     = nullptr;
 	VeResourceManager*     resource_manager  = nullptr;

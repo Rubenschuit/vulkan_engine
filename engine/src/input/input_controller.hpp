@@ -68,8 +68,20 @@ public:
 
 	[[nodiscard]] CursorCaptureToken acquireCursor();
 
+	// Mouse look inside editor mode: the cursor locks and mouse motion turns the camera
+	// while the editor stays up. Ends by itself on right-button release, focus loss, or
+	// leaving editor mode.
+	void setMouseLook(bool enabled);
+	bool isMouseLook() const { return m_mouse_look; }
+
+	// From the last UI frame. While a text field is active no key drives the camera or an
+	// action; while the UI has a use for Escape (closing a popup, clearing the selection)
+	// Escape is left to it.
+	void setUiKeyboardState(bool text_input, bool ui_takes_escape);
+
 private:
 	bool effectiveEditorMode() const { return m_cursor_capture_count > 0 || m_user_editor_mode; }
+	bool cursorLocked() const { return m_mouse_look || !effectiveEditorMode(); }
 	void applyCursorMode();
 	void releaseCursorInternal();
 
@@ -81,7 +93,10 @@ private:
 
 	bool m_user_editor_mode = false;
 	int m_cursor_capture_count = 0;
-	bool m_last_applied_editor_mode = false;
+	bool m_mouse_look = false;
+	bool m_cursor_locked = false;
+	bool m_ui_text_input = false;
+	bool m_ui_takes_escape = false;
 	int m_prev_toggle_state = GLFW_RELEASE;
 	int m_prev_escape_state = GLFW_RELEASE;
 

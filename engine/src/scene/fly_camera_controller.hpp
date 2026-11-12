@@ -27,6 +27,17 @@ public:
 	float fov() const { return m_fov_y_radians; }
 	void setNearFar(float near_z, float far_z) { m_near = near_z; m_far = far_z; }
 
+	static constexpr float DEFAULT_MOVE_SPEED = 5.0f;
+	static constexpr float DEFAULT_SPRINT_MULTIPLIER = 12.0f;
+	static constexpr float DEFAULT_MOUSE_SENSITIVITY = 0.2f; // degrees per pixel
+
+	float moveSpeed() const { return m_move_speed; }
+	void setMoveSpeed(float metres_per_second) { m_move_speed = metres_per_second; }
+	float sprintMultiplier() const { return m_sprint_multiplier; }
+	void setSprintMultiplier(float multiplier) { m_sprint_multiplier = multiplier; }
+	float mouseSensitivity() const { return m_mouse_sensitivity; }
+	void setMouseSensitivity(float degrees_per_pixel) { m_mouse_sensitivity = degrees_per_pixel; }
+
 private:
 	glm::vec3 m_position{20.0f, 20.0f, 20.0f};
 	float m_yaw_rad = 0.0f;
@@ -35,10 +46,10 @@ private:
 	float m_near = 0.1f;
 	float m_far = 100000.0f;
 
-	float m_normal_speed = 5.0f;
-	float m_sprint_speed = 60.0f;
+	float m_move_speed = DEFAULT_MOVE_SPEED;
+	float m_sprint_multiplier = DEFAULT_SPRINT_MULTIPLIER;
 	float m_look_speed = 2.0f; // arrow keys
-	float m_mouse_sensitivity = 0.2f;
+	float m_mouse_sensitivity = DEFAULT_MOUSE_SENSITIVITY;
 };
 
 } // namespace ve

@@ -41,8 +41,6 @@ private:
 	void renderGroupControls(const std::string& key, const std::vector<Entity>& lights, Registry& registry);
 	void renderEnableCheckbox(const char* label, const std::vector<Entity>& lights, Registry& registry);
 	void applySelectionRequests(ImGuiMultiSelectIO* ms, Registry& registry, EditorState& state);
-	void groupEntities(Registry& registry, EditorState& state, const std::vector<Entity>& targets);
-	void ungroupEntity(Registry& registry, EditorState& state, Entity group);
 
 	bool matchesTypeFilter(Registry& registry, Entity entity);
 	bool matchesNameSearch(Registry& registry, Entity entity);
@@ -61,12 +59,6 @@ private:
 
 	std::unordered_map<std::string, LightGroupState> m_group_states;
 	Registry* m_last_registry = nullptr;
-	std::vector<Entity> m_pending_deletes;
-	std::vector<Entity> m_pending_duplicates;
-	std::vector<Entity> m_pending_group;
-	std::vector<Entity> m_pending_ungroup;
-	Entity m_pending_create_child = Entity::null();
-	bool m_pending_create_empty = false;
 
 	// Auto-expand and scroll-to for selection changes
 	std::unordered_set<uint32_t> m_force_open_entities;

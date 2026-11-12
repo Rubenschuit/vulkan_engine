@@ -77,12 +77,16 @@ private:
 	void registerViewportImage();
 	void renderMenuBar();
 	void renderKeybindingsWindow();
+	void applyEntityRequests(Registry& registry);
+	void focusEntities(Registry& registry, const std::vector<Entity>& targets);
 
 	VeRenderer& m_renderer;
 	std::unique_ptr<ImGuiLayer> m_imgui_layer;
 
 	EditorState m_state;
 	bool m_was_editor_mode = false;
+	bool m_ui_popup_open = false;
+	std::vector<Entity> m_pending_focus;
 
 	CameraManager& m_cameras;
 

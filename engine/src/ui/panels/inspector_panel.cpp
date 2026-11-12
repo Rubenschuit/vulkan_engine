@@ -4,6 +4,7 @@
 #include "ui/editor_icons.hpp"
 #include "ui/imgui_helpers.hpp"
 #include "ui/texture_inspector.hpp"
+#include "ui/entity_actions.hpp"
 #include "scene/ve_registry.hpp"
 #include "scene/ve_component.hpp"
 #include "scene/camera_math.hpp"
@@ -1172,31 +1173,6 @@ void InspectorPanel::renderRigidbody(RigidbodyComponent& rb, EditorState& state)
 	}
 }
 
-// Find the follow camera targeting `target`, creating one when none exists, and
-// snap it behind the character.
-static Entity acquireFollowCamera(Registry& registry, Entity target) {
-	Entity cam = Entity::null();
-	for (auto [e, fc] : registry.view<FollowCameraComponent>().includeInactive()) {
-		if (fc.target == target) {
-			cam = e;
-			break;
-		}
-	}
-	if (cam.isNull()) {
-		const std::string& name = registry.getName(target);
-		cam = registry.createFollowCamera(target, (name.empty() ? std::string{"Follow"} : name) + " Camera");
-	}
-	if (auto* fc = registry.getComponent<FollowCameraComponent>(cam))
-		fc->alignBehind();
-	return cam;
-}
-
-// True when `camera` is a follow camera whose target is `target`.
-static bool isFollowCameraOf(Registry& registry, Entity camera, Entity target) {
-	const auto* fc = registry.getComponent<FollowCameraComponent>(camera);
-	return fc && fc->target == target;
-}
-
 void InspectorPanel::renderCharacterController(Registry& registry, Entity entity, CharacterControllerComponent& cc, EditorState& state) {
 	constexpr float label_w = 110.0f;
 
@@ -1255,11 +1231,8 @@ void InspectorPanel::renderCharacterController(Registry& registry, Entity entity
 	const bool possessed = state.possessed_entity == entity;
 	float button_width = ImGui::GetContentRegionAvail().x;
 	if (possessed) {
-		if (ImGui::Button("Unpossess", ImVec2(button_width, 0))) {
-			state.possessed_entity = Entity::null();
-			if (isFollowCameraOf(registry, state.viewport_camera, entity))
-				state.viewport_camera = Entity::null();
-		}
+		if (ImGui::Button("Unpossess", ImVec2(button_width, 0)))
+			unpossessEntity(registry, state);
 		if (ImGui::Checkbox("Follow Camera", &state.follow_possessed_camera)) {
 			if (state.follow_possessed_camera)
 				state.viewport_camera = acquireFollowCamera(registry, entity);
@@ -1270,11 +1243,8 @@ void InspectorPanel::renderCharacterController(Registry& registry, Entity entity
 			? "WASD moves this character (camera-relative), mouse orbits, Shift runs, Space jumps"
 			: "WASD moves this character (camera-relative), Shift runs, Space jumps");
 	} else {
-		if (ImGui::Button("Possess", ImVec2(button_width, 0))) {
-			state.possessed_entity = entity;
-			if (state.follow_possessed_camera)
-				state.viewport_camera = acquireFollowCamera(registry, entity);
-		}
+		if (ImGui::Button("Possess", ImVec2(button_width, 0)))
+			possessEntity(registry, state, entity);
 	}
 }
 

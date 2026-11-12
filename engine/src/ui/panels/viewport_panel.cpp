@@ -1,22 +1,111 @@
 #include "pch.hpp"
 #include "ui/panels/viewport_panel.hpp"
+#include "ui/editor_icons.hpp"
+#include "ui/entity_actions.hpp"
 #include "scene/ve_registry.hpp"
 #include "scene/ve_component.hpp"
 #include "scene/camera_view.hpp"
+#include "scene/fly_camera_controller.hpp"
 #include "scene/scene_manager.hpp"
 #include "events/event_bus.hpp"
 #include "utils/ve_path.hpp"
 #include "utils/ve_ray.hpp"
 #include "physics/physics_system.hpp"
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <ImGuizmo.h>
 #include <glm/gtc/type_ptr.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/orthonormalize.hpp>
 #include <algorithm>
+#include <charconv>
 #include <cmath>
+#include <cstring>
+#include <string_view>
 
 namespace ve {
+
+namespace {
+
+constexpr float MIN_CAMERA_SPEED = 0.05f;
+constexpr float MAX_CAMERA_SPEED = 1000.0f;
+constexpr float MAX_SPRINT_MULTIPLIER = 50.0f;
+constexpr float MIN_MOUSE_SENSITIVITY = 0.01f;
+constexpr float MAX_MOUSE_SENSITIVITY = 1.0f;
+constexpr float CAMERA_SPEED_STEP = 1.25f;   // per wheel notch while looking
+constexpr float LIGHT_SURFACE_OFFSET = 0.5f; // metres off the clicked surface
+constexpr double SPEED_READOUT_SECONDS = 1.0;
+constexpr const char* CONTEXT_MENU_ID = "ViewportContextMenu";
+
+// Where something dropped or created along `ray` lands: the surface it hits, else the z = 0
+// ground plane, else 10 m ahead. `normal` faces back toward the ray origin.
+glm::vec3 placementPoint(const Ray& ray, Registry& registry, glm::vec3& normal) {
+	RayHit hit;
+	if (raycastScene(ray, registry, hit)) {
+		normal = glm::dot(hit.normal, ray.direction) > 0.0f ? -hit.normal : hit.normal;
+		if (glm::dot(normal, normal) < 0.25f)
+			normal = -ray.direction;
+		return hit.point;
+	}
+	if (std::abs(ray.direction.z) > 1e-4f) {
+		float t = -ray.origin.z / ray.direction.z;
+		if (t > 0.0f) {
+			normal = glm::vec3(0.0f, 0.0f, 1.0f);
+			return ray.origin + t * ray.direction;
+		}
+	}
+	normal = -ray.direction;
+	return ray.origin + ray.direction * 10.0f;
+}
+
+void formatSpeed(char* buf, size_t size, float speed) {
+	snprintf(buf, size, speed < 1.0f ? "%.2f m/s" : (speed < 10.0f ? "%.1f m/s" : "%.0f m/s"), static_cast<double>(speed));
+}
+
+} // namespace
+
+void ViewportPanel::setFlyCamera(FlyCameraController* camera) {
+	m_fly_camera = camera;
+	static constexpr const char* TYPE_NAME = "EditorCamera";
+	if (ImGuiSettingsHandler* existing = ImGui::FindSettingsHandler(TYPE_NAME)) {
+		existing->UserData = camera;
+		return;
+	}
+	ImGuiSettingsHandler handler;
+	handler.TypeName = TYPE_NAME;
+	handler.TypeHash = ImHashStr(TYPE_NAME);
+	handler.UserData = camera;
+	handler.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler* h, const char* name) -> void* {
+		return std::strcmp(name, "Settings") == 0 ? h->UserData : nullptr;
+	};
+	handler.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler*, void* entry, const char* line) {
+		auto* cam = static_cast<FlyCameraController*>(entry);
+		const char* eq = std::strchr(line, '=');
+		if (!cam || !eq)
+			return;
+		float v = 0.0f;
+		if (std::from_chars(eq + 1, eq + 1 + std::strlen(eq + 1), v).ec != std::errc{} || !std::isfinite(v))
+			return;
+		std::string_view key(line, static_cast<size_t>(eq - line));
+		if (key == "MoveSpeed")
+			cam->setMoveSpeed(std::clamp(v, MIN_CAMERA_SPEED, MAX_CAMERA_SPEED));
+		else if (key == "SprintMultiplier")
+			cam->setSprintMultiplier(std::clamp(v, 1.0f, MAX_SPRINT_MULTIPLIER));
+		else if (key == "MouseSensitivity")
+			cam->setMouseSensitivity(std::clamp(v, MIN_MOUSE_SENSITIVITY, MAX_MOUSE_SENSITIVITY));
+	};
+	handler.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler* h, ImGuiTextBuffer* buf) {
+		const auto* cam = static_cast<const FlyCameraController*>(h->UserData);
+		if (!cam)
+			return;
+		buf->appendf("[%s][Settings]\n", h->TypeName);
+		buf->appendf("MoveSpeed=%g\n", static_cast<double>(cam->moveSpeed()));
+		buf->appendf("SprintMultiplier=%g\n", static_cast<double>(cam->sprintMultiplier()));
+		buf->appendf("MouseSensitivity=%g\n", static_cast<double>(cam->mouseSensitivity()));
+		buf->append("\n");
+	};
+	ImGui::AddSettingsHandler(&handler);
+}
 
 void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*context*/) {
 	invalidateImageRect();
@@ -35,6 +124,7 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 		ImGui::TextDisabled("|");
 		ImGui::SameLine();
 		renderCameraSelector(registry, state);
+		renderCameraSettings();
 
 		ImVec2 size = ImGui::GetContentRegionAvail();
 		float dpi_scale = ImGui::GetIO().DisplayFramebufferScale.x;
@@ -57,25 +147,10 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 		// Drop a model dragged from the Asset Browser at the cursor's surface point.
 		if (drew_image && ImGui::BeginDragDropTarget()) {
 			const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_GLTF_PATH");
-			if (payload && payload->Data && m_event_bus && m_camera_view && registry) {
-				ImVec2 mouse = ImGui::GetMousePos();
-				float uv_x = std::clamp((mouse.x - image_pos.x) / size.x, 0.0f, 1.0f);
-				float uv_y = std::clamp((mouse.y - image_pos.y) / size.y, 0.0f, 1.0f);
-				glm::mat4 inv_vp = glm::inverse(m_camera_view->proj * m_camera_view->view);
-				Ray ray = screenToWorldRay(uv_x, uv_y, inv_vp);
-
-				glm::vec3 placement;
-				RayHit hit;
-				if (raycastScene(ray, *registry, hit)) {
-					placement = hit.point;
-				} else if (std::abs(ray.direction.z) > 1e-4f) {
-					// No geometry under the cursor: fall back to the z=0 ground plane.
-					float t = -ray.origin.z / ray.direction.z;
-					placement = (t > 0.0f) ? ray.origin + t * ray.direction
-					                       : ray.origin + ray.direction * 10.0f;
-				} else {
-					placement = ray.origin + ray.direction * 10.0f;
-				}
+			Ray ray;
+			if (payload && payload->Data && m_event_bus && registry && rayUnderMouse(ray)) {
+				glm::vec3 normal{0.0f};
+				glm::vec3 placement = placementPoint(ray, *registry, normal);
 
 				m_event_bus->emitImmediate(AddModelRequestedEvent{
 					.gltf_path = utf8ToPath(static_cast<const char*>(payload->Data)),
@@ -114,6 +189,21 @@ void ViewportPanel::render(Registry* registry, EditorState& state, UIContext& /*
 				}
 			}
 		}
+
+		handleRightMouse(registry, state);
+		renderContextMenu(registry, state);
+
+		if (state.mouse_look_active && m_fly_camera && state.viewport_camera.isNull()) {
+			float wheel = ImGui::GetIO().MouseWheel;
+			if (wheel != 0.0f) {
+				m_fly_camera->setMoveSpeed(std::clamp(m_fly_camera->moveSpeed() * std::pow(CAMERA_SPEED_STEP, wheel),
+					MIN_CAMERA_SPEED, MAX_CAMERA_SPEED));
+				m_speed_readout_until = ImGui::GetTime() + SPEED_READOUT_SECONDS;
+				ImGui::MarkIniSettingsDirty();
+			}
+		}
+		if (drew_image)
+			renderSpeedReadout();
 
 		// Keyboard shortcuts for gizmo mode (when viewport is hovered)
 		if (state.viewport_hovered || state.viewport_focused) {
@@ -207,6 +297,142 @@ void ViewportPanel::renderCameraSelector(Registry* registry, EditorState& state)
 		}
 		ImGui::EndCombo();
 	}
+}
+
+void ViewportPanel::renderCameraSettings() {
+	if (!m_fly_camera)
+		return;
+	ImGui::SameLine();
+	char speed_text[24];
+	formatSpeed(speed_text, sizeof(speed_text), m_fly_camera->moveSpeed());
+	char label[48];
+	snprintf(label, sizeof(label), "%s###CameraSettings", speed_text);
+	if (ImGui::Button(label))
+		ImGui::OpenPopup("CameraSettings");
+	ImGui::SetItemTooltip("Editor camera speed and mouse look");
+
+	if (!ImGui::BeginPopup("CameraSettings"))
+		return;
+	bool changed = false;
+	float speed = m_fly_camera->moveSpeed();
+	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12.0f);
+	if (ImGui::SliderFloat("Move Speed", &speed, MIN_CAMERA_SPEED, MAX_CAMERA_SPEED, "%.2f m/s", ImGuiSliderFlags_Logarithmic)) {
+		m_fly_camera->setMoveSpeed(speed);
+		changed = true;
+	}
+	float sprint = m_fly_camera->sprintMultiplier();
+	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12.0f);
+	if (ImGui::SliderFloat("Sprint Multiplier", &sprint, 1.0f, MAX_SPRINT_MULTIPLIER, "%.1fx", ImGuiSliderFlags_Logarithmic)) {
+		m_fly_camera->setSprintMultiplier(sprint);
+		changed = true;
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Speed factor while Shift is held.");
+	float sensitivity = m_fly_camera->mouseSensitivity();
+	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12.0f);
+	if (ImGui::SliderFloat("Mouse Sensitivity", &sensitivity, MIN_MOUSE_SENSITIVITY, MAX_MOUSE_SENSITIVITY, "%.3f deg/px",
+	                       ImGuiSliderFlags_Logarithmic)) {
+		m_fly_camera->setMouseSensitivity(sensitivity);
+		changed = true;
+	}
+	if (ImGui::Button("Reset to Defaults")) {
+		m_fly_camera->setMoveSpeed(FlyCameraController::DEFAULT_MOVE_SPEED);
+		m_fly_camera->setSprintMultiplier(FlyCameraController::DEFAULT_SPRINT_MULTIPLIER);
+		m_fly_camera->setMouseSensitivity(FlyCameraController::DEFAULT_MOUSE_SENSITIVITY);
+		changed = true;
+	}
+	ImGui::TextDisabled("Hold the right mouse button in the viewport to look around;\nscroll while holding it to change the speed.");
+	if (changed)
+		ImGui::MarkIniSettingsDirty();
+	ImGui::EndPopup();
+}
+
+bool ViewportPanel::rayUnderMouse(Ray& ray) const {
+	if (!m_camera_view || !isImageValid())
+		return false;
+	ImVec2 mouse = ImGui::GetMousePos();
+	float uv_x = (mouse.x - m_image_min.x) / (m_image_max.x - m_image_min.x);
+	float uv_y = (mouse.y - m_image_min.y) / (m_image_max.y - m_image_min.y);
+	if (uv_x < 0.0f || uv_x > 1.0f || uv_y < 0.0f || uv_y > 1.0f)
+		return false;
+	ray = screenToWorldRay(uv_x, uv_y, glm::inverse(m_camera_view->proj * m_camera_view->view));
+	return true;
+}
+
+// Right button on the image: released in place it opens the context menu, dragged past the
+// threshold it becomes mouse look. The cursor stays free until then, so a click never hides it.
+void ViewportPanel::handleRightMouse(Registry* registry, EditorState& state) {
+	if (state.mouse_look_active) {
+		m_right_pending = false;
+		return;
+	}
+	Ray ray;
+	if (state.viewport_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !state.gizmo_active && rayUnderMouse(ray))
+		m_right_pending = true;
+	if (!m_right_pending)
+		return;
+
+	if (ImGui::IsMouseDragPastThreshold(ImGuiMouseButton_Right)) {
+		m_right_pending = false;
+		state.mouse_look_requested = true;
+	} else if (ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
+		m_right_pending = false;
+		if (registry && rayUnderMouse(ray)) {
+			m_menu_point = placementPoint(ray, *registry, m_menu_normal);
+			ImGui::OpenPopup(CONTEXT_MENU_ID);
+		}
+	} else if (!ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+		m_right_pending = false;
+	}
+}
+
+void ViewportPanel::renderContextMenu(Registry* registry, EditorState& state) {
+	if (!ImGui::BeginPopup(CONTEXT_MENU_ID))
+		return;
+	// Acts on the selection, wherever the click was; with nothing selected it creates at the click
+	const Entity primary = state.selectedEntity();
+	if (registry && !primary.isNull() && registry->isAlive(primary)) {
+		const size_t count = state.selected_entities.size();
+		if (count == 1) {
+			const std::string& name = registry->getName(primary);
+			ImGui::SeparatorText(name.empty() ? "<unnamed>" : name.c_str());
+		} else {
+			char title[32];
+			snprintf(title, sizeof(title), "%zu Entities", count);
+			ImGui::SeparatorText(title);
+		}
+		entityContextMenuItems(*registry, state, primary);
+		ImGui::Separator();
+		if (ImGui::MenuItem("Clear Selection", "Esc"))
+			state.clearSelection();
+	} else {
+		ImGui::SeparatorText("Create Here");
+		const glm::vec3 light_position = m_menu_point + m_menu_normal * LIGHT_SURFACE_OFFSET;
+		auto create = [&](EntityAction action, glm::vec3 position) {
+			state.entity_requests.push_back({.action = action, .position = position});
+		};
+		if (ImGui::MenuItem(ICON_GROUP "  Empty Entity"))
+			create(EntityAction::CreateEmpty, m_menu_point);
+		if (ImGui::MenuItem(ICON_POINT_LIGHT "  Point Light"))
+			create(EntityAction::CreatePointLight, light_position);
+		if (ImGui::MenuItem(ICON_SPOT_LIGHT "  Spot Light"))
+			create(EntityAction::CreateSpotLight, light_position);
+	}
+	ImGui::EndPopup();
+}
+
+void ViewportPanel::renderSpeedReadout() {
+	if (!m_fly_camera || ImGui::GetTime() >= m_speed_readout_until)
+		return;
+	char text[32];
+	formatSpeed(text, sizeof(text), m_fly_camera->moveSpeed());
+	const ImVec2 pad(6.0f, 3.0f);
+	const ImVec2 pos(m_image_min.x + 8.0f, m_image_min.y + 8.0f);
+	const ImVec2 text_size = ImGui::CalcTextSize(text);
+	ImDrawList* dl = ImGui::GetWindowDrawList();
+	dl->AddRectFilled(ImVec2(pos.x - pad.x, pos.y - pad.y),
+		ImVec2(pos.x + text_size.x + pad.x, pos.y + text_size.y + pad.y), IM_COL32(0, 0, 0, 170), 4.0f);
+	dl->AddText(pos, IM_COL32(255, 255, 255, 255), text);
 }
 
 void ViewportPanel::renderGizmo(Registry* registry, EditorState& state, float img_x, float img_y, float img_w, float img_h) {

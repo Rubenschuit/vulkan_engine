@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "ui/editor.hpp"
 #include "scene/camera_manager.hpp"
+#include "ui/entity_actions.hpp"
 #include "ui/imgui_layer.hpp"
 #include "input/input_controller.hpp"
 #include "input/input_action.hpp"
@@ -12,15 +13,25 @@
 #include "events/event_bus.hpp"
 #include "events/engine_events.hpp"
 #include <imgui.h>
+#include <algorithm>
 #include <cmath>
+#include <limits>
+#include <utility>
 
 namespace ve {
+
+namespace {
+
+constexpr float MIN_FOCUS_RADIUS = 0.5f;
+
+}
 
 Editor::Editor(VeWindow& window, VeDevice& device, VeRenderer& renderer,
                EventBus& event_bus, const EngineConfig& config, CameraManager& cameras)
 	: m_renderer(renderer), m_cameras(cameras), m_event_bus(event_bus) {
 	m_imgui_layer = std::make_unique<ImGuiLayer>(window, device, renderer, event_bus);
 	m_imgui_layer->setAppSettingsWindowName(config.app_name);
+	m_viewport_panel.setFlyCamera(&m_cameras.flyCamera());
 	m_performance_panel = std::make_unique<PerformancePanel>(renderer);
 	m_graphics_panel = std::make_unique<GraphicsPanel>(renderer, window, event_bus);
 	m_environment_panel = std::make_unique<EnvironmentPanel>();
@@ -41,8 +52,17 @@ Editor::~Editor() {
 }
 
 void Editor::beginFrame() {
-	if (m_context.input_controller)
+	if (m_context.input_controller) {
 		m_state.editor_mode = m_context.input_controller->isEditorMode();
+		m_state.mouse_look_active = m_context.input_controller->isMouseLook();
+	}
+	// The GLFW backend keeps reporting the locked cursor's position, which would hover whatever
+	// panel it passes over
+	ImGuiIO& io = ImGui::GetIO();
+	if (m_state.mouse_look_active)
+		io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
+	else
+		io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
 	handleModeTransition();
 	if (m_state.editor_mode)
 		handleViewportResize();
@@ -83,13 +103,26 @@ void Editor::registerViewportImage() {
 void Editor::renderUI(UIContext& context, Registry* registry) {
 	bool editor_mode = m_state.editor_mode;
 
+	// Applied ahead of the panels, so the hierarchy expands to and scrolls to what they select
+	if (registry) {
+		applyEntityRequests(*registry);
+	} else {
+		m_state.entity_requests.clear();
+		m_pending_focus.clear();
+	}
+
 	// Auto-show inspector when an entity is selected
 	if (m_state.selection_changed && !m_state.selectedEntity().isNull())
 		m_state.show_inspector = true;
 
+	m_state.viewport_hovered = false;
+	m_state.viewport_focused = false;
+	m_state.hierarchy_focused = false;
+
 	m_imgui_layer->renderUI(context, m_state, [this, registry, editor_mode](UIContext& ctx) {
 		if (editor_mode) {
-			if (ImGui::IsKeyPressed(ImGuiKey_Escape) && !m_state.selected_entities.empty())
+			if (ImGui::IsKeyPressed(ImGuiKey_Escape) && !m_state.selected_entities.empty() && !m_ui_popup_open
+			    && !ImGui::GetIO().WantTextInput)
 				m_state.clearSelection();
 
 			renderMenuBar();
@@ -116,11 +149,20 @@ void Editor::renderUI(UIContext& context, Registry* registry) {
 
 			if (m_state.show_app_settings && m_app_ui_callback)
 				m_app_ui_callback();
+
+			if (registry) {
+				// Keys belong to the camera during mouse look
+				if (!m_ui_popup_open && !m_state.mouse_look_active
+				    && (m_state.viewport_hovered || m_state.viewport_focused || m_state.hierarchy_focused))
+					queueEntityShortcuts(m_state);
+				entityDeleteConfirm(*registry, m_state);
+			}
 		} else {
 			m_performance_panel->render(registry, m_state, ctx);
 			if (m_app_ui_callback)
 				m_app_ui_callback();
 		}
+		m_ui_popup_open = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
 
 		// Loading overlay (renders on top of everything)
 		if (m_context.scene_manager) {
@@ -133,6 +175,15 @@ void Editor::renderUI(UIContext& context, Registry* registry) {
 			m_loading_overlay.render(m_context.scene_manager->assetLoader(), vp_min, vp_max);
 		}
 	});
+
+	if (m_context.input_controller) {
+		// Escape clears a selection before it leaves the editor
+		const bool clears_selection = editor_mode && !m_state.selected_entities.empty();
+		m_context.input_controller->setUiKeyboardState(ImGui::GetIO().WantTextInput, m_ui_popup_open || clears_selection);
+		if (m_state.mouse_look_requested && editor_mode)
+			m_context.input_controller->setMouseLook(true);
+	}
+	m_state.mouse_look_requested = false;
 
 	// Cache AABB offset for gizmo/debug shape placement
 	if (m_state.selection_changed && registry) {
@@ -181,6 +232,71 @@ void Editor::renderUI(UIContext& context, Registry* registry) {
 	}
 
 	m_state.selection_changed = false;
+}
+
+void Editor::applyEntityRequests(Registry& registry) {
+	for (const EntityRequest& request : std::exchange(m_state.entity_requests, {})) {
+		if (request.action == EntityAction::Focus)
+			m_pending_focus = request.targets;
+		else
+			applyEntityRequest(registry, m_state, request);
+	}
+	if (m_pending_focus.empty())
+		return;
+
+	// Focusing moves the editor camera. Leaving a scene camera reseeds the fly camera from that
+	// camera's last view on the next resolve, so the move waits until the fly camera renders.
+	if (!m_state.viewport_camera.isNull()) {
+		m_state.viewport_camera = Entity::null();
+	} else if (m_cameras.currentView().source.isNull()) {
+		focusEntities(registry, m_pending_focus);
+		m_pending_focus.clear();
+	}
+}
+
+// Back the editor camera off along its view direction until the targets' bounds fit the view
+void Editor::focusEntities(Registry& registry, const std::vector<Entity>& targets) {
+	glm::vec3 lo(std::numeric_limits<float>::max());
+	glm::vec3 hi(std::numeric_limits<float>::lowest());
+	bool found = false;
+	auto include = [&](const glm::vec3& a, const glm::vec3& b) {
+		lo = glm::min(lo, a);
+		hi = glm::max(hi, b);
+		found = true;
+	};
+	for (Entity target : targets) {
+		if (!registry.isAlive(target))
+			continue;
+		bool has_mesh = false;
+		std::vector<Entity> stack{target};
+		while (!stack.empty()) {
+			Entity e = stack.back();
+			stack.pop_back();
+			auto* mc = registry.getComponent<MeshComponent>(e);
+			if (mc && mc->hasMesh()) {
+				const VeMesh::AABB& box = mc->getWorldAABB();
+				include(box.min, box.max);
+				has_mesh = true;
+			}
+			for (Entity c = registry.firstChild(e); !c.isNull(); c = registry.nextSibling(c))
+				stack.push_back(c);
+		}
+		// Lights, cameras and empty groups count as a point
+		if (!has_mesh && registry.getComponent<TransformComponent>(target)) {
+			const glm::vec3 p(registry.getWorldTransform(target)[3]);
+			include(p, p);
+		}
+	}
+	if (!found)
+		return;
+
+	const glm::vec3 center = 0.5f * (lo + hi);
+	const float radius = std::max(0.5f * glm::length(hi - lo), MIN_FOCUS_RADIUS);
+	const CameraView& view = m_cameras.currentView();
+	const float half_fov_y = 0.5f * view.fov_y_radians;
+	const float half_fov = std::min(half_fov_y, std::atan(std::tan(half_fov_y) * view.aspect));
+	FlyCameraController& fly = m_cameras.flyCamera();
+	fly.setPosition(center - fly.forward() * (radius / std::sin(half_fov)));
 }
 
 void Editor::setContext(const EditorContext& ctx, const RenderServices& services) {
@@ -256,11 +372,13 @@ void Editor::renderKeybindingsWindow() {
 			ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthFixed, 100.0f);
 			ImGui::TableSetupColumn("Action");
 			tableRow("Tab", "Toggle editor mode");
-			tableRow("Escape", "Exit editor / close app");
+			tableRow("Escape", "Clear selection, else exit editor / close app");
 			tableRow("WASD", "Move camera");
 			tableRow("Space / C", "Move up / down");
 			tableRow("Shift", "Sprint");
 			tableRow("Arrow keys", "Look around");
+			tableRow("Right drag", "Look around (viewport)");
+			tableRow("Scroll", "Camera speed, while right-dragging");
 			ImGui::EndTable();
 		}
 	}
@@ -272,7 +390,20 @@ void Editor::renderKeybindingsWindow() {
 			tableRow("T", "Translate");
 			tableRow("R", "Rotate");
 			tableRow("E", "Scale");
-			tableRow("Delete", "Delete entity");
+			ImGui::EndTable();
+		}
+	}
+
+	if (ImGui::CollapsingHeader("Selection (viewport, hierarchy)", ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (ImGui::BeginTable("selection_keys", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH)) {
+			ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+			ImGui::TableSetupColumn("Action");
+			tableRow("Right click", "Selection menu (Create Here if none)");
+			tableRow("F", "Focus selection");
+			tableRow("Ctrl+D", "Duplicate");
+			tableRow("Ctrl+G", "Group");
+			tableRow("Del", "Delete");
+			tableRow("X", "Delete, after a confirm");
 			ImGui::EndTable();
 		}
 	}
