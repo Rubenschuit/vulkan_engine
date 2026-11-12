@@ -18,8 +18,8 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/orthonormalize.hpp>
 #include <algorithm>
-#include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <string_view>
 
@@ -83,8 +83,9 @@ void ViewportPanel::setFlyCamera(FlyCameraController* camera) {
 		const char* eq = std::strchr(line, '=');
 		if (!cam || !eq)
 			return;
-		float v = 0.0f;
-		if (std::from_chars(eq + 1, eq + 1 + std::strlen(eq + 1), v).ec != std::errc{} || !std::isfinite(v))
+		char* end = nullptr;
+		const float v = std::strtof(eq + 1, &end);
+		if (end == eq + 1 || !std::isfinite(v))
 			return;
 		std::string_view key(line, static_cast<size_t>(eq - line));
 		if (key == "MoveSpeed")
